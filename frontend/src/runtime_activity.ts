@@ -1,24 +1,24 @@
-import { translate as translateText, type RuntimeLanguage } from "./runtime_i18n.js";
+import { translate, type RuntimeLanguage } from "./runtime_i18n.js";
 import { workflowSessionLivenessPresentation } from "./workflow_session_state.js";
 
 export function formatUpdatedTime(timestamp: any, language?: RuntimeLanguage): string {
-  if (typeof timestamp !== "number") return translateText("time unavailable", language);
+  if (typeof timestamp !== "number") return translate("time unavailable", language);
   return new Date(timestamp * 1000).toLocaleTimeString(language === "zh-CN" ? "zh-CN" : "en");
 }
 
 export function formatSessionDateTime(timestamp: any, language?: RuntimeLanguage): string {
-  if (typeof timestamp !== "number") return translateText("time unavailable", language);
+  if (typeof timestamp !== "number") return translate("time unavailable", language);
   return new Date(timestamp * 1000).toLocaleString(language === "zh-CN" ? "zh-CN" : "en");
 }
 
 export function formatLivenessPresentation(session: any, language?: RuntimeLanguage): any {
   const presentation = workflowSessionLivenessPresentation(session);
   if (language !== "zh-CN") return presentation;
-  let label = translateText(String(presentation.label || "idle"), language);
+  let label = translate(String(presentation.label || "idle"), language);
   if (presentation.state === "idle" && String(presentation.label || "").startsWith("idle · ")) {
-    label = translateText("idle", language) + " · " + String(presentation.label).slice("idle · ".length);
+    label = translate("idle", language) + " · " + String(presentation.label).slice("idle · ".length);
   }
-  return { ...presentation, label, tooltip: translateText(String(presentation.tooltip || ""), language) };
+  return { ...presentation, label, tooltip: translate(String(presentation.tooltip || ""), language) };
 }
 
 export function activityKindLabel(activity: any, language?: RuntimeLanguage): string {
@@ -60,7 +60,7 @@ export function activityFacts(activity: any, includeTiming: boolean, language?: 
   } else if (activity && activity.job_handoff) {
     facts.push(language === "zh-CN" ? "已移交" : "handed off");
     if (activity.execution_state) {
-      facts.push((language === "zh-CN" ? "执行 " : "execution ") + translateText(String(activity.execution_state), language));
+      facts.push((language === "zh-CN" ? "执行 " : "execution ") + translate(String(activity.execution_state), language));
     }
   } else if (activity && activity.state) {
     facts.push(String(activity.state));

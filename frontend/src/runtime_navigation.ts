@@ -1,5 +1,5 @@
 import {
-  translate as translateText,
+  translate,
   localizedCountLabel,
   type RuntimeLanguage,
 } from "./runtime_i18n.js";
@@ -39,10 +39,10 @@ export function formatWorkspaceBreadcrumb(
 ): { runnerText: string; projectText: string } {
   const runnerText = project?.client_id
     ? String(project.client_id)
-    : translateText("Fleet", language);
+    : translate("Fleet", language);
   const projectText = project
-    ? String(project.name || project.id || translateText("Projects", language))
-    : translateText("Projects", language);
+    ? String(project.name || project.id || translate("Projects", language))
+    : translate("Projects", language);
   return { runnerText, projectText };
 }
 
@@ -75,7 +75,7 @@ export function formatDeviceStatusText(
   if (filter) {
     return base + (language === "zh-CN" ? " · 已筛选" : " · filtered");
   }
-  return base + " · " + translateText("All Runners", language);
+  return base + " · " + translate("All Runners", language);
 }
 
 export function formatProjectStatusText(
@@ -132,7 +132,7 @@ export function renderProjectSelectorTree(
   sessionsPanel: HTMLElement | null,
   options: RenderProjectSelectorOptions,
 ): void {
-  const tr = (text: string): string => translateText(text, options.language);
+  const tr = (text: string): string => translate(text, options.language);
   const countLabel = (count: unknown, singular: string): string => localizedCountLabel(count, singular, options.language);
   const updatedLabel = (timestamp: any): string => formatUpdatedTime(timestamp, options.language);
 
@@ -294,7 +294,7 @@ export function renderRunnerFleetRows(
   runners: any[],
   options: RenderRunnerFleetOptions,
 ): void {
-  const tr = (text: string): string => translateText(text, options.language);
+  const tr = (text: string): string => translate(text, options.language);
   const countLabel = (count: unknown, singular: string): string => localizedCountLabel(count, singular, options.language);
 
   clearNavigationNode(node);
@@ -370,7 +370,7 @@ export function renderRecentSessionRows(
   sessions: any[],
   options: RenderRecentSessionsOptions,
 ): void {
-  const tr = (text: string): string => translateText(text, options.language);
+  const tr = (text: string): string => translate(text, options.language);
   const updatedLabel = (timestamp: any): string => formatUpdatedTime(timestamp, options.language);
 
   clearNavigationNode(node);

@@ -1,4 +1,4 @@
-import { translate as translateText, } from "./runtime_i18n.js";
+import { translate, } from "./runtime_i18n.js";
 import { formatUpdatedTime } from "./runtime_activity.js";
 import { runtimeCollaborationMessageSides, runtimeCollaborationMessageCanMutate, } from "./runtime_collaboration_state.js";
 import { appendRichMessage } from "./runtime_rich_text.js";
@@ -9,10 +9,10 @@ function clearCollaborationNode(node) {
 }
 export function collaborationPhaseLabel(phase, language) {
     switch (phase) {
-        case "live": return translateText("Live", language);
-        case "reconnecting": return translateText("Reconnecting", language);
-        case "paused": return translateText("Paused", language);
-        default: return translateText("Idle", language);
+        case "live": return translate("Live", language);
+        case "reconnecting": return translate("Reconnecting", language);
+        case "paused": return translate("Paused", language);
+        default: return translate("Idle", language);
     }
 }
 export function syncCollaborationComposerLayout(body = typeof document !== "undefined" ? document.getElementById("runtime-message-body") : null, composer = typeof document !== "undefined" ? document.getElementById("runtime-collaboration-form") : null, send = typeof document !== "undefined" ? document.getElementById("runtime-message-send") : null) {
@@ -29,13 +29,13 @@ export function syncCollaborationComposerLayout(body = typeof document !== "unde
 export function formatComposerOptionSummary(kind, priority, requiresAck, language) {
     const signals = [];
     if (kind && kind !== "note")
-        signals.push(translateText(kind, language));
+        signals.push(translate(kind, language));
     if (priority && priority !== "normal")
-        signals.push(translateText(priority, language));
+        signals.push(translate(priority, language));
     if (requiresAck)
         signals.push(language === "zh-CN" ? "需确认" : "ACK");
     return {
-        label: signals.length ? signals.join(" · ") : translateText("Options", language),
+        label: signals.length ? signals.join(" · ") : translate("Options", language),
         hasSelection: signals.length > 0,
     };
 }
@@ -76,7 +76,7 @@ export function renderLatestAgentMessage(container, messages, locallyAuthoredMes
     }
 }
 export function renderCollaborationMessageCards(node, messages, options) {
-    const tr = (text) => translateText(text, options.language);
+    const tr = (text) => translate(text, options.language);
     const updatedLabel = (timestamp) => formatUpdatedTime(timestamp, options.language);
     const byId = new Map();
     const children = new Map();

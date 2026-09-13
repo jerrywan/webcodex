@@ -1,9 +1,9 @@
-import { translate as translateText, localizedCountLabel } from "./runtime_i18n.js";
+import { translate, localizedCountLabel } from "./runtime_i18n.js";
 import { runtimeWindowActivityLabel, runtimeWindowShortKey } from "./runtime_console_state.js";
 export function windowDateTimeLabel(timestampMs, language) {
     const value = Number(timestampMs);
     if (!Number.isFinite(value) || value <= 0)
-        return translateText("time unavailable", language);
+        return translate("time unavailable", language);
     return new Date(value).toLocaleString(language === "zh-CN" ? "zh-CN" : "en");
 }
 export function windowAgeLabel(timestampMs, now = Date.now()) {
@@ -95,7 +95,7 @@ export function renderWindowActivityRows(node, activities, options = {}) {
             trace.type = "button";
             trace.className = "window-trace-copy";
             trace.textContent = "trace " + String(activity.server_trace_id);
-            trace.title = translateText("Copy trace id", language);
+            trace.title = translate("Copy trace id", language);
             if (options.onCopyTrace) {
                 trace.addEventListener("click", () => options.onCopyTrace(String(activity.server_trace_id)));
             }

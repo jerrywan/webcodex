@@ -1,5 +1,5 @@
 import {
-  translate as translateText,
+  translate,
   type RuntimeLanguage,
 } from "./runtime_i18n.js";
 import { formatUpdatedTime } from "./runtime_activity.js";
@@ -16,10 +16,10 @@ function clearCollaborationNode(node: HTMLElement): void {
 
 export function collaborationPhaseLabel(phase: string, language?: RuntimeLanguage): string {
   switch (phase) {
-    case "live": return translateText("Live", language);
-    case "reconnecting": return translateText("Reconnecting", language);
-    case "paused": return translateText("Paused", language);
-    default: return translateText("Idle", language);
+    case "live": return translate("Live", language);
+    case "reconnecting": return translate("Reconnecting", language);
+    case "paused": return translate("Paused", language);
+    default: return translate("Idle", language);
   }
 }
 
@@ -45,11 +45,11 @@ export function formatComposerOptionSummary(
   language?: RuntimeLanguage,
 ): { label: string; hasSelection: boolean } {
   const signals: string[] = [];
-  if (kind && kind !== "note") signals.push(translateText(kind, language));
-  if (priority && priority !== "normal") signals.push(translateText(priority, language));
+  if (kind && kind !== "note") signals.push(translate(kind, language));
+  if (priority && priority !== "normal") signals.push(translate(priority, language));
   if (requiresAck) signals.push(language === "zh-CN" ? "需确认" : "ACK");
   return {
-    label: signals.length ? signals.join(" · ") : translateText("Options", language),
+    label: signals.length ? signals.join(" · ") : translate("Options", language),
     hasSelection: signals.length > 0,
   };
 }
@@ -114,7 +114,7 @@ export function renderCollaborationMessageCards(
   messages: any[],
   options: RenderCollaborationCardsOptions,
 ): void {
-  const tr = (text: string): string => translateText(text, options.language);
+  const tr = (text: string): string => translate(text, options.language);
   const updatedLabel = (timestamp: any): string => formatUpdatedTime(timestamp, options.language);
 
   const byId = new Map<string, any>();

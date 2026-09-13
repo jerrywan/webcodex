@@ -1,10 +1,10 @@
 import {
-  translate as translateText,
+  translate,
   localizedCountLabel,
   type RuntimeLanguage,
 } from "./runtime_i18n.js";
 import {
-  communicationTimeLabel as formatCommunicationTime,
+  communicationTimeLabel,
   parseAgentIds,
 } from "./runtime_communication.js";
 
@@ -57,7 +57,7 @@ export function formatAgentCardRevision(agent: any, language?: RuntimeLanguage):
     (language === "zh-CN" ? " · 控制器代数 " : " · controller generation ") +
     String(agent?.current_controller_generation || 0) +
     (language === "zh-CN" ? " · 更新于 " : " · updated ") +
-    formatCommunicationTime(agent?.updated_at_unix_ms, language)
+    communicationTimeLabel(agent?.updated_at_unix_ms, language)
   );
 }
 
@@ -67,7 +67,7 @@ export function formatAgentWakeStatus(agent: any, language?: RuntimeLanguage): s
   return (
     localizedCountLabel(unresolvedWakeCount, "unresolved Wake", "unresolved Wakes", language) +
     (language === "zh-CN" ? " · 最近状态 " : " · latest ") +
-    translateText(latestWakeState, language) +
+    translate(latestWakeState, language) +
     (language === "zh-CN"
       ? " · 收件箱投递与唤醒消费彼此独立"
       : " · Inbox Delivery and Wake consumption remain independent")
@@ -84,11 +84,11 @@ export function formatAgentEndpointStatus(endpoint: any, language?: RuntimeLangu
     (language === "zh-CN" ? "浏览器端点 " : "Browser Endpoint ") +
     endpoint.endpoint_id +
     " · " +
-    translateText(endpoint.lifecycle, language) +
+    translate(endpoint.lifecycle, language) +
     (language === "zh-CN" ? " · 代数 " : " · generation ") +
     String(endpoint.controller_generation) +
     (language === "zh-CN" ? " · 租约至 " : " · lease ") +
-    formatCommunicationTime(endpoint.lease_expires_at_unix_ms, language) +
+    communicationTimeLabel(endpoint.lease_expires_at_unix_ms, language) +
     (language === "zh-CN"
       ? " · 运行控制台适配器：仅轮询（运行时可唤醒："
       : " · Runtime Console adapter: polling only (runtime wake capable: ") +

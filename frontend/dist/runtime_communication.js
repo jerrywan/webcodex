@@ -1,7 +1,7 @@
-import { translate as translateText, localizedCountLabel } from "./runtime_i18n.js";
+import { translate, localizedCountLabel } from "./runtime_i18n.js";
 export function communicationTimeLabel(value, language) {
     if (typeof value !== "number" || !Number.isFinite(value))
-        return translateText("time unavailable", language);
+        return translate("time unavailable", language);
     return new Date(value).toLocaleString(language === "zh-CN" ? "zh-CN" : "en");
 }
 export function parseAgentIds(value) {
@@ -15,7 +15,7 @@ export function deliveryAgentLabel(agentId, agents = []) {
     const agent = agents.find((a) => String(a?.agent_id || "") === agentId);
     return agent ? String(agent.display_name || agent.handle || agentId) : agentId;
 }
-function appendChipElement(parent, text, extraClass = "") {
+function appendCommunicationChip(parent, text, extraClass = "") {
     const chip = document.createElement("span");
     chip.className = "chip" + (extraClass ? " " + extraClass : "");
     chip.textContent = text;
@@ -79,7 +79,7 @@ export function createConversationRow(conversation, selectedConversationId, opti
     head.className = "communication-row-head";
     const title = document.createElement("span");
     title.className = "communication-row-title";
-    title.textContent = String(conversation?.title || translateText("Untitled Conversation", language));
+    title.textContent = String(conversation?.title || translate("Untitled Conversation", language));
     const count = document.createElement("span");
     count.className = "chip";
     count.textContent = localizedCountLabel(conversation?.message_count, "message", "messages", language);
@@ -117,7 +117,7 @@ export function createConversationMessageCard(message, agents, options = {}) {
     const name = document.createElement("span");
     name.className = "conversation-message-author";
     name.textContent = agentAuthored
-        ? "Agent · " + String(author.display_name || author.handle || (author.agent_id ? deliveryAgentLabel(String(author.agent_id), agents) : "") || author.agent_id || translateText("unknown", language))
+        ? "Agent · " + String(author.display_name || author.handle || (author.agent_id ? deliveryAgentLabel(String(author.agent_id), agents) : "") || author.agent_id || translate("unknown", language))
         : (language === "zh-CN" ? "人工 · " : "Human · ") + String(author.principal_kind || (language === "zh-CN" ? "凭证主体" : "credential principal"));
     const seq = document.createElement("span");
     seq.className = "muted small";
@@ -142,7 +142,7 @@ export function createConversationMessageCard(message, agents, options = {}) {
     const delivery = document.createElement("div");
     delivery.className = "conversation-message-deliveries";
     delivery.textContent = deliveries.length
-        ? (language === "zh-CN" ? "Agent 收件箱：" : "Agent Inbox: ") + deliveries.map((item) => deliveryAgentLabel(String(item?.recipient_agent_id || ""), agents) + " " + translateText(String(item?.state || "unknown"), language)).join(" · ")
+        ? (language === "zh-CN" ? "Agent 收件箱：" : "Agent Inbox: ") + deliveries.map((item) => deliveryAgentLabel(String(item?.recipient_agent_id || ""), agents) + " " + translate(String(item?.state || "unknown"), language)).join(" · ")
         : (language === "zh-CN" ? "没有 Agent 收件箱投递 · 仅保留记录 / 人工房间" : "No Agent Inbox delivery · transcript / Human room only");
     card.appendChild(delivery);
     return card;
@@ -166,11 +166,11 @@ export function createInboxDeliveryCard(item, agents, options) {
     head.className = "communication-row-head";
     const title = document.createElement("span");
     title.className = "communication-row-title";
-    title.textContent = String(item?.conversation_title || translateText("Untitled Conversation", language)) + " · #" + String(item?.message?.seq || 0);
+    title.textContent = String(item?.conversation_title || translate("Untitled Conversation", language)) + " · #" + String(item?.message?.seq || 0);
     const consume = document.createElement("button");
     consume.type = "button";
     consume.className = "text-button";
-    consume.textContent = translateText("Consume", language);
+    consume.textContent = translate("Consume", language);
     consume.addEventListener("click", () => options.onConsume(String(item?.delivery_id || "")));
     head.appendChild(title);
     head.appendChild(consume);

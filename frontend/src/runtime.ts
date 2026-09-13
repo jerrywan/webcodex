@@ -92,10 +92,10 @@ import {
   ZH_COUNT_LABELS,
   languagePreference,
   loadLanguagePreference,
-  translate as translateText,
+  translate,
   translateStaticNodeValue,
   localizedCountLabel,
-  localizedWorkflowText as translateWorkflowText,
+  localizedWorkflowText,
 } from "./runtime_i18n.js";
 import {
   appendLinkifiedText,
@@ -112,10 +112,8 @@ import {
   writeClipboardText,
 } from "./runtime_api.js";
 import {
-  windowDateTimeLabel as formatWindowDateTime,
-  windowAgeLabel as formatWindowAge,
   runtimeProjectClientId,
-  renderWindowActivityRows as renderActivityRowsHelper,
+  renderWindowActivityRows,
   createWindowCard,
   renderWindowActiveRequests,
   renderWindowLinkedSessions,
@@ -124,9 +122,8 @@ import {
   renderWindowCards,
 } from "./runtime_window.js";
 import {
-  communicationTimeLabel as formatCommunicationTime,
   parseAgentIds,
-  deliveryAgentLabel as formatDeliveryAgent,
+  deliveryAgentLabel,
   renderAgentRows,
   renderConversationRows,
   renderConversationMessages,
@@ -136,9 +133,6 @@ import {
   formatUpdatedTime,
   formatSessionDateTime,
   formatLivenessPresentation,
-  activityKindLabel as formatActivityKind,
-  activityFacts as formatActivityFacts,
-  activityDescription as formatActivityDescription,
   appendActivityPreview,
   renderTimelineEvents,
 } from "./runtime_activity.js";
@@ -151,29 +145,25 @@ import {
   APPEARANCE_MEDIA_QUERY,
   type AppearancePreference,
   type RuntimeWorkspaceView,
-  appearancePreference as validateAppearancePreference,
-  loadAppearancePreference as loadAppearanceFromStorage,
-  persistAppearancePreference as persistAppearanceToStorage,
-  resolvedAppearance as resolveThemeAppearance,
-  workspaceViewPreference as validateWorkspaceViewPreference,
-  loadWorkspaceViewPreference as loadWorkspaceViewFromStorage,
-  persistWorkspaceViewPreference as persistWorkspaceViewToStorage,
-  loadRememberedRuntimeCredential as loadCredentialFromStorage,
-  persistRuntimeCredentialForTab as persistCredentialToStorage,
-  clearRememberedRuntimeCredential as clearCredentialFromStorage,
-  currentDraftStorageKey as draftStorageKey,
+  appearancePreference,
+  loadAppearancePreference,
+  persistAppearancePreference,
+  resolvedAppearance,
+  workspaceViewPreference,
+  loadWorkspaceViewPreference,
+  persistWorkspaceViewPreference,
+  loadRememberedRuntimeCredential,
+  persistRuntimeCredentialForTab,
+  clearRememberedRuntimeCredential,
   loadDraft,
   saveDraft,
   clearDraft,
-  clearRuntimeDrafts as clearAllRuntimeDrafts,
-  deviceDisclosureStorageKey as runnerDisclosureKey,
-  storedDeviceDisclosure as loadDeviceDisclosure,
-  persistDeviceDisclosure as saveDeviceDisclosure,
+  clearRuntimeDrafts,
+  storedDeviceDisclosure,
+  persistDeviceDisclosure,
 } from "./runtime_storage.js";
 import {
-  pendingAttentionCount as countPendingAttention,
-  runnerAttentionCount as calculateRunnerAttention,
-  attentionLabel as formatAttentionLabel,
+  runnerAttentionCount,
   formatProjectIdentity,
   extractProjectSelectorDevices,
   formatProjectLabel,
@@ -308,7 +298,7 @@ function show(id: string, visible: boolean): void {
 }
 
 function tr(source: string): string {
-  return translateText(source, runtimeLanguage);
+  return translate(source, runtimeLanguage);
 }
 
 function translatedStaticNodeValue(source: string): string {
@@ -371,7 +361,7 @@ function applyLanguage(language: RuntimeLanguage, persist = true, rerender = tru
     button.title = nextLanguageTitle;
     button.setAttribute("aria-label", nextLanguageTitle);
   });
-  applyAppearance(appearancePreference(document.documentElement.dataset.theme), false);
+  applyAppearance(parseAppearancePreference(document.documentElement.dataset.theme), false);
   if (persist) {
     try { window.localStorage.setItem(LANGUAGE_STORAGE_KEY, runtimeLanguage); }
     catch { /* Language remains active when storage is unavailable. */ }
@@ -379,20 +369,20 @@ function applyLanguage(language: RuntimeLanguage, persist = true, rerender = tru
   if (rerender) renderLanguageSensitiveUi();
 }
 
-function appearancePreference(value: unknown): AppearancePreference {
-  return validateAppearancePreference(value);
+function parseAppearancePreference(value: unknown): AppearancePreference {
+  return appearancePreference(value);
 }
 
-function loadAppearancePreference(): AppearancePreference {
-  return loadAppearanceFromStorage();
+function readStoredAppearance(): AppearancePreference {
+  return loadAppearancePreference();
 }
 
-function resolvedAppearance(preference: AppearancePreference): "light" | "dark" {
-  return resolveThemeAppearance(preference, appearanceMedia.matches);
+function computeResolvedAppearance(preference: AppearancePreference): "light" | "dark" {
+  return resolvedAppearance(preference, appearanceMedia.matches);
 }
 
 function applyAppearance(preference: AppearancePreference, persist = true): void {
-  const resolved = resolvedAppearance(preference);
+  const resolved = computeResolvedAppearance(preference);
   document.documentElement.dataset.theme = preference;
   document.documentElement.dataset.resolvedTheme = resolved;
   document.querySelector('meta[name="theme-color"]')?.setAttribute(
@@ -407,15 +397,15 @@ function applyAppearance(preference: AppearancePreference, persist = true): void
     trigger.title = label;
     trigger.setAttribute("aria-label", runtimeLanguage === "zh-CN" ? label + "。" + tr("Choose appearance") : label + ". " + tr("Choose appearance"));
   });
-  if (persist) persistAppearanceToStorage(preference);
+  if (persist) persistAppearancePreference(preference);
 }
 
-function workspaceViewPreference(value: unknown): RuntimeWorkspaceView {
-  return validateWorkspaceViewPreference(value);
+function parseWorkspaceViewPreference(value: unknown): RuntimeWorkspaceView {
+  return workspaceViewPreference(value);
 }
 
-function loadWorkspaceViewPreference(): RuntimeWorkspaceView {
-  return loadWorkspaceViewFromStorage();
+function readStoredWorkspaceView(): RuntimeWorkspaceView {
+  return loadWorkspaceViewPreference();
 }
 
 function renderWorkspaceHeading(): void {
@@ -440,7 +430,7 @@ function renderWorkspaceHeading(): void {
 }
 
 function applyWorkspaceView(view: RuntimeWorkspaceView, persist = true): void {
-  workspaceView = workspaceViewPreference(view);
+  workspaceView = parseWorkspaceViewPreference(view);
   const operations = workspaceView === "operations";
   const windows = workspaceView === "windows";
   const sessions = workspaceView === "sessions";
@@ -470,7 +460,7 @@ function applyWorkspaceView(view: RuntimeWorkspaceView, persist = true): void {
   renderWorkspaceHeading();
   syncResponsiveNavigation();
   setMobileNavigationOpen(false, false);
-  if (persist) persistWorkspaceViewToStorage(workspaceView);
+  if (persist) persistWorkspaceViewPreference(workspaceView);
 }
 
 function revealOperationsSection(targetId: string): void {
@@ -674,20 +664,16 @@ function announceNewCollaborationMessages(count: number): void {
   setText("runtime-message-announcer", label);
 }
 
-function loadRememberedRuntimeCredential(): string {
-  return loadCredentialFromStorage();
+function readStoredCredential(): string {
+  return loadRememberedRuntimeCredential();
 }
 
-function persistRuntimeCredentialForTab(): void {
-  persistCredentialToStorage(token, rememberCredentialForTab);
+function writeTabCredential(): void {
+  persistRuntimeCredentialForTab(token, rememberCredentialForTab);
 }
 
-function clearRememberedRuntimeCredential(): void {
-  clearCredentialFromStorage();
-}
-
-function currentDraftStorageKey(project = state.selectedProject, sessionId = state.workflow?.selectedSessionId): string {
-  return draftStorageKey(project, sessionId);
+function eraseStoredCredential(): void {
+  clearRememberedRuntimeCredential();
 }
 
 function saveCurrentDraft(): void {
@@ -707,8 +693,8 @@ function clearCurrentDraft(): void {
   clearDraft(state.selectedProject, state.workflow?.selectedSessionId);
 }
 
-function clearRuntimeDrafts(): void {
-  clearAllRuntimeDrafts();
+function eraseAllDrafts(): void {
+  clearRuntimeDrafts();
 }
 
 function rememberLocalCollaborationMessage(messageId: unknown): void {
@@ -717,21 +703,17 @@ function rememberLocalCollaborationMessage(messageId: unknown): void {
   locallyAuthoredCollaborationMessageIds.add(id);
 }
 
-function deviceDisclosureStorageKey(clientId: string): string {
-  return runnerDisclosureKey(clientId);
+function readDeviceDisclosure(clientId: string): boolean | null {
+  return storedDeviceDisclosure(clientId);
 }
 
-function storedDeviceDisclosure(clientId: string): boolean | null {
-  return loadDeviceDisclosure(clientId);
-}
-
-function persistDeviceDisclosure(clientId: string, open: boolean): void {
-  saveDeviceDisclosure(clientId, open);
+function writeDeviceDisclosure(clientId: string, open: boolean): void {
+  persistDeviceDisclosure(clientId, open);
 }
 
 function revealRunner(clientId: string): void {
   if (!clientId) return;
-  persistDeviceDisclosure(clientId, true);
+  writeDeviceDisclosure(clientId, true);
   const group = document.querySelector(`.device-group[data-runner-id="${CSS.escape(clientId)}"]`) as HTMLDetailsElement | null;
   if (group) group.open = true;
 }
@@ -784,14 +766,6 @@ async function api(path: string, payload: any, signal?: AbortSignal): Promise<an
   return apiClient.post(path, payload, signal);
 }
 
-function windowDateTimeLabel(timestampMs: unknown): string {
-  return formatWindowDateTime(timestampMs, runtimeLanguage);
-}
-
-function windowAgeLabel(timestampMs: unknown): string {
-  return formatWindowAge(timestampMs, Date.now());
-}
-
 async function copyRuntimeValue(value: string, statusId?: string): Promise<void> {
   if (!value) return;
   const ok = await writeClipboardText(value);
@@ -807,8 +781,8 @@ function openWindowLinkedSession(session: any): void {
   selectRecentSession({ client_id: clientId, project_id: project, session_id: sessionId });
 }
 
-function renderWindowActivityRows(node: HTMLElement | null, activities: any[], compact = false): void {
-  renderActivityRowsHelper(node, activities, {
+function renderWindowActivities(node: HTMLElement | null, activities: any[], compact = false): void {
+  renderWindowActivityRows(node, activities, {
     compact,
     language: runtimeLanguage,
     onCopyTrace: (traceId) => void copyRuntimeValue(traceId),
@@ -821,7 +795,7 @@ function renderWindowList(): void {
   show("runtime-window-list-empty", windowRows.length === 0);
   setText(
     "runtime-window-list-status",
-    windowRows.length ? countLabel(windowRows.length, "Window") : tr("No WebCodex activity"),
+    windowRows.length ? runtimeCountLabel(windowRows.length, "Window") : tr("No WebCodex activity"),
   );
   renderWindowCards(node, windowRows, selectedWindowKey, (key) => void selectWindow(key));
 }
@@ -853,7 +827,7 @@ function renderWindowDetail(detail: any | null): void {
     Array.isArray(detail.linked_sessions) ? detail.linked_sessions : [],
     (session) => openWindowLinkedSession(session),
   );
-  renderWindowActivityRows(el("runtime-window-activity"), Array.isArray(detail.activity) ? detail.activity : []);
+  renderWindowActivities(el("runtime-window-activity"), Array.isArray(detail.activity) ? detail.activity : []);
   renderWorkspaceHeading();
 }
 
@@ -927,7 +901,7 @@ function renderSessionWindowCorrelation(detail: any): void {
   const linkedNode = el("runtime-linked-windows");
   clearNode(linkedNode);
   const links = available && Array.isArray(detail?.linked_windows) ? detail.linked_windows : [];
-  setText("runtime-linked-windows-status", available ? countLabel(links.length, "Window") : "runtime:read unavailable");
+  setText("runtime-linked-windows-status", available ? runtimeCountLabel(links.length, "Window") : "runtime:read unavailable");
   if (available) {
     renderSessionWindowCorrelationLinks(linkedNode, links, (key) => {
       selectedWindowKey = key;
@@ -940,7 +914,7 @@ function renderSessionWindowCorrelation(detail: any): void {
     ? detail.window_activity_after_last_session_record
     : [];
   show("runtime-recorder-gap-panel", gaps.length > 0);
-  renderWindowActivityRows(el("runtime-recorder-gap-activity"), gaps, true);
+  renderWindowActivities(el("runtime-recorder-gap-activity"), gaps, true);
 }
 
 function hideDetail(): void {
@@ -987,8 +961,8 @@ function lock(message = "", clearRemembered = true): void {
   detachCommunicationEndpointsBestEffort();
   token = "";
   if (clearRemembered) {
-    clearRememberedRuntimeCredential();
-    clearRuntimeDrafts();
+    eraseStoredCredential();
+    eraseAllDrafts();
   }
   abortAll();
   invalidateRuntimeCredential(state);
@@ -1047,7 +1021,7 @@ function lock(message = "", clearRemembered = true): void {
 }
 
 function unlockUi(): void {
-  persistRuntimeCredentialForTab();
+  writeTabCredential();
   document.body.classList.add("runtime-connected");
   show("runtime-token-gate", false);
   show("runtime-console", true);
@@ -1064,16 +1038,8 @@ function showError(message: string): void {
   show("runtime-error", !!message);
 }
 
-function countLabel(value: any, singular: string, plural = singular + "s"): string {
+function runtimeCountLabel(value: any, singular: string, plural = singular + "s"): string {
   return localizedCountLabel(value, singular, plural, runtimeLanguage);
-}
-
-function pendingAttentionCount(attention: any): number {
-  return countPendingAttention(attention);
-}
-
-function attentionLabel(attention: any): string {
-  return formatAttentionLabel(attention, runtimeLanguage);
 }
 
 function renderRuntimeOverviewMetrics(data: any): void {
@@ -1309,8 +1275,8 @@ function renderProjectSelectors(projects: any[], truncated: boolean): void {
       selectedProject: state.selectedProject,
       projectDeviceFilter,
       language: runtimeLanguage,
-      storedDeviceDisclosure,
-      onPersistDeviceDisclosure: persistDeviceDisclosure,
+      storedDeviceDisclosure: readDeviceDisclosure,
+      onPersistDeviceDisclosure: writeDeviceDisclosure,
       onSelectProject: (clientId, projectId) => switchProject(clientId, projectId),
     },
   );
@@ -1474,20 +1440,8 @@ function localizedLivenessPresentation(session: any): any {
   return formatLivenessPresentation(session, runtimeLanguage);
 }
 
-function localizedWorkflowText(value: unknown): string {
-  return translateWorkflowText(value, runtimeLanguage);
-}
-
-function activityKindLabel(activity: any): string {
-  return formatActivityKind(activity, runtimeLanguage);
-}
-
-function activityFacts(activity: any, includeTiming: boolean): string[] {
-  return formatActivityFacts(activity, includeTiming, runtimeLanguage);
-}
-
-function activityDescription(activity: any): string {
-  return formatActivityDescription(activity, runtimeLanguage);
+function localWorkflowText(value: unknown): string {
+  return localizedWorkflowText(value, runtimeLanguage);
 }
 
 function appendPreview(parent: HTMLElement, label: string, activity: any): void {
@@ -1570,11 +1524,11 @@ function setTone(id: string, tone: string): void {
 
 function renderOverview(overview: any): void {
   const view = workflowSessionOverviewPresentation(overview);
-  setText("runtime-overview-work", localizedWorkflowText(view.workText));
-  setText("runtime-overview-validation", localizedWorkflowText(view.validationText) + (typeof view.validationAt === "number" ? " · " + updatedLabel(view.validationAt) : ""));
+  setText("runtime-overview-work", localWorkflowText(view.workText));
+  setText("runtime-overview-validation", localWorkflowText(view.validationText) + (typeof view.validationAt === "number" ? " · " + updatedLabel(view.validationAt) : ""));
   setTone("runtime-overview-validation-card", view.validationTone);
-  setText("runtime-overview-attention", localizedWorkflowText(view.attentionText)); setTone("runtime-overview-attention-card", view.attentionTone);
-  setText("runtime-overview-progress", localizedWorkflowText(view.progressText) + (typeof view.progressAt === "number" ? (runtimeLanguage === "zh-CN" ? " · 报告于 " : " · reported ") + updatedLabel(view.progressAt) : ""));
+  setText("runtime-overview-attention", localWorkflowText(view.attentionText)); setTone("runtime-overview-attention-card", view.attentionTone);
+  setText("runtime-overview-progress", localWorkflowText(view.progressText) + (typeof view.progressAt === "number" ? (runtimeLanguage === "zh-CN" ? " · 报告于 " : " · reported ") + updatedLabel(view.progressAt) : ""));
 }
 
 function syncFollowUi(): void {
@@ -1779,7 +1733,7 @@ function renderCollaboration(statusText?: string, consumeMutationNotice = true):
   );
   const localizedStatusText = statusText ? tr(statusText) : "";
   const status = available
-    ? (runtimeLanguage === "zh-CN" ? "协作：" : "Collaboration: ") + collaborationPhaseLabel(state.collaboration.phase, runtimeLanguage) + " · " + countLabel(messages.length, "retained message") + (localizedStatusText ? " · " + localizedStatusText : "")
+    ? (runtimeLanguage === "zh-CN" ? "协作：" : "Collaboration: ") + collaborationPhaseLabel(state.collaboration.phase, runtimeLanguage) + " · " + runtimeCountLabel(messages.length, "retained message") + (localizedStatusText ? " · " + localizedStatusText : "")
     : (runtimeLanguage === "zh-CN" ? "runtime:read 不可用" : "runtime:read unavailable");
   setText("runtime-collaboration-status", status);
   const node = el("runtime-collaboration-board");
@@ -2155,10 +2109,6 @@ async function postHumanCollaborationMessage(event: Event): Promise<void> {
   renderCollaboration();
 }
 
-function communicationTimeLabel(value: any): string {
-  return formatCommunicationTime(value, runtimeLanguage);
-}
-
 function communicationAgent(agentId: string): any | null {
   return communicationAgents.find((agent) => String(agent?.agent_id || "") === agentId) || null;
 }
@@ -2236,7 +2186,7 @@ function renderCommunicationAvailability(): void {
 }
 
 function renderCommunicationAgents(): void {
-  setText("runtime-communication-count", countLabel(communicationAgents.length, "Agent"));
+  setText("runtime-communication-count", runtimeCountLabel(communicationAgents.length, "Agent"));
   const list = el("runtime-agent-list");
   show("runtime-agent-empty", communicationReadAvailable === true && communicationAgents.length === 0);
   renderAgentRows(list, communicationAgents, selectedCommunicationAgentId, {
@@ -2263,7 +2213,7 @@ function renderCommunicationAgentCard(): void {
   setText("runtime-agent-card-id", agentId);
   setText("runtime-agent-card-description", String(agent.description || tr("No description.")));
   setText("runtime-agent-card-revision", formatAgentCardRevision(agent, runtimeLanguage));
-  setText("runtime-agent-unread", countLabel(agent.queued_delivery_count, "queued"));
+  setText("runtime-agent-unread", runtimeCountLabel(agent.queued_delivery_count, "queued"));
   const labels = el("runtime-agent-card-labels");
   clearNode(labels);
   if (labels) {
@@ -2313,10 +2263,6 @@ function renderCommunicationConversations(): void {
       void fetchCommunicationConversation(communicationGeneration);
     },
   });
-}
-
-function deliveryAgentLabel(agentId: string): string {
-  return formatDeliveryAgent(agentId, communicationAgents);
 }
 
 function renderCommunicationConversation(): void {
@@ -2370,7 +2316,7 @@ function renderCommunicationInbox(): void {
   const totalQueued = Number(agent.queued_delivery_count || 0);
   setText(
     "runtime-inbox-status",
-    countLabel(totalQueued, "queued delivery")
+    runtimeCountLabel(totalQueued, "queued delivery")
       + (communicationInbox.length < totalQueued ? (runtimeLanguage === "zh-CN" ? " · 当前显示 " : " · showing ") + String(communicationInbox.length) : "")
       + (runtimeLanguage === "zh-CN" ? " · 读取不会消费投递或唤醒模型" : " · reading does not consume or wake a model")
   );
@@ -3064,7 +3010,7 @@ document.querySelector(".context-trigger")?.addEventListener("click", (event) =>
   syncContextUi(false);
 });
 document.querySelectorAll<HTMLButtonElement>("[data-runtime-view]").forEach((button) => {
-  button.addEventListener("click", () => applyWorkspaceView(workspaceViewPreference(button.dataset.runtimeView)));
+  button.addEventListener("click", () => applyWorkspaceView(parseWorkspaceViewPreference(button.dataset.runtimeView)));
 });
 document.querySelectorAll<HTMLButtonElement>("[data-context-target]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -3087,7 +3033,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-language-toggle]").forEach((
 });
 document.querySelectorAll<HTMLButtonElement>("[data-theme-option]").forEach((button) => {
   button.addEventListener("click", () => {
-    applyAppearance(appearancePreference(button.dataset.themeOption));
+    applyAppearance(parseAppearancePreference(button.dataset.themeOption));
     const menu = button.closest("details.theme-menu") as HTMLDetailsElement | null;
     if (menu) menu.open = false;
     closeTopbarMore(false);
@@ -3210,14 +3156,14 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 const syncSystemAppearance = () => {
-  if (appearancePreference(document.documentElement.dataset.theme) === "system") applyAppearance("system", false);
+  if (parseAppearancePreference(document.documentElement.dataset.theme) === "system") applyAppearance("system", false);
 };
 if (typeof appearanceMedia.addEventListener === "function") appearanceMedia.addEventListener("change", syncSystemAppearance);
 else appearanceMedia.addListener(syncSystemAppearance);
 captureStaticUiSources();
 applyLanguage(loadLanguagePreference(), false, false);
-applyAppearance(loadAppearancePreference(), false);
-applyWorkspaceView(loadWorkspaceViewPreference(), false);
+applyAppearance(readStoredAppearance(), false);
+applyWorkspaceView(readStoredWorkspaceView(), false);
 syncAckComposer();
 window.addEventListener("pagehide", () => {
   saveCurrentDraft();
@@ -3230,7 +3176,7 @@ window.addEventListener("pagehide", () => {
 });
 
 lock("", false);
-const rememberedRuntimeCredential = loadRememberedRuntimeCredential();
+const rememberedRuntimeCredential = readStoredCredential();
 if (rememberedRuntimeCredential) {
   setText("runtime-token-error", tr("Restoring this tab…"));
   connectRuntimeCredential(rememberedRuntimeCredential, true);

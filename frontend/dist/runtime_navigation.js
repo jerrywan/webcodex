@@ -1,4 +1,4 @@
-import { translate as translateText, localizedCountLabel, } from "./runtime_i18n.js";
+import { translate, localizedCountLabel, } from "./runtime_i18n.js";
 import { runtimeProjectIdentityText, filterAndSortRuntimeProjects, resolveRunnerDisclosure, } from "./runtime_console_state.js";
 import { formatProjectIdentity, pendingAttentionCount, attentionLabel, runnerAttentionCount, } from "./runtime_overview.js";
 import { formatUpdatedTime, formatLivenessPresentation, appendActivityPreview, } from "./runtime_activity.js";
@@ -17,10 +17,10 @@ function appendNavigationChip(parent, text, extraClass = "") {
 export function formatWorkspaceBreadcrumb(project, language) {
     const runnerText = project?.client_id
         ? String(project.client_id)
-        : translateText("Fleet", language);
+        : translate("Fleet", language);
     const projectText = project
-        ? String(project.name || project.id || translateText("Projects", language))
-        : translateText("Projects", language);
+        ? String(project.name || project.id || translate("Projects", language))
+        : translate("Projects", language);
     return { runnerText, projectText };
 }
 export function formatSelectedProjectIdentity(project, language) {
@@ -40,7 +40,7 @@ export function formatDeviceStatusText(devicesCount, filter, language) {
     if (filter) {
         return base + (language === "zh-CN" ? " · 已筛选" : " · filtered");
     }
-    return base + " · " + translateText("All Runners", language);
+    return base + " · " + translate("All Runners", language);
 }
 export function formatProjectStatusText(returnedProjects, totalProjects, truncated, filter, query, language) {
     const scope = language === "zh-CN"
@@ -66,7 +66,7 @@ export function formatRecentSessionStatusText(meta, language) {
         + (meta.scan_truncated ? (language === "zh-CN" ? " · 扫描不完整" : " · partial scan") : "");
 }
 export function renderProjectSelectorTree(deviceSelect, projectList, sessionsPanel, options) {
-    const tr = (text) => translateText(text, options.language);
+    const tr = (text) => translate(text, options.language);
     const countLabel = (count, singular) => localizedCountLabel(count, singular, options.language);
     const updatedLabel = (timestamp) => formatUpdatedTime(timestamp, options.language);
     clearNavigationNode(deviceSelect);
@@ -244,7 +244,7 @@ export function renderProjectSelectorTree(deviceSelect, projectList, sessionsPan
     }
 }
 export function renderRunnerFleetRows(node, runners, options) {
-    const tr = (text) => translateText(text, options.language);
+    const tr = (text) => translate(text, options.language);
     const countLabel = (count, singular) => localizedCountLabel(count, singular, options.language);
     clearNavigationNode(node);
     for (const runner of runners) {
@@ -326,7 +326,7 @@ export function renderRunnerFleetRows(node, runners, options) {
     }
 }
 export function renderRecentSessionRows(node, sessions, options) {
-    const tr = (text) => translateText(text, options.language);
+    const tr = (text) => translate(text, options.language);
     const updatedLabel = (timestamp) => formatUpdatedTime(timestamp, options.language);
     clearNavigationNode(node);
     for (const session of sessions) {

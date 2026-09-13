@@ -1,4 +1,4 @@
-import { translate as translateText, localizedCountLabel } from "./runtime_i18n.js";
+import { translate, localizedCountLabel } from "./runtime_i18n.js";
 import { runtimeProjectIdentityText, runtimeDeviceIds } from "./runtime_console_state.js";
 export function pendingAttentionCount(attention) {
     return ["open_risks", "open_todos", "open_questions", "open_guidance"].reduce((total, key) => total + (typeof attention?.[key] === "number" ? Math.max(0, Math.floor(attention[key])) : 0), 0);
@@ -18,17 +18,17 @@ export function attentionLabel(attention, language) {
         if (count)
             parts.push(localizedCountLabel(count, singular, singular + "s", language));
     }
-    return parts.length ? parts.join(" · ") : translateText("No retained pending attention", language);
+    return parts.length ? parts.join(" · ") : translate("No retained pending attention", language);
 }
 export function formatProjectIdentity(project, language) {
     if (language !== "zh-CN")
         return runtimeProjectIdentityText(project);
     if (!project || typeof project.id !== "string" || !project.id) {
-        return translateText("No project selected", language);
+        return translate("No project selected", language);
     }
     const runner = typeof project.client_id === "string" && project.client_id
         ? project.client_id
-        : translateText("unknown", language);
+        : translate("unknown", language);
     const path = typeof project.path === "string" && project.path ? project.path : "不可用";
     return "运行器：" + runner + " · 项目：" + project.id + " · 工作空间：" + path;
 }
@@ -71,11 +71,11 @@ export function formatRuntimeOverviewMetrics(data, language) {
         ? (language === "zh-CN" ? "构建 " : "build ") +
             buildGitCommit +
             (data.build_git_dirty ? (language === "zh-CN" ? " · 有未提交更改" : " · dirty") : "")
-        : translateText("build unavailable", language);
+        : translate("build unavailable", language);
     const projectsText = data.projects_available
         ? localizedCountLabel(data.visible_projects, "visible Project", "visible Projects", language) +
             (data.projects_truncated ? (language === "zh-CN" ? " · 不完整" : " · partial") : "")
-        : translateText("project:read unavailable", language);
+        : translate("project:read unavailable", language);
     const jobsText = localizedCountLabel(data.active_jobs, "active Job", "active Jobs", language) +
         (data.mixed_builds_present ? (language === "zh-CN" ? " · 存在混合构建" : " · mixed builds") : "");
     const sessionsText = localizedCountLabel(data.workflow_sessions?.active, "active Session", "active Sessions", language) +

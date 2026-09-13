@@ -14,13 +14,12 @@ import { Script } from "node:vm";
 import ts from "typescript";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const watchedSources = new Set([
-  "app.ts",
-  "review_state.ts",
+
+// These modules are transpiled independently for ESM consumers and also inlined,
+// in this exact order, into the classic Runtime Console bundle. The classic
+// contract below therefore treats this list as the authoritative shared scope.
+export const RUNTIME_INLINE_MODULES = Object.freeze([
   "workflow_session_state.ts",
-  "styles.css",
-  "console.html",
-  "runtime.ts",
   "runtime_collaboration_state.ts",
   "runtime_communication_state.ts",
   "runtime_context_state.ts",
@@ -33,10 +32,19 @@ const watchedSources = new Set([
   "runtime_activity.ts",
   "runtime_storage.ts",
   "runtime_overview.ts",
-  "runtime_icons.ts",
   "runtime_operations.ts",
+  "runtime_icons.ts",
   "runtime_navigation.ts",
   "runtime_collaboration.ts",
+  "runtime.ts",
+]);
+
+const watchedSources = new Set([
+  "app.ts",
+  "review_state.ts",
+  ...RUNTIME_INLINE_MODULES,
+  "styles.css",
+  "console.html",
   "runtime.css",
   "runtime.html",
   "admin.ts",
@@ -62,9 +70,8 @@ const diagnosticHost = {
   getNewLine: () => "\n",
 };
 
-function transpileTypeScript(sourceDirectory, fileName) {
-  const sourcePath = resolve(sourceDirectory, fileName);
-  const result = ts.transpileModule(readSource(sourceDirectory, fileName), {
+function transpileTypeScriptSource(source, fileName) {
+  const result = ts.transpileModule(source, {
     compilerOptions: {
       target: ts.ScriptTarget.ES2020,
       module: ts.ModuleKind.ES2020,
@@ -73,7 +80,7 @@ function transpileTypeScript(sourceDirectory, fileName) {
       sourceMap: false,
       inlineSourceMap: false,
     },
-    fileName: sourcePath,
+    fileName,
     reportDiagnostics: true,
   });
   const errors = (result.diagnostics || []).filter(
@@ -83,6 +90,11 @@ function transpileTypeScript(sourceDirectory, fileName) {
     throw new Error(ts.formatDiagnostics(errors, diagnosticHost).trim());
   }
   return normalizeNewline(result.outputText);
+}
+
+function transpileTypeScript(sourceDirectory, fileName) {
+  const sourcePath = resolve(sourceDirectory, fileName);
+  return transpileTypeScriptSource(readSource(sourceDirectory, fileName), sourcePath);
 }
 
 function buildJs(source) {
@@ -117,13 +129,218 @@ function minifyCss(source) {
 function stripModuleExports(js) {
   return js
     .replace(/^export\s*\{\};\s*\n?/gm, "")
-    .replace(/^export\s+((?:async\s+)?(?:function|const|let|class))\b/gm, "$1");
+    .replace(/^export\s+((?:async\s+)?(?:function|const|let|var|class))\b/gm, "$1");
+}
+
+function collectBindingNames(name, names) {
+  if (ts.isIdentifier(name)) {
+    names.add(name.text);
+    return;
+  }
+  if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+    for (const element of name.elements) {
+      if (!ts.isOmittedExpression(element)) collectBindingNames(element.name, names);
+    }
+  }
+}
+
+function emittedTopLevelBindings(fileName, source) {
+  const emitted = transpileTypeScriptSource(source, fileName);
+  const sourceFile = ts.createSourceFile(
+    fileName.replace(/\.tsx?$/, ".js"),
+    emitted,
+    ts.ScriptTarget.ES2020,
+    true,
+    ts.ScriptKind.JS
+  );
+  const names = new Set();
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) {
+      if (statement.name) names.add(statement.name.text);
+      continue;
+    }
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        collectBindingNames(declaration.name, names);
+      }
+    }
+  }
+  return names;
+}
+
+function runtimeImportTarget(specifier) {
+  if (!specifier.startsWith("./")) return null;
+  const relativeName = specifier.slice(2);
+  if (!relativeName || relativeName.includes("/") || relativeName.includes("\\")) return null;
+  if (relativeName.endsWith(".js")) return relativeName.slice(0, -3) + ".ts";
+  if (relativeName.endsWith(".ts")) return relativeName;
+  return relativeName + ".ts";
+}
+
+export function analyzeRuntimeClassicBundleModules(modules) {
+  const moduleNames = new Set(modules.map(({ fileName }) => fileName));
+  const bindingsByModule = new Map();
+  const declarationSites = new Map();
+  for (const { fileName, source } of modules) {
+    const bindings = emittedTopLevelBindings(fileName, source);
+    bindingsByModule.set(fileName, bindings);
+    for (const name of bindings) {
+      const sites = declarationSites.get(name) || [];
+      sites.push(fileName);
+      declarationSites.set(name, sites);
+    }
+  }
+
+  const aliases = [];
+  const unresolvedImports = [];
+  for (const { fileName, source } of modules) {
+    const sourceFile = ts.createSourceFile(
+      fileName,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    );
+    for (const statement of sourceFile.statements) {
+      if (!ts.isImportDeclaration(statement)) continue;
+      const clause = statement.importClause;
+      const fromModule = ts.isStringLiteral(statement.moduleSpecifier)
+        ? statement.moduleSpecifier.text
+        : "";
+      const targetFile = runtimeImportTarget(fromModule);
+      const line = sourceFile.getLineAndCharacterOfPosition(statement.getStart(sourceFile)).line + 1;
+      if (!clause) {
+        unresolvedImports.push({
+          file: fileName,
+          fromModule,
+          imported: "(side effect)",
+          line,
+          reason: "side-effect imports are not supported by the classic Runtime bundle",
+        });
+        continue;
+      }
+      if (clause.isTypeOnly) continue;
+
+      if (clause.name) {
+        unresolvedImports.push({
+          file: fileName,
+          fromModule,
+          imported: "default",
+          line,
+          reason: "default value imports are not supported by the classic Runtime bundle",
+        });
+      }
+      if (!clause.namedBindings) continue;
+      if (ts.isNamespaceImport(clause.namedBindings)) {
+        unresolvedImports.push({
+          file: fileName,
+          fromModule,
+          imported: "*",
+          line,
+          reason: "namespace value imports are not supported by the classic Runtime bundle",
+        });
+        continue;
+      }
+      for (const specifier of clause.namedBindings.elements) {
+        if (specifier.isTypeOnly) continue;
+        const imported = specifier.propertyName?.text || specifier.name.text;
+        const local = specifier.name.text;
+        if (specifier.propertyName) {
+          aliases.push({ file: fileName, fromModule, imported, local, line });
+        }
+        if (!targetFile || !moduleNames.has(targetFile)) {
+          unresolvedImports.push({
+            file: fileName,
+            fromModule,
+            imported,
+            line,
+            reason: "value import target is not part of the classic Runtime bundle",
+          });
+          continue;
+        }
+        if (!bindingsByModule.get(targetFile)?.has(imported)) {
+          unresolvedImports.push({
+            file: fileName,
+            fromModule,
+            imported,
+            line,
+            reason: `canonical binding is not emitted by ${targetFile}`,
+          });
+        }
+      }
+    }
+  }
+
+  const collisions = Array.from(declarationSites.entries())
+    .filter(([, files]) => files.length > 1)
+    .map(([name, files]) => ({ name, files }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  aliases.sort((left, right) => left.file.localeCompare(right.file) || left.line - right.line);
+  unresolvedImports.sort(
+    (left, right) => left.file.localeCompare(right.file) || left.line - right.line
+  );
+  return { aliases, collisions, unresolvedImports };
+}
+
+export function assertRuntimeClassicBundleModules(modules) {
+  const analysis = analyzeRuntimeClassicBundleModules(modules);
+  const problems = [];
+  if (analysis.aliases.length) {
+    problems.push(
+      `${analysis.aliases.length} named value import alias(es):\n` +
+        analysis.aliases
+          .map(
+            ({ file, fromModule, imported, local, line }) =>
+              `  ${file}:${line}: import { ${imported} as ${local} } from "${fromModule}"`
+          )
+          .join("\n")
+    );
+  }
+  if (analysis.collisions.length) {
+    problems.push(
+      `${analysis.collisions.length} shared classic-scope binding collision(s):\n` +
+        analysis.collisions
+          .map(({ name, files }) => `  ${name}: ${files.join(", ")}`)
+          .join("\n")
+    );
+  }
+  if (analysis.unresolvedImports.length) {
+    problems.push(
+      `${analysis.unresolvedImports.length} canonical value import binding error(s):\n` +
+        analysis.unresolvedImports
+          .map(
+            ({ file, fromModule, imported, line, reason }) =>
+              `  ${file}:${line}: ${imported} from "${fromModule}" — ${reason}`
+          )
+          .join("\n")
+    );
+  }
+  if (problems.length) {
+    throw new Error(
+      "Runtime classic bundle contract violated. Imports are stripped before the Runtime modules " +
+        "share one classic-script lexical scope.\n" +
+        problems.join("\n")
+    );
+  }
+  return analysis;
+}
+
+export function assertRuntimeClassicBundleContract(
+  sourceDirectory = resolve(root, "src")
+) {
+  return assertRuntimeClassicBundleModules(
+    RUNTIME_INLINE_MODULES.map((fileName) => ({
+      fileName,
+      source: readSource(sourceDirectory, fileName),
+    }))
+  );
 }
 
 export function createOutputs(
   outputDirectory,
   sourceDirectory = resolve(root, "src")
 ) {
+  assertRuntimeClassicBundleContract(sourceDirectory);
   const reviewStateModule = buildJs(
     transpileTypeScript(sourceDirectory, "review_state.ts")
   );
@@ -390,42 +607,34 @@ export function createOutputs(
         ""
       )
   );
+  const runtimeClassicModules = new Map([
+    ["workflow_session_state.ts", workflowSessionStateClassic],
+    ["runtime_collaboration_state.ts", runtimeCollaborationStateClassic],
+    ["runtime_communication_state.ts", runtimeCommunicationStateClassic],
+    ["runtime_context_state.ts", runtimeContextStateClassic],
+    ["runtime_console_state.ts", runtimeConsoleStateClassic],
+    ["runtime_i18n.ts", runtimeI18nClassic],
+    ["runtime_rich_text.ts", runtimeRichTextClassic],
+    ["runtime_api.ts", runtimeApiClassic],
+    ["runtime_window.ts", runtimeWindowClassic],
+    ["runtime_communication.ts", runtimeCommunicationClassic],
+    ["runtime_activity.ts", runtimeActivityClassic],
+    ["runtime_storage.ts", runtimeStorageClassic],
+    ["runtime_overview.ts", runtimeOverviewClassic],
+    ["runtime_operations.ts", runtimeOperationsClassic],
+    ["runtime_icons.ts", runtimeIconsClassic],
+    ["runtime_navigation.ts", runtimeNavigationClassic],
+    ["runtime_collaboration.ts", runtimeCollaborationClassic],
+    ["runtime.ts", runtimeScript],
+  ]);
   const runtimeInlined = buildJs(
-    workflowSessionStateClassic +
-      "\n" +
-      runtimeCollaborationStateClassic +
-      "\n" +
-      runtimeCommunicationStateClassic +
-      "\n" +
-      runtimeContextStateClassic +
-      "\n" +
-      runtimeConsoleStateClassic +
-      "\n" +
-      runtimeI18nClassic +
-      "\n" +
-      runtimeRichTextClassic +
-      "\n" +
-      runtimeApiClassic +
-      "\n" +
-      runtimeWindowClassic +
-      "\n" +
-      runtimeCommunicationClassic +
-      "\n" +
-      runtimeActivityClassic +
-      "\n" +
-      runtimeStorageClassic +
-      "\n" +
-      runtimeOverviewClassic +
-      "\n" +
-      runtimeOperationsClassic +
-      "\n" +
-      runtimeIconsClassic +
-      "\n" +
-      runtimeNavigationClassic +
-      "\n" +
-      runtimeCollaborationClassic +
-      "\n" +
-      runtimeScript
+    RUNTIME_INLINE_MODULES.map((fileName) => {
+      const classicModule = runtimeClassicModules.get(fileName);
+      if (classicModule === undefined) {
+        throw new Error(`Runtime inline module has no classic build output: ${fileName}`);
+      }
+      return classicModule;
+    }).join("\n")
   );
   assertClassicScript(resolve(outputDirectory, "runtime.js"), runtimeInlined);
   const adminControllerModule = buildJs(
