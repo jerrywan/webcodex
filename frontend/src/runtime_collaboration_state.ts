@@ -1,4 +1,4 @@
-function compareText(left: string, right: string): number {
+function compareCollaborationText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
@@ -119,7 +119,7 @@ export function mergeRuntimeCollaborationMessages(current: any[], updates: any[]
   }
   return Array.from(byId.values()).sort((left, right) =>
     messageCreatedAt(left) - messageCreatedAt(right) ||
-    compareText(String(left?.message_id || ""), String(right?.message_id || ""))
+    compareCollaborationText(String(left?.message_id || ""), String(right?.message_id || ""))
   );
 }
 

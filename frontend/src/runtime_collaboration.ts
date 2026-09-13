@@ -10,12 +10,7 @@ import {
 import { appendRichMessage } from "./runtime_rich_text.js";
 import { runtimeIcon, createMessageAction } from "./runtime_icons.js";
 
-declare const el: ((id: string) => HTMLElement | null) | undefined;
-declare const setText: ((id: string, text: string) => void) | undefined;
-declare const state: any;
-
-
-function clearNode(node: HTMLElement): void {
+function clearCollaborationNode(node: HTMLElement): void {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
@@ -83,31 +78,6 @@ export function filterCollaborationCards(
   return { matches, total: cards.length };
 }
 
-export function filterCollaborationMessages(): void {
-  const searchInput = (typeof el === "function"
-    ? el("runtime-message-search")
-    : (typeof document !== "undefined" ? document.getElementById("runtime-message-search") : null)) as HTMLInputElement | null;
-  const query = searchInput?.value || "";
-  let matches = 0;
-  if (typeof document === "undefined") return;
-  const cards = document.querySelectorAll<HTMLElement>("#runtime-collaboration-board .message-card");
-  const messagesList = typeof state !== "undefined" && state?.collaboration?.messages ? state.collaboration.messages : [];
-  for (const card of Array.from(cards)) {
-    const message = messagesList.find((entry: any) => entry && entry.message_id === card.dataset.messageId);
-    const visible = runtimeSearchMatches(query, [message?.message, message?.resolution, message?.message_id, message?.author_session_id]);
-    card.hidden = !visible;
-    if (visible) matches++;
-  }
-  document.querySelectorAll<HTMLElement>("#runtime-collaboration-board .message-date-separator").forEach((node) => { node.hidden = !!query.trim(); });
-  const statusText = query.trim() ? matches + " / " + cards.length : "";
-  if (typeof setText === "function") {
-    setText("runtime-message-search-status", statusText);
-  } else {
-    const statusTarget = document.getElementById("runtime-message-search-status");
-    if (statusTarget) statusTarget.textContent = statusText;
-  }
-}
-
 export function renderLatestAgentMessage(
   container: HTMLElement,
   messages: any[],
@@ -117,7 +87,7 @@ export function renderLatestAgentMessage(
   const updatedLabel = (timestamp: any): string => formatUpdatedTime(timestamp, language);
   const sides = runtimeCollaborationMessageSides(messages, locallyAuthoredMessageIds);
   const latest = [...messages].reverse().find((message: any) => sides.get(String(message.message_id)) === "incoming" && !message.superseded_by_message_id && message.closure_kind !== "withdrawn");
-  clearNode(container);
+  clearCollaborationNode(container);
   if (latest) {
     appendRichMessage(container, latest.message);
     const time = document.createElement("p"); time.className = "muted small"; time.textContent = updatedLabel(latest.created_at);

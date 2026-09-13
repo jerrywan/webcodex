@@ -80,7 +80,7 @@ import {
   syncCollaborationComposerLayout,
   formatComposerOptionSummary,
   runtimeSearchMatches,
-  filterCollaborationMessages,
+  filterCollaborationCards,
   renderLatestAgentMessage,
   renderCollaborationMessageCards,
 } from "./runtime_collaboration.js";
@@ -1717,6 +1717,21 @@ function resetCollaborationComposerUi(): void {
   if (body) body.value = "";
   closeComposerOptions(false);
   syncCollaborationComposer();
+}
+
+function filterCollaborationMessages(): void {
+  const query = (el("runtime-message-search") as HTMLInputElement | null)?.value || "";
+  const cards = Array.from(
+    document.querySelectorAll<HTMLElement>("#runtime-collaboration-board .message-card"),
+  );
+  const separators = Array.from(
+    document.querySelectorAll<HTMLElement>("#runtime-collaboration-board .message-date-separator"),
+  );
+  const result = filterCollaborationCards(cards, separators, state.collaboration.messages, query);
+  setText(
+    "runtime-message-search-status",
+    query.trim() ? result.matches + " / " + result.total : "",
+  );
 }
 
 function renderCollaboration(statusText?: string, consumeMutationNotice = true): void {

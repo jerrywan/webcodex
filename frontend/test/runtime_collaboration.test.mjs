@@ -117,12 +117,13 @@ test("runtimeSearchMatches matches queries across multiple values", () => {
   assert.equal(runtimeSearchMatches("term", [123, undefined, null]), false);
 });
 
-test("filterCollaborationCards hides non-matching cards and toggles separators", () => {
+test("filterCollaborationCards searches retained fields without mutating messages", () => {
   const messages = [
-    { message_id: "m1", message: "Task 1 complete", resolution: "Done" },
+    { message_id: "m1", message: "Task 1 complete", resolution: "Fixed Unicode 路径" },
     { message_id: "m2", message: "Fix build error", resolution: "Patched" },
     { message_id: "m3", message: "Review pending", author_session_id: "worker-1" },
   ];
+  const original = JSON.stringify(messages);
   const cards = messages.map((m) => {
     const el = createMockElement("article");
     el.dataset.messageId = m.message_id;
@@ -135,14 +136,19 @@ test("filterCollaborationCards hides non-matching cards and toggles separators",
   assert.deepEqual(cards.map((c) => c.hidden), [false, false, false]);
   assert.deepEqual(separators.map((s) => s.hidden), [false, false]);
 
+  const resultResolution = filterCollaborationCards(cards, separators, messages, "FIXED 路径");
+  assert.deepEqual(resultResolution, { matches: 1, total: 3 });
+  assert.deepEqual(cards.map((c) => c.hidden), [false, true, true]);
+  assert.deepEqual(separators.map((s) => s.hidden), [true, true]);
+
   const resultFiltered = filterCollaborationCards(cards, separators, messages, "build");
   assert.deepEqual(resultFiltered, { matches: 1, total: 3 });
   assert.deepEqual(cards.map((c) => c.hidden), [true, false, true]);
-  assert.deepEqual(separators.map((s) => s.hidden), [true, true]);
 
   const resultAuthor = filterCollaborationCards(cards, separators, messages, "worker-1");
   assert.deepEqual(resultAuthor, { matches: 1, total: 3 });
   assert.deepEqual(cards.map((c) => c.hidden), [true, true, false]);
+  assert.equal(JSON.stringify(messages), original);
 });
 
 test("syncCollaborationComposerLayout adjusts classes and heights", () => {

@@ -3,11 +3,11 @@ import { runtimeProjectIdentityText, filterAndSortRuntimeProjects, resolveRunner
 import { formatProjectIdentity, pendingAttentionCount, attentionLabel, runnerAttentionCount, } from "./runtime_overview.js";
 import { formatUpdatedTime, formatLivenessPresentation, appendActivityPreview, } from "./runtime_activity.js";
 import { runtimeIcon } from "./runtime_icons.js";
-function clearNode(node) {
+function clearNavigationNode(node) {
     while (node.firstChild)
         node.removeChild(node.firstChild);
 }
-function appendChip(parent, text, extraClass = "") {
+function appendNavigationChip(parent, text, extraClass = "") {
     const chip = document.createElement("span");
     chip.className = "chip" + (extraClass ? " " + extraClass : "");
     chip.textContent = text;
@@ -69,7 +69,7 @@ export function renderProjectSelectorTree(deviceSelect, projectList, sessionsPan
     const tr = (text) => translateText(text, options.language);
     const countLabel = (count, singular) => localizedCountLabel(count, singular, options.language);
     const updatedLabel = (timestamp) => formatUpdatedTime(timestamp, options.language);
-    clearNode(deviceSelect);
+    clearNavigationNode(deviceSelect);
     const all = document.createElement("option");
     all.value = "";
     all.textContent = tr("All Runners");
@@ -82,7 +82,7 @@ export function renderProjectSelectorTree(deviceSelect, projectList, sessionsPan
     }
     deviceSelect.value = options.projectDeviceFilter;
     const rows = filterAndSortRuntimeProjects(options.effectiveProjects, options.projectDeviceFilter, "");
-    clearNode(projectList);
+    clearNavigationNode(projectList);
     const projectsByDevice = new Map();
     for (const project of rows) {
         const clientId = String(project?.client_id || "unknown");
@@ -246,7 +246,7 @@ export function renderProjectSelectorTree(deviceSelect, projectList, sessionsPan
 export function renderRunnerFleetRows(node, runners, options) {
     const tr = (text) => translateText(text, options.language);
     const countLabel = (count, singular) => localizedCountLabel(count, singular, options.language);
-    clearNode(node);
+    clearNavigationNode(node);
     for (const runner of runners) {
         const clientId = String(runner?.client_id || "");
         if (!clientId)
@@ -284,19 +284,19 @@ export function renderRunnerFleetRows(node, runners, options) {
         const working = Math.max(Number(runner.jobs_running || 0), Number(runner.sessions?.running_sessions || 0));
         const attention = runnerAttentionCount(runner);
         if (working > 0)
-            appendChip(signals, tr("RUNNING"), "tone-runtime");
+            appendNavigationChip(signals, tr("RUNNING"), "tone-runtime");
         if (attention > 0)
-            appendChip(signals, tr("ATTENTION") + " " + attention, "tone-warn");
+            appendNavigationChip(signals, tr("ATTENTION") + " " + attention, "tone-warn");
         if (!runner.connected)
-            appendChip(signals, tr("OFFLINE"), "tone-fail");
+            appendNavigationChip(signals, tr("OFFLINE"), "tone-fail");
         else if (String(runner.status || "") === "stale")
-            appendChip(signals, tr("STALE"), "tone-warn");
+            appendNavigationChip(signals, tr("STALE"), "tone-warn");
         if (runner.source_alignment === "different")
-            appendChip(signals, tr("SOURCE DIFFERENT"), "tone-fail");
+            appendNavigationChip(signals, tr("SOURCE DIFFERENT"), "tone-fail");
         if (runner.version_matches_server === false)
-            appendChip(signals, tr("BUILD DIFFERENT"), "tone-warn");
+            appendNavigationChip(signals, tr("BUILD DIFFERENT"), "tone-warn");
         if (runner.build_git_dirty === true)
-            appendChip(signals, tr("DIRTY"), "tone-warn");
+            appendNavigationChip(signals, tr("DIRTY"), "tone-warn");
         const facts = document.createElement("div");
         facts.className = "muted small fleet-row-facts";
         const projectFact = runner.projects_scan_partial
@@ -328,7 +328,7 @@ export function renderRunnerFleetRows(node, runners, options) {
 export function renderRecentSessionRows(node, sessions, options) {
     const tr = (text) => translateText(text, options.language);
     const updatedLabel = (timestamp) => formatUpdatedTime(timestamp, options.language);
-    clearNode(node);
+    clearNavigationNode(node);
     for (const session of sessions) {
         const sessionId = String(session?.session_id || "");
         const projectId = String(session?.project_id || "");
@@ -355,10 +355,10 @@ export function renderRecentSessionRows(node, sessions, options) {
         signals.className = "recent-session-signals";
         const liveness = formatLivenessPresentation(session, options.language);
         if (liveness.state === "working")
-            appendChip(signals, tr("RUNNING"), "tone-runtime");
+            appendNavigationChip(signals, tr("RUNNING"), "tone-runtime");
         const attention = attentionLabel(session.overview?.attention);
         if (pendingAttentionCount(session.overview?.attention) > 0)
-            appendChip(signals, attention, "tone-warn");
+            appendNavigationChip(signals, attention, "tone-warn");
         const lifecycle = document.createElement("span");
         lifecycle.className = "muted small";
         lifecycle.textContent = [tr(String(session.lifecycle || "")), liveness.label, (options.language === "zh-CN" ? "更新于 " : "updated ") + updatedLabel(session.updated_at)].filter(Boolean).join(" · ");

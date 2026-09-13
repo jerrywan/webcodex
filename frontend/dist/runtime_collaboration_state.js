@@ -1,4 +1,4 @@
-function compareText(left, right) {
+function compareCollaborationText(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
 }
 export function emptyCollaborationState() {
@@ -106,7 +106,7 @@ export function mergeRuntimeCollaborationMessages(current, updates) {
             byId.set(id, message);
     }
     return Array.from(byId.values()).sort((left, right) => messageCreatedAt(left) - messageCreatedAt(right) ||
-        compareText(String(left?.message_id || ""), String(right?.message_id || "")));
+        compareCollaborationText(String(left?.message_id || ""), String(right?.message_id || "")));
 }
 export function runtimeCollaborationObservationAction(payload) {
     if (payload?.history_lost)

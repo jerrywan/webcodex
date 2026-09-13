@@ -3,7 +3,7 @@ import { formatUpdatedTime } from "./runtime_activity.js";
 import { runtimeCollaborationMessageSides, runtimeCollaborationMessageCanMutate, } from "./runtime_collaboration_state.js";
 import { appendRichMessage } from "./runtime_rich_text.js";
 import { runtimeIcon, createMessageAction } from "./runtime_icons.js";
-function clearNode(node) {
+function clearCollaborationNode(node) {
     while (node.firstChild)
         node.removeChild(node.firstChild);
 }
@@ -57,39 +57,11 @@ export function filterCollaborationCards(cards, separators, messages, query) {
     }
     return { matches, total: cards.length };
 }
-export function filterCollaborationMessages() {
-    const searchInput = (typeof el === "function"
-        ? el("runtime-message-search")
-        : (typeof document !== "undefined" ? document.getElementById("runtime-message-search") : null));
-    const query = searchInput?.value || "";
-    let matches = 0;
-    if (typeof document === "undefined")
-        return;
-    const cards = document.querySelectorAll("#runtime-collaboration-board .message-card");
-    const messagesList = typeof state !== "undefined" && state?.collaboration?.messages ? state.collaboration.messages : [];
-    for (const card of Array.from(cards)) {
-        const message = messagesList.find((entry) => entry && entry.message_id === card.dataset.messageId);
-        const visible = runtimeSearchMatches(query, [message?.message, message?.resolution, message?.message_id, message?.author_session_id]);
-        card.hidden = !visible;
-        if (visible)
-            matches++;
-    }
-    document.querySelectorAll("#runtime-collaboration-board .message-date-separator").forEach((node) => { node.hidden = !!query.trim(); });
-    const statusText = query.trim() ? matches + " / " + cards.length : "";
-    if (typeof setText === "function") {
-        setText("runtime-message-search-status", statusText);
-    }
-    else {
-        const statusTarget = document.getElementById("runtime-message-search-status");
-        if (statusTarget)
-            statusTarget.textContent = statusText;
-    }
-}
 export function renderLatestAgentMessage(container, messages, locallyAuthoredMessageIds, language) {
     const updatedLabel = (timestamp) => formatUpdatedTime(timestamp, language);
     const sides = runtimeCollaborationMessageSides(messages, locallyAuthoredMessageIds);
     const latest = [...messages].reverse().find((message) => sides.get(String(message.message_id)) === "incoming" && !message.superseded_by_message_id && message.closure_kind !== "withdrawn");
-    clearNode(container);
+    clearCollaborationNode(container);
     if (latest) {
         appendRichMessage(container, latest.message);
         const time = document.createElement("p");
