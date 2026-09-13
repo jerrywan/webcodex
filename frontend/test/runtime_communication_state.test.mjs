@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { RuntimeCommunicationRefreshCoordinator } from "../dist/runtime_console_state.js";
+import {
+  RuntimeCommunicationRefreshCoordinator,
+  runtimeCommunicationTranscriptAfterSeq,
+} from "../dist/runtime_communication_state.js";
 
 function deferred() {
   let resolve;
@@ -30,6 +33,16 @@ function communicationRefreshHarness() {
   });
   return { coordinator, lease, full, refreshes, dataEndpoints };
 }
+
+test("communication transcript window follows the latest bounded page", () => {
+  assert.equal(runtimeCommunicationTranscriptAfterSeq(0), 0);
+  assert.equal(runtimeCommunicationTranscriptAfterSeq(100), 0);
+  assert.equal(runtimeCommunicationTranscriptAfterSeq(101), 1);
+  assert.equal(runtimeCommunicationTranscriptAfterSeq(250), 150);
+  assert.equal(runtimeCommunicationTranscriptAfterSeq(250, 50), 200);
+  assert.equal(runtimeCommunicationTranscriptAfterSeq(-1), 0);
+  assert.equal(runtimeCommunicationTranscriptAfterSeq(Number.NaN), 0);
+});
 
 test("lease-only in flight + manual full refresh waits for full communication data", async () => {
   const { coordinator, lease, full, refreshes, dataEndpoints } = communicationRefreshHarness();

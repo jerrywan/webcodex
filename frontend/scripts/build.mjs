@@ -21,6 +21,9 @@ const watchedSources = new Set([
   "styles.css",
   "console.html",
   "runtime.ts",
+  "runtime_collaboration_state.ts",
+  "runtime_communication_state.ts",
+  "runtime_context_state.ts",
   "runtime_console_state.ts",
   "runtime_i18n.ts",
   "runtime_rich_text.ts",
@@ -127,14 +130,37 @@ export function createOutputs(
     transpileTypeScript(sourceDirectory, "workflow_session_state.ts")
   );
   const workflowSessionStateClassic = stripModuleExports(workflowSessionStateModule);
+  const runtimeCollaborationStateModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_collaboration_state.ts")
+  );
+  const runtimeCollaborationStateClassic = stripModuleExports(
+    runtimeCollaborationStateModule
+  );
+  const runtimeCommunicationStateModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_communication_state.ts")
+  );
+  const runtimeCommunicationStateClassic = stripModuleExports(
+    runtimeCommunicationStateModule
+  );
+  const runtimeContextStateModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_context_state.ts")
+  );
+  const runtimeContextStateClassic = stripModuleExports(
+    runtimeContextStateModule
+  );
   const runtimeConsoleStateModule = buildJs(
     transpileTypeScript(sourceDirectory, "runtime_console_state.ts")
   );
   const runtimeConsoleStateClassic = stripModuleExports(
-    runtimeConsoleStateModule.replace(
-      /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/workflow_session_state(?:\.js)?["'];?\s*\n/m,
-      ""
-    )
+    runtimeConsoleStateModule
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/workflow_session_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_collaboration_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
   );
   const appModule = transpileTypeScript(sourceDirectory, "app.ts");
   const appScript = stripModuleExports(
@@ -246,6 +272,18 @@ export function createOutputs(
         ""
       )
       .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_communication_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_context_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_collaboration_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
         /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_console_state(?:\.js)?["'];?\s*\n/m,
         ""
       )
@@ -292,6 +330,12 @@ export function createOutputs(
   );
   const runtimeInlined = buildJs(
     workflowSessionStateClassic +
+      "\n" +
+      runtimeCollaborationStateClassic +
+      "\n" +
+      runtimeCommunicationStateClassic +
+      "\n" +
+      runtimeContextStateClassic +
       "\n" +
       runtimeConsoleStateClassic +
       "\n" +
@@ -369,6 +413,9 @@ export function createOutputs(
   return new Map([
     ["review_state.js", reviewStateModule],
     ["workflow_session_state.js", workflowSessionStateModule],
+    ["runtime_collaboration_state.js", runtimeCollaborationStateModule],
+    ["runtime_communication_state.js", runtimeCommunicationStateModule],
+    ["runtime_context_state.js", runtimeContextStateModule],
     ["runtime_console_state.js", runtimeConsoleStateModule],
     ["runtime_i18n.js", runtimeI18nModule],
     ["runtime_rich_text.js", runtimeRichTextModule],

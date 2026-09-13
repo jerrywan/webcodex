@@ -250,62 +250,6 @@ function shouldFollowWorkflowSessionLatest(state) {
 function compareText(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
 }
-class RuntimeCommunicationRefreshCoordinator {
-    constructor(runRefresh) {
-        this.runRefresh = runRefresh;
-        this.generation = 0;
-        this.inFlight = null;
-    }
-    refresh(includeData = true) {
-        const generation = this.generation;
-        const current = this.inFlight;
-        if (current && current.generation === generation) {
-            if (!includeData || current.includeData)
-                return current.promise;
-            return current.promise.then(() => this.generation === generation ? this.refresh(true) : false, () => this.generation === generation ? this.refresh(true) : false);
-        }
-        const promise = Promise.resolve().then(() => this.runRefresh(includeData));
-        const started = { includeData, generation, promise };
-        this.inFlight = started;
-        const clear = () => {
-            if (this.inFlight === started)
-                this.inFlight = null;
-        };
-        void promise.then(clear, clear);
-        return promise;
-    }
-    reset() {
-        this.generation += 1;
-        this.inFlight = null;
-    }
-}
-function runtimeCommunicationTranscriptAfterSeq(lastSeq, limit = 100) {
-    const normalizedLastSeq = typeof lastSeq === "number" && Number.isSafeInteger(lastSeq)
-        ? Math.max(0, lastSeq)
-        : 0;
-    const normalizedLimit = Number.isSafeInteger(limit) && limit > 0 ? limit : 100;
-    return Math.max(0, normalizedLastSeq - normalizedLimit);
-}
-function runtimeWorkflowSessionSummaryRevision(session) {
-    if (!session)
-        return "";
-    return JSON.stringify([
-        String(session.session_id || ""),
-        String(session.title || ""),
-        String(session.lifecycle || ""),
-        String(session.mode || ""),
-        typeof session.updated_at === "number" ? session.updated_at : null,
-        !!session.running_call,
-        typeof session.running_jobs === "number" ? session.running_jobs : null,
-        session.running_jobs_complete === true,
-        session.current_activity ?? null,
-        session.last_activity ?? null,
-        session.overview ?? null,
-    ]);
-}
-function runtimeWorkflowSessionSummaryChanged(previous, next) {
-    return runtimeWorkflowSessionSummaryRevision(previous) !== runtimeWorkflowSessionSummaryRevision(next);
-}
 function emptyCollaborationState() {
     return {
         generation: 0,
@@ -319,6 +263,20 @@ function emptyCollaborationState() {
         uncertainMutation: null,
         mutationNotice: "",
     };
+}
+function resetCollaborationState(collaboration) {
+    if (!collaboration)
+        return;
+    collaboration.generation += 1;
+    collaboration.sessionId = "";
+    collaboration.messages = [];
+    collaboration.observationToken = "";
+    collaboration.available = true;
+    collaboration.phase = "idle";
+    collaboration.replyTargetId = "";
+    collaboration.editTargetId = "";
+    collaboration.uncertainMutation = null;
+    collaboration.mutationNotice = "";
 }
 function messageCreatedAt(message) {
     return typeof message?.created_at === "number" ? message.created_at : 0;
@@ -405,230 +363,6 @@ function runtimeCollaborationObservationAction(payload) {
     if (payload?.has_more)
         return "drain";
     return "wait";
-}
-function runtimeDeviceIds(projects) {
-    const devices = new Set();
-    for (const project of Array.isArray(projects) ? projects : []) {
-        const clientId = typeof project?.client_id === "string" ? project.client_id : "";
-        if (clientId)
-            devices.add(clientId);
-    }
-    return Array.from(devices).sort(compareText);
-}
-function runtimeProjectsForDevice(projects, clientId) {
-    return (Array.isArray(projects) ? projects : [])
-        .filter((project) => project && (!clientId || project.client_id === clientId) && typeof project.id === "string" && project.id)
-        .slice()
-        .sort((left, right) => {
-        const leftName = typeof left.name === "string" && left.name ? left.name : left.id;
-        const rightName = typeof right.name === "string" && right.name ? right.name : right.id;
-        return compareText(leftName, rightName) || compareText(left.id, right.id);
-    });
-}
-function projectAttentionCount(project) {
-    const attention = project?.sessions?.attention;
-    return ["open_guidance", "open_questions", "open_risks", "open_todos"]
-        .reduce((total, key) => total + (typeof attention?.[key] === "number" ? Math.max(0, attention[key]) : 0), 0);
-}
-function filterAndSortRuntimeProjects(projects, clientId, query) {
-    const needle = String(query || "").trim().toLocaleLowerCase();
-    return runtimeProjectsForDevice(projects, clientId)
-        .filter((project) => {
-        if (!needle)
-            return true;
-        return [project?.name, project?.id, project?.client_id, project?.path]
-            .filter((value) => typeof value === "string")
-            .some((value) => String(value).toLocaleLowerCase().includes(needle));
-    })
-        .sort((left, right) => {
-        const leftRunning = typeof left?.sessions?.running_sessions === "number" ? left.sessions.running_sessions : 0;
-        const rightRunning = typeof right?.sessions?.running_sessions === "number" ? right.sessions.running_sessions : 0;
-        if (!!rightRunning !== !!leftRunning)
-            return rightRunning ? 1 : -1;
-        const leftAttention = projectAttentionCount(left);
-        const rightAttention = projectAttentionCount(right);
-        if (!!rightAttention !== !!leftAttention)
-            return rightAttention ? 1 : -1;
-        const leftUpdated = typeof left?.sessions?.latest_updated_at === "number" ? left.sessions.latest_updated_at : 0;
-        const rightUpdated = typeof right?.sessions?.latest_updated_at === "number" ? right.sessions.latest_updated_at : 0;
-        if (leftUpdated !== rightUpdated)
-            return rightUpdated - leftUpdated;
-        const leftName = typeof left?.name === "string" && left.name ? left.name : left.id;
-        const rightName = typeof right?.name === "string" && right.name ? right.name : right.id;
-        return compareText(String(leftName || ""), String(rightName || "")) || compareText(String(left?.id || ""), String(right?.id || ""));
-    });
-}
-function runtimeProjectIdentityText(project) {
-    if (!project || typeof project.id !== "string" || !project.id)
-        return "No project selected";
-    const runner = typeof project.client_id === "string" && project.client_id ? project.client_id : "unknown";
-    const path = typeof project.path === "string" && project.path ? project.path : "unavailable";
-    return "Runner: " + runner + " · Project: " + project.id + " · Workspace: " + path;
-}
-function preferredRuntimeProjectSelection(projects, selectedDevice, selectedProject) {
-    const rows = Array.isArray(projects) ? projects : [];
-    if (selectedProject) {
-        const retained = rows.find((project) => project && project.id === selectedProject && typeof project.client_id === "string" && project.client_id);
-        if (retained)
-            return { device: retained.client_id, project: retained.id };
-    }
-    const devices = runtimeDeviceIds(rows);
-    const device = devices.includes(selectedDevice) ? selectedDevice : "";
-    return { device, project: "" };
-}
-function initialRuntimeConsoleState() {
-    return {
-        credentialGeneration: 0,
-        overviewGeneration: 0,
-        projectsGeneration: 0,
-        runnerGeneration: 0,
-        selectedDevice: "",
-        selectedProject: "",
-        projectGeneration: 0,
-        sessionListGeneration: 0,
-        workflow: initialWorkflowSessionState(),
-        collaboration: emptyCollaborationState(),
-    };
-}
-function invalidateRuntimeCredential(state) {
-    state.credentialGeneration += 1;
-    state.overviewGeneration += 1;
-    state.projectsGeneration += 1;
-    state.runnerGeneration += 1;
-    state.selectedDevice = "";
-    state.selectedProject = "";
-    state.projectGeneration += 1;
-    state.sessionListGeneration += 1;
-    clearWorkflowSessionSelection(state.workflow);
-    state.collaboration.generation += 1;
-    state.collaboration.sessionId = "";
-    state.collaboration.messages = [];
-    state.collaboration.observationToken = "";
-    state.collaboration.available = true;
-    state.collaboration.phase = "idle";
-    state.collaboration.replyTargetId = "";
-    state.collaboration.editTargetId = "";
-    state.collaboration.uncertainMutation = null;
-    state.collaboration.mutationNotice = "";
-}
-function beginRuntimeCredential(state) {
-    invalidateRuntimeCredential(state);
-    return refreshRuntimeProjects(state);
-}
-function refreshRuntimeOverview(state) {
-    state.overviewGeneration += 1;
-    return { credentialGeneration: state.credentialGeneration, generation: state.overviewGeneration };
-}
-function isCurrentRuntimeOverviewRequest(state, request) {
-    return !!request && request.credentialGeneration === state.credentialGeneration && request.generation === state.overviewGeneration;
-}
-function refreshRuntimeProjects(state, query = "", clientId = state.selectedDevice) {
-    state.projectsGeneration += 1;
-    return {
-        credentialGeneration: state.credentialGeneration,
-        projectGeneration: state.projectGeneration,
-        generation: state.projectsGeneration,
-        clientId: String(clientId || ""),
-        query: String(query || "").trim(),
-    };
-}
-function isCurrentRuntimeProjectsRequest(state, request) {
-    return !!request &&
-        request.credentialGeneration === state.credentialGeneration &&
-        request.projectGeneration === state.projectGeneration &&
-        request.generation === state.projectsGeneration;
-}
-function refreshRuntimeRunner(state) {
-    if (!state.selectedDevice)
-        return null;
-    state.runnerGeneration += 1;
-    return { credentialGeneration: state.credentialGeneration, device: state.selectedDevice, generation: state.runnerGeneration };
-}
-function isCurrentRuntimeRunnerRequest(state, request) {
-    return !!request && request.credentialGeneration === state.credentialGeneration &&
-        request.device === state.selectedDevice && request.generation === state.runnerGeneration;
-}
-function selectRuntimeRunnerFilter(state, device) {
-    selectRuntimeProject(state, device, "");
-}
-function selectRuntimeProject(state, device, project) {
-    if (state.selectedDevice !== device)
-        state.runnerGeneration += 1;
-    state.selectedDevice = device;
-    state.selectedProject = project;
-    state.projectGeneration += 1;
-    state.sessionListGeneration += 1;
-    clearWorkflowSessionSelection(state.workflow);
-    state.collaboration.generation += 1;
-    state.collaboration.sessionId = "";
-    state.collaboration.messages = [];
-    state.collaboration.observationToken = "";
-    state.collaboration.available = true;
-    state.collaboration.phase = "idle";
-    state.collaboration.replyTargetId = "";
-    state.collaboration.editTargetId = "";
-    state.collaboration.uncertainMutation = null;
-    state.collaboration.mutationNotice = "";
-    return refreshRuntimeSessionList(state);
-}
-function refreshRuntimeSessionList(state) {
-    if (!state.selectedProject)
-        return null;
-    state.sessionListGeneration += 1;
-    return {
-        credentialGeneration: state.credentialGeneration,
-        project: state.selectedProject,
-        projectGeneration: state.projectGeneration,
-        generation: state.sessionListGeneration,
-    };
-}
-function isCurrentRuntimeSessionListRequest(state, request) {
-    return !!request && request.credentialGeneration === state.credentialGeneration &&
-        request.project === state.selectedProject && request.projectGeneration === state.projectGeneration &&
-        request.generation === state.sessionListGeneration;
-}
-function wrapWorkflowRequest(state, request) {
-    if (!request || !state.selectedProject)
-        return null;
-    return {
-        credentialGeneration: state.credentialGeneration,
-        project: state.selectedProject,
-        projectGeneration: state.projectGeneration,
-        sessionId: request.sessionId,
-        generation: request.generation,
-    };
-}
-function selectRuntimeWorkflowSession(state, sessionId) {
-    state.collaboration.generation += 1;
-    state.collaboration.sessionId = sessionId;
-    state.collaboration.messages = [];
-    state.collaboration.observationToken = "";
-    state.collaboration.available = true;
-    state.collaboration.phase = "idle";
-    state.collaboration.replyTargetId = "";
-    state.collaboration.editTargetId = "";
-    state.collaboration.uncertainMutation = null;
-    state.collaboration.mutationNotice = "";
-    return wrapWorkflowRequest(state, selectWorkflowSession(state.workflow, sessionId));
-}
-function selectRuntimeSessionLocation(state, device, project, sessionId) {
-    const sessionListRequest = selectRuntimeProject(state, device, project);
-    const detailRequest = selectRuntimeWorkflowSession(state, sessionId);
-    return { sessionListRequest, detailRequest };
-}
-function refreshRuntimeWorkflowSession(state) {
-    return wrapWorkflowRequest(state, refreshWorkflowSessionDetail(state.workflow));
-}
-function clearRuntimeWorkflowSession(state) {
-    clearWorkflowSessionSelection(state.workflow);
-    state.collaboration.generation += 1;
-    state.collaboration.sessionId = "";
-    state.collaboration.messages = [];
-    state.collaboration.observationToken = "";
-    state.collaboration.replyTargetId = "";
-    state.collaboration.editTargetId = "";
-    state.collaboration.uncertainMutation = null;
-    state.collaboration.mutationNotice = "";
 }
 function runtimeCollaborationRequest(state) {
     if (!state.selectedProject || !state.collaboration.sessionId)
@@ -739,40 +473,44 @@ function setRuntimeCollaborationPhase(state, request, phase) {
 function runtimeCollaborationNeedsRefreshRecovery(state) {
     return state?.collaboration?.phase === "paused";
 }
-function isCurrentRuntimeWorkflowSessionRequest(state, request) {
-    return !!request && request.credentialGeneration === state.credentialGeneration &&
-        request.project === state.selectedProject && request.projectGeneration === state.projectGeneration &&
-        isCurrentWorkflowSessionDetailRequest(state.workflow, { sessionId: request.sessionId, generation: request.generation });
+
+class RuntimeCommunicationRefreshCoordinator {
+    constructor(runRefresh) {
+        this.runRefresh = runRefresh;
+        this.generation = 0;
+        this.inFlight = null;
+    }
+    refresh(includeData = true) {
+        const generation = this.generation;
+        const current = this.inFlight;
+        if (current && current.generation === generation) {
+            if (!includeData || current.includeData)
+                return current.promise;
+            return current.promise.then(() => this.generation === generation ? this.refresh(true) : false, () => this.generation === generation ? this.refresh(true) : false);
+        }
+        const promise = Promise.resolve().then(() => this.runRefresh(includeData));
+        const started = { includeData, generation, promise };
+        this.inFlight = started;
+        const clear = () => {
+            if (this.inFlight === started)
+                this.inFlight = null;
+        };
+        void promise.then(clear, clear);
+        return promise;
+    }
+    reset() {
+        this.generation += 1;
+        this.inFlight = null;
+    }
 }
-function adoptRuntimeWorkflowSessionDetail(state, request, detail) {
-    if (!isCurrentRuntimeWorkflowSessionRequest(state, request))
-        return false;
-    return adoptWorkflowSessionDetail(state.workflow, { sessionId: request.sessionId, generation: request.generation }, detail);
+function runtimeCommunicationTranscriptAfterSeq(lastSeq, limit = 100) {
+    const normalizedLastSeq = typeof lastSeq === "number" && Number.isSafeInteger(lastSeq)
+        ? Math.max(0, lastSeq)
+        : 0;
+    const normalizedLimit = Number.isSafeInteger(limit) && limit > 0 ? limit : 100;
+    return Math.max(0, normalizedLastSeq - normalizedLimit);
 }
-function resolveRunnerDisclosure(storedDisclosure, defaultOpen) {
-    return storedDisclosure === null ? defaultOpen : storedDisclosure;
-}
-function runtimeWindowShortKey(value) {
-    const key = String(value || "");
-    if (key.length <= 14)
-        return key;
-    return key.slice(0, 8) + "…" + key.slice(-4);
-}
-function runtimeWindowActivityLabel(timestampMs, nowMs) {
-    const value = Number(timestampMs);
-    if (!Number.isFinite(value) || value <= 0)
-        return "No WebCodex activity";
-    const elapsed = Math.max(0, nowMs - value);
-    if (elapsed < 1000)
-        return "just now";
-    if (elapsed < 60000)
-        return Math.floor(elapsed / 1000) + "s ago";
-    if (elapsed < 3600000)
-        return Math.floor(elapsed / 60000) + "m ago";
-    if (elapsed < 86400000)
-        return Math.floor(elapsed / 3600000) + "h ago";
-    return Math.floor(elapsed / 86400000) + "d ago";
-}
+
 function resolveRuntimeContextPresentationMode(isWideViewport, isMobileViewport) {
     if (isMobileViewport)
         return "sheet";
@@ -815,6 +553,255 @@ function resolveRuntimeContextFocusTransition(options) {
         return "inspector_close";
     }
     return "none";
+}
+
+function compareText(left, right) {
+    return left < right ? -1 : left > right ? 1 : 0;
+}
+function runtimeWorkflowSessionSummaryRevision(session) {
+    if (!session)
+        return "";
+    return JSON.stringify([
+        String(session.session_id || ""),
+        String(session.title || ""),
+        String(session.lifecycle || ""),
+        String(session.mode || ""),
+        typeof session.updated_at === "number" ? session.updated_at : null,
+        !!session.running_call,
+        typeof session.running_jobs === "number" ? session.running_jobs : null,
+        session.running_jobs_complete === true,
+        session.current_activity ?? null,
+        session.last_activity ?? null,
+        session.overview ?? null,
+    ]);
+}
+function runtimeWorkflowSessionSummaryChanged(previous, next) {
+    return runtimeWorkflowSessionSummaryRevision(previous) !== runtimeWorkflowSessionSummaryRevision(next);
+}
+function runtimeDeviceIds(projects) {
+    const devices = new Set();
+    for (const project of Array.isArray(projects) ? projects : []) {
+        const clientId = typeof project?.client_id === "string" ? project.client_id : "";
+        if (clientId)
+            devices.add(clientId);
+    }
+    return Array.from(devices).sort(compareText);
+}
+function runtimeProjectsForDevice(projects, clientId) {
+    return (Array.isArray(projects) ? projects : [])
+        .filter((project) => project && (!clientId || project.client_id === clientId) && typeof project.id === "string" && project.id)
+        .slice()
+        .sort((left, right) => {
+        const leftName = typeof left.name === "string" && left.name ? left.name : left.id;
+        const rightName = typeof right.name === "string" && right.name ? right.name : right.id;
+        return compareText(leftName, rightName) || compareText(left.id, right.id);
+    });
+}
+function projectAttentionCount(project) {
+    const attention = project?.sessions?.attention;
+    return ["open_guidance", "open_questions", "open_risks", "open_todos"]
+        .reduce((total, key) => total + (typeof attention?.[key] === "number" ? Math.max(0, attention[key]) : 0), 0);
+}
+function filterAndSortRuntimeProjects(projects, clientId, query) {
+    const needle = String(query || "").trim().toLocaleLowerCase();
+    return runtimeProjectsForDevice(projects, clientId)
+        .filter((project) => {
+        if (!needle)
+            return true;
+        return [project?.name, project?.id, project?.client_id, project?.path]
+            .filter((value) => typeof value === "string")
+            .some((value) => String(value).toLocaleLowerCase().includes(needle));
+    })
+        .sort((left, right) => {
+        const leftRunning = typeof left?.sessions?.running_sessions === "number" ? left.sessions.running_sessions : 0;
+        const rightRunning = typeof right?.sessions?.running_sessions === "number" ? right.sessions.running_sessions : 0;
+        if (!!rightRunning !== !!leftRunning)
+            return rightRunning ? 1 : -1;
+        const leftAttention = projectAttentionCount(left);
+        const rightAttention = projectAttentionCount(right);
+        if (!!rightAttention !== !!leftAttention)
+            return rightAttention ? 1 : -1;
+        const leftUpdated = typeof left?.sessions?.latest_updated_at === "number" ? left.sessions.latest_updated_at : 0;
+        const rightUpdated = typeof right?.sessions?.latest_updated_at === "number" ? right.sessions.latest_updated_at : 0;
+        if (leftUpdated !== rightUpdated)
+            return rightUpdated - leftUpdated;
+        const leftName = typeof left?.name === "string" && left.name ? left.name : left.id;
+        const rightName = typeof right?.name === "string" && right.name ? right.name : right.id;
+        return compareText(String(leftName || ""), String(rightName || "")) || compareText(String(left?.id || ""), String(right?.id || ""));
+    });
+}
+function runtimeProjectIdentityText(project) {
+    if (!project || typeof project.id !== "string" || !project.id)
+        return "No project selected";
+    const runner = typeof project.client_id === "string" && project.client_id ? project.client_id : "unknown";
+    const path = typeof project.path === "string" && project.path ? project.path : "unavailable";
+    return "Runner: " + runner + " · Project: " + project.id + " · Workspace: " + path;
+}
+function preferredRuntimeProjectSelection(projects, selectedDevice, selectedProject) {
+    const rows = Array.isArray(projects) ? projects : [];
+    if (selectedProject) {
+        const retained = rows.find((project) => project && project.id === selectedProject && typeof project.client_id === "string" && project.client_id);
+        if (retained)
+            return { device: retained.client_id, project: retained.id };
+    }
+    const devices = runtimeDeviceIds(rows);
+    const device = devices.includes(selectedDevice) ? selectedDevice : "";
+    return { device, project: "" };
+}
+function initialRuntimeConsoleState() {
+    return {
+        credentialGeneration: 0,
+        overviewGeneration: 0,
+        projectsGeneration: 0,
+        runnerGeneration: 0,
+        selectedDevice: "",
+        selectedProject: "",
+        projectGeneration: 0,
+        sessionListGeneration: 0,
+        workflow: initialWorkflowSessionState(),
+        collaboration: emptyCollaborationState(),
+    };
+}
+function invalidateRuntimeCredential(state) {
+    state.credentialGeneration += 1;
+    state.overviewGeneration += 1;
+    state.projectsGeneration += 1;
+    state.runnerGeneration += 1;
+    state.selectedDevice = "";
+    state.selectedProject = "";
+    state.projectGeneration += 1;
+    state.sessionListGeneration += 1;
+    clearWorkflowSessionSelection(state.workflow);
+    resetCollaborationState(state.collaboration);
+}
+function beginRuntimeCredential(state) {
+    invalidateRuntimeCredential(state);
+    return refreshRuntimeProjects(state);
+}
+function refreshRuntimeOverview(state) {
+    state.overviewGeneration += 1;
+    return { credentialGeneration: state.credentialGeneration, generation: state.overviewGeneration };
+}
+function isCurrentRuntimeOverviewRequest(state, request) {
+    return !!request && request.credentialGeneration === state.credentialGeneration && request.generation === state.overviewGeneration;
+}
+function refreshRuntimeProjects(state, query = "", clientId = state.selectedDevice) {
+    state.projectsGeneration += 1;
+    return {
+        credentialGeneration: state.credentialGeneration,
+        projectGeneration: state.projectGeneration,
+        generation: state.projectsGeneration,
+        clientId: String(clientId || ""),
+        query: String(query || "").trim(),
+    };
+}
+function isCurrentRuntimeProjectsRequest(state, request) {
+    return !!request &&
+        request.credentialGeneration === state.credentialGeneration &&
+        request.projectGeneration === state.projectGeneration &&
+        request.generation === state.projectsGeneration;
+}
+function refreshRuntimeRunner(state) {
+    if (!state.selectedDevice)
+        return null;
+    state.runnerGeneration += 1;
+    return { credentialGeneration: state.credentialGeneration, device: state.selectedDevice, generation: state.runnerGeneration };
+}
+function isCurrentRuntimeRunnerRequest(state, request) {
+    return !!request && request.credentialGeneration === state.credentialGeneration &&
+        request.device === state.selectedDevice && request.generation === state.runnerGeneration;
+}
+function selectRuntimeRunnerFilter(state, device) {
+    selectRuntimeProject(state, device, "");
+}
+function selectRuntimeProject(state, device, project) {
+    if (state.selectedDevice !== device)
+        state.runnerGeneration += 1;
+    state.selectedDevice = device;
+    state.selectedProject = project;
+    state.projectGeneration += 1;
+    state.sessionListGeneration += 1;
+    clearWorkflowSessionSelection(state.workflow);
+    resetCollaborationState(state.collaboration);
+    return refreshRuntimeSessionList(state);
+}
+function refreshRuntimeSessionList(state) {
+    if (!state.selectedProject)
+        return null;
+    state.sessionListGeneration += 1;
+    return {
+        credentialGeneration: state.credentialGeneration,
+        project: state.selectedProject,
+        projectGeneration: state.projectGeneration,
+        generation: state.sessionListGeneration,
+    };
+}
+function isCurrentRuntimeSessionListRequest(state, request) {
+    return !!request && request.credentialGeneration === state.credentialGeneration &&
+        request.project === state.selectedProject && request.projectGeneration === state.projectGeneration &&
+        request.generation === state.sessionListGeneration;
+}
+function wrapWorkflowRequest(state, request) {
+    if (!request || !state.selectedProject)
+        return null;
+    return {
+        credentialGeneration: state.credentialGeneration,
+        project: state.selectedProject,
+        projectGeneration: state.projectGeneration,
+        sessionId: request.sessionId,
+        generation: request.generation,
+    };
+}
+function selectRuntimeWorkflowSession(state, sessionId) {
+    resetCollaborationState(state.collaboration);
+    state.collaboration.sessionId = sessionId;
+    return wrapWorkflowRequest(state, selectWorkflowSession(state.workflow, sessionId));
+}
+function selectRuntimeSessionLocation(state, device, project, sessionId) {
+    const sessionListRequest = selectRuntimeProject(state, device, project);
+    const detailRequest = selectRuntimeWorkflowSession(state, sessionId);
+    return { sessionListRequest, detailRequest };
+}
+function refreshRuntimeWorkflowSession(state) {
+    return wrapWorkflowRequest(state, refreshWorkflowSessionDetail(state.workflow));
+}
+function clearRuntimeWorkflowSession(state) {
+    clearWorkflowSessionSelection(state.workflow);
+    resetCollaborationState(state.collaboration);
+}
+function isCurrentRuntimeWorkflowSessionRequest(state, request) {
+    return !!request && request.credentialGeneration === state.credentialGeneration &&
+        request.project === state.selectedProject && request.projectGeneration === state.projectGeneration &&
+        isCurrentWorkflowSessionDetailRequest(state.workflow, { sessionId: request.sessionId, generation: request.generation });
+}
+function adoptRuntimeWorkflowSessionDetail(state, request, detail) {
+    if (!isCurrentRuntimeWorkflowSessionRequest(state, request))
+        return false;
+    return adoptWorkflowSessionDetail(state.workflow, { sessionId: request.sessionId, generation: request.generation }, detail);
+}
+function resolveRunnerDisclosure(storedDisclosure, defaultOpen) {
+    return storedDisclosure === null ? defaultOpen : storedDisclosure;
+}
+function runtimeWindowShortKey(value) {
+    const key = String(value || "");
+    if (key.length <= 14)
+        return key;
+    return key.slice(0, 8) + "…" + key.slice(-4);
+}
+function runtimeWindowActivityLabel(timestampMs, nowMs) {
+    const value = Number(timestampMs);
+    if (!Number.isFinite(value) || value <= 0)
+        return "No WebCodex activity";
+    const elapsed = Math.max(0, nowMs - value);
+    if (elapsed < 1000)
+        return "just now";
+    if (elapsed < 60000)
+        return Math.floor(elapsed / 1000) + "s ago";
+    if (elapsed < 3600000)
+        return Math.floor(elapsed / 60000) + "m ago";
+    if (elapsed < 86400000)
+        return Math.floor(elapsed / 3600000) + "h ago";
+    return Math.floor(elapsed / 86400000) + "d ago";
 }
 
 const LANGUAGE_STORAGE_KEY = "webcodex.runtime.language.v1";
