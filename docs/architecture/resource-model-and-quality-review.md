@@ -148,11 +148,26 @@ canonical Runtime surface是 `List / Resolve / Read`，Management surface是 `Ve
 
 优先让一个具体用例依赖小而明确的服务集合，例如 SkillCatalogService 只借用所需 Runner/catalog 端口，而不是立刻拆成很多新 crate 或制造动态 ServiceLocator。先抽纯投影与解析，再处理有状态服务；明确锁、缓存、超时由谁持有。
 
-### E. 存储访问需要测量隔离，不宜先换数据库（P2，性能假设）
+### E. 存储访问需要测量隔离，不宜先换数据库（Stage 3A 已建立基线）
 
-[Database](../../crates/webcodex-store/src/lib.rs)，94–100，当前使用 `Mutex<Connection>`；[Memory store](../../crates/webcodex-store/src/memory.rs)，935–990，有同步加锁查询/事务。共享连接可能造成不同领域操作排队，但本轮未测得实际锁竞争、阻塞时间或吞吐问题。
+[Database](../../crates/webcodex-store/src/lib.rs) 仍由单个 `Mutex<Connection>` 持有 SQLite connection，因此不同 store domain 在结构上可能互相排队；这仍然只是 bottleneck 假设，不是优化依据。Stage 3A 没有改连接数、线程模型、WAL、事务、CAS、replay 或 schema，而是把 production connection acquisition 收敛到一个 store-local observation boundary。
 
-先量化 DB lock wait、statement/transaction duration 和各域请求占比。若确有运行时线程阻塞，可评估有界 blocking worker 或数据库 actor；队列、取消和事务完成后的未知结果必须有明确定义。拆线程或连接不等于提升所有负载，更不能破坏当前 CAS/重放事务边界。
+该边界只暴露三个稳定 measurement name：`store_connection_acquisitions_total`、`store_connection_lock_wait_seconds`、`store_connection_hold_seconds`。唯一业务 label 是 closed `domain`，当前集合为 `accounts`、`activity`、`admin_project_lifecycle`、`agent_task`、`agent_wake`、`audit`、`communication`、`core`、`executions`、`goal`、`job_receipts`、`memory`、`oauth`、`schema`、`task_kernel`、`window_activity`。不记录 project/principal/account/Agent/Goal/Task/request id、路径、SQL 文本、table 动态字符串或用户数据。
+
+`lock_wait` 定义为调用 `Mutex::lock` 前的 monotonic timestamp 到成功取得 connection guard；`hold` 定义为成功取得 connection guard 到真实 `MutexGuard<Connection>` 释放。后者是 **connection critical-section duration**，不是 SQLite statement duration：一个 guard 内可能包含多条 query、transaction、validation、CAS 检查、commit 和少量 Rust 逻辑。若某个 domain 的 hold 异常，再做 statement/transaction drill-down；Stage 3A 不包装 rusqlite API。
+
+默认 observation 以 `webcodex_store::connection` target 的 structured trace 发出。真实 connection guard 在 observer callback 前先释放，因此 trace subscriber 不会扩大被测 connection critical section，也不会让其它 store caller 因 telemetry 继续等待该 mutex。observer panic 在这个小边界内 `catch_unwind`，不会被翻译成 DB/business error；原有 `Mutex::lock().unwrap()` poison panic 仍保持。启用的同步 trace subscriber 理论上仍可能在 **mutex 已释放后** 延迟当前 caller 返回，Stage 3A 不为此增加后台 telemetry worker；dogfood 采样时也应观察这一开销。
+
+因此 Stage 3A 的结论只是“现在可以测量”，不是“数据库需要优化”。p50/p95 必须来自 dogfood 或 production-like workload，不伪造 benchmark 改善数字。Stage 3B 只有在数据支持时才进入：
+
+| 观测证据 | 下一步 |
+|---|---|
+| `lock_wait` p95 约为 0，且没有持续 queueing | 不做 DB architecture optimization |
+| 单一 domain 的 `hold` 明显偏高 | 先缩短该 domain critical section，或对它做第二层 statement/transaction drill-down |
+| 多个 domain 同时出现明显 wait，且能与其它 domain 的 hold 对应 | 再评估 bounded blocking worker / DB actor；先定义 queue、cancel、outcome-unknown 与事务完成语义 |
+| 大量重复只读工作占主要 hold/CPU，且 authority/revision fence 可证明 | 才评估有 revision/authority fence 的 cache |
+
+同步 `Database` API 是否阻塞 Tokio worker 是 Stage 3 的另一个问题，但本阶段不迁移 `spawn_blocking`、DB actor 或 async mutex。已有 Connector/Runner 路径在其它 blocking work 上使用 `spawn_blocking` 的事实也不能替代 Store contention 数据。
 
 ### F. 表达规则和投影预算有小规模重复（P2，本轮验证一部分）
 
@@ -222,7 +237,8 @@ Plugin 已有 `NotStarted / OutcomeUnknown / Completed`，见 [plugin.rs](../../
 | 0，本轮 | 启动目录投影的小型复用、基线表征测试、本文 | JSON 形状、顺序、hint、预算、来源发现和权限均不改 | 新旧 JSON oracle 对照，空/不可用/上游截断、Unicode/转义、超大条目；既有 startup 测试 |
 | 1，后续已完成 | 扩展家族 admission 声明归 ToolDefinition；Runner Skill provider enqueue typed error 小切片 | 外部错误、scope、surface、direct/gateway 语义不改 | family/registry invariant、ModelHidden invariant、surface/principal focused tests、typed-to-legacy error-kind 对照 |
 | 2，后续已完成 | Skill catalog observer / known-id exact resolver 分离；Configured + Managed 收敛到一个 Runner Skill runtime/management boundary | opaque identity、Project authority、请求时授权、catalog 完整语义、management outcome-unknown、revision/race 语义不改 | before/after request fanout、canonical wire/capability inventory、duplicate target、source unavailable、source identity race、revision race、configured identity-first scan tests |
-| 3 | 实测需要的缓存、有界并发、DB worker 隔离 | 未知结果/事务/重放语义不改 | 与基线比较 p50/p95、锁等待、内存/字节上限、故障注入 |
+| 3A，本轮 | Store connection contention observability baseline：closed-domain acquisition count、lock wait、connection hold | DB authority、schema、transaction/CAS/replay、poison 与 async execution model 均不改 | observer primitive tests、production raw-lock invariant、representative store behavior；dogfood 后聚合 p50/p95 |
+| 3B，仅实测需要时 | 有证据驱动的 critical-section 缩短、bounded blocking worker / DB actor 或 fenced cache | 未知结果、事务、重放、authority 与 revision 语义不改 | 与 3A 实际 workload 基线比较 p50/p95、cross-domain wait、hold share、资源上限和故障注入；无证据则不实施 |
 | 4，独立功能设计 | 用户私有命名空间、显式仓库知识复用、统一资源浏览界面 | 不隐式继承权限，不改变执行 cwd | principal 隔离、分享撤销、worktree 来源、冲突展示与迁移方案 |
 
 区分纯重构和新增功能很重要：共同描述结构可以先不改变任何用户功能；跨 worktree 共享或 user namespace 一定要另行定义产品行为。阶段 4 不应成为阶段 1/2 的前提。
