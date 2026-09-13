@@ -182,7 +182,8 @@ const WIDE_CONTEXT_MEDIA = "(min-width: 1280px)";
 
 let contextUserIntent: boolean | null = null;
 
-type RuntimeLanguage = "en" | "zh-CN";
+type StaticTextSource = { node: Text; source: string };
+type StaticAttributeSource = { node: Element; name: string; source: string };
 
 // Verified localization mapping: "Close session context": "关闭会话上下文"
 
