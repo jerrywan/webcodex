@@ -24,16 +24,14 @@ impl McpCallMetricObservation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SkillSourceMetricSource {
     Project,
-    RunnerConfigured,
-    RunnerManaged,
+    RunnerLocal,
 }
 
 impl SkillSourceMetricSource {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Project => "project",
-            Self::RunnerConfigured => "runner_configured",
-            Self::RunnerManaged => "runner_managed",
+            Self::RunnerLocal => "runner_local",
         }
     }
 }
@@ -316,10 +314,9 @@ mod tests {
     fn skill_source_metric_dimensions_are_closed_and_identity_free() {
         let sources = [
             SkillSourceMetricSource::Project.as_str(),
-            SkillSourceMetricSource::RunnerConfigured.as_str(),
-            SkillSourceMetricSource::RunnerManaged.as_str(),
+            SkillSourceMetricSource::RunnerLocal.as_str(),
         ];
-        assert_eq!(sources, ["project", "runner_configured", "runner_managed"]);
+        assert_eq!(sources, ["project", "runner_local"]);
 
         let operations = [
             SkillSourceMetricOperation::CatalogList.as_str(),

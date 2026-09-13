@@ -1,4 +1,4 @@
-use super::RunnerCapabilityRequirement::{FileRead, SkillStoreManage};
+use super::RunnerCapabilityRequirement::{FileRead, SkillManagement};
 use super::ToolVisibility::ModelHidden;
 use super::{def, ToolDefinition, ToolOperatorExtensionFamily, TOOL_CATEGORY_RUNTIME};
 use crate::metadata::{
@@ -122,7 +122,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ]),
         ModelHidden,
         TOOL_CATEGORY_RUNTIME,
-        Some(SkillStoreManage),
+        Some(SkillManagement),
         TOOL_PROVIDER_RUNNER,
         super::ToolSemanticContract {
             effect: super::ToolEffect::Observe,
@@ -160,7 +160,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ]),
         ModelHidden,
         TOOL_CATEGORY_RUNTIME,
-        Some(SkillStoreManage),
+        Some(SkillManagement),
         TOOL_PROVIDER_RUNNER,
         super::ToolSemanticContract {
             effect: super::ToolEffect::Mutate,
@@ -193,7 +193,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ]),
         ModelHidden,
         TOOL_CATEGORY_RUNTIME,
-        Some(SkillStoreManage),
+        Some(SkillManagement),
         TOOL_PROVIDER_RUNNER,
         super::ToolSemanticContract {
             effect: super::ToolEffect::Mutate,
@@ -225,7 +225,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ]),
         ModelHidden,
         TOOL_CATEGORY_RUNTIME,
-        Some(SkillStoreManage),
+        Some(SkillManagement),
         TOOL_PROVIDER_RUNNER,
         super::ToolSemanticContract {
             effect: super::ToolEffect::Mutate,

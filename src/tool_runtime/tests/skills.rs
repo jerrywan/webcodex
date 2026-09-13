@@ -15,13 +15,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use webcodex_core::configured_skills::{
-    ConfiguredSkillDescriptor, ConfiguredSkillRootsListResponse, ConfiguredSkillRootsReadResponse,
-    ConfiguredSkillRootsRequest, CONFIGURED_SKILL_ROOTS_RESPONSE_FORMAT,
-};
-use webcodex_core::skill_store::{
-    RunnerSkillDescriptor, SkillStoreListActiveResponse, SkillStoreReadResponse, SkillStoreRequest,
-    SKILL_STORE_RESPONSE_FORMAT,
+use webcodex_core::runner_skill::{
+    RunnerSkillDescriptor, RunnerSkillListResponse, RunnerSkillReadResponse, RunnerSkillRequest,
+    RunnerSkillResolveResponse, RunnerSkillSource, RUNNER_SKILL_RESPONSE_FORMAT,
 };
 
 fn write_skill(root: &Path, package: &str, name: &str, description: &str, body: &str) {
@@ -166,15 +162,40 @@ struct FakeConfiguredSkillState {
 }
 
 #[derive(Debug, Clone)]
-struct FakeOperatorSkillState {
+struct FakeManagedSkillState {
     skill_id: String,
     skill_key: String,
     name: String,
     description: String,
     package_revision: String,
     definition_revision: String,
-    configured: Option<FakeConfiguredSkillState>,
     resource_text: String,
+}
+
+#[derive(Debug, Clone)]
+struct FakeOperatorSkillState {
+    configured: Option<FakeConfiguredSkillState>,
+    managed: Option<FakeManagedSkillState>,
+}
+
+fn configured_descriptor(state: &FakeConfiguredSkillState) -> RunnerSkillDescriptor {
+    RunnerSkillDescriptor::Configured {
+        skill_id: state.skill_id.clone(),
+        name: state.name.clone(),
+        description: state.description.clone(),
+        definition_revision: state.definition_revision.clone(),
+    }
+}
+
+fn managed_descriptor(state: &FakeManagedSkillState) -> RunnerSkillDescriptor {
+    RunnerSkillDescriptor::Managed {
+        skill_id: state.skill_id.clone(),
+        skill_key: state.skill_key.clone(),
+        name: state.name.clone(),
+        description: state.description.clone(),
+        package_revision: state.package_revision.clone(),
+        definition_revision: state.definition_revision.clone(),
+    }
 }
 
 async fn call_kernel_with_fake_operator_store(
@@ -217,241 +238,238 @@ async fn call_kernel_with_fake_operator_store(
             "operator Skill fixture timed out"
         );
         if let Some(request) = probe_patch_agent_request(runtime, client_id).await {
-            if request.kind == "configured_skill_roots" {
-                let operation: ConfiguredSkillRootsRequest = serde_json::from_str(
+            if request.kind == "skill" {
+                let operation: RunnerSkillRequest = serde_json::from_str(
                     request
                         .content
                         .as_deref()
-                        .expect("typed configured Skill roots request"),
+                        .expect("typed Runner Skill request"),
                 )
                 .unwrap();
                 kinds.push(
                     match &operation {
-                        ConfiguredSkillRootsRequest::List => "configured_skill_roots:list",
-                        ConfiguredSkillRootsRequest::Read { .. } => "configured_skill_roots:read",
+                        RunnerSkillRequest::List => "skill:list",
+                        RunnerSkillRequest::Resolve { .. } => "skill:resolve",
+                        RunnerSkillRequest::Read { .. } => "skill:read",
+                        _ => "skill:management",
                     }
                     .to_string(),
                 );
-                let state = operator
-                    .lock()
-                    .unwrap()
-                    .configured
-                    .clone()
-                    .expect("configured Skill fixture state");
+                let state = operator.lock().unwrap().clone();
                 let (exit_code, stdout, error) = match operation {
-                    ConfiguredSkillRootsRequest::List => (
-                        Some(0),
-                        Some(
-                            serde_json::to_string(&ConfiguredSkillRootsListResponse {
-                                format: CONFIGURED_SKILL_ROOTS_RESPONSE_FORMAT.to_string(),
-                                skills: vec![ConfiguredSkillDescriptor {
-                                    skill_id: state.skill_id,
-                                    name: state.name,
-                                    description: state.description,
-                                    definition_revision: state.definition_revision,
-                                }],
-                                invalid_count: 0,
-                                diagnostics: Vec::new(),
-                                discovery_truncated: false,
-                            })
-                            .unwrap(),
-                        ),
-                        None,
-                    ),
-                    ConfiguredSkillRootsRequest::Read {
+                    RunnerSkillRequest::List => {
+                        let mut skills = Vec::new();
+                        if let Some(configured) = state.configured.as_ref() {
+                            skills.push(configured_descriptor(configured));
+                        }
+                        if let Some(managed) = state.managed.as_ref() {
+                            skills.push(managed_descriptor(managed));
+                        }
+                        let mut seen = std::collections::BTreeSet::new();
+                        if skills.iter().any(|skill| !seen.insert(skill.skill_id())) {
+                            (None, None, Some("skill_catalog_unavailable".to_string()))
+                        } else {
+                            (
+                                Some(0),
+                                Some(
+                                    serde_json::to_string(&RunnerSkillListResponse {
+                                        format: RUNNER_SKILL_RESPONSE_FORMAT.to_string(),
+                                        skills,
+                                        invalid_count: 0,
+                                        diagnostics: Vec::new(),
+                                        discovery_truncated: false,
+                                    })
+                                    .unwrap(),
+                                ),
+                                None,
+                            )
+                        }
+                    }
+                    RunnerSkillRequest::Resolve { skill_id } => {
+                        let configured_error = state
+                            .configured
+                            .as_ref()
+                            .and_then(|configured| configured.read_error.clone());
+                        if let Some(error) = configured_error {
+                            (None, None, Some(error))
+                        } else {
+                            let configured = state
+                                .configured
+                                .as_ref()
+                                .filter(|configured| configured.skill_id == skill_id);
+                            let managed = state
+                                .managed
+                                .as_ref()
+                                .filter(|managed| managed.skill_id == skill_id);
+                            if configured.is_some() && managed.is_some() {
+                                (None, None, Some("skill_catalog_unavailable".to_string()))
+                            } else {
+                                let skill = configured
+                                    .map(configured_descriptor)
+                                    .or_else(|| managed.map(managed_descriptor));
+                                let stdout = serde_json::to_string(&RunnerSkillResolveResponse {
+                                    format: RUNNER_SKILL_RESPONSE_FORMAT.to_string(),
+                                    skill,
+                                })
+                                .unwrap();
+                                if configured.is_some() {
+                                    if let Some(next_revision) = configured.and_then(|configured| {
+                                        configured.next_definition_revision_after_probe.clone()
+                                    }) {
+                                        if let Some(configured) =
+                                            operator.lock().unwrap().configured.as_mut()
+                                        {
+                                            configured.definition_revision = next_revision;
+                                        }
+                                    }
+                                }
+                                (Some(0), Some(stdout), None)
+                            }
+                        }
+                    }
+                    RunnerSkillRequest::Read {
                         skill_id,
+                        expected_source,
                         path,
                         start_line,
                         limit,
-                        expected_definition_revision,
-                    } => {
-                        let is_identity_probe =
-                            path == "SKILL.md" && expected_definition_revision.is_none();
-                        let next_definition_revision = is_identity_probe
-                            .then(|| state.next_definition_revision_after_probe.clone())
-                            .flatten();
-                        let error = state.read_error.clone().or_else(|| {
-                            if skill_id != state.skill_id {
-                                Some("skill_not_found".to_string())
-                            } else if expected_definition_revision
-                                .as_deref()
-                                .is_some_and(|expected| expected != state.definition_revision)
-                            {
-                                Some("skill_definition_changed".to_string())
-                            } else {
-                                None
-                            }
-                        });
-                        let result = if let Some(error) = error {
-                            (None, None, Some(error))
-                        } else {
-                            let text = if path == "SKILL.md" {
-                                state.definition_text
-                            } else {
-                                state.resource_text
-                            };
-                            assert!(limit >= 1);
-                            let sha256 = if path == "SKILL.md" {
-                                state.definition_revision.clone()
-                            } else {
-                                "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-                                    .to_string()
-                            };
-                            (
-                                Some(0),
-                                Some(
-                                    serde_json::to_string(&ConfiguredSkillRootsReadResponse {
-                                        format: CONFIGURED_SKILL_ROOTS_RESPONSE_FORMAT.to_string(),
-                                        skill_id: state.skill_id,
-                                        name: state.name,
-                                        definition_revision: state.definition_revision,
-                                        path,
-                                        sha256,
-                                        file_bytes: text.len(),
-                                        total_lines: 1,
-                                        text,
-                                        start_line,
-                                        end_line: Some(start_line),
-                                        returned_lines: 1,
-                                        has_more: false,
-                                        next_start_line: None,
-                                    })
-                                    .unwrap(),
-                                ),
-                                None,
-                            )
-                        };
-                        if result.2.is_none() {
-                            if let Some(next_revision) = next_definition_revision {
-                                if let Some(configured) =
-                                    operator.lock().unwrap().configured.as_mut()
-                                {
-                                    configured.definition_revision = next_revision;
-                                }
-                            }
-                        }
-                        result
-                    }
-                };
-                runtime
-                    .runner_registry
-                    .complete(RunnerResultRequest {
-                        client_id: client_id.to_string(),
-                        runner_instance_id: "inst".to_string(),
-                        request_id: request.request_id,
-                        exit_code,
-                        stdout,
-                        stderr: Some(String::new()),
-                        duration_ms: Some(1),
-                        error,
-                    })
-                    .await
-                    .unwrap();
-            } else if request.kind == "skill_store" {
-                let operation: SkillStoreRequest = serde_json::from_str(
-                    request
-                        .content
-                        .as_deref()
-                        .expect("typed Skill store request"),
-                )
-                .unwrap();
-                let state = operator.lock().unwrap().clone();
-                kinds.push(
-                    match &operation {
-                        SkillStoreRequest::ListActive => "skill_store:list_active",
-                        SkillStoreRequest::Read { .. } => "skill_store:read",
-                        _ => "skill_store:other",
-                    }
-                    .to_string(),
-                );
-                let (exit_code, stdout, error) = match operation {
-                    SkillStoreRequest::ListActive => (
-                        Some(0),
-                        Some(
-                            serde_json::to_string(&SkillStoreListActiveResponse {
-                                format: SKILL_STORE_RESPONSE_FORMAT.to_string(),
-                                namespace_revision: "fake-namespace".to_string(),
-                                skills: vec![RunnerSkillDescriptor {
-                                    skill_id: state.skill_id,
-                                    skill_key: state.skill_key,
-                                    name: state.name,
-                                    description: state.description,
-                                    package_revision: state.package_revision,
-                                    definition_revision: state.definition_revision,
-                                }],
-                            })
-                            .unwrap(),
-                        ),
-                        None,
-                    ),
-                    SkillStoreRequest::Read {
-                        skill_id,
-                        path,
-                        start_line,
                         expected_package_revision,
                         expected_definition_revision,
-                        ..
                     } => {
-                        let error = if skill_id != state.skill_id {
-                            Some("skill_not_found".to_string())
-                        } else if expected_package_revision
-                            .as_deref()
-                            .is_some_and(|expected| expected != state.package_revision)
-                        {
-                            Some("skill_package_changed".to_string())
-                        } else if expected_definition_revision
-                            .as_deref()
-                            .is_some_and(|expected| expected != state.definition_revision)
-                        {
-                            Some("skill_definition_changed".to_string())
+                        let configured = state
+                            .configured
+                            .as_ref()
+                            .filter(|configured| configured.skill_id == skill_id);
+                        let managed = state
+                            .managed
+                            .as_ref()
+                            .filter(|managed| managed.skill_id == skill_id);
+                        if configured.is_some() && managed.is_some() {
+                            (None, None, Some("skill_catalog_unavailable".to_string()))
                         } else {
-                            None
-                        };
-                        if let Some(error) = error {
-                            (None, None, Some(error))
-                        } else {
-                            let definition_read = path == "SKILL.md";
-                            let text = if definition_read {
-                                format!(
-                                    "---\nname: {}\ndescription: {}\n---\nmanaged definition\n",
-                                    state.name, state.description
-                                )
-                            } else {
-                                state.resource_text
+                            let result = match expected_source {
+                                RunnerSkillSource::Configured => match configured {
+                                    None => (None, None, Some("skill_source_changed".to_string())),
+                                    Some(configured) => {
+                                        let error = configured.read_error.clone().or_else(|| {
+                                            expected_definition_revision.as_deref().and_then(
+                                                |expected| {
+                                                    (expected != configured.definition_revision)
+                                                        .then(|| {
+                                                            "skill_definition_changed".to_string()
+                                                        })
+                                                },
+                                            )
+                                        });
+                                        if let Some(error) = error {
+                                            (None, None, Some(error))
+                                        } else {
+                                            let text = if path == "SKILL.md" {
+                                                configured.definition_text.clone()
+                                            } else {
+                                                configured.resource_text.clone()
+                                            };
+                                            let sha256 = if path == "SKILL.md" {
+                                                configured.definition_revision.clone()
+                                            } else {
+                                                "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                                                    .to_string()
+                                            };
+                                            (
+                                                Some(0),
+                                                Some(
+                                                    serde_json::to_string(
+                                                        &RunnerSkillReadResponse {
+                                                            format: RUNNER_SKILL_RESPONSE_FORMAT
+                                                                .to_string(),
+                                                            skill: configured_descriptor(
+                                                                configured,
+                                                            ),
+                                                            path,
+                                                            sha256,
+                                                            text,
+                                                            start_line,
+                                                            end_line: Some(start_line),
+                                                            returned_lines: limit.min(1),
+                                                            has_more: false,
+                                                            next_start_line: None,
+                                                        },
+                                                    )
+                                                    .unwrap(),
+                                                ),
+                                                None,
+                                            )
+                                        }
+                                    }
+                                },
+                                RunnerSkillSource::Managed => match managed {
+                                    None => (None, None, Some("skill_source_changed".to_string())),
+                                    Some(managed) => {
+                                        let error = expected_package_revision
+                                            .as_deref()
+                                            .and_then(|expected| {
+                                                (expected != managed.package_revision)
+                                                    .then(|| "skill_package_changed".to_string())
+                                            })
+                                            .or_else(|| {
+                                                expected_definition_revision.as_deref().and_then(
+                                                    |expected| {
+                                                        (expected != managed.definition_revision)
+                                                            .then(|| {
+                                                                "skill_definition_changed"
+                                                                    .to_string()
+                                                            })
+                                                    },
+                                                )
+                                            });
+                                        if let Some(error) = error {
+                                            (None, None, Some(error))
+                                        } else {
+                                            let definition_read = path == "SKILL.md";
+                                            let text = if definition_read {
+                                                format!(
+                                                    "---\nname: {}\ndescription: {}\n---\nmanaged definition\n",
+                                                    managed.name, managed.description
+                                                )
+                                            } else {
+                                                managed.resource_text.clone()
+                                            };
+                                            let sha256 = if definition_read {
+                                                managed.definition_revision.clone()
+                                            } else {
+                                                "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                                                    .to_string()
+                                            };
+                                            (
+                                                Some(0),
+                                                Some(
+                                                    serde_json::to_string(
+                                                        &RunnerSkillReadResponse {
+                                                            format: RUNNER_SKILL_RESPONSE_FORMAT
+                                                                .to_string(),
+                                                            skill: managed_descriptor(managed),
+                                                            path,
+                                                            sha256,
+                                                            text,
+                                                            start_line,
+                                                            end_line: Some(start_line),
+                                                            returned_lines: limit.min(1),
+                                                            has_more: false,
+                                                            next_start_line: None,
+                                                        },
+                                                    )
+                                                    .unwrap(),
+                                                ),
+                                                None,
+                                            )
+                                        }
+                                    }
+                                },
                             };
-                            let sha256 = if definition_read {
-                                state.definition_revision.clone()
-                            } else {
-                                "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-                                    .to_string()
-                            };
-                            (
-                                Some(0),
-                                Some(
-                                    serde_json::to_string(&SkillStoreReadResponse {
-                                        format: SKILL_STORE_RESPONSE_FORMAT.to_string(),
-                                        skill_id: state.skill_id,
-                                        skill_key: state.skill_key,
-                                        name: state.name,
-                                        description: state.description,
-                                        package_revision: state.package_revision,
-                                        definition_revision: state.definition_revision,
-                                        path,
-                                        sha256,
-                                        text,
-                                        start_line,
-                                        end_line: Some(start_line),
-                                        returned_lines: 1,
-                                        has_more: false,
-                                        next_start_line: None,
-                                    })
-                                    .unwrap(),
-                                ),
-                                None,
-                            )
+                            result
                         }
                     }
-                    other => panic!("unexpected operator Skill request in read fixture: {other:?}"),
+                    other => panic!("unexpected Runner Skill request in read fixture: {other:?}"),
                 };
                 runtime
                     .runner_registry
@@ -511,7 +529,7 @@ async fn project_and_operator_skill_catalog_union_is_fresh_conflict_safe_and_pac
         None,
         RunnerCapabilities {
             file_read: true,
-            skill_store_read: true,
+            skill_runtime: true,
             ..Default::default()
         },
         vec![
@@ -526,14 +544,16 @@ async fn project_and_operator_skill_catalog_union_is_fresh_conflict_safe_and_pac
     let package_b = format!("wc_skillpkg_{}", "b".repeat(64));
     let definition = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".to_string();
     let operator = Arc::new(Mutex::new(FakeOperatorSkillState {
-        skill_id: format!("wc_skill_{}", "1".repeat(32)),
-        skill_key: "operator-demo".to_string(),
-        name: "duplicate".to_string(),
-        description: "Operator-installed guidance".to_string(),
-        package_revision: package_a.clone(),
-        definition_revision: definition.clone(),
         configured: None,
-        resource_text: "resource-a".to_string(),
+        managed: Some(FakeManagedSkillState {
+            skill_id: format!("wc_skill_{}", "1".repeat(32)),
+            skill_key: "operator-demo".to_string(),
+            name: "duplicate".to_string(),
+            description: "Operator-installed guidance".to_string(),
+            package_revision: package_a.clone(),
+            definition_revision: definition.clone(),
+            resource_text: "resource-a".to_string(),
+        }),
     }));
 
     let (listed_a, _) = call_kernel_with_fake_operator_store(
@@ -574,8 +594,9 @@ async fn project_and_operator_skill_catalog_union_is_fresh_conflict_safe_and_pac
 
     {
         let mut state = operator.lock().unwrap();
-        state.package_revision = package_b.clone();
-        state.resource_text = "resource-b".to_string();
+        let managed = state.managed.as_mut().unwrap();
+        managed.package_revision = package_b.clone();
+        managed.resource_text = "resource-b".to_string();
     }
     let (after_activation, _) = call_kernel_with_fake_operator_store(
         &runtime,
@@ -649,8 +670,7 @@ async fn project_configured_and_managed_skills_share_one_conflict_safe_catalog()
         None,
         RunnerCapabilities {
             file_read: true,
-            configured_skill_roots_read: true,
-            skill_store_read: true,
+            skill_runtime: true,
             ..Default::default()
         },
         vec![registered_project(
@@ -666,12 +686,6 @@ async fn project_configured_and_managed_skills_share_one_conflict_safe_catalog()
     let managed_revision = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
     let managed_package = format!("wc_skillpkg_{}", "a".repeat(64));
     let sources = Arc::new(Mutex::new(FakeOperatorSkillState {
-        skill_id: managed_id.clone(),
-        skill_key: "managed-duplicate".to_string(),
-        name: "duplicate".to_string(),
-        description: "Managed guidance".to_string(),
-        package_revision: managed_package.clone(),
-        definition_revision: managed_revision.to_string(),
         configured: Some(FakeConfiguredSkillState {
             skill_id: configured_id.clone(),
             name: "duplicate".to_string(),
@@ -682,7 +696,15 @@ async fn project_configured_and_managed_skills_share_one_conflict_safe_catalog()
             read_error: None,
             next_definition_revision_after_probe: None,
         }),
-        resource_text: "managed resource".to_string(),
+        managed: Some(FakeManagedSkillState {
+            skill_id: managed_id.clone(),
+            skill_key: "managed-duplicate".to_string(),
+            name: "duplicate".to_string(),
+            description: "Managed guidance".to_string(),
+            package_revision: managed_package.clone(),
+            definition_revision: managed_revision.to_string(),
+            resource_text: "managed resource".to_string(),
+        }),
     }));
 
     let (listed, _) = call_kernel_with_fake_operator_store(
@@ -738,12 +760,7 @@ async fn project_configured_and_managed_skills_share_one_conflict_safe_catalog()
     assert!(configured_read.output["package_revision"].is_null());
     assert_eq!(
         configured_read_kinds,
-        vec![
-            "file_skill_list_packages",
-            "configured_skill_roots:read",
-            "skill_store:read",
-            "configured_skill_roots:read",
-        ]
+        vec!["file_skill_list_packages", "skill:resolve", "skill:read"]
     );
 
     let (managed_read, managed_read_kinds) = call_kernel_with_fake_operator_store(
@@ -765,17 +782,12 @@ async fn project_configured_and_managed_skills_share_one_conflict_safe_catalog()
     assert_eq!(managed_read.output["trust"], "operator_installed_guidance");
     assert_eq!(
         managed_read_kinds,
-        vec![
-            "file_skill_list_packages",
-            "configured_skill_roots:read",
-            "skill_store:read",
-            "skill_store:read",
-        ]
+        vec!["file_skill_list_packages", "skill:resolve", "skill:read"]
     );
 }
 
 #[tokio::test]
-async fn configured_skill_exact_read_uses_read_probe_without_catalog_list() {
+async fn configured_skill_exact_read_uses_unified_resolve_then_read() {
     let root = tempfile::tempdir().unwrap();
     let runtime = ToolRuntime::new_for_tests();
     let client_id = "configured-skill-read-fanout";
@@ -785,7 +797,7 @@ async fn configured_skill_exact_read_uses_read_probe_without_catalog_list() {
         None,
         RunnerCapabilities {
             file_read: true,
-            configured_skill_roots_read: true,
+            skill_runtime: true,
             ..Default::default()
         },
         vec![registered_project(
@@ -798,13 +810,6 @@ async fn configured_skill_exact_read_uses_read_probe_without_catalog_list() {
     let configured_id = format!("wc_skill_{}", "2".repeat(32));
     let configured_revision = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     let sources = Arc::new(Mutex::new(FakeOperatorSkillState {
-        skill_id: format!("wc_skill_{}", "3".repeat(32)),
-        skill_key: "unused-managed".to_string(),
-        name: "unused-managed".to_string(),
-        description: "Unused managed guidance".to_string(),
-        package_revision: format!("wc_skillpkg_{}", "a".repeat(64)),
-        definition_revision: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            .to_string(),
         configured: Some(FakeConfiguredSkillState {
             skill_id: configured_id.clone(),
             name: "configured".to_string(),
@@ -815,7 +820,7 @@ async fn configured_skill_exact_read_uses_read_probe_without_catalog_list() {
             read_error: None,
             next_definition_revision_after_probe: None,
         }),
-        resource_text: "unused managed resource".to_string(),
+        managed: None,
     }));
 
     let (read, kinds) = call_kernel_with_fake_operator_store(
@@ -835,11 +840,7 @@ async fn configured_skill_exact_read_uses_read_probe_without_catalog_list() {
     assert_eq!(read.output["text"], "configured resource");
     assert_eq!(
         kinds,
-        vec![
-            "file_skill_list_packages",
-            "configured_skill_roots:read",
-            "configured_skill_roots:read",
-        ]
+        vec!["file_skill_list_packages", "skill:resolve", "skill:read"]
     );
 
     let (unsupported_package, unsupported_kinds) = call_kernel_with_fake_operator_store(
@@ -861,12 +862,12 @@ async fn configured_skill_exact_read_uses_read_probe_without_catalog_list() {
     );
     assert_eq!(
         unsupported_kinds,
-        vec!["file_skill_list_packages", "configured_skill_roots:read"]
+        vec!["file_skill_list_packages", "skill:resolve"]
     );
 }
 
 #[tokio::test]
-async fn managed_skill_exact_read_uses_read_probe_without_list_active() {
+async fn managed_skill_exact_read_uses_unified_resolve_then_read() {
     let root = tempfile::tempdir().unwrap();
     let runtime = ToolRuntime::new_for_tests();
     let client_id = "managed-skill-read-fanout";
@@ -876,7 +877,7 @@ async fn managed_skill_exact_read_uses_read_probe_without_list_active() {
         None,
         RunnerCapabilities {
             file_read: true,
-            skill_store_read: true,
+            skill_runtime: true,
             ..Default::default()
         },
         vec![registered_project(
@@ -890,14 +891,16 @@ async fn managed_skill_exact_read_uses_read_probe_without_list_active() {
     let managed_revision = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
     let managed_package = format!("wc_skillpkg_{}", "a".repeat(64));
     let sources = Arc::new(Mutex::new(FakeOperatorSkillState {
-        skill_id: managed_id.clone(),
-        skill_key: "managed".to_string(),
-        name: "managed".to_string(),
-        description: "Managed guidance".to_string(),
-        package_revision: managed_package.clone(),
-        definition_revision: managed_revision.to_string(),
         configured: None,
-        resource_text: "managed resource".to_string(),
+        managed: Some(FakeManagedSkillState {
+            skill_id: managed_id.clone(),
+            skill_key: "managed".to_string(),
+            name: "managed".to_string(),
+            description: "Managed guidance".to_string(),
+            package_revision: managed_package.clone(),
+            definition_revision: managed_revision.to_string(),
+            resource_text: "managed resource".to_string(),
+        }),
     }));
 
     let (read, kinds) = call_kernel_with_fake_operator_store(
@@ -918,11 +921,7 @@ async fn managed_skill_exact_read_uses_read_probe_without_list_active() {
     assert_eq!(read.output["text"], "managed resource");
     assert_eq!(
         kinds,
-        vec![
-            "file_skill_list_packages",
-            "skill_store:read",
-            "skill_store:read",
-        ]
+        vec!["file_skill_list_packages", "skill:resolve", "skill:read"]
     );
 }
 
@@ -937,8 +936,7 @@ async fn exact_skill_resolution_fails_closed_on_duplicate_target_across_sources(
         None,
         RunnerCapabilities {
             file_read: true,
-            configured_skill_roots_read: true,
-            skill_store_read: true,
+            skill_runtime: true,
             ..Default::default()
         },
         vec![registered_project(
@@ -953,12 +951,6 @@ async fn exact_skill_resolution_fails_closed_on_duplicate_target_across_sources(
     let managed_revision = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
     let managed_package = format!("wc_skillpkg_{}", "a".repeat(64));
     let sources = Arc::new(Mutex::new(FakeOperatorSkillState {
-        skill_id: duplicate_id.clone(),
-        skill_key: "managed-duplicate-id".to_string(),
-        name: "managed".to_string(),
-        description: "Managed guidance".to_string(),
-        package_revision: managed_package.clone(),
-        definition_revision: managed_revision.to_string(),
         configured: Some(FakeConfiguredSkillState {
             skill_id: duplicate_id.clone(),
             name: "configured".to_string(),
@@ -969,7 +961,15 @@ async fn exact_skill_resolution_fails_closed_on_duplicate_target_across_sources(
             read_error: None,
             next_definition_revision_after_probe: None,
         }),
-        resource_text: "managed resource".to_string(),
+        managed: Some(FakeManagedSkillState {
+            skill_id: duplicate_id.clone(),
+            skill_key: "managed-duplicate-id".to_string(),
+            name: "managed".to_string(),
+            description: "Managed guidance".to_string(),
+            package_revision: managed_package.clone(),
+            definition_revision: managed_revision.to_string(),
+            resource_text: "managed resource".to_string(),
+        }),
     }));
 
     let (read, kinds) = call_kernel_with_fake_operator_store(
@@ -987,14 +987,7 @@ async fn exact_skill_resolution_fails_closed_on_duplicate_target_across_sources(
     .await;
     assert!(!read.success);
     assert_eq!(read.output["error_kind"], "skill_catalog_unavailable");
-    assert_eq!(
-        kinds,
-        vec![
-            "file_skill_list_packages",
-            "configured_skill_roots:read",
-            "skill_store:read",
-        ]
-    );
+    assert_eq!(kinds, vec!["file_skill_list_packages", "skill:resolve"]);
 }
 
 #[tokio::test]
@@ -1015,8 +1008,7 @@ async fn exact_skill_resolution_fails_closed_when_applicable_source_is_unavailab
         None,
         RunnerCapabilities {
             file_read: true,
-            configured_skill_roots_read: true,
-            skill_store_read: true,
+            skill_runtime: true,
             ..Default::default()
         },
         vec![registered_project(
@@ -1028,13 +1020,6 @@ async fn exact_skill_resolution_fails_closed_when_applicable_source_is_unavailab
     let project = crate::tool_runtime::runner_project_runtime_id(client_id, "project");
     let configured_revision = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     let sources = Arc::new(Mutex::new(FakeOperatorSkillState {
-        skill_id: format!("wc_skill_{}", "8".repeat(32)),
-        skill_key: "unused-managed".to_string(),
-        name: "unused-managed".to_string(),
-        description: "Unused managed guidance".to_string(),
-        package_revision: format!("wc_skillpkg_{}", "b".repeat(64)),
-        definition_revision: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            .to_string(),
         configured: Some(FakeConfiguredSkillState {
             skill_id: format!("wc_skill_{}", "9".repeat(32)),
             name: "configured-unavailable".to_string(),
@@ -1042,10 +1027,19 @@ async fn exact_skill_resolution_fails_closed_when_applicable_source_is_unavailab
             definition_revision: configured_revision.to_string(),
             definition_text: "configured definition".to_string(),
             resource_text: "configured resource".to_string(),
-            read_error: Some("configured_skill_roots_unavailable".to_string()),
+            read_error: Some("skill_catalog_unavailable".to_string()),
             next_definition_revision_after_probe: None,
         }),
-        resource_text: "unused managed resource".to_string(),
+        managed: Some(FakeManagedSkillState {
+            skill_id: format!("wc_skill_{}", "8".repeat(32)),
+            skill_key: "unused-managed".to_string(),
+            name: "unused-managed".to_string(),
+            description: "Unused managed guidance".to_string(),
+            package_revision: format!("wc_skillpkg_{}", "b".repeat(64)),
+            definition_revision: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                .to_string(),
+            resource_text: "unused managed resource".to_string(),
+        }),
     }));
     let (listed, _) = call_kernel_with_fake_operator_store(
         &runtime,
@@ -1076,7 +1070,7 @@ async fn exact_skill_resolution_fails_closed_when_applicable_source_is_unavailab
         vec![
             "file_skill_list_packages",
             "file_skill_read_file",
-            "configured_skill_roots:read",
+            "skill:resolve",
         ]
     );
 }
@@ -1092,7 +1086,7 @@ async fn configured_exact_read_pins_probe_revision_across_resource_read() {
         None,
         RunnerCapabilities {
             file_read: true,
-            configured_skill_roots_read: true,
+            skill_runtime: true,
             ..Default::default()
         },
         vec![registered_project(
@@ -1106,13 +1100,6 @@ async fn configured_exact_read_pins_probe_revision_across_resource_read() {
     let revision_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     let revision_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     let sources = Arc::new(Mutex::new(FakeOperatorSkillState {
-        skill_id: format!("wc_skill_{}", "3".repeat(32)),
-        skill_key: "unused-managed".to_string(),
-        name: "unused-managed".to_string(),
-        description: "Unused managed guidance".to_string(),
-        package_revision: format!("wc_skillpkg_{}", "c".repeat(64)),
-        definition_revision: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            .to_string(),
         configured: Some(FakeConfiguredSkillState {
             skill_id: configured_id.clone(),
             name: "configured".to_string(),
@@ -1123,7 +1110,7 @@ async fn configured_exact_read_pins_probe_revision_across_resource_read() {
             read_error: None,
             next_definition_revision_after_probe: Some(revision_b.to_string()),
         }),
-        resource_text: "unused managed resource".to_string(),
+        managed: None,
     }));
 
     let (read, kinds) = call_kernel_with_fake_operator_store(
@@ -1142,11 +1129,7 @@ async fn configured_exact_read_pins_probe_revision_across_resource_read() {
     assert_eq!(read.output["error_kind"], "skill_definition_changed");
     assert_eq!(
         kinds,
-        vec![
-            "file_skill_list_packages",
-            "configured_skill_roots:read",
-            "configured_skill_roots:read",
-        ]
+        vec!["file_skill_list_packages", "skill:resolve", "skill:read"]
     );
 }
 

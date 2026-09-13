@@ -6,10 +6,6 @@
 //! then operation identity and its required payload travel together.
 
 use crate::coding_agent::{validate_request as validate_coding_agent_request, CodingAgentRequest};
-use crate::configured_skills::{
-    ConfiguredSkillRootsRequest, CONFIGURED_SKILL_ROOTS_REQUEST_KIND,
-    CONFIGURED_SKILL_ROOTS_REQUEST_MAX_BYTES,
-};
 use crate::lsp_bridge::RunnerLspPayload;
 use crate::mcp_gateway::{validate_request as validate_mcp_gateway_request, McpGatewayRequest};
 use crate::plugin::{validate_request as validate_plugin_gateway_request, PluginGatewayRequest};
@@ -23,7 +19,9 @@ use crate::runner_protocol::{
     STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS, STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
     STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS,
 };
-use crate::skill_store::SkillStoreRequest;
+use crate::runner_skill::{
+    RunnerSkillRequest, RUNNER_SKILL_REQUEST_KIND, RUNNER_SKILL_REQUEST_MAX_BYTES,
+};
 use crate::ssh_resource::{SshResourceRequest, SSH_RESOURCE_REQUEST_MAX_BYTES};
 use crate::validation_bridge::{validate_bridge_request, ValidationBridgeRequest};
 
@@ -525,8 +523,7 @@ pub enum RunnerOperation {
     McpGateway(McpGatewayRequest),
     PluginGateway(PluginGatewayRequest),
     CodingAgent(CodingAgentRequest),
-    ConfiguredSkillRoots(ConfiguredSkillRootsRequest),
-    SkillStore(SkillStoreRequest),
+    Skill(RunnerSkillRequest),
     SshResource(SshResourceRequest),
     RunnerConfig(RunnerConfigOperationRequest),
 }
@@ -555,8 +552,7 @@ impl RunnerOperation {
             Self::McpGateway(_) => "mcp_gateway",
             Self::PluginGateway(_) => "plugin_gateway",
             Self::CodingAgent(_) => "coding_agent",
-            Self::ConfiguredSkillRoots(_) => CONFIGURED_SKILL_ROOTS_REQUEST_KIND,
-            Self::SkillStore(_) => "skill_store",
+            Self::Skill(_) => RUNNER_SKILL_REQUEST_KIND,
             Self::SshResource(_) => "ssh_resource",
             Self::RunnerConfig(_) => RUNNER_CONFIG_REQUEST_KIND,
         }
@@ -759,27 +755,18 @@ fn encode_operation(
             wire.timeout_secs = 120;
             wire.coding_agent = Some(operation);
         }
-        RunnerOperation::ConfiguredSkillRoots(operation) => {
+        RunnerOperation::Skill(operation) => {
             operation
                 .validate()
-                .map_err(|error| format!("invalid configured Skill roots request: {error}"))?;
-            let content = serde_json::to_string(&operation).map_err(|error| {
-                format!("could not encode configured Skill roots request: {error}")
-            })?;
-            if content.len() > CONFIGURED_SKILL_ROOTS_REQUEST_MAX_BYTES {
-                return Err("configured Skill roots request exceeds V2 payload bound".to_string());
-            }
-            wire.content = Some(content);
-            wire.timeout_secs = 30;
-        }
-        RunnerOperation::SkillStore(operation) => {
+                .map_err(|error| format!("invalid Runner Skill request: {error}"))?;
+            let management = operation.requires_management_capability();
             let content = serde_json::to_string(&operation)
-                .map_err(|error| format!("could not encode Skill store request: {error}"))?;
-            if content.len() > 32 * 1024 {
-                return Err("Skill store request exceeds V2 payload bound".to_string());
+                .map_err(|error| format!("could not encode Runner Skill request: {error}"))?;
+            if content.len() > RUNNER_SKILL_REQUEST_MAX_BYTES {
+                return Err("Runner Skill request exceeds V2 payload bound".to_string());
             }
             wire.content = Some(content);
-            wire.timeout_secs = 120;
+            wire.timeout_secs = if management { 120 } else { 30 };
         }
         RunnerOperation::SshResource(operation) => {
             operation
@@ -1113,28 +1100,20 @@ fn decode_operation(wire: &RunnerRequest) -> Result<RunnerOperation, String> {
                 .map_err(|error| format!("invalid CodingAgent request: {error}"))?;
             Ok(RunnerOperation::CodingAgent(operation))
         }
-        CONFIGURED_SKILL_ROOTS_REQUEST_KIND => {
+        RUNNER_SKILL_REQUEST_KIND => {
             ensure_special_payloads_absent(wire)?;
             ensure_empty_generic_execution_fields(wire, true)?;
             let content = bounded_content(
                 wire,
-                CONFIGURED_SKILL_ROOTS_REQUEST_MAX_BYTES,
-                CONFIGURED_SKILL_ROOTS_REQUEST_KIND,
+                RUNNER_SKILL_REQUEST_MAX_BYTES,
+                RUNNER_SKILL_REQUEST_KIND,
             )?;
-            let operation = serde_json::from_str::<ConfiguredSkillRootsRequest>(content)
-                .map_err(|error| format!("invalid configured Skill roots payload: {error}"))?;
+            let operation = serde_json::from_str::<RunnerSkillRequest>(content)
+                .map_err(|error| format!("invalid Runner Skill payload: {error}"))?;
             operation
                 .validate()
-                .map_err(|error| format!("invalid configured Skill roots request: {error}"))?;
-            Ok(RunnerOperation::ConfiguredSkillRoots(operation))
-        }
-        "skill_store" => {
-            ensure_special_payloads_absent(wire)?;
-            ensure_empty_generic_execution_fields(wire, true)?;
-            let content = bounded_content(wire, 32 * 1024, "skill_store")?;
-            let operation = serde_json::from_str::<SkillStoreRequest>(content)
-                .map_err(|error| format!("invalid Skill store payload: {error}"))?;
-            Ok(RunnerOperation::SkillStore(operation))
+                .map_err(|error| format!("invalid Runner Skill request: {error}"))?;
+            Ok(RunnerOperation::Skill(operation))
         }
         "ssh_resource" => {
             ensure_special_payloads_absent(wire)?;
@@ -2062,10 +2041,7 @@ mod tests {
                     timeout_secs: 60,
                 },
             )),
-            RunnerOperation::ConfiguredSkillRoots(
-                crate::configured_skills::ConfiguredSkillRootsRequest::List,
-            ),
-            RunnerOperation::SkillStore(crate::skill_store::SkillStoreRequest::ListActive),
+            RunnerOperation::Skill(crate::runner_skill::RunnerSkillRequest::List),
             RunnerOperation::SshResource(crate::ssh_resource::SshResourceRequest::List),
             RunnerOperation::RunnerConfig(RunnerConfigOperationRequest {
                 action: crate::runner_protocol::RunnerConfigAction::Check,
@@ -2203,8 +2179,7 @@ mod tests {
             "mcp_gateway",
             "plugin_gateway",
             "coding_agent",
-            CONFIGURED_SKILL_ROOTS_REQUEST_KIND,
-            "skill_store",
+            RUNNER_SKILL_REQUEST_KIND,
             "ssh_resource",
             RUNNER_CONFIG_REQUEST_KIND,
         ]);

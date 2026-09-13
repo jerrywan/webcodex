@@ -60,10 +60,9 @@ fn validate_file_request_rejects_invalid_read_requests() {
 }
 
 #[test]
-fn generic_file_request_cannot_inject_runner_skill_store_operations() {
+fn generic_file_request_cannot_inject_runner_skill_operations() {
     for op in [
-        "skill_store",
-        "configured_skill_roots",
+        "skill",
         "skill_install",
         "skill_activate",
         "skill_versions",

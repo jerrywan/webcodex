@@ -8,7 +8,7 @@ use super::startup_brief::{
 };
 use super::{ToolResult, ToolRuntime};
 use crate::auth::AuthContext;
-use crate::runner_http::{EnqueueConfiguredSkillRootsError, EnqueueSkillStoreError, RunnerFeature};
+use crate::runner_http::{EnqueueRunnerSkillError, RunnerFeature};
 use crate::runner_protocol::{ShellFileOpRequest, ShellRunResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -16,8 +16,9 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Component;
 use std::time::{Duration, Instant};
-use webcodex_core::configured_skills::{
-    ConfiguredSkillRootsListResponse, ConfiguredSkillRootsReadResponse, ConfiguredSkillRootsRequest,
+use webcodex_core::runner_skill::{
+    RunnerSkillDescriptor, RunnerSkillListResponse, RunnerSkillReadResponse, RunnerSkillRequest,
+    RunnerSkillResolveResponse, RunnerSkillSource,
 };
 use webcodex_core::skill_metadata::parse_skill_metadata;
 pub(crate) use webcodex_core::skill_metadata::{
@@ -25,11 +26,9 @@ pub(crate) use webcodex_core::skill_metadata::{
 };
 use webcodex_core::skill_store::{
     valid_lower_sha256, valid_package_revision, valid_skill_key, valid_state_revision,
-    RunnerSkillDescriptor, SkillStoreActivateResponse, SkillStoreInstallResponse,
-    SkillStoreListActiveResponse, SkillStoreReadResponse, SkillStoreRemoveResponse,
-    SkillStoreRequest, SkillStoreVersionsResponse, MAX_OPERATOR_REVISIONS_PER_SKILL,
-    MAX_SKILL_STORE_FILE_COUNT, MAX_SKILL_STORE_TOTAL_BYTES, MAX_SKILL_STORE_VERSIONS_LIMIT,
-    SKILL_STORE_RESPONSE_FORMAT,
+    SkillStoreActivateResponse, SkillStoreInstallResponse, SkillStoreRemoveResponse,
+    SkillStoreVersionsResponse, MAX_OPERATOR_REVISIONS_PER_SKILL, MAX_SKILL_STORE_FILE_COUNT,
+    MAX_SKILL_STORE_TOTAL_BYTES, MAX_SKILL_STORE_VERSIONS_LIMIT, SKILL_STORE_RESPONSE_FORMAT,
 };
 
 pub(crate) const SKILL_ROOT: &str = ".agents/skills";
@@ -147,15 +146,7 @@ enum ExactSkillCandidate {
         name: String,
         definition_revision: String,
     },
-    RunnerConfigured {
-        name: String,
-        definition_revision: String,
-    },
-    RunnerManaged {
-        name: String,
-        package_revision: String,
-        definition_revision: String,
-    },
+    Runner(RunnerSkillDescriptor),
 }
 
 #[derive(Debug, Clone)]
@@ -214,71 +205,64 @@ fn observe_skill_source_request(
 }
 
 impl ToolRuntime {
-    async fn runner_skill_store_request(
+    async fn runner_skill_request(
         &self,
         project: &ResolvedProject,
         auth: Option<&AuthContext>,
-        operation: SkillStoreRequest,
-        optional_if_unsupported: bool,
-    ) -> Result<Option<ShellRunResponse>, String> {
-        let metric_operation = match &operation {
-            SkillStoreRequest::ListActive => Some(SkillSourceMetricOperation::CatalogList),
-            SkillStoreRequest::Read { .. } => Some(SkillSourceMetricOperation::ResourceRead),
-            _ => None,
-        };
-        self.runner_skill_store_request_with_metric(
-            project,
-            auth,
-            operation,
-            optional_if_unsupported,
-            metric_operation,
-        )
-        .await
-    }
-
-    async fn runner_skill_store_request_with_metric(
-        &self,
-        project: &ResolvedProject,
-        auth: Option<&AuthContext>,
-        operation: SkillStoreRequest,
+        operation: RunnerSkillRequest,
         optional_if_unsupported: bool,
         metric_operation: Option<SkillSourceMetricOperation>,
     ) -> Result<Option<ShellRunResponse>, String> {
         let client_id = project.config.client_id.clone();
         let access = crate::runner_http::runner_access_from_auth(auth);
+        let management = operation.requires_management_capability();
+        let mutation = operation.is_mutation();
+        let unavailable_kind = if management {
+            "skill_store_runner_unavailable"
+        } else {
+            "skill_catalog_unavailable"
+        };
+        let capability_kind = if management {
+            "skill_store_capability_unavailable"
+        } else {
+            "skill_catalog_unavailable"
+        };
         let view = self
             .runner_registry
             .get_runner_semantic_view_checked_for_auth(&client_id, access.as_ref())
             .await
-            .map_err(|_| "skill_store_runner_unavailable".to_string())?;
-        let management = operation.requires_management_capability();
+            .map_err(|_| unavailable_kind.to_string())?;
         let required = if management {
-            RunnerFeature::SkillStoreManage
+            RunnerFeature::SkillManagement
         } else {
-            RunnerFeature::SkillStoreRead
+            RunnerFeature::SkillRuntime
         };
         if !view.supports(required) {
             return if optional_if_unsupported {
                 Ok(None)
             } else {
-                Err("skill_store_capability_unavailable".to_string())
+                Err(capability_kind.to_string())
             };
         }
         if !view.view.connected {
-            return Err("skill_store_runner_unavailable".to_string());
+            return Err(unavailable_kind.to_string());
         }
-        let mutation = operation.is_mutation();
+        let requested_by = if management {
+            "skill_management"
+        } else {
+            "skill_runtime"
+        };
         let (request_id, rx) = self
             .runner_registry
-            .enqueue_skill_store_typed(
+            .enqueue_runner_skill_typed(
                 &client_id,
                 &view.view.runner_instance_id,
                 operation,
                 access.as_ref(),
-                "skill_runtime".to_string(),
+                requested_by.to_string(),
             )
             .await
-            .map_err(|error| skill_store_enqueue_error_kind(&error).to_string())?;
+            .map_err(|error| runner_skill_enqueue_error_kind(&error, management).to_string())?;
         let request_started = Instant::now();
         let wait_secs = if management { 120 } else { 30 };
         match tokio::time::timeout(Duration::from_secs(wait_secs), rx).await {
@@ -287,7 +271,7 @@ impl ToolRuntime {
                 if let Some(operation) = metric_operation {
                     observe_skill_source_request(
                         self.metrics.as_ref(),
-                        SkillSourceMetricSource::RunnerManaged,
+                        SkillSourceMetricSource::RunnerLocal,
                         operation,
                         request_started,
                         None,
@@ -298,7 +282,7 @@ impl ToolRuntime {
                 Err(if mutation {
                     "skill_store_outcome_unknown".to_string()
                 } else {
-                    "skill_store_runner_unavailable".to_string()
+                    unavailable_kind.to_string()
                 })
             }
             Err(_) => {
@@ -309,7 +293,7 @@ impl ToolRuntime {
                 if let Some(operation) = metric_operation {
                     observe_skill_source_request(
                         self.metrics.as_ref(),
-                        SkillSourceMetricSource::RunnerManaged,
+                        SkillSourceMetricSource::RunnerLocal,
                         operation,
                         request_started,
                         None,
@@ -320,114 +304,25 @@ impl ToolRuntime {
                 if mutation && dispatched != Some(false) {
                     Err("skill_store_outcome_unknown".to_string())
                 } else {
-                    Err("skill_store_runner_unavailable".to_string())
+                    Err(unavailable_kind.to_string())
                 }
             }
         }
     }
 
-    async fn runner_configured_skill_roots_request(
+    async fn observe_runner_skill_catalog(
         &self,
         project: &ResolvedProject,
         auth: Option<&AuthContext>,
-        operation: ConfiguredSkillRootsRequest,
-        optional_if_unsupported: bool,
-    ) -> Result<Option<ShellRunResponse>, String> {
-        let metric_operation = match &operation {
-            ConfiguredSkillRootsRequest::List => SkillSourceMetricOperation::CatalogList,
-            ConfiguredSkillRootsRequest::Read { .. } => SkillSourceMetricOperation::ResourceRead,
-        };
-        self.runner_configured_skill_roots_request_with_metric(
-            project,
-            auth,
-            operation,
-            optional_if_unsupported,
-            metric_operation,
-        )
-        .await
-    }
-
-    async fn runner_configured_skill_roots_request_with_metric(
-        &self,
-        project: &ResolvedProject,
-        auth: Option<&AuthContext>,
-        operation: ConfiguredSkillRootsRequest,
-        optional_if_unsupported: bool,
-        metric_operation: SkillSourceMetricOperation,
-    ) -> Result<Option<ShellRunResponse>, String> {
-        let client_id = project.config.client_id.clone();
-        let access = crate::runner_http::runner_access_from_auth(auth);
-        let view = self
-            .runner_registry
-            .get_runner_semantic_view_checked_for_auth(&client_id, access.as_ref())
-            .await
-            .map_err(|_| "configured_skill_roots_runner_unavailable".to_string())?;
-        if !view.supports(RunnerFeature::ConfiguredSkillRootsRead) {
-            return if optional_if_unsupported {
-                Ok(None)
-            } else {
-                Err("configured_skill_roots_capability_unavailable".to_string())
-            };
-        }
-        if !view.view.connected {
-            return Err("configured_skill_roots_runner_unavailable".to_string());
-        }
-        let (request_id, rx) = self
-            .runner_registry
-            .enqueue_configured_skill_roots_typed(
-                &client_id,
-                &view.view.runner_instance_id,
-                operation,
-                access.as_ref(),
-                "skill_runtime".to_string(),
-            )
-            .await
-            .map_err(|error| configured_skill_roots_enqueue_error_kind(&error).to_string())?;
-        let request_started = Instant::now();
-        match tokio::time::timeout(Duration::from_secs(30), rx).await {
-            Ok(Ok(response)) => Ok(Some(response)),
-            Ok(Err(_)) => {
-                observe_skill_source_request(
-                    self.metrics.as_ref(),
-                    SkillSourceMetricSource::RunnerConfigured,
-                    metric_operation,
-                    request_started,
-                    None,
-                    SkillSourceMetricOutcomeClass::Unavailable,
-                    None,
-                );
-                Err("configured_skill_roots_runner_unavailable".to_string())
-            }
-            Err(_) => {
-                self.runner_registry
-                    .cancel_request_dispatch_state(&request_id)
-                    .await;
-                observe_skill_source_request(
-                    self.metrics.as_ref(),
-                    SkillSourceMetricSource::RunnerConfigured,
-                    metric_operation,
-                    request_started,
-                    None,
-                    SkillSourceMetricOutcomeClass::Unavailable,
-                    None,
-                );
-                Err("configured_skill_roots_runner_unavailable".to_string())
-            }
-        }
-    }
-
-    async fn observe_configured_runner_skills(
-        &self,
-        project: &ResolvedProject,
-        auth: Option<&AuthContext>,
-    ) -> Result<Option<ConfiguredSkillRootsListResponse>, String> {
+    ) -> Result<Option<RunnerSkillListResponse>, String> {
         let observation_started = Instant::now();
         let Some(response) = self
-            .runner_configured_skill_roots_request(
+            .runner_skill_request(
                 project,
                 auth,
-                ConfiguredSkillRootsRequest::List,
+                RunnerSkillRequest::List,
                 true,
+                Some(SkillSourceMetricOperation::CatalogList),
             )
             .await?
         else {
@@ -436,7 +331,7 @@ impl ToolRuntime {
         if response.exit_code != Some(0) || response.error.is_some() {
             observe_skill_source_request(
                 self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerConfigured,
+                SkillSourceMetricSource::RunnerLocal,
                 SkillSourceMetricOperation::CatalogList,
                 observation_started,
                 Some(&response),
@@ -445,13 +340,13 @@ impl ToolRuntime {
             );
             return Err("skills_catalog_unavailable".to_string());
         }
-        let parsed: ConfiguredSkillRootsListResponse =
+        let parsed: RunnerSkillListResponse =
             match serde_json::from_str(response.stdout.as_deref().unwrap_or_default()) {
                 Ok(parsed) => parsed,
                 Err(_) => {
                     observe_skill_source_request(
                         self.metrics.as_ref(),
-                        SkillSourceMetricSource::RunnerConfigured,
+                        SkillSourceMetricSource::RunnerLocal,
                         SkillSourceMetricOperation::CatalogList,
                         observation_started,
                         Some(&response),
@@ -464,7 +359,7 @@ impl ToolRuntime {
         if parsed.validate().is_err() {
             observe_skill_source_request(
                 self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerConfigured,
+                SkillSourceMetricSource::RunnerLocal,
                 SkillSourceMetricOperation::CatalogList,
                 observation_started,
                 Some(&response),
@@ -475,7 +370,7 @@ impl ToolRuntime {
         }
         observe_skill_source_request(
             self.metrics.as_ref(),
-            SkillSourceMetricSource::RunnerConfigured,
+            SkillSourceMetricSource::RunnerLocal,
             SkillSourceMetricOperation::CatalogList,
             observation_started,
             Some(&response),
@@ -483,90 +378,6 @@ impl ToolRuntime {
             Some(parsed.skills.len()),
         );
         Ok(Some(parsed))
-    }
-
-    async fn observe_runner_skills(
-        &self,
-        project: &ResolvedProject,
-        auth: Option<&AuthContext>,
-    ) -> Result<Vec<RunnerSkillDescriptor>, String> {
-        let observation_started = Instant::now();
-        let Some(response) = self
-            .runner_skill_store_request(project, auth, SkillStoreRequest::ListActive, true)
-            .await?
-        else {
-            return Ok(Vec::new());
-        };
-        if response.exit_code != Some(0) || response.error.is_some() {
-            observe_skill_source_request(
-                self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerManaged,
-                SkillSourceMetricOperation::CatalogList,
-                observation_started,
-                Some(&response),
-                SkillSourceMetricOutcomeClass::RunnerError,
-                None,
-            );
-            return Err("skills_catalog_unavailable".to_string());
-        }
-        let parsed: SkillStoreListActiveResponse =
-            match serde_json::from_str(response.stdout.as_deref().unwrap_or_default()) {
-                Ok(parsed) => parsed,
-                Err(_) => {
-                    observe_skill_source_request(
-                        self.metrics.as_ref(),
-                        SkillSourceMetricSource::RunnerManaged,
-                        SkillSourceMetricOperation::CatalogList,
-                        observation_started,
-                        Some(&response),
-                        SkillSourceMetricOutcomeClass::InvalidResponse,
-                        None,
-                    );
-                    return Err("skills_catalog_unavailable".to_string());
-                }
-            };
-        if parsed.format != SKILL_STORE_RESPONSE_FORMAT || parsed.skills.len() > 256 {
-            observe_skill_source_request(
-                self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerManaged,
-                SkillSourceMetricOperation::CatalogList,
-                observation_started,
-                Some(&response),
-                SkillSourceMetricOutcomeClass::InvalidResponse,
-                None,
-            );
-            return Err("skills_catalog_unavailable".to_string());
-        }
-        for skill in &parsed.skills {
-            if !valid_skill_id(&skill.skill_id)
-                || !valid_skill_key(&skill.skill_key)
-                || !valid_package_revision(&skill.package_revision)
-                || !is_lower_sha256(&skill.definition_revision)
-                || skill.name.chars().count() > MAX_SKILL_NAME_CHARS
-                || skill.description.chars().count() > MAX_SKILL_DESCRIPTION_CHARS
-            {
-                observe_skill_source_request(
-                    self.metrics.as_ref(),
-                    SkillSourceMetricSource::RunnerManaged,
-                    SkillSourceMetricOperation::CatalogList,
-                    observation_started,
-                    Some(&response),
-                    SkillSourceMetricOutcomeClass::InvalidResponse,
-                    None,
-                );
-                return Err("skills_catalog_unavailable".to_string());
-            }
-        }
-        observe_skill_source_request(
-            self.metrics.as_ref(),
-            SkillSourceMetricSource::RunnerManaged,
-            SkillSourceMetricOperation::CatalogList,
-            observation_started,
-            Some(&response),
-            SkillSourceMetricOutcomeClass::Success,
-            Some(parsed.skills.len()),
-        );
-        Ok(parsed.skills)
     }
 
     async fn probe_project_skill_exact(
@@ -626,7 +437,7 @@ impl ToolRuntime {
             .unwrap_or(ExactSkillProbeOutcome::Absent)
     }
 
-    async fn probe_configured_skill_exact(
+    async fn probe_runner_skill_exact(
         &self,
         project: &ResolvedProject,
         auth: Option<&AuthContext>,
@@ -634,106 +445,11 @@ impl ToolRuntime {
     ) -> ExactSkillProbeOutcome {
         let observation_started = Instant::now();
         let response = match self
-            .runner_configured_skill_roots_request_with_metric(
+            .runner_skill_request(
                 project,
                 auth,
-                ConfiguredSkillRootsRequest::Read {
+                RunnerSkillRequest::Resolve {
                     skill_id: skill_id.to_string(),
-                    path: SKILL_DEFINITION_FILE.to_string(),
-                    start_line: 1,
-                    limit: 1,
-                    expected_definition_revision: None,
-                },
-                true,
-                SkillSourceMetricOperation::ExactResolve,
-            )
-            .await
-        {
-            Ok(Some(response)) => response,
-            Ok(None) => return ExactSkillProbeOutcome::NotApplicable,
-            Err(_) => return ExactSkillProbeOutcome::SourceUnavailable,
-        };
-        if response.exit_code != Some(0) || response.error.is_some() {
-            observe_skill_source_request(
-                self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerConfigured,
-                SkillSourceMetricOperation::ExactResolve,
-                observation_started,
-                Some(&response),
-                SkillSourceMetricOutcomeClass::RunnerError,
-                None,
-            );
-            return if response.error.as_deref() == Some("skill_not_found") {
-                ExactSkillProbeOutcome::Absent
-            } else {
-                ExactSkillProbeOutcome::SourceUnavailable
-            };
-        }
-        let read: ConfiguredSkillRootsReadResponse =
-            match serde_json::from_str(response.stdout.as_deref().unwrap_or_default()) {
-                Ok(read) => read,
-                Err(_) => {
-                    observe_skill_source_request(
-                        self.metrics.as_ref(),
-                        SkillSourceMetricSource::RunnerConfigured,
-                        SkillSourceMetricOperation::ExactResolve,
-                        observation_started,
-                        Some(&response),
-                        SkillSourceMetricOutcomeClass::InvalidResponse,
-                        None,
-                    );
-                    return ExactSkillProbeOutcome::SourceUnavailable;
-                }
-            };
-        if read
-            .validate_for_request(skill_id, SKILL_DEFINITION_FILE, 1, 1)
-            .is_err()
-            || read.sha256 != read.definition_revision
-        {
-            observe_skill_source_request(
-                self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerConfigured,
-                SkillSourceMetricOperation::ExactResolve,
-                observation_started,
-                Some(&response),
-                SkillSourceMetricOutcomeClass::InvalidResponse,
-                None,
-            );
-            return ExactSkillProbeOutcome::SourceUnavailable;
-        }
-        observe_skill_source_request(
-            self.metrics.as_ref(),
-            SkillSourceMetricSource::RunnerConfigured,
-            SkillSourceMetricOperation::ExactResolve,
-            observation_started,
-            Some(&response),
-            SkillSourceMetricOutcomeClass::Success,
-            None,
-        );
-        ExactSkillProbeOutcome::Candidate(ExactSkillCandidate::RunnerConfigured {
-            name: read.name,
-            definition_revision: read.definition_revision,
-        })
-    }
-
-    async fn probe_managed_skill_exact(
-        &self,
-        project: &ResolvedProject,
-        auth: Option<&AuthContext>,
-        skill_id: &str,
-    ) -> ExactSkillProbeOutcome {
-        let observation_started = Instant::now();
-        let response = match self
-            .runner_skill_store_request_with_metric(
-                project,
-                auth,
-                SkillStoreRequest::Read {
-                    skill_id: skill_id.to_string(),
-                    path: SKILL_DEFINITION_FILE.to_string(),
-                    start_line: 1,
-                    limit: 1,
-                    expected_package_revision: None,
-                    expected_definition_revision: None,
                 },
                 true,
                 Some(SkillSourceMetricOperation::ExactResolve),
@@ -747,26 +463,22 @@ impl ToolRuntime {
         if response.exit_code != Some(0) || response.error.is_some() {
             observe_skill_source_request(
                 self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerManaged,
+                SkillSourceMetricSource::RunnerLocal,
                 SkillSourceMetricOperation::ExactResolve,
                 observation_started,
                 Some(&response),
                 SkillSourceMetricOutcomeClass::RunnerError,
                 None,
             );
-            return if response.error.as_deref() == Some("skill_not_found") {
-                ExactSkillProbeOutcome::Absent
-            } else {
-                ExactSkillProbeOutcome::SourceUnavailable
-            };
+            return ExactSkillProbeOutcome::SourceUnavailable;
         }
-        let read: SkillStoreReadResponse =
+        let resolved: RunnerSkillResolveResponse =
             match serde_json::from_str(response.stdout.as_deref().unwrap_or_default()) {
-                Ok(read) => read,
+                Ok(resolved) => resolved,
                 Err(_) => {
                     observe_skill_source_request(
                         self.metrics.as_ref(),
-                        SkillSourceMetricSource::RunnerManaged,
+                        SkillSourceMetricSource::RunnerLocal,
                         SkillSourceMetricOperation::ExactResolve,
                         observation_started,
                         Some(&response),
@@ -776,24 +488,10 @@ impl ToolRuntime {
                     return ExactSkillProbeOutcome::SourceUnavailable;
                 }
             };
-        if read.format != SKILL_STORE_RESPONSE_FORMAT
-            || read.skill_id != skill_id
-            || read.path != SKILL_DEFINITION_FILE
-            || !valid_skill_key(&read.skill_key)
-            || !valid_package_revision(&read.package_revision)
-            || !is_lower_sha256(&read.definition_revision)
-            || !is_lower_sha256(&read.sha256)
-            || read.sha256 != read.definition_revision
-            || read.name.chars().count() > MAX_SKILL_NAME_CHARS
-            || read.description.chars().count() > MAX_SKILL_DESCRIPTION_CHARS
-            || read.start_line != 1
-            || read.returned_lines > 1
-            || read.text.len() > MAX_SKILL_READ_TEXT_BYTES
-            || read.has_more != read.next_start_line.is_some()
-        {
+        if resolved.validate_for_request(skill_id).is_err() {
             observe_skill_source_request(
                 self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerManaged,
+                SkillSourceMetricSource::RunnerLocal,
                 SkillSourceMetricOperation::ExactResolve,
                 observation_started,
                 Some(&response),
@@ -804,18 +502,17 @@ impl ToolRuntime {
         }
         observe_skill_source_request(
             self.metrics.as_ref(),
-            SkillSourceMetricSource::RunnerManaged,
+            SkillSourceMetricSource::RunnerLocal,
             SkillSourceMetricOperation::ExactResolve,
             observation_started,
             Some(&response),
             SkillSourceMetricOutcomeClass::Success,
             None,
         );
-        ExactSkillProbeOutcome::Candidate(ExactSkillCandidate::RunnerManaged {
-            name: read.name,
-            package_revision: read.package_revision,
-            definition_revision: read.definition_revision,
-        })
+        resolved
+            .skill
+            .map(|skill| ExactSkillProbeOutcome::Candidate(ExactSkillCandidate::Runner(skill)))
+            .unwrap_or(ExactSkillProbeOutcome::Absent)
     }
 
     async fn resolve_exact_skill(
@@ -831,13 +528,7 @@ impl ToolRuntime {
         )?;
         merge_exact_skill_probe(
             &mut candidate,
-            self.probe_configured_skill_exact(project, auth, skill_id)
-                .await,
-        )?;
-        merge_exact_skill_probe(
-            &mut candidate,
-            self.probe_managed_skill_exact(project, auth, skill_id)
-                .await,
+            self.probe_runner_skill_exact(project, auth, skill_id).await,
         )?;
         Ok(candidate)
     }
@@ -846,183 +537,46 @@ impl ToolRuntime {
         &self,
         project: &ResolvedProject,
         auth: Option<&AuthContext>,
-        skill_id: &str,
+        resolved: &RunnerSkillDescriptor,
         path: &str,
         start_line: usize,
         limit: usize,
-        expected_package_revision: Option<&str>,
-        expected_definition_revision: Option<&str>,
+        user_expected_package_revision: Option<&str>,
+        user_expected_definition_revision: Option<&str>,
     ) -> ToolResult {
-        let observation_started = Instant::now();
-        let response = match self
-            .runner_skill_store_request(
-                project,
-                auth,
-                SkillStoreRequest::Read {
-                    skill_id: skill_id.to_string(),
-                    path: path.to_string(),
-                    start_line,
-                    limit,
-                    expected_package_revision: expected_package_revision.map(str::to_string),
-                    expected_definition_revision: expected_definition_revision.map(str::to_string),
-                },
-                false,
-            )
-            .await
-        {
-            Ok(Some(response)) => response,
-            Ok(None) => {
-                return skill_error(
-                    "skill_store_capability_unavailable",
-                    &project.resolved_id,
-                    Some(json!({"skill_id": skill_id})),
-                )
+        let skill_id = resolved.skill_id();
+        let source = resolved.source();
+        let (expected_package_revision, expected_definition_revision) = match source {
+            RunnerSkillSource::Configured => {
+                (None, Some(resolved.definition_revision().to_string()))
             }
-            Err(kind) => {
-                return skill_error_dynamic(
-                    &kind,
-                    &project.resolved_id,
-                    Some(json!({"skill_id": skill_id})),
-                    kind == "skill_store_outcome_unknown",
-                )
-            }
+            RunnerSkillSource::Managed => (
+                user_expected_package_revision.map(str::to_string),
+                user_expected_definition_revision.map(str::to_string),
+            ),
         };
-        if response.exit_code != Some(0) || response.error.is_some() {
-            observe_skill_source_request(
-                self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerManaged,
-                SkillSourceMetricOperation::ResourceRead,
-                observation_started,
-                Some(&response),
-                SkillSourceMetricOutcomeClass::RunnerError,
-                None,
-            );
-            let kind = stable_skill_store_error(response.error.as_deref());
-            return skill_error_dynamic(
-                &kind,
-                &project.resolved_id,
-                Some(json!({"skill_id": skill_id, "path": path})),
-                false,
-            );
-        }
-        let read: SkillStoreReadResponse =
-            match serde_json::from_str(response.stdout.as_deref().unwrap_or_default()) {
-                Ok(read) => read,
-                Err(_) => {
-                    observe_skill_source_request(
-                        self.metrics.as_ref(),
-                        SkillSourceMetricSource::RunnerManaged,
-                        SkillSourceMetricOperation::ResourceRead,
-                        observation_started,
-                        Some(&response),
-                        SkillSourceMetricOutcomeClass::InvalidResponse,
-                        None,
-                    );
-                    return skill_error(
-                        "skill_store_response_invalid",
-                        &project.resolved_id,
-                        Some(json!({"skill_id": skill_id})),
-                    );
-                }
-            };
-        if read.format != SKILL_STORE_RESPONSE_FORMAT
-            || read.skill_id != skill_id
-            || read.path != path
-            || !valid_package_revision(&read.package_revision)
-            || !is_lower_sha256(&read.definition_revision)
-            || !is_lower_sha256(&read.sha256)
-            || read.start_line != start_line
-            || read.returned_lines > limit
-            || read.text.len() > MAX_SKILL_READ_TEXT_BYTES
-            || read.has_more != read.next_start_line.is_some()
-        {
-            observe_skill_source_request(
-                self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerManaged,
-                SkillSourceMetricOperation::ResourceRead,
-                observation_started,
-                Some(&response),
-                SkillSourceMetricOutcomeClass::InvalidResponse,
-                None,
-            );
-            return skill_error(
-                "skill_store_response_invalid",
-                &project.resolved_id,
-                Some(json!({"skill_id": skill_id})),
-            );
-        }
-        observe_skill_source_request(
-            self.metrics.as_ref(),
-            SkillSourceMetricSource::RunnerManaged,
-            SkillSourceMetricOperation::ResourceRead,
-            observation_started,
-            Some(&response),
-            SkillSourceMetricOutcomeClass::Success,
-            None,
-        );
-        let output = json!({
-            "project": project.resolved_id,
-            "skill_id": read.skill_id,
-            "name": read.name,
-            "source_scope": "runner",
-            "trust": "operator_installed_guidance",
-            "package_revision": read.package_revision,
-            "definition_revision": read.definition_revision,
-            "path": read.path,
-            "sha256": read.sha256,
-            "text": read.text,
-            "start_line": read.start_line,
-            "end_line": read.end_line,
-            "returned_lines": read.returned_lines,
-            "has_more": read.has_more,
-            "next_start_line": read.next_start_line,
-        });
-        if serde_json::to_vec(&output)
-            .map(|bytes| bytes.len() > MAX_SKILL_READ_RESULT_BYTES)
-            .unwrap_or(true)
-        {
-            return skill_error(
-                "skill_read_result_too_large",
-                &project.resolved_id,
-                Some(json!({"skill_id": skill_id, "path": path})),
-            );
-        }
-        ToolResult::ok(output)
-    }
-
-    async fn read_configured_runner_skill(
-        &self,
-        project: &ResolvedProject,
-        auth: Option<&AuthContext>,
-        skill_id: &str,
-        path: &str,
-        start_line: usize,
-        limit: usize,
-        definition_revision: &str,
-    ) -> ToolResult {
         let observation_started = Instant::now();
         let response = match self
-            .runner_configured_skill_roots_request(
+            .runner_skill_request(
                 project,
                 auth,
-                ConfiguredSkillRootsRequest::Read {
+                RunnerSkillRequest::Read {
                     skill_id: skill_id.to_string(),
+                    expected_source: source,
                     path: path.to_string(),
                     start_line,
                     limit,
-                    expected_definition_revision: Some(definition_revision.to_string()),
+                    expected_package_revision,
+                    expected_definition_revision,
                 },
                 false,
+                Some(SkillSourceMetricOperation::ResourceRead),
             )
             .await
         {
             Ok(Some(response)) => response,
             Ok(None) => {
-                return skill_error(
-                    "configured_skill_roots_capability_unavailable",
-                    &project.resolved_id,
-                    Some(json!({"skill_id": skill_id})),
-                )
+                return skill_error("skill_catalog_unavailable", &project.resolved_id, None)
             }
             Err(kind) => {
                 return skill_error_dynamic(
@@ -1036,78 +590,94 @@ impl ToolRuntime {
         if response.exit_code != Some(0) || response.error.is_some() {
             observe_skill_source_request(
                 self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerConfigured,
+                SkillSourceMetricSource::RunnerLocal,
                 SkillSourceMetricOperation::ResourceRead,
                 observation_started,
                 Some(&response),
                 SkillSourceMetricOutcomeClass::RunnerError,
                 None,
             );
-            let kind = stable_configured_skill_error(response.error.as_deref());
+            let kind = stable_runner_skill_read_error(response.error.as_deref());
             return skill_error_dynamic(
-                &kind,
+                kind,
                 &project.resolved_id,
                 Some(json!({"skill_id": skill_id, "path": path})),
                 false,
             );
         }
-        let read: ConfiguredSkillRootsReadResponse =
+        let read: RunnerSkillReadResponse =
             match serde_json::from_str(response.stdout.as_deref().unwrap_or_default()) {
                 Ok(read) => read,
                 Err(_) => {
                     observe_skill_source_request(
                         self.metrics.as_ref(),
-                        SkillSourceMetricSource::RunnerConfigured,
+                        SkillSourceMetricSource::RunnerLocal,
                         SkillSourceMetricOperation::ResourceRead,
                         observation_started,
                         Some(&response),
                         SkillSourceMetricOutcomeClass::InvalidResponse,
                         None,
                     );
-                    return skill_error(
-                        "configured_skill_response_invalid",
-                        &project.resolved_id,
-                        Some(json!({"skill_id": skill_id})),
-                    );
+                    return skill_error("skill_catalog_unavailable", &project.resolved_id, None);
                 }
             };
         if read
-            .validate_for_request(skill_id, path, start_line, limit)
+            .validate_for_request(skill_id, source, path, start_line, limit)
             .is_err()
-            || read.definition_revision != definition_revision
+            || (source == RunnerSkillSource::Configured
+                && read.skill.definition_revision() != resolved.definition_revision())
         {
             observe_skill_source_request(
                 self.metrics.as_ref(),
-                SkillSourceMetricSource::RunnerConfigured,
+                SkillSourceMetricSource::RunnerLocal,
                 SkillSourceMetricOperation::ResourceRead,
                 observation_started,
                 Some(&response),
                 SkillSourceMetricOutcomeClass::InvalidResponse,
                 None,
             );
-            return skill_error(
-                "configured_skill_response_invalid",
-                &project.resolved_id,
-                Some(json!({"skill_id": skill_id})),
-            );
+            return skill_error("skill_catalog_unavailable", &project.resolved_id, None);
         }
         observe_skill_source_request(
             self.metrics.as_ref(),
-            SkillSourceMetricSource::RunnerConfigured,
+            SkillSourceMetricSource::RunnerLocal,
             SkillSourceMetricOperation::ResourceRead,
             observation_started,
             Some(&response),
             SkillSourceMetricOutcomeClass::Success,
             None,
         );
+        let (name, package_revision, definition_revision, trust) = match &read.skill {
+            RunnerSkillDescriptor::Configured {
+                name,
+                definition_revision,
+                ..
+            } => (
+                name.clone(),
+                None,
+                definition_revision.clone(),
+                "operator_configured_guidance",
+            ),
+            RunnerSkillDescriptor::Managed {
+                name,
+                package_revision,
+                definition_revision,
+                ..
+            } => (
+                name.clone(),
+                Some(package_revision.clone()),
+                definition_revision.clone(),
+                "operator_installed_guidance",
+            ),
+        };
         let output = json!({
             "project": project.resolved_id,
-            "skill_id": read.skill_id,
-            "name": read.name,
+            "skill_id": skill_id,
+            "name": name,
             "source_scope": "runner",
-            "trust": "operator_configured_guidance",
-            "package_revision": null,
-            "definition_revision": read.definition_revision,
+            "trust": trust,
+            "package_revision": package_revision,
+            "definition_revision": definition_revision,
             "path": read.path,
             "sha256": read.sha256,
             "text": read.text,
@@ -1136,12 +706,8 @@ impl ToolRuntime {
         auth: Option<&AuthContext>,
     ) -> Result<SkillCatalog, &'static str> {
         let mut catalog = self.discover_project_skills(project).await?;
-        let configured = self
-            .observe_configured_runner_skills(project, auth)
-            .await
-            .map_err(|_| "skills_catalog_unavailable")?;
-        let managed = self
-            .observe_runner_skills(project, auth)
+        let runner = self
+            .observe_runner_skill_catalog(project, auth)
             .await
             .map_err(|_| "skills_catalog_unavailable")?;
         let mut seen_ids = catalog
@@ -1149,53 +715,64 @@ impl ToolRuntime {
             .iter()
             .map(|skill| skill.descriptor.skill_id.clone())
             .collect::<std::collections::BTreeSet<_>>();
-        if let Some(configured) = configured {
-            catalog.invalid_count = catalog
-                .invalid_count
-                .saturating_add(configured.invalid_count);
-            catalog.discovery_truncated |= configured.discovery_truncated;
-            for reason_code in configured.diagnostics {
+        if let Some(runner) = runner {
+            catalog.invalid_count = catalog.invalid_count.saturating_add(runner.invalid_count);
+            catalog.discovery_truncated |= runner.discovery_truncated;
+            for reason_code in runner.diagnostics {
                 push_diagnostic(&mut catalog.diagnostics, &reason_code);
             }
-            for skill in configured.skills {
-                if !seen_ids.insert(skill.skill_id.clone()) {
+            for skill in runner.skills {
+                if !seen_ids.insert(skill.skill_id().to_string()) {
                     return Err("skills_catalog_unavailable");
                 }
-                let order_key = skill.skill_id.clone();
+                let (descriptor, order_key) = match skill {
+                    RunnerSkillDescriptor::Configured {
+                        skill_id,
+                        name,
+                        description,
+                        definition_revision,
+                    } => {
+                        let order_key = skill_id.clone();
+                        (
+                            SkillDescriptor {
+                                skill_id,
+                                name,
+                                description,
+                                definition_revision,
+                                package_revision: None,
+                                source_scope: "runner",
+                                trust: "operator_configured_guidance",
+                                name_conflict: false,
+                            },
+                            order_key,
+                        )
+                    }
+                    RunnerSkillDescriptor::Managed {
+                        skill_id,
+                        skill_key,
+                        name,
+                        description,
+                        package_revision,
+                        definition_revision,
+                    } => (
+                        SkillDescriptor {
+                            skill_id,
+                            name,
+                            description,
+                            definition_revision,
+                            package_revision: Some(package_revision),
+                            source_scope: "runner",
+                            trust: "operator_installed_guidance",
+                            name_conflict: false,
+                        },
+                        skill_key,
+                    ),
+                };
                 catalog.skills.push(CatalogSkill {
-                    descriptor: SkillDescriptor {
-                        skill_id: skill.skill_id,
-                        name: skill.name,
-                        description: skill.description,
-                        definition_revision: skill.definition_revision,
-                        package_revision: None,
-                        source_scope: "runner",
-                        trust: "operator_configured_guidance",
-                        name_conflict: false,
-                    },
+                    descriptor,
                     order_key,
                 });
             }
-        }
-        let mut managed = managed;
-        managed.sort_by(|left, right| left.skill_key.cmp(&right.skill_key));
-        for skill in managed {
-            if !seen_ids.insert(skill.skill_id.clone()) {
-                return Err("skills_catalog_unavailable");
-            }
-            catalog.skills.push(CatalogSkill {
-                descriptor: SkillDescriptor {
-                    skill_id: skill.skill_id,
-                    name: skill.name,
-                    description: skill.description,
-                    definition_revision: skill.definition_revision,
-                    package_revision: Some(skill.package_revision),
-                    source_scope: "runner",
-                    trust: "operator_installed_guidance",
-                    name_conflict: false,
-                },
-                order_key: skill.skill_key,
-            });
         }
         recompute_name_conflicts(&mut catalog.skills);
         catalog.catalog_revision = catalog_revision(
@@ -1366,59 +943,41 @@ impl ToolRuntime {
             Err(_) => return skill_error("skill_catalog_unavailable", &project.resolved_id, None),
         };
         let (package_name, name, definition_revision) = match candidate {
-            ExactSkillCandidate::RunnerManaged {
-                name: _resolved_name,
-                package_revision: _resolved_package_revision,
-                definition_revision: _resolved_definition_revision,
-            } => {
-                // The probe snapshot proves source membership only. Managed package and
-                // definition revisions remain pinned exclusively by user-supplied expectations.
+            ExactSkillCandidate::Runner(resolved) => {
+                if resolved.source() == RunnerSkillSource::Configured {
+                    if expected_package_revision.is_some() {
+                        return skill_error(
+                            "skill_package_revision_not_supported",
+                            &project.resolved_id,
+                            Some(json!({"skill_id": skill_id})),
+                        );
+                    }
+                    if expected_definition_revision
+                        .as_deref()
+                        .is_some_and(|expected| expected != resolved.definition_revision())
+                    {
+                        return skill_error(
+                            "skill_definition_changed",
+                            &project.resolved_id,
+                            Some(json!({
+                                "skill_id": skill_id,
+                                "definition_revision": resolved.definition_revision(),
+                            })),
+                        );
+                    }
+                }
+                // Managed Resolve revisions prove membership/source identity only. The final
+                // Read receives only the caller's explicit managed revision expectations.
                 return self
                     .read_runner_skill(
                         project,
                         auth,
-                        &skill_id,
+                        &resolved,
                         &resource_path,
                         start_line,
                         limit,
                         expected_package_revision.as_deref(),
                         expected_definition_revision.as_deref(),
-                    )
-                    .await;
-            }
-            ExactSkillCandidate::RunnerConfigured {
-                name: _resolved_name,
-                definition_revision,
-            } => {
-                if expected_package_revision.is_some() {
-                    return skill_error(
-                        "skill_package_revision_not_supported",
-                        &project.resolved_id,
-                        Some(json!({"skill_id": skill_id})),
-                    );
-                }
-                if expected_definition_revision
-                    .as_deref()
-                    .is_some_and(|expected| expected != definition_revision)
-                {
-                    return skill_error(
-                        "skill_definition_changed",
-                        &project.resolved_id,
-                        Some(json!({
-                            "skill_id": skill_id,
-                            "definition_revision": definition_revision,
-                        })),
-                    );
-                }
-                return self
-                    .read_configured_runner_skill(
-                        project,
-                        auth,
-                        &skill_id,
-                        &resource_path,
-                        start_line,
-                        limit,
-                        &definition_revision,
                     )
                     .await;
             }
@@ -1582,15 +1141,16 @@ impl ToolRuntime {
             return skill_error("skill_versions_limit_invalid", &project.resolved_id, None);
         }
         let response = match self
-            .runner_skill_store_request(
+            .runner_skill_request(
                 project,
                 auth,
-                SkillStoreRequest::Versions {
+                RunnerSkillRequest::Versions {
                     skill_key: skill_key.clone(),
                     offset,
                     limit,
                 },
                 false,
+                None,
             )
             .await
         {
@@ -1683,10 +1243,10 @@ impl ToolRuntime {
             );
         }
         let response = match self
-            .runner_skill_store_request(
+            .runner_skill_request(
                 project,
                 auth,
-                SkillStoreRequest::Install {
+                RunnerSkillRequest::Install {
                     skill_key: skill_key.clone(),
                     source_project_id: project.resolved_id.clone(),
                     source_project_root: project.config.path.clone(),
@@ -1697,6 +1257,7 @@ impl ToolRuntime {
                     expected_state_revision,
                 },
                 false,
+                None,
             )
             .await
         {
@@ -1795,16 +1356,17 @@ impl ToolRuntime {
             );
         }
         let response = match self
-            .runner_skill_store_request(
+            .runner_skill_request(
                 project,
                 auth,
-                SkillStoreRequest::Activate {
+                RunnerSkillRequest::Activate {
                     skill_key: skill_key.clone(),
                     package_revision: package_revision.clone(),
                     expected_state_revision,
                     idempotency_key,
                 },
                 false,
+                None,
             )
             .await
         {
@@ -1880,16 +1442,17 @@ impl ToolRuntime {
             return skill_error("skill_remove_invalid_arguments", &project.resolved_id, None);
         }
         let response = match self
-            .runner_skill_store_request(
+            .runner_skill_request(
                 project,
                 auth,
-                SkillStoreRequest::RemoveRevision {
+                RunnerSkillRequest::RemoveRevision {
                     skill_key: skill_key.clone(),
                     package_revision: package_revision.clone(),
                     expected_state_revision,
                     idempotency_key,
                 },
                 false,
+                None,
             )
             .await
         {
@@ -2412,35 +1975,22 @@ fn skill_error_dynamic(
     ToolResult::err_with_output(kind.to_string(), output)
 }
 
-fn configured_skill_roots_enqueue_error_kind(
-    error: &EnqueueConfiguredSkillRootsError,
+fn runner_skill_enqueue_error_kind(
+    error: &EnqueueRunnerSkillError,
+    management: bool,
 ) -> &'static str {
-    match error {
-        EnqueueConfiguredSkillRootsError::UnsupportedCapability { .. } => {
-            "configured_skill_roots_capability_unavailable"
-        }
-        EnqueueConfiguredSkillRootsError::ExactRunnerUnavailable { .. }
-        | EnqueueConfiguredSkillRootsError::ExactRunnerOffline { .. }
-        | EnqueueConfiguredSkillRootsError::RunnerChanged { .. } => {
-            "configured_skill_roots_runner_changed"
-        }
-        EnqueueConfiguredSkillRootsError::InvalidRequest { .. }
-        | EnqueueConfiguredSkillRootsError::DispatchUnavailable { .. } => {
-            "configured_skill_roots_runner_unavailable"
-        }
+    if !management {
+        return "skill_catalog_unavailable";
     }
-}
-
-fn skill_store_enqueue_error_kind(error: &EnqueueSkillStoreError) -> &'static str {
     match error {
-        EnqueueSkillStoreError::UnsupportedCapability { .. } => {
+        EnqueueRunnerSkillError::UnsupportedCapability { .. } => {
             "skill_store_capability_unavailable"
         }
-        EnqueueSkillStoreError::ExactRunnerUnavailable { .. }
-        | EnqueueSkillStoreError::ExactRunnerOffline { .. }
-        | EnqueueSkillStoreError::RunnerChanged { .. } => "skill_store_runner_changed",
-        EnqueueSkillStoreError::InvalidRequest { .. }
-        | EnqueueSkillStoreError::DispatchUnavailable { .. } => "skill_store_runner_unavailable",
+        EnqueueRunnerSkillError::ExactRunnerUnavailable { .. }
+        | EnqueueRunnerSkillError::ExactRunnerOffline { .. }
+        | EnqueueRunnerSkillError::RunnerChanged { .. } => "skill_store_runner_changed",
+        EnqueueRunnerSkillError::InvalidRequest { .. }
+        | EnqueueRunnerSkillError::DispatchUnavailable { .. } => "skill_store_runner_unavailable",
     }
 }
 
@@ -2463,22 +2013,24 @@ fn stable_skill_store_error(error: Option<&str>) -> String {
     }
 }
 
-fn stable_configured_skill_error(error: Option<&str>) -> String {
+fn stable_runner_skill_read_error(error: Option<&str>) -> &'static str {
     let base = error
-        .unwrap_or("configured_skill_roots_unavailable")
+        .unwrap_or("skill_catalog_unavailable")
         .split(':')
         .next()
-        .unwrap_or("configured_skill_roots_unavailable")
+        .unwrap_or("skill_catalog_unavailable")
         .trim();
-    if (base.starts_with("skill_") || base.starts_with("configured_skill_"))
-        && base.len() <= 96
-        && base
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
-    {
-        base.to_string()
-    } else {
-        "configured_skill_roots_unavailable".to_string()
+    match base {
+        "skill_package_changed" => "skill_package_changed",
+        "skill_definition_changed" => "skill_definition_changed",
+        "skill_sensitive_path" => "skill_sensitive_path",
+        "skill_resource_path_invalid" => "skill_resource_path_invalid",
+        "skill_resource_not_found" => "skill_resource_not_found",
+        "skill_resource_too_large" => "skill_resource_too_large",
+        "skill_resource_unsupported_encoding" => "skill_resource_unsupported_encoding",
+        "skill_resource_unavailable" => "skill_resource_unavailable",
+        "skill_read_result_too_large" => "skill_read_result_too_large",
+        _ => "skill_catalog_unavailable",
     }
 }
 
@@ -2724,95 +2276,39 @@ mod tests {
     }
 
     #[test]
-    fn configured_skill_roots_enqueue_errors_preserve_legacy_runtime_error_kinds() {
-        let cases = [
-            (
-                EnqueueConfiguredSkillRootsError::UnsupportedCapability {
-                    client_id: "runner-a".to_string(),
-                    capability: "configured_skill_roots_read",
-                },
-                "configured_skill_roots_capability_unavailable",
-            ),
-            (
-                EnqueueConfiguredSkillRootsError::ExactRunnerUnavailable {
-                    client_id: "runner-a".to_string(),
-                },
-                "configured_skill_roots_runner_changed",
-            ),
-            (
-                EnqueueConfiguredSkillRootsError::ExactRunnerOffline {
-                    client_id: "runner-a".to_string(),
-                },
-                "configured_skill_roots_runner_changed",
-            ),
-            (
-                EnqueueConfiguredSkillRootsError::RunnerChanged {
-                    client_id: "runner-a".to_string(),
-                },
-                "configured_skill_roots_runner_changed",
-            ),
-            (
-                EnqueueConfiguredSkillRootsError::InvalidRequest {
-                    message: "invalid configured Skill roots request".to_string(),
-                },
-                "configured_skill_roots_runner_unavailable",
-            ),
-            (
-                EnqueueConfiguredSkillRootsError::DispatchUnavailable {
-                    message: "too many pending requests".to_string(),
-                },
-                "configured_skill_roots_runner_unavailable",
-            ),
-        ];
-        for (error, expected) in cases {
-            assert_eq!(configured_skill_roots_enqueue_error_kind(&error), expected);
-        }
-    }
+    fn runner_skill_admission_errors_keep_runtime_fail_closed_and_management_store_semantics() {
+        let unsupported = EnqueueRunnerSkillError::UnsupportedCapability {
+            client_id: "runner-a".to_string(),
+            capability: "skill_runtime",
+        };
+        assert_eq!(
+            runner_skill_enqueue_error_kind(&unsupported, false),
+            "skill_catalog_unavailable"
+        );
+        assert_eq!(
+            runner_skill_enqueue_error_kind(&unsupported, true),
+            "skill_store_capability_unavailable"
+        );
 
-    #[test]
-    fn skill_store_enqueue_errors_preserve_legacy_runtime_error_kinds() {
-        let cases = [
-            (
-                EnqueueSkillStoreError::UnsupportedCapability {
-                    client_id: "runner-a".to_string(),
-                    capability: "skill_store_read",
-                },
-                "skill_store_capability_unavailable",
-            ),
-            (
-                EnqueueSkillStoreError::ExactRunnerUnavailable {
-                    client_id: "runner-a".to_string(),
-                },
-                "skill_store_runner_changed",
-            ),
-            (
-                EnqueueSkillStoreError::ExactRunnerOffline {
-                    client_id: "runner-a".to_string(),
-                },
-                "skill_store_runner_changed",
-            ),
-            (
-                EnqueueSkillStoreError::RunnerChanged {
-                    client_id: "runner-a".to_string(),
-                },
-                "skill_store_runner_changed",
-            ),
-            (
-                EnqueueSkillStoreError::InvalidRequest {
-                    message: "invalid Skill store request".to_string(),
-                },
-                "skill_store_runner_unavailable",
-            ),
-            (
-                EnqueueSkillStoreError::DispatchUnavailable {
-                    message: "too many pending requests".to_string(),
-                },
-                "skill_store_runner_unavailable",
-            ),
-        ];
-        for (error, expected) in cases {
-            assert_eq!(skill_store_enqueue_error_kind(&error), expected);
-        }
+        let changed = EnqueueRunnerSkillError::RunnerChanged {
+            client_id: "runner-a".to_string(),
+        };
+        assert_eq!(
+            runner_skill_enqueue_error_kind(&changed, false),
+            "skill_catalog_unavailable"
+        );
+        assert_eq!(
+            runner_skill_enqueue_error_kind(&changed, true),
+            "skill_store_runner_changed"
+        );
+
+        let unavailable = EnqueueRunnerSkillError::DispatchUnavailable {
+            message: "too many pending requests".to_string(),
+        };
+        assert_eq!(
+            runner_skill_enqueue_error_kind(&unavailable, true),
+            "skill_store_runner_unavailable"
+        );
     }
 
     #[test]

@@ -2,18 +2,19 @@ use super::*;
 use crate::runner_protocol::{
     RunnerPollRequest, RunnerRegisterRequest, ShellCommandExecutionState,
 };
-use webcodex_core::configured_skills::ConfiguredSkillRootsRequest;
+use webcodex_core::runner_skill::RunnerSkillRequest;
 
-fn configured_skills_registration(instance: &str, read: bool) -> RunnerRegisterRequest {
+fn skill_registration(instance: &str, runtime: bool, management: bool) -> RunnerRegisterRequest {
     current_runner_registration(RunnerRegisterRequest {
-        client_id: "configured-skills-runner".to_string(),
+        client_id: "skill-runner".to_string(),
         runner_instance_id: instance.to_string(),
         runner_protocol_generation: crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
         display_name: None,
         owner: Some("alice".to_string()),
         hostname: None,
         capabilities: RunnerCapabilities {
-            configured_skill_roots_read: read,
+            skill_runtime: runtime,
+            skill_management: management,
             ..Default::default()
         },
         host_context: None,
@@ -32,56 +33,41 @@ fn alice() -> RunnerAccess {
 }
 
 #[tokio::test]
-async fn configured_skill_roots_enqueue_requires_exact_instance_and_explicit_capability() {
+async fn skill_enqueue_requires_exact_instance_and_independent_runtime_management_capabilities() {
     let registry = RunnerRegistry::default();
     registry
-        .register(configured_skills_registration("instance-a", false))
+        .register(skill_registration("instance-a", false, false))
         .await
         .unwrap();
     let auth = alice();
 
-    let legacy_capability_error = registry
-        .enqueue_configured_skill_roots(
-            "configured-skills-runner",
+    let runtime_error = registry
+        .enqueue_runner_skill_typed(
+            "skill-runner",
             "instance-a",
-            ConfiguredSkillRootsRequest::List,
-            Some(&auth),
-            "test".to_string(),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(
-        legacy_capability_error,
-        "configured_skill_roots_capability_unavailable: exact Runner does not support configured_skill_roots_read"
-    );
-
-    let capability_error = registry
-        .enqueue_configured_skill_roots_typed(
-            "configured-skills-runner",
-            "instance-a",
-            ConfiguredSkillRootsRequest::List,
+            RunnerSkillRequest::List,
             Some(&auth),
             "test".to_string(),
         )
         .await
         .unwrap_err();
     assert!(matches!(
-        capability_error,
-        EnqueueConfiguredSkillRootsError::UnsupportedCapability {
-            capability: "configured_skill_roots_read",
+        runtime_error,
+        EnqueueRunnerSkillError::UnsupportedCapability {
+            capability: "skill_runtime",
             ..
         }
     ));
 
     registry
-        .register(configured_skills_registration("instance-a", true))
+        .register(skill_registration("instance-a", true, false))
         .await
         .unwrap();
     let stale_error = registry
-        .enqueue_configured_skill_roots_typed(
-            "configured-skills-runner",
+        .enqueue_runner_skill_typed(
+            "skill-runner",
             "replacement-instance",
-            ConfiguredSkillRootsRequest::List,
+            RunnerSkillRequest::List,
             Some(&auth),
             "test".to_string(),
         )
@@ -89,7 +75,29 @@ async fn configured_skill_roots_enqueue_requires_exact_instance_and_explicit_cap
         .unwrap_err();
     assert!(matches!(
         stale_error,
-        EnqueueConfiguredSkillRootsError::RunnerChanged { .. }
+        EnqueueRunnerSkillError::RunnerChanged { .. }
+    ));
+
+    let management_error = registry
+        .enqueue_runner_skill_typed(
+            "skill-runner",
+            "instance-a",
+            RunnerSkillRequest::Versions {
+                skill_key: "demo".to_string(),
+                offset: 0,
+                limit: 1,
+            },
+            Some(&auth),
+            "test".to_string(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        management_error,
+        EnqueueRunnerSkillError::UnsupportedCapability {
+            capability: "skill_management",
+            ..
+        }
     ));
 
     let inner = registry.inner.lock().await;
@@ -97,18 +105,22 @@ async fn configured_skill_roots_enqueue_requires_exact_instance_and_explicit_cap
 }
 
 #[tokio::test]
-async fn configured_skill_roots_dequeue_rejects_replacement_runner_before_dispatch() {
+async fn skill_dequeue_rejects_replacement_runner_before_dispatch() {
     let registry = RunnerRegistry::default();
     registry
-        .register(configured_skills_registration("instance-a", true))
+        .register(skill_registration("instance-a", true, true))
         .await
         .unwrap();
     let auth = alice();
     let (_request_id, receiver) = registry
-        .enqueue_configured_skill_roots_typed(
-            "configured-skills-runner",
+        .enqueue_runner_skill_typed(
+            "skill-runner",
             "instance-a",
-            ConfiguredSkillRootsRequest::List,
+            RunnerSkillRequest::Versions {
+                skill_key: "demo".to_string(),
+                offset: 0,
+                limit: 1,
+            },
             Some(&auth),
             "test".to_string(),
         )
@@ -122,13 +134,13 @@ async fn configured_skill_roots_dequeue_rejects_replacement_runner_before_dispat
         let mut inner = registry.inner.lock().await;
         inner
             .runners
-            .get_mut("configured-skills-runner")
+            .get_mut("skill-runner")
             .unwrap()
             .runner_instance_id = "instance-b".to_string();
     }
     let polled = registry
         .poll(RunnerPollRequest {
-            client_id: "configured-skills-runner".to_string(),
+            client_id: "skill-runner".to_string(),
             runner_instance_id: "instance-b".to_string(),
         })
         .await
@@ -141,14 +153,15 @@ async fn configured_skill_roots_dequeue_rejects_replacement_runner_before_dispat
         response.command_execution_state,
         Some(ShellCommandExecutionState::NotStarted)
     );
-    assert!(response.error.as_deref().is_some_and(|error| {
-        error.contains("configured Skill roots target Runner changed before dispatch")
-    }));
+    assert!(response
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("Skill target Runner changed before dispatch")));
 
     let inner = registry.inner.lock().await;
     assert!(inner.pending_by_id.is_empty());
     assert!(inner
         .queues_by_runner
-        .get("configured-skills-runner")
+        .get("skill-runner")
         .is_none_or(|queue| queue.is_empty()));
 }

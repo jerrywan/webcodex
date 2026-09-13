@@ -20,6 +20,7 @@ pub(crate) mod patches;
 pub(crate) mod persistent_shell;
 pub(crate) mod plugin;
 pub(crate) mod projects;
+pub(crate) mod runner_skills;
 // Remote persistent shells always run POSIX sh/bash on the SSH target. Their
 // local child ownership is platform-specific: Unix uses a private process group,
 // while Windows owns ssh.exe through ManagedChild's Job Object.
@@ -53,7 +54,6 @@ pub(crate) use config::{
     default_websocket_connect_timeout_secs, QuicClientConfig, ShellProfileConfig,
     CLIENT_PROFILE_ERROR, DEFAULT_MAX_CONCURRENT_JOBS,
 };
-pub(crate) use configured_skills::handle_configured_skill_roots_request;
 #[cfg(test)]
 pub(super) use dispatch::dispatch_request;
 pub(super) use dispatch::{dispatch_request_with_outcome, RunnerDispatchOutcome};
@@ -84,6 +84,7 @@ pub(crate) use projects::{
 pub(crate) use projects::{
     parse_runner_project_toml, runner_project_summary, validate_project_path_policy,
 };
+pub(crate) use runner_skills::handle_runner_skill_request;
 pub(crate) use shell::{
     configured_prepared_shell_job_command, configured_shell_job_command,
     configured_validation_job_command, cwd_allowed, prepare_detached_process_launch,
@@ -97,7 +98,6 @@ pub(crate) use shell::{
 };
 #[cfg(test)]
 pub(crate) use shell::{run_shell, run_shell_with_profiles};
-pub(crate) use skill_store::handle_skill_store_request;
 pub(crate) use ssh::{is_transport_failure, run_ssh_shell_with_execution_state, SshConnectionPool};
 #[cfg(all(test, unix))]
 pub(crate) use transport::install_reload_listener;

@@ -202,10 +202,9 @@ impl RunnerRecord {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct SkillStoreDispatchFence {
+pub(super) struct SkillDispatchFence {
     pub(super) runner_instance_id: String,
     pub(super) management: bool,
-    pub(super) configured_roots: bool,
 }
 
 #[derive(Debug)]
@@ -243,7 +242,7 @@ pub(super) struct PendingShellRequest {
     /// Exact Runner process lease plus source/read/manage mode captured for a
     /// Runner-global Skill request. Revalidated at dequeue so a replacement
     /// process using the same client_id cannot inherit authority.
-    pub(super) skill_store_fence: Option<SkillStoreDispatchFence>,
+    pub(super) skill_fence: Option<SkillDispatchFence>,
     pub(super) dispatched: bool,
 }
 

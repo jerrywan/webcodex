@@ -396,72 +396,44 @@ impl RunnerRegistry {
                 inner.persistent_waiters.remove(&request_id);
                 continue;
             }
-            let stale_skill_store_error =
-                inner.pending_by_id.get(&request_id).and_then(|pending| {
-                    match (&pending.operation, pending.skill_store_fence.as_ref()) {
-                        (RunnerOperation::SkillStore(_), Some(fence)) if !fence.configured_roots => {
-                            let Some(runner) = inner.runners.get(&body.client_id) else {
-                                return Some(
-                                    "stale_runner: Skill store target Runner disappeared before dispatch"
-                                        .to_string(),
-                                );
-                            };
-                            if runner.runner_instance_id != fence.runner_instance_id {
-                                return Some(
-                                    "stale_runner: Skill store target Runner changed before dispatch"
-                                        .to_string(),
-                                );
-                            }
-                            let required = if fence.management {
-                                RunnerFeature::SkillStoreManage
-                            } else {
-                                RunnerFeature::SkillStoreRead
-                            };
-                            (!runner.runner_features.supports(required)).then(|| {
-                                format!(
-                                    "skill_store_capability_unavailable: exact Runner no longer advertises {} before dispatch",
-                                    required.as_wire_name()
-                                )
-                            })
+            let stale_skill_error = inner.pending_by_id.get(&request_id).and_then(|pending| {
+                match (&pending.operation, pending.skill_fence.as_ref()) {
+                    (RunnerOperation::Skill(_), Some(fence)) => {
+                        let Some(runner) = inner.runners.get(&body.client_id) else {
+                            return Some(
+                                "stale_runner: Skill target Runner disappeared before dispatch"
+                                    .to_string(),
+                            );
+                        };
+                        if runner.runner_instance_id != fence.runner_instance_id {
+                            return Some(
+                                "stale_runner: Skill target Runner changed before dispatch"
+                                    .to_string(),
+                            );
                         }
-                        (RunnerOperation::ConfiguredSkillRoots(_), Some(fence))
-                            if fence.configured_roots && !fence.management =>
-                        {
-                            let Some(runner) = inner.runners.get(&body.client_id) else {
-                                return Some(
-                                    "stale_runner: configured Skill roots target Runner disappeared before dispatch"
-                                        .to_string(),
-                                );
-                            };
-                            if runner.runner_instance_id != fence.runner_instance_id {
-                                return Some(
-                                    "stale_runner: configured Skill roots target Runner changed before dispatch"
-                                        .to_string(),
-                                );
-                            }
-                            (!runner
-                                .runner_features
-                                .supports(RunnerFeature::ConfiguredSkillRootsRead))
-                            .then(|| {
-                                "configured_skill_roots_capability_unavailable: exact Runner no longer advertises configured_skill_roots_read before dispatch"
-                                    .to_string()
-                            })
-                        }
-                        (RunnerOperation::SkillStore(_) | RunnerOperation::ConfiguredSkillRoots(_), None) => Some(
-                            "stale_runner: Skill source exact dispatch fence is missing".to_string(),
-                        ),
-                        (RunnerOperation::SkillStore(_) | RunnerOperation::ConfiguredSkillRoots(_), Some(_)) => Some(
-                            "stale_runner: Skill source dispatch fence mode does not match the request kind"
-                                .to_string(),
-                        ),
-                        (_, Some(_)) => Some(
-                            "stale_runner: Skill source dispatch fence is attached to the wrong request kind"
-                                .to_string(),
-                        ),
-                        (_, None) => None,
+                        let required = if fence.management {
+                            RunnerFeature::SkillManagement
+                        } else {
+                            RunnerFeature::SkillRuntime
+                        };
+                        (!runner.runner_features.supports(required)).then(|| {
+                            format!(
+                                "skill_capability_unavailable: exact Runner no longer advertises {} before dispatch",
+                                required.as_wire_name()
+                            )
+                        })
                     }
-                });
-            if let Some(error) = stale_skill_store_error {
+                    (RunnerOperation::Skill(_), None) => Some(
+                        "stale_runner: Skill exact dispatch fence is missing".to_string(),
+                    ),
+                    (_, Some(_)) => Some(
+                        "stale_runner: Skill dispatch fence is attached to the wrong request kind"
+                            .to_string(),
+                    ),
+                    (_, None) => None,
+                }
+            });
+            if let Some(error) = stale_skill_error {
                 let Some(mut pending) = inner.pending_by_id.remove(&request_id) else {
                     continue;
                 };

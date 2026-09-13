@@ -100,9 +100,8 @@ fn capability_classification_keeps_environment_dependent_features_registration_r
         RunnerFeature::ComputerTextInput,
         RunnerFeature::JobStateReconciliation,
         RunnerFeature::CodingAgentRuns,
-        RunnerFeature::ConfiguredSkillRootsRead,
-        RunnerFeature::SkillStoreRead,
-        RunnerFeature::SkillStoreManage,
+        RunnerFeature::SkillRuntime,
+        RunnerFeature::SkillManagement,
         RunnerFeature::ManagedSshResources,
     ] {
         assert_eq!(

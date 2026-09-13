@@ -7,7 +7,7 @@ use super::jobs::{
 use super::projects::RunnerLookupError;
 use super::state::{
     CodingAgentDispatchFence, PendingShellRequest, PluginGatewayDispatchFence, RunnerRegistryInner,
-    SkillStoreDispatchFence,
+    SkillDispatchFence,
 };
 use super::validation::{
     validate_file_request, validate_id, validate_process_request, validate_run_request,
@@ -21,7 +21,6 @@ use webcodex_core::coding_agent::{
     validate_request as validate_coding_agent_request, CodingAgentDispatchState,
     CodingAgentRequest, CodingAgentResponse,
 };
-use webcodex_core::configured_skills::ConfiguredSkillRootsRequest;
 use webcodex_core::lsp_bridge::{RunnerLspPayload, RunnerLspRequest};
 use webcodex_core::mcp_gateway::{
     validate_request as validate_mcp_gateway_request, McpGatewayDispatchState, McpGatewayRequest,
@@ -52,7 +51,7 @@ use webcodex_core::runner_protocol::{
     RUNNER_CAPABILITY_STRUCTURED_SCRIPT_JAVASCRIPT, RUNNER_CAPABILITY_STRUCTURED_SCRIPT_PAYLOAD,
     RUNNER_CONFIG_REQUEST_MAX_BYTES,
 };
-use webcodex_core::skill_store::SkillStoreRequest;
+use webcodex_core::runner_skill::RunnerSkillRequest;
 use webcodex_core::ssh_resource::{SshResourceRequest, SSH_RESOURCE_REQUEST_MAX_BYTES};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +105,7 @@ impl fmt::Display for EnqueueLspError {
 impl std::error::Error for EnqueueLspError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EnqueueConfiguredSkillRootsError {
+pub enum EnqueueRunnerSkillError {
     InvalidRequest {
         message: String,
     },
@@ -128,7 +127,7 @@ pub enum EnqueueConfiguredSkillRootsError {
     },
 }
 
-impl fmt::Display for EnqueueConfiguredSkillRootsError {
+impl fmt::Display for EnqueueRunnerSkillError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidRequest { message } | Self::DispatchUnavailable { message } => {
@@ -137,68 +136,21 @@ impl fmt::Display for EnqueueConfiguredSkillRootsError {
             Self::ExactRunnerUnavailable { .. } => {
                 formatter.write_str("exact Runner is unavailable")
             }
-            Self::ExactRunnerOffline { .. } => formatter.write_str(
-                "exact Runner is offline; configured Skill roots request was not dispatched",
-            ),
-            Self::RunnerChanged { .. } => formatter.write_str(
-                "stale Runner identity; configured Skill roots request was not dispatched",
-            ),
-            Self::UnsupportedCapability { capability, .. } => write!(
-                formatter,
-                "configured_skill_roots_capability_unavailable: exact Runner does not support {capability}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for EnqueueConfiguredSkillRootsError {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EnqueueSkillStoreError {
-    InvalidRequest {
-        message: String,
-    },
-    ExactRunnerUnavailable {
-        client_id: String,
-    },
-    ExactRunnerOffline {
-        client_id: String,
-    },
-    RunnerChanged {
-        client_id: String,
-    },
-    UnsupportedCapability {
-        client_id: String,
-        capability: &'static str,
-    },
-    DispatchUnavailable {
-        message: String,
-    },
-}
-
-impl fmt::Display for EnqueueSkillStoreError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidRequest { message } | Self::DispatchUnavailable { message } => {
-                formatter.write_str(message)
+            Self::ExactRunnerOffline { .. } => {
+                formatter.write_str("exact Runner is offline; Skill request was not dispatched")
             }
-            Self::ExactRunnerUnavailable { .. } => {
-                formatter.write_str("exact Runner is unavailable")
-            }
-            Self::ExactRunnerOffline { .. } => formatter
-                .write_str("exact Runner is offline; Skill store request was not dispatched"),
             Self::RunnerChanged { .. } => {
-                formatter.write_str("stale Runner identity; Skill store request was not dispatched")
+                formatter.write_str("stale Runner identity; Skill request was not dispatched")
             }
             Self::UnsupportedCapability { capability, .. } => write!(
                 formatter,
-                "skill_store_capability_unavailable: exact Runner does not support {capability}"
+                "skill_capability_unavailable: exact Runner does not support {capability}"
             ),
         }
     }
 }
 
-impl std::error::Error for EnqueueSkillStoreError {}
+impl std::error::Error for EnqueueRunnerSkillError {}
 
 impl From<PendingRequestEnqueueError> for EnqueueLspError {
     fn from(error: PendingRequestEnqueueError) -> Self {
@@ -288,7 +240,7 @@ pub(super) fn enqueue_pending_request_locked(
             expected_mcp_gateway_provider_instance_id: None,
             expected_ssh_resource_runner_instance_id: None,
             expected_runner_config_runner_instance_id: None,
-            skill_store_fence: None,
+            skill_fence: None,
             dispatched: false,
         },
     );
@@ -1301,194 +1253,62 @@ impl RunnerRegistry {
         remove_pending_request_locked(&mut inner, request_id).map(|pending| pending.dispatched)
     }
 
-    /// Enqueue one read-only configured live Skill-root operation for one exact
-    /// Runner process. No native root path crosses this boundary: the Runner
-    /// resolves the opaque Skill identity against its own current hot config.
-    pub async fn enqueue_configured_skill_roots(
+    /// Enqueue one canonical Runner-local Skill request for one exact live Runner process.
+    /// Runtime and management capabilities are independent and revalidated at dequeue.
+    pub async fn enqueue_runner_skill_typed(
         &self,
         client_id: &str,
         expected_runner_instance_id: &str,
-        operation: ConfiguredSkillRootsRequest,
+        operation: RunnerSkillRequest,
         auth: Option<&crate::RunnerAccess>,
         requested_by: String,
-    ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), String> {
-        self.enqueue_configured_skill_roots_typed(
-            client_id,
-            expected_runner_instance_id,
-            operation,
-            auth,
-            requested_by,
-        )
-        .await
-        .map_err(|error| error.to_string())
-    }
-
-    /// Typed configured-Skill admission used by in-workspace callers that need
-    /// stable failure classification without parsing presentation text.
-    pub async fn enqueue_configured_skill_roots_typed(
-        &self,
-        client_id: &str,
-        expected_runner_instance_id: &str,
-        operation: ConfiguredSkillRootsRequest,
-        auth: Option<&crate::RunnerAccess>,
-        requested_by: String,
-    ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), EnqueueConfiguredSkillRootsError>
-    {
+    ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), EnqueueRunnerSkillError> {
         operation
             .validate()
-            .map_err(|_| EnqueueConfiguredSkillRootsError::InvalidRequest {
-                message: "invalid configured Skill roots request".to_string(),
+            .map_err(|_| EnqueueRunnerSkillError::InvalidRequest {
+                message: "invalid Runner Skill request".to_string(),
             })?;
-        let request_id = next_request_id();
-        let (tx, rx) = oneshot::channel();
-        let request = encode_runner_operation(
-            &request_id,
-            client_id,
-            requested_by,
-            RunnerOperation::ConfiguredSkillRoots(operation),
-        )
-        .map_err(|_| EnqueueConfiguredSkillRootsError::InvalidRequest {
-            message: "invalid configured Skill roots request".to_string(),
-        })?;
-        let mut inner = self.inner.lock().await;
-        let runner = inner.runners.get(client_id).ok_or_else(|| {
-            EnqueueConfiguredSkillRootsError::ExactRunnerUnavailable {
-                client_id: client_id.to_string(),
-            }
-        })?;
-        assert_runner_access(auth, runner).map_err(|_| {
-            EnqueueConfiguredSkillRootsError::ExactRunnerUnavailable {
-                client_id: client_id.to_string(),
-            }
-        })?;
-        if runner.runner_instance_id != expected_runner_instance_id {
-            return Err(EnqueueConfiguredSkillRootsError::RunnerChanged {
-                client_id: client_id.to_string(),
-            });
-        }
-        let required = RunnerFeature::ConfiguredSkillRootsRead;
-        if !runner.runner_features.supports(required) {
-            return Err(EnqueueConfiguredSkillRootsError::UnsupportedCapability {
-                client_id: client_id.to_string(),
-                capability: required.as_wire_name(),
-            });
-        }
-        if now_ts().saturating_sub(runner.last_seen) > RUNNER_ONLINE_WINDOW_SECS {
-            return Err(EnqueueConfiguredSkillRootsError::ExactRunnerOffline {
-                client_id: client_id.to_string(),
-            });
-        }
-        enqueue_pending_request_locked(
-            self.telemetry.as_ref(),
-            &mut inner,
-            client_id,
-            request_id.clone(),
-            request,
-            Some(tx),
-            None,
-        )
-        .map_err(
-            |error| EnqueueConfiguredSkillRootsError::DispatchUnavailable {
-                message: error.to_string(),
-            },
-        )?;
-        let pending = inner
-            .pending_by_id
-            .get_mut(&request_id)
-            .expect("configured Skill roots request was just enqueued");
-        pending.skill_store_fence = Some(SkillStoreDispatchFence {
-            runner_instance_id: expected_runner_instance_id.to_string(),
-            management: false,
-            configured_roots: true,
-        });
-        notify_runner_locked(&inner, client_id);
-        Ok((request_id, rx))
-    }
-
-    /// Enqueue one closed Runner-global Skill store operation for one exact
-    /// live Runner process. Read and management capabilities are independent;
-    /// the exact process lease and capability are revalidated again at dequeue.
-    pub async fn enqueue_skill_store(
-        &self,
-        client_id: &str,
-        expected_runner_instance_id: &str,
-        operation: SkillStoreRequest,
-        auth: Option<&crate::RunnerAccess>,
-        requested_by: String,
-    ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), String> {
-        self.enqueue_skill_store_typed(
-            client_id,
-            expected_runner_instance_id,
-            operation,
-            auth,
-            requested_by,
-        )
-        .await
-        .map_err(|error| error.to_string())
-    }
-
-    /// Typed Skill-store admission used by in-workspace callers that need to
-    /// classify failure without parsing presentation text. The legacy public
-    /// string-returning entry point above remains behavior-compatible.
-    pub async fn enqueue_skill_store_typed(
-        &self,
-        client_id: &str,
-        expected_runner_instance_id: &str,
-        operation: SkillStoreRequest,
-        auth: Option<&crate::RunnerAccess>,
-        requested_by: String,
-    ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), EnqueueSkillStoreError> {
         let management = operation.requires_management_capability();
-        let content = serde_json::to_string(&operation).map_err(|_| {
-            EnqueueSkillStoreError::InvalidRequest {
-                message: "invalid Skill store request".to_string(),
-            }
-        })?;
-        if content.len() > 32 * 1024 {
-            return Err(EnqueueSkillStoreError::InvalidRequest {
-                message: "invalid Skill store request".to_string(),
-            });
-        }
         let request_id = next_request_id();
         let (tx, rx) = oneshot::channel();
         let request = encode_runner_operation(
             &request_id,
             client_id,
             requested_by,
-            RunnerOperation::SkillStore(operation),
+            RunnerOperation::Skill(operation),
         )
-        .map_err(|_| EnqueueSkillStoreError::InvalidRequest {
-            message: "invalid Skill store request".to_string(),
+        .map_err(|_| EnqueueRunnerSkillError::InvalidRequest {
+            message: "invalid Runner Skill request".to_string(),
         })?;
         let mut inner = self.inner.lock().await;
         let runner = inner.runners.get(client_id).ok_or_else(|| {
-            EnqueueSkillStoreError::ExactRunnerUnavailable {
+            EnqueueRunnerSkillError::ExactRunnerUnavailable {
                 client_id: client_id.to_string(),
             }
         })?;
         assert_runner_access(auth, runner).map_err(|_| {
-            EnqueueSkillStoreError::ExactRunnerUnavailable {
+            EnqueueRunnerSkillError::ExactRunnerUnavailable {
                 client_id: client_id.to_string(),
             }
         })?;
         if runner.runner_instance_id != expected_runner_instance_id {
-            return Err(EnqueueSkillStoreError::RunnerChanged {
+            return Err(EnqueueRunnerSkillError::RunnerChanged {
                 client_id: client_id.to_string(),
             });
         }
         let required = if management {
-            RunnerFeature::SkillStoreManage
+            RunnerFeature::SkillManagement
         } else {
-            RunnerFeature::SkillStoreRead
+            RunnerFeature::SkillRuntime
         };
         if !runner.runner_features.supports(required) {
-            return Err(EnqueueSkillStoreError::UnsupportedCapability {
+            return Err(EnqueueRunnerSkillError::UnsupportedCapability {
                 client_id: client_id.to_string(),
                 capability: required.as_wire_name(),
             });
         }
         if now_ts().saturating_sub(runner.last_seen) > RUNNER_ONLINE_WINDOW_SECS {
-            return Err(EnqueueSkillStoreError::ExactRunnerOffline {
+            return Err(EnqueueRunnerSkillError::ExactRunnerOffline {
                 client_id: client_id.to_string(),
             });
         }
@@ -1501,17 +1321,16 @@ impl RunnerRegistry {
             Some(tx),
             None,
         )
-        .map_err(|error| EnqueueSkillStoreError::DispatchUnavailable {
+        .map_err(|error| EnqueueRunnerSkillError::DispatchUnavailable {
             message: error.to_string(),
         })?;
         let pending = inner
             .pending_by_id
             .get_mut(&request_id)
-            .expect("Skill store request was just enqueued");
-        pending.skill_store_fence = Some(SkillStoreDispatchFence {
+            .expect("Runner Skill request was just enqueued");
+        pending.skill_fence = Some(SkillDispatchFence {
             runner_instance_id: expected_runner_instance_id.to_string(),
             management,
-            configured_roots: false,
         });
         notify_runner_locked(&inner, client_id);
         Ok((request_id, rx))

@@ -2026,14 +2026,10 @@ fn runner_register_capabilities(cfg: &RunnerConfig) -> RunnerCapabilities {
     // advertise a capability that the binary does not implement.
     capabilities.project_path_registration = true;
     capabilities.managed_worktree = true;
-    // Runner-configured live Skill root discovery/read is a separate read-only
-    // capability. It remains explicit even with no configured roots so Server
-    // rolling upgrades never infer this authority from file_read or Skill Store.
-    capabilities.configured_skill_roots_read = true;
-    // Runner-global operator-installed Skill store read and management are
-    // explicit rolling-upgrade capabilities implemented by this binary.
-    capabilities.skill_store_read = true;
-    capabilities.skill_store_manage = true;
+    // Configured live roots and managed active Skills share one Runner-local runtime
+    // boundary; managed lifecycle authority remains independently advertised.
+    capabilities.skill_runtime = true;
+    capabilities.skill_management = true;
     // Native Tool Plugins are a separate Runner-local gateway capability. Keep
     // this explicit even when zero Plugins are configured so cross-platform
     // `plugin_tool reload` can target the exact Runner.
