@@ -106,7 +106,7 @@ fn goal_plan_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "version": {"type": "integer", "const": 2, "description": "Goal Plan presentation projection version."},
+            "version": {"type": "integer", "const": 1, "description": "Backward-compatible Goal Plan presentation projection version; live activity is an additive observation field."},
             "goal_id": {"type": "string", "pattern": "^wc_goal_[0-9a-f]{32}$", "description": "Exact durable Goal identity used for refresh/rehydration and app-only polling. Identity is never authority."},
             "title": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Bounded Goal title."},
             "objective": {"type": "string", "minLength": 1, "maxLength": 8192, "description": "Bounded authoritative Goal objective; the Store enforces the same 8192-byte UTF-8 ceiling."},

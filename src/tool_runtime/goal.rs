@@ -87,7 +87,11 @@ pub(crate) struct GoalPlanProjection {
 
 fn goal_plan_projection(goal: GoalDetail, activity: GoalActivityObservation) -> GoalPlanProjection {
     GoalPlanProjection {
-        version: 2,
+        // Activity is an additive observation field. Keep the wire projection at
+        // v1 so an already-mounted pre-liveness Goal Plan View can continue to
+        // accept authoritative state across a Server upgrade and simply ignore
+        // the new field until that View is remounted with the current resource.
+        version: 1,
         goal_id: goal.summary.goal_id,
         title: goal.summary.title,
         objective: goal.objective,

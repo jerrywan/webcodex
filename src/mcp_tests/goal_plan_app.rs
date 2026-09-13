@@ -319,7 +319,7 @@ async fn goal_plan_poll_reads_authoritative_revision_without_ui_request_identity
     );
     assert_eq!(
         present["result"]["structuredContent"]["output"]["goal_plan"]["version"],
-        2
+        1
     );
     assert_eq!(
         present["result"]["structuredContent"]["output"]["goal_plan"]["activity"]["available"],

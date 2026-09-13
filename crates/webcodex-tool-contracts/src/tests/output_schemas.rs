@@ -124,7 +124,7 @@ fn agent_continuation_projection_schema_requires_strict_nullable_restart_recover
 fn goal_plan_activity_schema_is_bounded_soft_and_payload_free() {
     let schema = output_schema_for_tool("present_goal_plan");
     let plan = &schema["properties"]["output"]["properties"]["goal_plan"];
-    assert_eq!(plan["properties"]["version"]["const"], 2);
+    assert_eq!(plan["properties"]["version"]["const"], 1);
     assert!(plan["required"]
         .as_array()
         .unwrap()

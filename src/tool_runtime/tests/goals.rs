@@ -323,7 +323,7 @@ fn goal_schemas_are_bounded_private_and_existing_coding_tools_do_not_accept_goal
     let present = spec("present_goal_plan");
     assert_eq!(present.input_schema["required"], json!(["goal_id"]));
     let plan = &present.output_schema["properties"]["output"]["properties"]["goal_plan"];
-    assert_eq!(plan["properties"]["version"]["const"], 2);
+    assert_eq!(plan["properties"]["version"]["const"], 1);
     assert_eq!(
         plan["properties"]["activity"]["additionalProperties"],
         false
@@ -611,7 +611,7 @@ async fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hi
     let initial = runtime.present_goal_plan(Some(&bob), goal_id.clone()).await;
     assert!(initial.success, "{:?}", initial.output);
     let plan = &initial.output["goal_plan"];
-    assert_eq!(plan["version"], 2);
+    assert_eq!(plan["version"], 1);
     assert_eq!(plan["goal_id"], goal_id);
     assert_eq!(plan["lifecycle"], "active");
     assert_eq!(plan["revision"], 1);
