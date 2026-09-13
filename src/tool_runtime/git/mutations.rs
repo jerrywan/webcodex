@@ -7,7 +7,7 @@ use super::super::helpers::{shell_escape_simple, validate_limited_cleanup_paths}
 use super::super::shell::{dispatch_uncertainty_lifecycle, runner_command_lifecycle};
 use super::super::tool_result::{RecoveryKind, ToolResult};
 use super::super::ToolRuntime;
-use crate::runner_protocol::{ShellCommandExecutionState, ShellRunRequest};
+use crate::runner_protocol::ShellCommandExecutionState;
 
 const GIT_COMMIT_PATHS_MAX_PATHS: usize = 32;
 const GIT_COMMIT_PATH_MAX_CHARS: usize = 512;
