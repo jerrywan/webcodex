@@ -569,6 +569,7 @@ async fn run_script_slow_handoff_keeps_typed_payload_ephemeral_and_safe_metadata
     let handoff = task.await.unwrap();
     assert!(handoff.success, "{:?}", handoff.error);
     assert_eq!(handoff.output["promoted_to_job"], true);
+    assert_observe_job_continuation(&handoff.output);
     assert_eq!(handoff.output["execution_state"], "running");
     let job_id = handoff.output["job_id"].as_str().unwrap();
     assert_eq!(request.job_id.as_deref(), Some(job_id));
@@ -628,6 +629,7 @@ async fn run_script_slow_handoff_keeps_typed_payload_ephemeral_and_safe_metadata
                 }],
                 tail_lines: 40,
                 wait_secs: None,
+                wake_on: Default::default(),
             },
             Some(&auth),
         )
@@ -763,6 +765,7 @@ async fn typescript_slow_handoff_keeps_one_execution_and_safe_durable_metadata()
     let handoff = task.await.unwrap();
     assert!(handoff.success, "{:?}", handoff.error);
     assert_eq!(handoff.output["promoted_to_job"], true);
+    assert_observe_job_continuation(&handoff.output);
     assert_eq!(handoff.output["execution_state"], "running");
     let job_id = handoff.output["job_id"].as_str().unwrap();
     assert_eq!(request.job_id.as_deref(), Some(job_id));

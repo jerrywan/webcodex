@@ -805,16 +805,7 @@ async fn detached_process_uses_existing_job_identity_and_typed_runner_request() 
     assert!(result.success, "{:?}", result.error);
     let job_id = result.output["job_id"].as_str().unwrap().to_string();
     assert_eq!(result.output["execution_source"], "run_detached_process");
-    assert_eq!(result.output["continuation"]["tool"], "observe_jobs");
-    assert_eq!(
-        result.output["continuation"]["arguments"]["items"][0]["job_id"],
-        job_id
-    );
-    assert_eq!(
-        result.output["continuation"]["arguments"]["items"][0]["after_observation_token"],
-        result.output["observation_token"]
-    );
-    assert_eq!(result.output["continuation"]["arguments"]["wait_secs"], 30);
+    assert_observe_job_continuation(&result.output);
 
     let request = wait_for_patch_agent_request(&runtime, "detached-product-path").await;
     assert_eq!(request.kind, "start_detached_process_job");
@@ -1234,17 +1225,7 @@ async fn run_process_slow_handoff_is_queryable_once_and_keeps_the_original_budge
     );
     let job_id = handoff.output["job_id"].as_str().unwrap().to_string();
     assert_eq!(request.job_id.as_deref(), Some(job_id.as_str()));
-    let observation_token = handoff.output["observation_token"].as_str().unwrap();
-    assert_eq!(handoff.output["continuation"]["tool"], "observe_jobs");
-    assert_eq!(
-        handoff.output["continuation"]["arguments"]["items"][0]["job_id"],
-        job_id
-    );
-    assert_eq!(
-        handoff.output["continuation"]["arguments"]["items"][0]["after_observation_token"],
-        observation_token
-    );
-    assert_eq!(handoff.output["continuation"]["arguments"]["wait_secs"], 30);
+    assert_observe_job_continuation(&handoff.output);
 
     let status = runtime
         .job_status_for_auth(job_id.clone(), false, Some(&auth))

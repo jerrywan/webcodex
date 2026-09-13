@@ -72,6 +72,14 @@ pub fn session_input_summary_for_tool(tool_name: &str, arguments: &Value) -> Val
             }
         }
         ToolAuditSessionInputPolicy::ObserveJobs => {
+            // Raw/pre-parse input must not turn this enum into an arbitrary
+            // string channel in the Session ledger.
+            if !matches!(
+                object.get("wake_on").and_then(Value::as_str),
+                Some("change" | "terminal")
+            ) {
+                object.remove("wake_on");
+            }
             if let Some(items) = object.get_mut("items").and_then(Value::as_array_mut) {
                 for item in items.iter_mut().filter_map(Value::as_object_mut) {
                     item.remove("after_observation_token");

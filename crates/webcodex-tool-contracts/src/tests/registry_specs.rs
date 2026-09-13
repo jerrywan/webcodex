@@ -904,3 +904,28 @@ fn session_tool_specs_describe_explicit_targeting() {
         );
     }
 }
+
+#[test]
+fn observe_jobs_wake_policy_schema_is_closed_and_compatible() {
+    let specs = registered_tool_specs();
+    let spec = specs
+        .iter()
+        .find(|spec| spec.name == "observe_jobs")
+        .unwrap();
+    let wake = &spec.input_schema["properties"]["wake_on"];
+    assert_eq!(wake["enum"], serde_json::json!(["change", "terminal"]));
+    assert_eq!(wake["default"], "change");
+    assert!(!spec.input_schema["required"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("wake_on")));
+    for phrase in [
+        "No token",
+        "no wait_secs",
+        "wake_on=change",
+        "wake_on=terminal",
+        "changed=true",
+    ] {
+        assert!(spec.description.contains(phrase), "missing {phrase}");
+    }
+}

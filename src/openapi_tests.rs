@@ -1853,3 +1853,12 @@ fn workspace_checkpoints_disabled_openapi_surface() {
     assert!(!properties.contains_key("checkpoint_id"));
     assert!(!properties.contains_key("include_diff_stat"));
 }
+
+#[test]
+fn openapi_observe_jobs_wake_policy_retains_canonical_enum() {
+    let spec = build_openapi_spec();
+    let wake = &spec["components"]["schemas"]["ToolCallRequest"]["properties"]["wake_on"];
+    assert_eq!(wake["type"], "string");
+    assert_eq!(wake["enum"], json!(["change", "terminal"]));
+    assert_eq!(wake["default"], "change");
+}

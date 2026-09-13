@@ -217,14 +217,15 @@ pub(super) fn build_list_item(
     // bounded execution snapshot observed when the tool returned. Job terminal
     // lifecycle does not write back into the Session event, so only an actually
     // unfinished correlated tool call is truthful current work here.
-    let current = interactions
-        .iter()
-        .rev()
-        .copied()
-        .find(|interaction| interaction.finish.is_none() && interaction.start.is_some());
+    let current = interactions.iter().rev().copied().find(|interaction| {
+        interaction.finish.is_none()
+            && interaction.start.is_some()
+            && !interaction_is_observation_transport(interaction)
+    });
     let current_sequence = current.map(|interaction| interaction.sequence);
     let last = interactions.iter().rev().copied().find(|interaction| {
         interaction.finish.is_some()
+            && !interaction_is_observation_transport(interaction)
             && Some(interaction.sequence) != current_sequence
             && interaction
                 .finish
@@ -260,6 +261,7 @@ pub(super) fn build_detail(
     let overview = build_overview(record, &interactions, true, validation);
     let mut ordered_activity = interactions
         .into_iter()
+        .filter(|interaction| !interaction_is_observation_transport(interaction))
         .map(|interaction| OrderedActivity {
             activity: activity_from_interaction(interaction, project),
             ledger_sequence: Some(interaction.sequence),
@@ -339,11 +341,9 @@ fn build_overview(
         history_complete: !history_truncated,
         history_truncated,
     };
-    for interaction in interactions
-        .iter()
-        .copied()
-        .filter(|interaction| interaction.finish.is_some())
-    {
+    for interaction in interactions.iter().copied().filter(|interaction| {
+        interaction.finish.is_some() && !interaction_is_observation_transport(interaction)
+    }) {
         let evidence = interaction
             .finish
             .or(interaction.start)
@@ -1091,7 +1091,6 @@ fn semantic_kind(event: &SessionEvent) -> &'static str {
         | "session_shell_exec"
         | "session_shell_status"
         | "close_session_shell"
-        | "observe_jobs"
         | "stop_job" => "Ran",
         _ if event.write_like => "Edited",
         _ if event.git_like || event.change_summary_like => "Reviewed",
@@ -1099,6 +1098,15 @@ fn semantic_kind(event: &SessionEvent) -> &'static str {
         _ if event.read_like => "Read",
         _ => "Used",
     }
+}
+
+// Observation calls remain ledger/validation evidence, but are transport rather
+// than user work. Filter only the Console work/activity projections.
+fn interaction_is_observation_transport(interaction: &Interaction<'_>) -> bool {
+    interaction
+        .finish
+        .or(interaction.start)
+        .is_some_and(|event| event.tool_name == "observe_jobs")
 }
 
 fn interaction_is_progress_metadata(event: &SessionEvent) -> bool {

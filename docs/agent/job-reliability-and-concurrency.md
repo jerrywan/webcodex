@@ -242,6 +242,28 @@ observation-field schemas should make clear that:
 - `unknown_job` after same-process reconciliation is a diagnostic signal, not an
   automatic instruction to create a replacement Job.
 
+`observe_jobs` adds an optional `wake_on` policy: `change` is the compatible
+wire default and wakes on any observable update. `terminal` coalesces ordinary
+stdout/stderr/progress/activity changes until any watched Job is terminal, an
+item errors, or one shared absolute deadline expires. It never returns an
+`updated` wake reason: at the deadline `wait.outcome=timeout` can coexist with
+`changed=true`. Item errors take precedence over terminal, then timeout.
+
+Canonical execution handoffs suggest `wait_secs=60, wake_on=terminal`. This is
+a maximum wait, so terminal completion wakes immediately. Any missing token
+still gives an immediate baseline, and omitting `wait_secs` gives an immediate
+observation. Each Job waiter advances a private opaque cursor on non-terminal
+updates; final bounded deltas always use the caller's original token. Waiters
+use canonical Notify/revision rechecks, without a periodic polling heartbeat;
+updates neither recreate other Jobs' waiters nor extend the batch deadline.
+
+Workflow Session records retain every `observe_jobs` interaction for audit and
+validation evidence. Runtime Console treats these calls as observation
+transport: they are excluded from current/last Activity, the detail timeline,
+and work run counts. `running_call` still reports an unfinished transport call.
+Original Job handoff Activities remain historical snapshots; observing a
+terminal Job does not rewrite them or join live Registry state into Activity.
+
 ### Runtime/operator observation tools
 
 Descriptions for `runtime_status`, `list_runners`, and related operator surfaces

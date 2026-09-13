@@ -3383,6 +3383,7 @@ impl ToolCall {
                 items,
                 tail_lines,
                 wait_secs,
+                wake_on,
             } => serde_json::json!({
                 "item_count": items.len(),
                 "token_count": items
@@ -3395,6 +3396,7 @@ impl ToolCall {
                     .collect::<Vec<_>>(),
                 "tail_lines": tail_lines,
                 "wait_secs": wait_secs,
+                "wake_on": wake_on,
             }),
             Self::ApplyUnifiedDiff {
                 project,

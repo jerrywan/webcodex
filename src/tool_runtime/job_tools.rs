@@ -47,8 +47,9 @@ impl ToolRuntime {
                 items,
                 tail_lines,
                 wait_secs,
+                wake_on,
             } => {
-                self.observe_jobs_for_auth(items, tail_lines, wait_secs, auth)
+                self.observe_jobs_for_auth(items, tail_lines, wait_secs, wake_on, auth)
                     .await
             }
             ToolCall::ListJobs {

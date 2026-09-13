@@ -1646,3 +1646,34 @@ fn agent_continuation_bind_parses_required_view_fence_and_omits_it_from_audit() 
     args.as_object_mut().unwrap().remove("binding_id");
     assert!(ToolCall::from_tool_name("agent_continuation_bind", args).is_err());
 }
+
+#[test]
+fn observe_jobs_wake_policy_defaults_validates_and_audits_safely() {
+    for (policy, expected) in [
+        (None, ObserveJobsWakeOn::Change),
+        (Some("change"), ObserveJobsWakeOn::Change),
+        (Some("terminal"), ObserveJobsWakeOn::Terminal),
+    ] {
+        let mut args = json!({
+            "items": [{"job_id": "job", "after_observation_token": "private-observation-cursor"}],
+            "wait_secs": 1
+        });
+        if let Some(policy) = policy {
+            args["wake_on"] = json!(policy);
+        }
+        let call = ToolCall::from_tool_name("observe_jobs", args.clone()).unwrap();
+        assert!(matches!(&call, ToolCall::ObserveJobs { wake_on, .. } if *wake_on == expected));
+        let audit = call.session_log_arguments();
+        assert_eq!(audit["wake_on"], serde_json::to_value(expected).unwrap());
+        assert!(!audit.to_string().contains("private-observation-cursor"));
+    }
+    for policy in [
+        json!("unknown-private-value"),
+        json!(null),
+        json!(1),
+        json!({"bad": true}),
+    ] {
+        let args = json!({"items": [{"job_id": "job"}], "wake_on": policy});
+        assert!(ToolCall::from_tool_name("observe_jobs", args.clone()).is_err());
+    }
+}

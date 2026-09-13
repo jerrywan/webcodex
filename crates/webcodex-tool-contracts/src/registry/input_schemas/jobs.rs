@@ -492,7 +492,13 @@ pub fn observe_jobs_input_schema() -> Value {
             "wait_secs": {
                 "type": "integer",
                 "minimum": 1,
-                "description": "Optional one shared bounded wait. Values above 60 seconds are accepted and clamped to 60. It returns when any relevant Job changes and is never multiplied by item count."
+                "description": "Optional one shared bounded wait (a maximum), never a minimum sleep or multiplied by item count. Omission or any item without a token returns an immediate observation/baseline. Values above 60 seconds are clamped to 60. With tokens, wake_on selects early wake behavior; updates never extend the deadline."
+            },
+            "wake_on": {
+                "type": "string",
+                "enum": ["change", "terminal"],
+                "default": "change",
+                "description": "Bounded-wait wake policy. change (default) returns on any observable change. terminal coalesces non-terminal log/progress/activity changes until any Job is terminal, an item errors, or the shared deadline expires. Deadline returns timeout even when changed=true; deltas remain relative to the caller's original tokens. No token means immediate baseline; no wait_secs means immediate observation."
             }
         },
         "required": ["items"]

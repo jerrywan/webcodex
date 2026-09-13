@@ -45,7 +45,8 @@ fn structured_execution_output(
                     "job_id": job_id.expect("promoted Job id"),
                     "after_observation_token": "observation"
                 }],
-                "wait_secs": 30
+                "wait_secs": 60,
+                "wake_on": "terminal"
             }
         });
     }
@@ -1232,6 +1233,18 @@ fn key_tool_output_schemas_include_expected_fields() {
             continuation["properties"]["arguments"]["properties"]["wait_secs"]["maximum"],
             60
         );
+        assert_eq!(
+            continuation["properties"]["arguments"]["properties"]["wait_secs"]["const"],
+            60
+        );
+        assert_eq!(
+            continuation["properties"]["arguments"]["properties"]["wake_on"]["const"],
+            "terminal"
+        );
+        assert!(continuation["properties"]["arguments"]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("wake_on")));
         assert!(
             has_output_field(name, "failure_kind"),
             "{name} missing failure_kind"

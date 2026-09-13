@@ -627,7 +627,7 @@ fn observe_jobs_output_schema() -> Value {
                     "waited_ms": {"type": "integer", "minimum": 0}
                 },
                 "required": ["outcome", "waited_ms"],
-                "description": "The single shared-wait fact for this batch. Final item outputs are snapshots and do not expose a second wait outcome."
+                "description": "The single shared-wait fact for this batch. terminal policy never wakes updated: timeout means the deadline elapsed and may coexist with changed=true and cumulative log deltas. Item errors take precedence over terminal, then timeout. Final item outputs are snapshots and do not expose a second wait outcome."
             },
             "changed_count": {"type": "integer", "minimum": 0, "maximum": 8},
             "terminal_count": {"type": "integer", "minimum": 0, "maximum": 8},
@@ -679,7 +679,7 @@ fn observe_jobs_output_schema() -> Value {
                     }
                 },
                 "required": ["outcome"],
-                "description": "The one shared-wait fact for an ordinary all-success, non-truncated compact batch."
+                "description": "The one shared-wait fact for an ordinary all-success, non-truncated compact batch. terminal policy never wakes updated; timeout may coexist with changed=true and cumulative deltas."
             },
             "session_hint": session_hint_schema(),
             "permission": permission_decision_schema()

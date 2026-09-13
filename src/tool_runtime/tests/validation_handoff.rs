@@ -18,7 +18,7 @@ use crate::runner_protocol::{
 };
 use crate::tool_runtime::sessions::{SessionTransport, DEFAULT_MAX_EVENTS_PER_SESSION};
 use crate::tool_runtime::validation_events::validation_summary_for_session;
-use crate::tool_runtime::{ObserveJobsItem, ToolCall, ToolRuntime};
+use crate::tool_runtime::{ObserveJobsItem, ObserveJobsWakeOn, ToolCall, ToolRuntime};
 use serde_json::json;
 
 /// Fetch the `start_validation_job` request that the agent should have polled
@@ -279,6 +279,9 @@ fn assert_cargo_result_matches_schema(tool_name: &str, result: &crate::tool_runt
     use crate::tool_runtime::registry::output_schema_for_tool;
     use crate::tool_runtime::startup_brief::validate_schema_instance_for_test;
 
+    if result.output["promoted_to_job"] == true {
+        assert_observe_job_continuation(&result.output);
+    }
     let schema = output_schema_for_tool(tool_name);
     let value = serde_json::to_value(result).unwrap();
     assert!(
@@ -614,16 +617,6 @@ async fn long_go_test_hands_off_same_job_and_terminal_evidence_is_queryable() {
         .as_str()
         .expect("go_test handoff observation token")
         .to_string();
-    assert_eq!(result.output["continuation"]["tool"], "observe_jobs");
-    assert_eq!(
-        result.output["continuation"]["arguments"]["items"][0]["job_id"],
-        job_id
-    );
-    assert_eq!(
-        result.output["continuation"]["arguments"]["items"][0]["after_observation_token"],
-        observation_token
-    );
-    assert_eq!(result.output["continuation"]["arguments"]["wait_secs"], 30);
     let observed = runtime
         .observe_jobs_for_auth(
             vec![ObserveJobsItem {
@@ -632,6 +625,7 @@ async fn long_go_test_hands_off_same_job_and_terminal_evidence_is_queryable() {
             }],
             40,
             None,
+            ObserveJobsWakeOn::Change,
             Some(&auth),
         )
         .await;
@@ -863,6 +857,7 @@ async fn long_cargo_check_hands_off_with_immediately_observable_token() {
             }],
             40,
             None,
+            ObserveJobsWakeOn::Change,
             None,
         )
         .await;
@@ -979,6 +974,7 @@ async fn long_cargo_test_hands_off_to_queryable_job() {
             }],
             40,
             None,
+            ObserveJobsWakeOn::Change,
             None,
         )
         .await;
@@ -1025,6 +1021,7 @@ async fn long_cargo_test_hands_off_to_queryable_job() {
             }],
             200,
             None,
+            ObserveJobsWakeOn::Change,
             None,
         )
         .await;
@@ -2797,7 +2794,8 @@ fn cargo_output_schema_enforces_handoff_terminal_and_rejection_branches() {
                         "job_id": "job-123",
                         "after_observation_token": "observation"
                     }],
-                    "wait_secs": 30
+                    "wait_secs": 60,
+                    "wake_on": "terminal"
                 }
             },
             "promoted_to_job": true,

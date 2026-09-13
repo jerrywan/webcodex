@@ -1818,126 +1818,159 @@ fn console_list_uses_only_unfinished_call_as_now_and_keeps_job_handoff_as_last()
 }
 
 #[test]
-fn console_list_keeps_started_run_job_handoff_historical_and_later_activity_becomes_last() {
-    let store = SessionStore::new_in_memory(10, 30);
-    let project = "agent:eval:demo";
-    let session = store.start_session(Some(project.to_string()), Some("async job".to_string()));
-    let job_id = "12345678-1234-5678-9abc-123456789abc";
-    let start = store.record_tool_call_started(
-        Some(&session.session_id),
-        SessionTransport::Api,
-        "run_job",
-        &json!({"project": project}),
-        crate::tool_runtime::sessions::session_tool_contract("run_job"),
-    );
-    store.record_tool_call_finished(
-        start,
-        true,
-        &json!({
-            "execution_state": "started",
-            "job_id": job_id,
-            "status": "running",
-            "stdout_tail": "",
-            "stderr_tail": "",
-            "stdout_lines": 0,
-            "stderr_lines": 0
-        }),
-        None,
-        None,
-    );
+fn console_list_keeps_job_handoff_historical_and_hides_observation_transport() {
+    for tool in ["run_job", "cargo_test"] {
+        let store = SessionStore::new_in_memory(10, 30);
+        let project = "agent:eval:demo";
+        let session = store.start_session(Some(project.to_string()), Some("async job".to_string()));
+        let job_id = "12345678-1234-5678-9abc-123456789abc";
+        let start = store.record_tool_call_started(
+            Some(&session.session_id),
+            SessionTransport::Api,
+            tool,
+            &json!({"project": project}),
+            crate::tool_runtime::sessions::session_tool_contract(tool),
+        );
+        store.record_tool_call_finished(
+            start,
+            true,
+            &json!({
+                "execution_state": "started",
+                "job_id": job_id,
+                "status": "running",
+                "stdout_tail": "",
+                "stderr_tail": "",
+                "stdout_lines": 0,
+                "stderr_lines": 0
+            }),
+            None,
+            None,
+        );
 
-    let list = store.console_list_for_project(
-        project,
-        Some(10),
-        crate::tool_runtime::sessions::console_validation_hooks(),
-    );
-    let row = list
-        .sessions
-        .iter()
-        .find(|row| row.session_id == session.session_id)
-        .unwrap();
-    assert!(row.current_activity.is_none());
-    let last = row.last_activity.as_ref().unwrap();
-    assert_eq!(last.tool.as_deref(), Some("run_job"));
-    assert!(last.job_handoff);
-    assert_eq!(last.state, "running");
-    assert_eq!(last.execution_state.as_deref(), Some("started"));
-    assert_eq!(last.job_id.as_deref(), Some(job_id));
-
-    // A later authoritative Job observation may say terminal completed while
-    // the original handoff event remains the historical `started` snapshot.
-    let observed = store.record_tool_call_started(
-        Some(&session.session_id),
-        SessionTransport::Api,
-        "observe_jobs",
-        &json!({"items": [{"job_id": job_id}]}),
-        crate::tool_runtime::sessions::session_tool_contract("observe_jobs"),
-    );
-    store.record_tool_call_finished(
-        observed,
-        true,
-        &json!({
-            "items": [{
-                "success": true,
-                "output": {
-                    "job_id": job_id,
-                    "status": "completed",
-                    "execution_state": "completed"
-                }
-            }]
-        }),
-        None,
-        None,
-    );
-
-    let detail = store
-        .console_detail_for_project(
+        let list = store.console_list_for_project(
             project,
-            &session.session_id,
-            Some(20),
+            Some(10),
             crate::tool_runtime::sessions::console_validation_hooks(),
-        )
-        .unwrap();
-    let handoff = detail
-        .activity
-        .iter()
-        .find(|activity| activity.tool.as_deref() == Some("run_job"))
-        .unwrap();
-    assert_eq!(handoff.execution_state.as_deref(), Some("started"));
+        );
+        let row = list
+            .sessions
+            .iter()
+            .find(|row| row.session_id == session.session_id)
+            .unwrap();
+        assert!(row.current_activity.is_none());
+        let last = row.last_activity.as_ref().unwrap();
+        assert_eq!(last.tool.as_deref(), Some(tool));
+        assert!(last.job_handoff);
+        assert_eq!(last.state, "running");
+        assert_eq!(last.execution_state.as_deref(), Some("started"));
+        assert_eq!(last.job_id.as_deref(), Some(job_id));
 
-    let list = store.console_list_for_project(
-        project,
-        Some(10),
-        crate::tool_runtime::sessions::console_validation_hooks(),
-    );
-    let row = list
-        .sessions
-        .iter()
-        .find(|row| row.session_id == session.session_id)
-        .unwrap();
-    assert!(row.current_activity.is_none());
-    assert_eq!(
-        row.last_activity.as_ref().unwrap().tool.as_deref(),
-        Some("observe_jobs")
-    );
+        // A later authoritative Job observation may say terminal completed while
+        // the original handoff event remains the historical `started` snapshot.
+        for _ in 0..5 {
+            let observed = store.record_tool_call_started(
+                Some(&session.session_id),
+                SessionTransport::Api,
+                "observe_jobs",
+                &json!({"items": [{"job_id": job_id}]}),
+                crate::tool_runtime::sessions::session_tool_contract("observe_jobs"),
+            );
+            let pending = store.console_list_for_project(
+                project,
+                Some(10),
+                crate::tool_runtime::sessions::console_validation_hooks(),
+            );
+            let row = &pending.sessions[0];
+            assert!(row.running_call);
+            assert!(row.current_activity.is_none());
+            assert_eq!(
+                row.last_activity.as_ref().unwrap().tool.as_deref(),
+                Some(tool)
+            );
+            store.record_tool_call_finished(
+                observed,
+                true,
+                &json!({
+                    "items": [{
+                        "success": true,
+                        "output": {
+                            "job_id": job_id,
+                            "status": "completed",
+                            "execution_state": "completed"
+                        }
+                    }]
+                }),
+                None,
+                None,
+            );
+        }
 
-    store.close_session(&session.session_id).unwrap();
-    let list = store.console_list_for_project(
-        project,
-        Some(10),
-        crate::tool_runtime::sessions::console_validation_hooks(),
-    );
-    let row = list
-        .sessions
-        .iter()
-        .find(|row| row.session_id == session.session_id)
-        .unwrap();
-    assert_eq!(row.lifecycle, "closed");
-    assert!(row.current_activity.is_none());
-    assert_eq!(
-        row.last_activity.as_ref().unwrap().tool.as_deref(),
-        Some("observe_jobs")
-    );
+        let detail = store
+            .console_detail_for_project(
+                project,
+                &session.session_id,
+                Some(20),
+                crate::tool_runtime::sessions::console_validation_hooks(),
+            )
+            .unwrap();
+        let handoff = detail
+            .activity
+            .iter()
+            .find(|activity| activity.tool.as_deref() == Some(tool))
+            .unwrap();
+        assert_eq!(handoff.execution_state.as_deref(), Some("started"));
+        assert!(detail
+            .activity
+            .iter()
+            .all(|activity| activity.tool.as_deref() != Some("observe_jobs")));
+        assert_eq!(detail.activity.len(), 1);
+        let expected_runs = usize::from(tool == "run_job");
+        assert_eq!(detail.overview.work.runs, expected_runs);
+        let raw = store.summary(&session.session_id, Some(30)).unwrap();
+        assert_eq!(
+            raw.events
+                .iter()
+                .filter(|event| event.tool_name == "observe_jobs")
+                .count(),
+            10
+        );
+
+        let list = store.console_list_for_project(
+            project,
+            Some(10),
+            crate::tool_runtime::sessions::console_validation_hooks(),
+        );
+        let row = list
+            .sessions
+            .iter()
+            .find(|row| row.session_id == session.session_id)
+            .unwrap();
+        assert!(row.current_activity.is_none());
+        assert_eq!(
+            row.last_activity.as_ref().unwrap().tool.as_deref(),
+            Some(tool)
+        );
+
+        store.close_session(&session.session_id).unwrap();
+        let list = store.console_list_for_project(
+            project,
+            Some(10),
+            crate::tool_runtime::sessions::console_validation_hooks(),
+        );
+        let row = list
+            .sessions
+            .iter()
+            .find(|row| row.session_id == session.session_id)
+            .unwrap();
+        assert_eq!(row.overview.work.runs, expected_runs);
+        assert!(!row.running_call);
+        assert_eq!(row.lifecycle, "closed");
+        assert!(row.current_activity.is_none());
+        assert_eq!(
+            row.last_activity.as_ref().unwrap().tool.as_deref(),
+            Some(tool)
+        );
+    }
 }
 
 #[test]

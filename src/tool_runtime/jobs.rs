@@ -663,7 +663,8 @@ pub(crate) fn observe_job_continuation(job_id: &str, observation_token: Option<&
         "observe_jobs",
         json!({
             "items": [item],
-            "wait_secs": 30,
+            "wait_secs": 60,
+            "wake_on": "terminal",
         }),
     )
     .to_value()

@@ -265,6 +265,15 @@ pub struct ObserveJobsItem {
     pub after_observation_token: Option<String>,
 }
 
+/// Which observable changes may end a bounded batch Job wait early.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObserveJobsWakeOn {
+    #[default]
+    Change,
+    Terminal,
+}
+
 fn deserialize_non_empty_read_path<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1689,6 +1698,8 @@ pub enum ToolCall {
         tail_lines: usize,
         #[serde(default, deserialize_with = "deserialize_observe_jobs_wait_secs")]
         wait_secs: Option<u64>,
+        #[serde(default)]
+        wake_on: ObserveJobsWakeOn,
     },
 
     /// List files in a Runner-registered project directory (bounded, read-only).
@@ -2491,6 +2502,7 @@ fn reject_unknown_observe_jobs_fields(arguments: &Value) -> Result<(), String> {
         "items",
         "tail_lines",
         "wait_secs",
+        "wake_on",
         // Wrapper/session metadata that transports may leave in params.
         "session_id",
         "recording_session_id",

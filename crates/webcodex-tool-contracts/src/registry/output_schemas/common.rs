@@ -124,9 +124,10 @@ pub fn observe_job_continuation_schema() -> Value {
                         "required": ["job_id"]
                     }
                 },
-                "wait_secs": {"type": "integer", "minimum": 1, "maximum": 60}
+                "wait_secs": {"type": "integer", "const": 60, "minimum": 1, "maximum": 60},
+                "wake_on": {"type": "string", "const": "terminal"}
             },
-            "required": ["items", "wait_secs"]
+            "required": ["items", "wait_secs", "wake_on"]
         }),
         "Bounded next-call hint for observing the exact already-started Job. Advisory only: it grants no authority, is not a retry token, and never starts background polling.",
     )

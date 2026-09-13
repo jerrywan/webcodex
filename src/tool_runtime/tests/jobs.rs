@@ -495,6 +495,7 @@ async fn long_run_shell_hands_off_same_job_once_and_status_log_stop_observe_it()
             }],
             40,
             None,
+            ObserveJobsWakeOn::Change,
             Some(&auth),
         )
         .await;
@@ -1363,21 +1364,7 @@ async fn model_facing_stop_job_stops_agent_job_with_same_session() {
         .await;
     assert!(run.success, "{:?}", run.error);
     let job_id = run.output["job_id"].as_str().unwrap().to_string();
-    assert_eq!(run.output["continuation"]["tool"], "observe_jobs");
-    assert_eq!(
-        run.output["continuation"]["arguments"]["items"][0]["job_id"],
-        job_id
-    );
-    assert_eq!(
-        run.output["continuation"]["arguments"]["items"][0]["after_observation_token"],
-        run.output["observation_token"]
-    );
-    let continuation = ToolCall::from_tool_name(
-        run.output["continuation"]["tool"].as_str().unwrap(),
-        run.output["continuation"]["arguments"].clone(),
-    )
-    .expect("run_job continuation must remain parser-ready");
-    assert!(matches!(continuation, ToolCall::ObserveJobs { .. }));
+    assert_observe_job_continuation(&run.output);
 
     let result = runtime
         .dispatch_with_auth(
