@@ -36,6 +36,7 @@ const watchedSources = new Set([
   "runtime_icons.ts",
   "runtime_operations.ts",
   "runtime_navigation.ts",
+  "runtime_collaboration.ts",
   "runtime.css",
   "runtime.html",
   "admin.ts",
@@ -291,6 +292,32 @@ export function createOutputs(
         ""
       )
   );
+  const runtimeCollaborationModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_collaboration.ts")
+  );
+  const runtimeCollaborationClassic = stripModuleExports(
+    runtimeCollaborationModule
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_i18n(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_activity(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_collaboration_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_rich_text(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_icons(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+  );
   const runtimeModule = transpileTypeScript(sourceDirectory, "runtime.ts");
   const runtimeScript = stripModuleExports(
     runtimeModule
@@ -316,6 +343,10 @@ export function createOutputs(
       )
       .replace(
         /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_navigation(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_collaboration(?:\.js)?["'];?\s*\n/m,
         ""
       )
       .replace(
@@ -392,6 +423,8 @@ export function createOutputs(
       "\n" +
       runtimeNavigationClassic +
       "\n" +
+      runtimeCollaborationClassic +
+      "\n" +
       runtimeScript
   );
   assertClassicScript(resolve(outputDirectory, "runtime.js"), runtimeInlined);
@@ -461,6 +494,7 @@ export function createOutputs(
     ["runtime_operations.js", runtimeOperationsModule],
     ["runtime_icons.js", runtimeIconsModule],
     ["runtime_navigation.js", runtimeNavigationModule],
+    ["runtime_collaboration.js", runtimeCollaborationModule],
     ["admin_controller.js", adminControllerModule],
     ["admin_mutation_controller.js", adminMutationControllerModule],
     ["admin_mutation_view.js", adminMutationViewModule],

@@ -178,7 +178,7 @@ test("mobile project search only receives focus while navigation remains open", 
 test("retained message search matches body and resolution without mutating messages", async () => {
   const source = await readFile(new URL("../dist/runtime.js", import.meta.url), "utf8");
   const start = source.indexOf("function runtimeSearchMatches(");
-  const end = source.indexOf("function renderCollaboration(", start);
+  const end = source.indexOf("function renderLatestAgentMessage(", start);
   const messages = [
     { message_id: "a", message: "Build failed", resolution: "Fixed Unicode 路径" },
     { message_id: "b", message: "Pending", author_session_id: "worker-2" },
