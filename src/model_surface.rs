@@ -343,6 +343,7 @@ mod tests {
         "present_agent_continuation",
         "rotate_agent_continuation_endpoint",
         "runtime_status",
+        "wait_for_agent_events",
         "plugin_tool",
         "tool_manifest",
         "search_project_texts",

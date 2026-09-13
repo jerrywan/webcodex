@@ -95,6 +95,7 @@ fn tool_call_parser_name_gate_matches_tool_definitions() {
         "agent_continuation_wake_prepare",
         "agent_continuation_wake_finish",
         "agent_continuation_unbind",
+        "agent_wait_state",
         "read_tool_trace",
         "skill_list",
         "skill_read_file",

@@ -402,6 +402,7 @@ impl ToolRuntime {
                 | "agent_continuation_wake_prepare"
                 | "agent_continuation_wake_finish"
                 | "agent_continuation_unbind"
+                | "agent_wait_state"
         ) && !capabilities.agent_continuation_app
         {
             return ToolCallOutcome {
