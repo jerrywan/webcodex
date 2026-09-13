@@ -22,6 +22,10 @@ const watchedSources = new Set([
   "console.html",
   "runtime.ts",
   "runtime_console_state.ts",
+  "runtime_i18n.ts",
+  "runtime_rich_text.ts",
+  "runtime_api.ts",
+  "runtime_window.ts",
   "runtime.css",
   "runtime.html",
   "admin.ts",
@@ -102,7 +106,7 @@ function minifyCss(source) {
 function stripModuleExports(js) {
   return js
     .replace(/^export\s*\{\};\s*\n?/gm, "")
-    .replace(/^export\s+(function|const|let|class)\b/gm, "$1");
+    .replace(/^export\s+((?:async\s+)?(?:function|const|let|class))\b/gm, "$1");
 }
 
 export function createOutputs(
@@ -142,6 +146,32 @@ export function createOutputs(
     reviewStateClassic + "\n" + workflowSessionStateClassic + "\n" + appScript
   );
   assertClassicScript(resolve(outputDirectory, "app.js"), appInlined);
+  const runtimeI18nModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_i18n.ts")
+  );
+  const runtimeI18nClassic = stripModuleExports(runtimeI18nModule);
+  const runtimeRichTextModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_rich_text.ts")
+  );
+  const runtimeRichTextClassic = stripModuleExports(runtimeRichTextModule);
+  const runtimeApiModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_api.ts")
+  );
+  const runtimeApiClassic = stripModuleExports(runtimeApiModule);
+  const runtimeWindowModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_window.ts")
+  );
+  const runtimeWindowClassic = stripModuleExports(
+    runtimeWindowModule
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_i18n(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_console_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+  );
   const runtimeModule = transpileTypeScript(sourceDirectory, "runtime.ts");
   const runtimeScript = stripModuleExports(
     runtimeModule
@@ -153,9 +183,37 @@ export function createOutputs(
         /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_console_state(?:\.js)?["'];?\s*\n/m,
         ""
       )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_i18n(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_rich_text(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_api(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_window(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
   );
   const runtimeInlined = buildJs(
-    workflowSessionStateClassic + "\n" + runtimeConsoleStateClassic + "\n" + runtimeScript
+    workflowSessionStateClassic +
+      "\n" +
+      runtimeConsoleStateClassic +
+      "\n" +
+      runtimeI18nClassic +
+      "\n" +
+      runtimeRichTextClassic +
+      "\n" +
+      runtimeApiClassic +
+      "\n" +
+      runtimeWindowClassic +
+      "\n" +
+      runtimeScript
   );
   assertClassicScript(resolve(outputDirectory, "runtime.js"), runtimeInlined);
   const adminControllerModule = buildJs(
@@ -210,6 +268,10 @@ export function createOutputs(
     ["review_state.js", reviewStateModule],
     ["workflow_session_state.js", workflowSessionStateModule],
     ["runtime_console_state.js", runtimeConsoleStateModule],
+    ["runtime_i18n.js", runtimeI18nModule],
+    ["runtime_rich_text.js", runtimeRichTextModule],
+    ["runtime_api.js", runtimeApiModule],
+    ["runtime_window.js", runtimeWindowModule],
     ["admin_controller.js", adminControllerModule],
     ["admin_mutation_controller.js", adminMutationControllerModule],
     ["admin_mutation_view.js", adminMutationViewModule],

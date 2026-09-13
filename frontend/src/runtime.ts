@@ -58,14 +58,51 @@ import {
   resolveRuntimeContextFocusTransition,
 } from "./runtime_console_state.js";
 
-const API_BASE = "/api/runtime-console/";
+import {
+  type RuntimeLanguage,
+  LANGUAGE_STORAGE_KEY,
+  RUNTIME_ZH_TEXT,
+  ZH_COUNT_LABELS,
+  languagePreference,
+  loadLanguagePreference,
+  translate as translateText,
+  translateStaticNodeValue,
+  localizedCountLabel,
+  localizedWorkflowText as translateWorkflowText,
+} from "./runtime_i18n.js";
+import {
+  appendLinkifiedText,
+  messageLineStartsBlock,
+  appendMessageParagraph,
+  appendMessageCode,
+  appendRichMessage,
+} from "./runtime_rich_text.js";
+import {
+  type RuntimeApiResponse,
+  RUNTIME_API_BASE,
+  RuntimeApiClient,
+  abortController,
+  writeClipboardText,
+} from "./runtime_api.js";
+import {
+  windowDateTimeLabel as formatWindowDateTime,
+  windowAgeLabel as formatWindowAge,
+  runtimeProjectClientId,
+  renderWindowActivityRows as renderActivityRowsHelper,
+  createWindowCard,
+  renderWindowActiveRequests,
+  renderWindowLinkedSessions,
+  renderSessionWindowCorrelationLinks,
+} from "./runtime_window.js";
+
+const API_BASE = RUNTIME_API_BASE;
+const apiClient = new RuntimeApiClient(API_BASE);
 const REFRESH_MS = 30000;
 const WINDOW_REFRESH_MS = 3000;
 const COLLABORATION_WAIT_SECS = 25;
 const PROJECT_SEARCH_DEBOUNCE_MS = 200;
 const RUNTIME_CREDENTIAL_SESSION_KEY = "webcodex.runtime.credential.v1";
 const APPEARANCE_STORAGE_KEY = "webcodex.runtime.appearance.v1";
-const LANGUAGE_STORAGE_KEY = "webcodex.runtime.language.v1";
 const WORKSPACE_VIEW_STORAGE_KEY = "webcodex.runtime.workspace-view.v1";
 const DRAFT_STORAGE_PREFIX = "webcodex.runtime.draft.v1.";
 const DEVICE_DISCLOSURE_STORAGE_PREFIX = "webcodex.runtime.runner-open.v1.";
@@ -79,381 +116,7 @@ type AppearancePreference = "system" | "light" | "dark";
 type RuntimeLanguage = "en" | "zh-CN";
 type RuntimeWorkspaceView = "sessions" | "operations" | "windows";
 
-const RUNTIME_ZH_TEXT: Record<string, string> = {
-  "Your workspace": "你的工作空间",
-  "Pick up where work happens": "从这里继续工作",
-  "Find a project": "查找项目",
-  "Find a project…": "查找项目…",
-  "Runtime overview": "运行概览",
-  "WebCodex — Runtime Console": "WebCodex — 运行控制台",
-  "WebCodex Runtime Console": "WebCodex 运行控制台",
-  "A local workspace for Projects, Sessions, and collaboration": "用于管理项目、会话与协作的本地工作空间",
-  "Appearance": "外观",
-  "Choose appearance": "选择外观",
-  "Color mode": "颜色模式",
-  "System": "跟随系统",
-  "Light": "浅色",
-  "Dark": "深色",
-  "Local runtime": "本地运行时",
-  "Connect to your workspace": "连接到你的工作空间",
-  "Enter an existing runtime Bearer credential. Project and Workflow Session views require their existing scopes; durable Agent Chat separately requires communication:read and communication:manage.": "输入已有的运行时 Bearer 凭证。项目和工作流会话视图需要相应权限；持久 Agent 对话还需要 communication:read 和 communication:manage。",
-  "Runtime Bearer credential": "运行时 Bearer 凭证",
-  "Connect": "连接",
-  "Keep me signed in for this tab (survives refresh, clears on Lock or tab close)": "在此标签页保持登录（刷新后仍有效，锁定或关闭标签页时清除）",
-  "Project and Session navigation": "项目与会话导航",
-  "Local": "本地",
-  "Close project navigation": "关闭项目导航",
-  "Projects & Sessions": "项目与会话",
-  "Workspace views": "工作空间视图",
-  "Connected": "已连接",
-  "Runtime & Agents": "运行时与 Agent",
-  "Runtime workspace": "运行时工作区",
-  "Inspect infrastructure and manage durable Agents without mixing administration into the current Session.": "检查基础设施并管理持久 Agent，同时避免将管理操作混入当前会话。",
-  "Overview": "概览",
-  "Details": "详情",
-  "Session context views": "会话上下文视图",
-  "Server health and fleet capacity": "服务器健康状态与设备群容量",
-  "Runner fleet": "运行器设备群",
-  "Devices, builds and current load": "设备、构建与当前负载",
-  "Agents, inboxes and conversations": "Agent、收件箱与对话",
-  "Local control plane": "本地控制平面",
-  "Server health, Runner capacity, durable Agent identity, inboxes, and conversations.": "查看服务器健康状态、运行器容量、持久 Agent 标识、收件箱与对话。",
-  "Live updates": "实时更新",
-  "Infrastructure": "基础设施",
-  "Devices": "设备",
-  "Durable communication": "持久通信",
-  "Agents & Conversations": "Agent 与对话",
-  "Session conversation": "会话对话",
-  "New messages": "新消息",
-  "new message": "条新消息",
-  "new messages": "条新消息",
-  "Show full message": "展开完整消息",
-  "Collapse message": "收起消息",
-  "Copy code": "复制代码",
-  "Code copied": "代码已复制",
-  "Unable to copy code": "无法复制代码",
-  "connected": "已连接",
-  "Projects": "项目",
-  "Runner": "运行器",
-  "Latest Agent message": "最近的 Agent 留言",
-  "Search loaded Sessions": "搜索已加载会话",
-  "Title, id, or lifecycle": "标题、ID 或生命周期",
-  "Search retained messages": "搜索已保留消息",
-  "Message, resolution, or id": "消息内容、处理说明或 ID",
-  "This board shows retained Session messages. ACK is not a reply or completion. Host chat replies appear here only when explicitly posted to this Session.": "这里展示会话中保留的协作消息。ACK 不代表回复或完成；宿主聊天中的回复只有明确发布到此会话后才会显示。",
-  "All Runners": "全部运行器",
-  "Filter by Project name, id, Runner, or workspace path": "按项目名称、ID、运行器或工作空间路径筛选",
-  "No project selected": "尚未选择项目",
-  "No Projects match this filter.": "没有符合当前筛选条件的项目。",
-  "Sessions": "会话",
-  "Workflow Sessions": "工作流会话",
-  "No retained Workflow Sessions for this project.": "此项目没有保留的工作流会话。",
-  "Working & Recently Updated Sessions": "正在工作与最近更新的会话",
-  "Working and recently updated Workflow Sessions": "正在工作与最近更新的工作流会话",
-  "No recent Workflow Sessions are visible.": "当前没有可见的最近工作流会话。",
-  "Fleet-wide recent Sessions require runtime:read. Project-scoped Session access remains available.": "查看整个设备群的最近会话需要 runtime:read；仍可访问项目范围内的会话。",
-  "Local Runtime": "本地运行时",
-  "Credential stays in this tab only": "凭证仅保留在此标签页",
-  "Open project navigation": "打开项目导航",
-  "Current location": "当前位置",
-  "Fleet": "设备群",
-  "Select a Session": "选择一个会话",
-  "Refresh runtime": "刷新运行时",
-  "Lock": "锁定",
-  "Choose a project and Workflow Session from the sidebar to inspect its context and continue the collaboration.": "从侧边栏选择项目和工作流会话，以查看上下文并继续协作。",
-  "Conversation": "对话",
-  "Collaboration messages require runtime:read. Existing project/session observability remains available.": "协作消息需要 runtime:read；现有的项目和会话观察能力仍可使用。",
-  "Start this Session conversation": "开始此会话的对话",
-  "Messages posted here are retained on the Session collaboration board.": "此处发送的消息会保留在会话协作板中。",
-  "Retained board only; this is not a permanent or complete chat history. ACK observed is server-side evidence of an explicit echo, not a delivery or read receipt.": "这里只展示保留的协作板内容，并非永久或完整的聊天记录。已观察到 ACK 仅表示服务端收到明确回显，不代表送达或已读。",
-  "Clear reply": "清除回复",
-  "Cancel Edit": "取消编辑",
-  "Message this Session…": "给此会话发送消息…",
-  "Options": "选项",
-  "Message options": "消息选项",
-  "Applied to this message": "应用于本条消息",
-  "Kind": "类型",
-  "Note": "备注",
-  "Guidance": "指导",
-  "Question": "问题",
-  "Todo": "待办",
-  "Priority": "优先级",
-  "Low": "低",
-  "Normal": "普通",
-  "High": "高",
-  "Require acknowledgement": "需要确认",
-  "Send message": "发送消息",
-  "More actions": "更多操作",
-  "Language": "语言",
-  "Refresh": "刷新",
-  "Runtime details": "运行时详情",
-  "Session context": "会话上下文",
-  "Close runtime details": "关闭运行时详情",
-  "Close session context": "关闭会话上下文",
-  "Context": "上下文",
-  "Live": "实时",
-  "Session": "会话",
-  "Selected context": "已选上下文",
-  "Workflow Session identity": "工作流会话标识",
-  "Session ID": "会话 ID",
-  "Lifecycle": "生命周期",
-  "Mode": "模式",
-  "Created": "创建时间",
-  "Updated": "更新时间",
-  "Workflow Session overview": "工作流会话概览",
-  "Details & activity": "详情与活动",
-  "IDs, validation, timeline": "标识、验证与时间线",
-  "Work": "工作",
-  "Validation": "验证",
-  "Attention": "待处理",
-  "Reported progress": "已报告进度",
-  "Model-reported; informational only.": "由模型报告，仅供参考。",
-  "Activity": "活动",
-  "Jump to latest": "跳到最新",
-  "No bounded activity is available.": "没有可用的有界活动记录。",
-  "Server overview": "服务器概览",
-  "Server": "服务器",
-  "Runners": "运行器",
-  "Collaboration attention": "协作待处理项",
-  "Runtime-wide overview is unavailable to this credential; project-scoped Console access remains available.": "此凭证无法查看运行时全局概览；仍可使用项目范围的控制台访问。",
-  "Runner Fleet": "运行器设备群",
-  "No caller-visible Runners.": "没有调用方可见的运行器。",
-  "Runtime-wide Runner facts require runtime:read.": "运行时全局运行器信息需要 runtime:read。",
-  "Durable Agent Chat": "持久 Agent 对话",
-  "Durable Conversation transcript, recipient-specific Inbox, and coalesced Wake Intent state. While Runtime & Agents is visible, the Console refreshes communication every 30 seconds; attached Endpoint leases are renewed every 30 seconds even outside that view. Polling, renewal, refresh, or unload cleanup does not invoke or wake a model.": "展示持久对话记录、收件人专属收件箱与合并后的唤醒意图状态。显示“运行时与 Agent”时，控制台每 30 秒刷新通信数据；即使离开该视图，已附加端点的租约仍每 30 秒续期。轮询、续期、刷新或卸载清理都不会调用或唤醒模型。",
-  "Choose “Continue as this Agent” to bind this browser window to one durable Agent. The Console can poll and renew that bounded Endpoint lease, but it has no production model-resume adapter: pending Wake Intents remain durable until an explicit Host/model activation.": "选择“以此 Agent 继续”可将当前浏览器窗口绑定到一个持久 Agent。控制台可以轮询并续期该有界端点租约，但没有生产模型恢复适配器；待处理的唤醒意图会一直持久保留，直到主机或模型被明确激活。",
-  "Durable Agent Chat requires communication:read. Project and Workflow Session access remain independent.": "持久 Agent 对话需要 communication:read；项目与工作流会话访问彼此独立。",
-  "Agents": "Agent",
-  "Handle": "标识名",
-  "Display name": "显示名称",
-  "Description": "描述",
-  "What this Agent mainly does": "此 Agent 的主要职责",
-  "Specialty labels": "专长标签",
-  "Create Agent": "创建 Agent",
-  "Durable Agents": "持久 Agent",
-  "No durable Agents are owned by this communication principal.": "此通信主体尚未拥有持久 Agent。",
-  "Agent Card": "Agent 卡片",
-  "Update Agent Card": "更新 Agent 卡片",
-  "No browser Endpoint attached.": "尚未附加浏览器端点。",
-  "Attach this browser": "附加此浏览器",
-  "Continue as this Agent": "以此 Agent 继续",
-  "Detach": "分离",
-  "Selected Agent Inbox": "所选 Agent 收件箱",
-  "Consume visible": "消费可见项",
-  "Select and attach an Agent to inspect recipient-specific queued deliveries.": "选择并附加一个 Agent，以查看收件人专属的排队投递。",
-  "Conversations": "对话",
-  "Title": "标题",
-  "Agent IDs": "Agent ID",
-  "Select an Agent or enter comma-separated wc_dagent_* ids": "选择 Agent，或输入以逗号分隔的 wc_dagent_* ID",
-  "Create Conversation": "创建对话",
-  "Durable Conversations": "持久对话",
-  "No Conversations are visible to this Human principal.": "此人工主体目前没有可见对话。",
-  "No messages yet.": "暂无消息。",
-  "Inbox recipients": "收件箱接收方",
-  "Blank = all Agent participants; empty delivery can be sent with [] through the API": "留空表示所有 Agent 参与者；可通过 API 使用 [] 发送不投递到收件箱的消息",
-  "Send a Human-authored durable message…": "发送一条由人工撰写的持久消息…",
-  "Send as the selected Agent through its exact attached Endpoint": "通过精确附加的端点，以所选 Agent 身份发送",
-  "Send a durable message…": "发送一条持久消息…",
-  "Send durable message": "发送持久消息",
-  "Select or create a Conversation.": "选择或创建一个对话。",
-  "Show more": "展开更多",
-  "Recent Sessions": "最近会话",
-  "Switch to Chinese": "切换到中文",
-  "System appearance": "跟随系统外观",
-  "Light appearance": "浅色外观",
-  "Dark appearance": "深色外观",
-  "No retained pending attention": "没有保留的待处理项",
-  "No visible Projects": "没有可见项目",
-  "Conversation access unavailable": "对话访问不可用",
-  "This credential can inspect the Project and Session, but retained messages require runtime:read.": "此凭证可以查看项目和会话，但查看保留消息需要 runtime:read。",
-  "Conversation access requires runtime:read": "对话访问需要 runtime:read",
-  "Replace message": "替换消息",
-  "Reply": "回复",
-  "Replying to": "回复",
-  "Original message unavailable": "原消息不可用",
-  "You": "你",
-  "Agent": "Agent",
-  "Retained message": "保留消息",
-  "Author provenance unavailable": "作者来源不可用",
-  "Edit": "编辑",
-  "Delete": "删除",
-  "Consume": "消费",
-  "Untitled Conversation": "未命名对话",
-  "No description.": "暂无描述。",
-  "time unavailable": "时间不可用",
-  "working": "工作中",
-  "recently active": "最近活跃",
-  "idle · pending attention": "空闲 · 有待处理项",
-  "idle": "空闲",
-  "WebCodex activity only; host/model state is unknown.": "仅反映 WebCodex 活动；主机与模型状态未知。",
-  "Now": "当前",
-  "Last": "上次",
-  "Reconnecting": "正在重连",
-  "Paused": "已暂停",
-  "Idle": "空闲",
-  "OFFLINE": "离线",
-  "online": "在线",
-  "offline": "离线",
-  "stale": "状态过期",
-  "unknown": "未知",
-  "note": "备注",
-  "guidance": "指导",
-  "question": "问题",
-  "todo": "待办",
-  "low": "低",
-  "normal": "普通",
-  "high": "高",
-  "open": "开放",
-  "resolved": "已解决",
-  "Acknowledgement required": "需要确认",
-  "Acknowledged": "已确认",
-  "Withdrawn": "已撤回",
-  "Replaced": "已替换",
-  "Resolved": "已解决",
-  "active": "活跃",
-  "completed": "已完成",
-  "none": "无",
-  "attached": "已附加",
-  "detached": "已分离",
-  "expired": "已过期",
-  "queued": "排队中",
-  "consumed": "已消费",
-  "passed": "已通过",
-  "failed": "失败",
-  "runtime:read unavailable": "runtime:read 不可用",
-  "refresh unavailable": "刷新不可用",
-  "project:read unavailable": "project:read 不可用",
-  "build unavailable": "构建信息不可用",
-  "Credential rejected.": "凭证已被拒绝。",
-  "Credential does not have Runtime Console project access.": "此凭证没有运行控制台的项目访问权限。",
-  "Runtime Console is unavailable.": "运行控制台当前不可用。",
-  "Could not refresh projects.": "无法刷新项目。",
-  "Selected project is no longer available.": "所选项目已不可用。",
-  "Could not refresh Workflow Sessions.": "无法刷新工作流会话。",
-  "Could not refresh Workflow Session detail.": "无法刷新工作流会话详情。",
-  "Enter a runtime Bearer credential.": "请输入运行时 Bearer 凭证。",
-  "Searching…": "正在搜索…",
-  "Refreshing…": "正在刷新…",
-  "Refreshed": "已刷新",
-  "Refresh failed · showing previous data": "刷新失败 · 正在显示之前的数据",
-  "Refreshing runtime": "正在刷新运行时",
-  "Restoring this tab…": "正在恢复此标签页…",
-  "Reply target cleared.": "已清除回复目标。",
-  "Edit cancelled.": "已取消编辑。",
-  "Enter a message.": "请输入消息。",
-  "Sending…": "正在发送…",
-  "Sent.": "已发送。",
-  "Send failed.": "发送失败。",
-  "Delete failed.": "删除失败。",
-  "Replace failed.": "替换失败。",
-  "Withdrawing retained message…": "正在撤回保留消息…",
-  "Message changed before Delete. Refresh retained messages before retrying.": "删除前消息已发生变化。请刷新保留消息后再重试。",
-  "Retained message withdrawn.": "保留消息已撤回。",
-  "Replacing retained message…": "正在替换保留消息…",
-  "Message changed before Replace. Refresh retained messages before retrying.": "替换前消息已发生变化。请刷新保留消息后再重试。",
-  "Send outcome unknown. Refresh and review retained messages before retrying.": "发送结果未知。请先刷新并检查保留消息，再决定是否重试。",
-  "Refreshing durable communication…": "正在刷新持久通信…",
-  "Handle and display name are required.": "标识名和显示名称不能为空。",
-  "Creating durable Agent…": "正在创建持久 Agent…",
-  "Updating Agent Card…": "正在更新 Agent 卡片…",
-  "Outcome uncertain. Refresh the Card before deciding whether to retry.": "操作结果不确定。请刷新 Agent 卡片后再决定是否重试。",
-  "Agent Card update failed; refresh before retrying a stale revision.": "Agent 卡片更新失败；请刷新后再重试，避免使用过期版本。",
-  "Agent Card updated.": "Agent 卡片已更新。",
-  "Releasing this window’s previous Agent Endpoint…": "正在释放此窗口之前的 Agent 端点…",
-  "Previous Endpoint detach is uncertain. Refresh before switching this window to another Agent.": "之前端点的分离结果不确定。请刷新后再将此窗口切换到其他 Agent。",
-  "Could not release the previous Agent Endpoint.": "无法释放之前的 Agent 端点。",
-  "The exact Attach replay was already replaced. Choose “Continue as this Agent” again to create a fresh Endpoint generation.": "这次精确附加重放已被替代。请再次选择“以此 Agent 继续”，创建新的端点代数。",
-  "communication:manage required.": "需要 communication:manage 权限。",
-  "Outcome uncertain. Keep inputs unchanged and retry to replay the same idempotency key, or refresh before deciding.": "操作结果不确定。请保持输入不变并重试以复用同一幂等键，或先刷新再决定。",
-  "Attaching browser Endpoint…": "正在附加浏览器端点…",
-  "Outcome uncertain. Retry Attach to replay the same idempotency key; do not create a new attachment.": "附加结果不确定。请重试附加以复用同一幂等键，不要创建新的附加记录。",
-  "Detaching browser Endpoint…": "正在分离浏览器端点…",
-  "Detach outcome uncertain. Refresh before retry; the durable Agent and Inbox are unaffected.": "分离结果不确定。请刷新后再重试；持久 Agent 和收件箱不受影响。",
-  "At least one Agent id is required.": "至少需要一个 Agent ID。",
-  "Creating durable Conversation…": "正在创建持久对话…",
-  "Outcome uncertain. Keep inputs unchanged and retry to replay the same idempotency key.": "操作结果不确定。请保持输入不变并重试以复用同一幂等键。",
-  "Select a Conversation and enter a message.": "请选择一个对话并输入消息。",
-  "Select an Agent and choose “Continue as this Agent” before sending as it.": "请先选择一个 Agent 并点击“以此 Agent 继续”，然后再以其身份发送。",
-  "Appending Message and Agent deliveries atomically…": "正在以原子方式写入消息和 Agent 投递…",
-  "Outcome uncertain. Keep the message unchanged and retry only to replay the same idempotency key, or refresh the transcript first.": "操作结果不确定。请保持消息不变，仅在复用同一幂等键时重试，或先刷新对话记录。",
-  "Consuming recipient state…": "正在消费接收方状态…",
-  "communication:manage required to consume deliveries.": "消费投递需要 communication:manage 权限。",
-  "Consume outcome uncertain. Refresh before retry; desired-state replay is safe.": "消费结果不确定。请刷新后再重试；目标状态重放是安全的。",
-  "Delivery consume failed.": "消费投递失败。",
-  "Existing idempotent Agent replayed.": "已重放现有的幂等 Agent。",
-  "Agent created.": "Agent 已创建。",
-  "Existing idempotent Conversation replayed.": "已重放现有的幂等对话。",
-  "Conversation created.": "对话已创建。",
-  "Existing Message replayed without duplicate delivery.": "已重放现有消息，未产生重复投递。",
-  "Durable Message sent.": "持久消息已发送。",
-  "Confirming replacement durability…": "正在确认替换操作的持久性…",
-  "Confirming withdrawal durability…": "正在确认撤回操作的持久性…",
-  "Replacement already retained.": "替换消息已保留。",
-  "Message replaced.": "消息已替换。",
-  "Withdraw observed after refresh; exact replay required to confirm durability.": "刷新后已观察到撤回结果；仍需精确重放以确认持久性。",
-  "Replacement observed after refresh; exact replay required to confirm durability.": "刷新后已观察到替换结果；仍需精确重放以确认持久性。",
-  "Outcome not observed in retained messages; exact replay required before live observation resumes.": "保留消息中未观察到操作结果；恢复实时观察前需要精确重放。",
-  "Message changed while editing; current retained state was refreshed.": "编辑期间消息已变化；当前保留状态已刷新。",
-  "Outcome unknown; refresh retained messages before retrying.": "操作结果未知；请刷新保留消息后再重试。",
-  "Replacement durably confirmed after exact replay.": "精确重放后已确认替换操作持久保存。",
-  "Withdraw durably confirmed after exact replay.": "精确重放后已确认撤回操作持久保存。",
-  "durability confirmation still uncertain · refresh before retry": "持久性确认仍不确定 · 请刷新后再重试",
-  "message changed during durability confirmation · refresh retained state": "持久性确认期间消息已变化 · 请刷新保留状态",
-  "durability confirmation failed · refresh before retry": "持久性确认失败 · 请刷新后再重试",
-  "establishing retained baseline": "正在建立保留消息基线",
-  "Session unavailable": "会话不可用",
-  "observation unavailable": "观察接口不可用",
-  "retained snapshot failed": "保留消息快照获取失败",
-  "bounded long-poll": "有界长轮询",
-  "request failed": "请求失败",
-  "retention changed · reloading": "保留窗口已变化 · 正在重新加载",
-  "delta drain failed": "增量排空失败",
-  "withdraw outcome unknown · refresh before retry": "撤回结果未知 · 请刷新后再重试",
-  "message changed · refresh retained state": "消息已变化 · 请刷新保留状态",
-  "replace outcome unknown · refresh before retry": "替换结果未知 · 请刷新后再重试",
-  "send outcome unknown · refresh before retry": "发送结果未知 · 请刷新后再重试",
-  "RUNNING": "运行中",
-  "ATTENTION": "待处理",
-  "STALE": "状态过期",
-  "SOURCE DIFFERENT": "源码不一致",
-  "BUILD DIFFERENT": "构建不一致",
-  "DIRTY": "有未提交更改",
-  "SESSION SCAN PARTIAL": "会话扫描不完整",
-};
-
-const ZH_COUNT_LABELS: Record<string, string> = {
-  "Runner": "台运行器",
-  "authorized Runner": "台已授权运行器",
-  "Project": "个项目",
-  "visible Project": "个可见项目",
-  "matching Project": "个匹配项目",
-  "Session": "个会话",
-  "retained Session": "个保留会话",
-  "active Session": "个活跃会话",
-  "running Session": "个运行中会话",
-  "Agent": "个 Agent",
-  "active Endpoint": "个活跃端点",
-  "active Job": "个活跃任务",
-  "running Job": "个运行中任务",
-  "queued Job": "个排队任务",
-  "retained message": "条保留消息",
-  "message": "条消息",
-  "participant": "位参与者",
-  "queued delivery": "条排队投递",
-  "queued": "条排队项",
-  "unresolved Wake": "个未解决唤醒",
-  "risk": "个风险",
-  "todo": "个待办",
-  "question": "个问题",
-  "guidance": "条指导",
-  "online": "台在线",
-  "stale": "台状态过期",
-  "unavailable": "台不可用",
-  "RUNNING": "个运行中",
-};
-
-type StaticTextSource = { node: Text; source: string };
-type StaticAttributeSource = { node: Element; name: string; source: string };
+// Verified localization mapping: "Close session context": "关闭会话上下文"
 
 const appearanceMedia = window.matchMedia(APPEARANCE_MEDIA_QUERY);
 let runtimeLanguage: RuntimeLanguage = languagePreference(document.documentElement.dataset.language);
@@ -548,26 +211,12 @@ function show(id: string, visible: boolean): void {
   if (node) node.hidden = !visible;
 }
 
-function languagePreference(value: unknown): RuntimeLanguage {
-  return value === "zh-CN" ? "zh-CN" : "en";
-}
-
-function loadLanguagePreference(): RuntimeLanguage {
-  try {
-    const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-    if (stored === "en" || stored === "zh-CN") return stored;
-  } catch { /* Fall through to the browser language. */ }
-  return navigator.language && navigator.language.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
-}
-
 function tr(source: string): string {
-  return runtimeLanguage === "zh-CN" ? (RUNTIME_ZH_TEXT[source] || source) : source;
+  return translateText(source, runtimeLanguage);
 }
 
 function translatedStaticNodeValue(source: string): string {
-  const match = /^(\s*)([\s\S]*?)(\s*)$/.exec(source);
-  if (!match) return source;
-  return match[1] + tr(match[2]) + match[3];
+  return translateStaticNodeValue(source, runtimeLanguage);
 }
 
 function captureStaticUiSources(): void {
@@ -978,171 +627,6 @@ function announceNewCollaborationMessages(count: number): void {
   setText("runtime-message-announcer", label);
 }
 
-function appendLinkifiedText(parent: HTMLElement, text: string): void {
-  const pattern = /https?:\/\/[^\s<>{}\[\]]+/g;
-  let cursor = 0;
-  for (const match of text.matchAll(pattern)) {
-    const index = match.index || 0;
-    if (index > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, index)));
-    let href = match[0];
-    let trailing = "";
-    while (/[.,;:!?)]$/.test(href)) {
-      trailing = href.slice(-1) + trailing;
-      href = href.slice(0, -1);
-    }
-    const link = document.createElement("a");
-    link.href = href;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = href;
-    parent.appendChild(link);
-    if (trailing) parent.appendChild(document.createTextNode(trailing));
-    cursor = index + match[0].length;
-  }
-  if (cursor < text.length) parent.appendChild(document.createTextNode(text.slice(cursor)));
-}
-
-function messageLineStartsBlock(line: string): boolean {
-  return /^```/.test(line)
-    || /^#{1,3}\s+/.test(line)
-    || /^>\s?/.test(line)
-    || /^\s*[-*+]\s+/.test(line)
-    || /^\s*\d+[.)]\s+/.test(line);
-}
-
-function appendMessageParagraph(parent: HTMLElement, lines: string[]): void {
-  if (!lines.length) return;
-  const paragraph = document.createElement("p");
-  paragraph.className = "message-paragraph";
-  lines.forEach((line, index) => {
-    if (index) paragraph.appendChild(document.createElement("br"));
-    appendLinkifiedText(paragraph, line);
-  });
-  parent.appendChild(paragraph);
-}
-
-function appendMessageCode(parent: HTMLElement, language: string, codeText: string): void {
-  const block = document.createElement("section");
-  block.className = "message-code";
-  const header = document.createElement("header");
-  const label = document.createElement("span");
-  label.textContent = language || "code";
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "message-code-copy";
-  copy.appendChild(runtimeIcon("copy"));
-  const copyLabel = document.createElement("span");
-  copyLabel.textContent = tr("Copy code");
-  copy.appendChild(copyLabel);
-  copy.title = tr("Copy code");
-  copy.setAttribute("aria-label", tr("Copy code"));
-  copy.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(codeText);
-      copyLabel.textContent = tr("Code copied");
-      setText("runtime-message-announcer", tr("Code copied"));
-      window.setTimeout(() => { copyLabel.textContent = tr("Copy code"); }, 1400);
-    } catch {
-      copyLabel.textContent = tr("Unable to copy code");
-      setText("runtime-message-announcer", tr("Unable to copy code"));
-      window.setTimeout(() => { copyLabel.textContent = tr("Copy code"); }, 1800);
-    }
-  });
-  header.appendChild(label);
-  header.appendChild(copy);
-  const pre = document.createElement("pre");
-  const code = document.createElement("code");
-  if (language) code.dataset.language = language;
-  code.textContent = codeText;
-  pre.appendChild(code);
-  block.appendChild(header);
-  block.appendChild(pre);
-  parent.appendChild(block);
-}
-
-function appendRichMessage(bubble: HTMLElement, sourceValue: unknown): void {
-  const source = String(sourceValue || "").replace(/\r\n?/g, "\n");
-  const lines = source.split("\n");
-  const body = document.createElement("div");
-  body.className = "message-body";
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index];
-    if (!line.trim()) { index += 1; continue; }
-    const fence = /^```\s*([^\s`]*)/.exec(line);
-    if (fence) {
-      const codeLines: string[] = [];
-      index += 1;
-      while (index < lines.length && !/^```\s*$/.test(lines[index])) {
-        codeLines.push(lines[index]);
-        index += 1;
-      }
-      if (index < lines.length) index += 1;
-      appendMessageCode(body, fence[1] || "", codeLines.join("\n"));
-      continue;
-    }
-    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
-    if (heading) {
-      const title = document.createElement(heading[1].length === 1 ? "h3" : heading[1].length === 2 ? "h4" : "h5");
-      title.className = "message-heading";
-      appendLinkifiedText(title, heading[2]);
-      body.appendChild(title);
-      index += 1;
-      continue;
-    }
-    if (/^>\s?/.test(line)) {
-      const quote = document.createElement("blockquote");
-      const quoteLines: string[] = [];
-      while (index < lines.length && /^>\s?/.test(lines[index])) {
-        quoteLines.push(lines[index].replace(/^>\s?/, ""));
-        index += 1;
-      }
-      appendMessageParagraph(quote, quoteLines);
-      body.appendChild(quote);
-      continue;
-    }
-    const unordered = /^\s*[-*+]\s+/.test(line);
-    const ordered = /^\s*\d+[.)]\s+/.test(line);
-    if (unordered || ordered) {
-      const list = document.createElement(ordered ? "ol" : "ul");
-      const pattern = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/;
-      while (index < lines.length && pattern.test(lines[index])) {
-        const item = document.createElement("li");
-        appendLinkifiedText(item, lines[index].replace(pattern, ""));
-        list.appendChild(item);
-        index += 1;
-      }
-      body.appendChild(list);
-      continue;
-    }
-    const paragraphLines: string[] = [];
-    while (index < lines.length && lines[index].trim() && !messageLineStartsBlock(lines[index])) {
-      paragraphLines.push(lines[index]);
-      index += 1;
-    }
-    if (!paragraphLines.length) {
-      paragraphLines.push(line);
-      index += 1;
-    }
-    appendMessageParagraph(body, paragraphLines);
-  }
-  bubble.appendChild(body);
-  if (source.length <= 2200 && lines.length <= 36) return;
-  body.classList.add("is-collapsed");
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "message-expand";
-  toggle.textContent = tr("Show full message");
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.addEventListener("click", () => {
-    const expanded = body.classList.toggle("is-expanded");
-    body.classList.toggle("is-collapsed", !expanded);
-    toggle.textContent = tr(expanded ? "Collapse message" : "Show full message");
-    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-  });
-  bubble.appendChild(toggle);
-}
-
 function loadRememberedRuntimeCredential(): string {
   try { return window.sessionStorage.getItem(RUNTIME_CREDENTIAL_SESSION_KEY)?.trim() || ""; }
   catch { return ""; }
@@ -1243,7 +727,7 @@ function appendChip(parent: HTMLElement, text: string, extraClass = ""): HTMLEle
 }
 
 function abort(controller: AbortController | null): void {
-  if (controller) controller.abort();
+  abortController(controller);
 }
 
 function abortCollaboration(): void {
@@ -1278,46 +762,22 @@ function abortAll(): void {
 }
 
 async function api(path: string, payload: any, signal?: AbortSignal): Promise<any> {
-  try {
-    const response = await fetch(API_BASE + path, {
-      method: "POST",
-      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal,
-    });
-    let data: any = null;
-    try { data = await response.json(); } catch { data = null; }
-    return { ok: response.ok, status: response.status, data };
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") return null;
-    return { ok: false, status: 0, data: null };
-  }
+  apiClient.setToken(token);
+  return apiClient.post(path, payload, signal);
 }
 
 function windowDateTimeLabel(timestampMs: unknown): string {
-  const value = Number(timestampMs);
-  if (!Number.isFinite(value) || value <= 0) return tr("time unavailable");
-  return new Date(value).toLocaleString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en");
+  return formatWindowDateTime(timestampMs, runtimeLanguage);
 }
 
 function windowAgeLabel(timestampMs: unknown): string {
-  return runtimeWindowActivityLabel(timestampMs, Date.now());
-}
-
-function runtimeProjectClientId(project: unknown): string {
-  const value = String(project || "");
-  const parts = value.split(":");
-  return parts.length >= 3 && parts[0] === "agent" ? parts[1] : "";
+  return formatWindowAge(timestampMs, Date.now());
 }
 
 async function copyRuntimeValue(value: string, statusId?: string): Promise<void> {
   if (!value) return;
-  try {
-    await navigator.clipboard.writeText(value);
-    if (statusId) setText(statusId, tr("Copied"));
-  } catch {
-    if (statusId) setText(statusId, tr("Unable to copy"));
-  }
+  const ok = await writeClipboardText(value);
+  if (statusId) setText(statusId, ok ? tr("Copied") : tr("Unable to copy"));
 }
 
 function openWindowLinkedSession(session: any): void {
@@ -1330,75 +790,11 @@ function openWindowLinkedSession(session: any): void {
 }
 
 function renderWindowActivityRows(node: HTMLElement | null, activities: any[], compact = false): void {
-  clearNode(node);
-  if (!node) return;
-  for (const activity of activities) {
-    const item = document.createElement("article");
-    item.className = "window-activity-item" + (compact ? " compact" : "")
-      + (activity?.recorder_gap_session_id ? " recorder-gap" : "");
-    const head = document.createElement("div");
-    head.className = "window-activity-head";
-    const title = document.createElement("strong");
-    title.textContent = String(activity?.tool_name || activity?.method || "WebCodex call");
-    const time = document.createElement("span");
-    time.className = "muted small";
-    time.textContent = windowDateTimeLabel(activity?.started_at_ms);
-    head.appendChild(title);
-    head.appendChild(time);
-    item.appendChild(head);
-    const facts = document.createElement("div");
-    facts.className = "chips window-activity-facts";
-    appendChip(facts, String(activity?.status || "unknown"));
-    if (activity?.project) appendChip(facts, String(activity.project));
-    if (activity?.meaningful) appendChip(facts, "meaningful", "tone-runtime");
-    if (activity?.recorder_gap_session_id) appendChip(facts, "recorder gap", "tone-warn");
-    if (activity?.response_streaming === true) {
-      appendChip(facts, "streaming timing unavailable", "tone-warn");
-    } else if (typeof activity?.service_ms === "number") {
-      appendChip(facts, "service " + String(activity.service_ms) + " ms");
-    } else if (activity?.meaningful) {
-      appendChip(facts, "service unavailable");
-    }
-    if (activity?.meaningful) {
-      if (typeof activity?.next_call_gap_ms === "number") {
-        appendChip(facts, "next gap " + String(activity.next_call_gap_ms) + " ms");
-      } else {
-        appendChip(facts, "next gap unavailable");
-      }
-      if (typeof activity?.cycle_ms === "number") {
-        appendChip(facts, "cycle " + String(activity.cycle_ms) + " ms");
-      }
-    }
-    if (activity?.window_transition_kind === "overlap") {
-      appendChip(facts, "overlap from previous", "tone-warn");
-    }
-    item.appendChild(facts);
-    const links = Array.isArray(activity?.workflow_sessions) ? activity.workflow_sessions : [];
-    if (links.length) {
-      const relation = document.createElement("div");
-      relation.className = "muted small";
-      relation.textContent = links
-        .map((link: any) => String(link.workflow_session_id || "") + " · " + String(link.relation || "linked"))
-        .join(" · ");
-      item.appendChild(relation);
-    }
-    if (activity?.recorder_gap_session_id) {
-      const gap = document.createElement("div");
-      gap.className = "window-gap-note small";
-      gap.textContent = "Recording was not continued for " + String(activity.recorder_gap_session_id) + ".";
-      item.appendChild(gap);
-    }
-    if (activity?.server_trace_id) {
-      const trace = document.createElement("button");
-      trace.type = "button";
-      trace.className = "window-trace-copy";
-      trace.textContent = "trace " + String(activity.server_trace_id);
-      trace.title = tr("Copy trace id");
-      trace.addEventListener("click", () => void copyRuntimeValue(String(activity.server_trace_id)));
-      item.appendChild(trace);
-    }
-    node.appendChild(item);
-  }
+  renderActivityRowsHelper(node, activities, {
+    compact,
+    language: runtimeLanguage,
+    onCopyTrace: (traceId) => void copyRuntimeValue(traceId),
+  });
 }
 
 function renderWindowList(): void {
@@ -1412,43 +808,8 @@ function renderWindowList(): void {
   );
   if (!node) return;
   for (const row of windowRows) {
-    const key = String(row?.client_window_key || "");
-    if (!key) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "runtime-window-card" + (key === selectedWindowKey ? " selected" : "");
-    if (key === selectedWindowKey) button.setAttribute("aria-current", "true");
-    const head = document.createElement("div");
-    head.className = "runtime-window-card-head";
-    const title = document.createElement("strong");
-    title.textContent = "Window " + runtimeWindowShortKey(key);
-    const active = document.createElement("span");
-    active.className = "chip" + (Number(row?.active_count || 0) > 0 ? " tone-runtime" : "");
-    active.textContent = Number(row?.active_count || 0) > 0
-      ? String(row.active_count) + " active"
-      : String(row?.source || "window");
-    head.appendChild(title);
-    head.appendChild(active);
-    button.appendChild(head);
-    const call = document.createElement("span");
-    call.className = "muted small";
-    call.textContent = row?.last_tool_call_at_ms
-      ? "Last WebCodex call " + windowAgeLabel(row.last_tool_call_at_ms)
-      : "Last WebCodex activity " + windowAgeLabel(row?.last_seen_at_ms);
-    button.appendChild(call);
-    const meaningful = document.createElement("span");
-    meaningful.className = "muted small";
-    meaningful.textContent = row?.last_meaningful_activity_at_ms
-      ? "Last meaningful work " + windowAgeLabel(row.last_meaningful_activity_at_ms)
-      : "No meaningful WebCodex work recorded";
-    button.appendChild(meaningful);
-    const links = document.createElement("span");
-    links.className = "muted small";
-    links.textContent = countLabel(Number(row?.linked_session_count || 0), "linked Session")
-      + (Number(row?.recorder_gap_count || 0) ? " · " + String(row.recorder_gap_count) + " recorder gap" : "");
-    button.appendChild(links);
-    button.addEventListener("click", () => void selectWindow(key));
-    node.appendChild(button);
+    const card = createWindowCard(row, selectedWindowKey, (key) => void selectWindow(key));
+    if (card) node.appendChild(card);
   }
 }
 
@@ -1482,67 +843,16 @@ function renderWindowDetail(detail: any | null): void {
     "runtime-window-activity-status",
     countLabel(Number(detail.activity_returned || 0), "event") + (detail.activity_truncated ? " · bounded" : ""),
   );
-  const activeNode = el("runtime-window-active-requests");
-  clearNode(activeNode);
-  const activeRequests = Array.isArray(detail.active_requests) ? detail.active_requests : [];
-  if (activeNode && !activeRequests.length) {
-    const empty = document.createElement("p");
-    empty.className = "muted small";
-    empty.textContent = "No WebCodex request is currently active.";
-    activeNode.appendChild(empty);
-  }
-  for (const request of activeRequests) {
-    const item = document.createElement("article");
-    item.className = "window-request-item";
-    const title = document.createElement("strong");
-    title.textContent = String(request?.tool_name || request?.method || "WebCodex request");
-    item.appendChild(title);
-    const meta = document.createElement("div");
-    meta.className = "muted small";
-    const facts = [
-      request?.project,
-      request?.started_at_ms ? "started " + windowAgeLabel(request.started_at_ms) : null,
-      typeof request?.elapsed_ms === "number" ? String(request.elapsed_ms) + " ms elapsed" : null,
-    ].filter(Boolean).map(String);
-    meta.textContent = facts.join(" · ");
-    item.appendChild(meta);
-    if (request?.server_trace_id) {
-      const trace = document.createElement("button");
-      trace.type = "button";
-      trace.className = "window-trace-copy";
-      trace.textContent = "trace " + String(request.server_trace_id);
-      trace.addEventListener("click", () => void copyRuntimeValue(String(request.server_trace_id)));
-      item.appendChild(trace);
-    }
-    activeNode?.appendChild(item);
-  }
-  const sessionsNode = el("runtime-window-linked-sessions");
-  clearNode(sessionsNode);
-  for (const session of Array.isArray(detail.linked_sessions) ? detail.linked_sessions : []) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "window-session-card";
-    const title = document.createElement("strong");
-    title.textContent = String(session?.title || session?.workflow_session_id || "Workflow Session");
-    const meta = document.createElement("span");
-    meta.className = "muted small";
-    meta.textContent = [
-      session?.workflow_session_id,
-      session?.lifecycle,
-      session?.project,
-      ...(Array.isArray(session?.relations) ? session.relations : []),
-    ].filter(Boolean).map(String).join(" · ");
-    button.appendChild(title);
-    button.appendChild(meta);
-    button.addEventListener("click", () => openWindowLinkedSession(session));
-    sessionsNode?.appendChild(button);
-  }
-  if (sessionsNode && !sessionsNode.childElementCount) {
-    const empty = document.createElement("p");
-    empty.className = "muted small";
-    empty.textContent = "No authorized Workflow Session links.";
-    sessionsNode.appendChild(empty);
-  }
+  renderWindowActiveRequests(
+    el("runtime-window-active-requests"),
+    Array.isArray(detail.active_requests) ? detail.active_requests : [],
+    { onCopyTrace: (traceId) => void copyRuntimeValue(traceId) },
+  );
+  renderWindowLinkedSessions(
+    el("runtime-window-linked-sessions"),
+    Array.isArray(detail.linked_sessions) ? detail.linked_sessions : [],
+    (session) => openWindowLinkedSession(session),
+  );
   renderWindowActivityRows(el("runtime-window-activity"), Array.isArray(detail.activity) ? detail.activity : []);
   renderWorkspaceHeading();
 }
@@ -1618,36 +928,13 @@ function renderSessionWindowCorrelation(detail: any): void {
   clearNode(linkedNode);
   const links = available && Array.isArray(detail?.linked_windows) ? detail.linked_windows : [];
   setText("runtime-linked-windows-status", available ? countLabel(links.length, "Window") : "runtime:read unavailable");
-  for (const link of links) {
-    const key = String(link?.client_window_key || "");
-    if (!key) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "window-session-card" + (Number(link?.recorder_gap_count || 0) ? " recorder-gap" : "");
-    const title = document.createElement("strong");
-    title.textContent = "Window " + runtimeWindowShortKey(key);
-    const meta = document.createElement("span");
-    meta.className = "muted small";
-    meta.textContent = [
-      link?.source,
-      link?.last_seen_at_ms ? "last WebCodex activity " + windowAgeLabel(link.last_seen_at_ms) : null,
-      Number(link?.recorder_gap_count || 0) ? String(link.recorder_gap_count) + " recorder gap" : null,
-    ].filter(Boolean).map(String).join(" · ");
-    button.appendChild(title);
-    button.appendChild(meta);
-    button.addEventListener("click", () => {
+  if (available) {
+    renderSessionWindowCorrelationLinks(linkedNode, links, (key) => {
       selectedWindowKey = key;
       applyWorkspaceView("windows");
       renderWindowList();
       void refreshWindowDetail();
     });
-    linkedNode?.appendChild(button);
-  }
-  if (available && linkedNode && !links.length) {
-    const empty = document.createElement("p");
-    empty.className = "muted small";
-    empty.textContent = "No linked Window evidence.";
-    linkedNode.appendChild(empty);
   }
   const gaps = available && Array.isArray(detail?.window_activity_after_last_session_record)
     ? detail.window_activity_after_last_session_record
@@ -1778,9 +1065,7 @@ function showError(message: string): void {
 }
 
 function countLabel(value: any, singular: string, plural = singular + "s"): string {
-  const count = typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-  if (runtimeLanguage === "zh-CN") return count + " " + (ZH_COUNT_LABELS[singular] || RUNTIME_ZH_TEXT[singular] || singular);
-  return count + " " + (count === 1 ? singular : plural);
+  return localizedCountLabel(value, singular, plural, runtimeLanguage);
 }
 
 function pendingAttentionCount(attention: any): number {
@@ -2475,48 +1760,7 @@ function localizedLivenessPresentation(session: any): any {
 }
 
 function localizedWorkflowText(value: unknown): string {
-  const source = String(value || "");
-  if (runtimeLanguage !== "zh-CN" || !source) return source;
-  const exact: Record<string, string> = {
-    "Latest retained validation passed": "最近保留的验证已通过",
-    "Latest validation passed": "最近验证已通过",
-    "Latest retained validation failed": "最近保留的验证失败",
-    "Latest validation failed": "最近验证失败",
-    "Validation not run": "尚未运行验证",
-    "Retained terminal validation evidence unavailable": "保留的最终验证证据不可用",
-    "Terminal validation evidence unavailable": "最终验证证据不可用",
-    "No work observations in retained events.": "保留事件中没有工作观察记录。",
-    "No tool activity observed.": "尚未观察到工具活动。",
-    "No retained open guidance, questions, risks, or todos.": "没有保留的开放指导、问题、风险或待办。",
-    "No retained model-reported progress.": "没有保留的模型报告进度。",
-  };
-  let text = exact[source] || source;
-  const prefixes: Array<[string, string]> = [
-    ["Recent observed work: ", "最近观察到的工作："],
-    ["Observed work: ", "已观察工作："],
-    ["Retained open messages: ", "保留的开放消息："],
-    ["Retained: ", "保留："],
-    ["Recent ", "最近 "],
-    ["latest ", "最近 "],
-  ];
-  for (const [english, chinese] of prefixes) {
-    if (text.startsWith(english)) {
-      text = chinese + text.slice(english.length);
-      break;
-    }
-  }
-  const nounMap: Record<string, string> = {
-    edit: "次编辑", edits: "次编辑", validation: "次验证", validations: "次验证",
-    exploration: "次探索", review: "次审查", reviews: "次审查", run: "次运行", runs: "次运行",
-    risk: "个风险", risks: "个风险", todo: "个待办", todos: "个待办",
-    question: "个问题", questions: "个问题", guidance: "条指导",
-    test: "次测试", tests: "次测试", "unresolved failure": "个未解决失败",
-    "unresolved failures": "个未解决失败", "unresolved validation failure": "个未解决的验证失败",
-    "unresolved validation failures": "个未解决的验证失败",
-  };
-  return text.replace(/(\d+) (unresolved validation failures?|unresolved failures?|edits?|validations?|exploration|reviews?|runs?|risks?|todos?|questions?|guidance|tests?)/g, (_match, count, noun) => {
-    return String(count) + " " + (nounMap[String(noun)] || noun);
-  });
+  return translateWorkflowText(value, runtimeLanguage);
 }
 
 function activityKindLabel(activity: any): string {

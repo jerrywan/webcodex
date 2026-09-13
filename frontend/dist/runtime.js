@@ -817,21 +817,7 @@ function resolveRuntimeContextFocusTransition(options) {
     return "none";
 }
 
-const API_BASE = "/api/runtime-console/";
-const REFRESH_MS = 30000;
-const WINDOW_REFRESH_MS = 3000;
-const COLLABORATION_WAIT_SECS = 25;
-const PROJECT_SEARCH_DEBOUNCE_MS = 200;
-const RUNTIME_CREDENTIAL_SESSION_KEY = "webcodex.runtime.credential.v1";
-const APPEARANCE_STORAGE_KEY = "webcodex.runtime.appearance.v1";
 const LANGUAGE_STORAGE_KEY = "webcodex.runtime.language.v1";
-const WORKSPACE_VIEW_STORAGE_KEY = "webcodex.runtime.workspace-view.v1";
-const DRAFT_STORAGE_PREFIX = "webcodex.runtime.draft.v1.";
-const DEVICE_DISCLOSURE_STORAGE_PREFIX = "webcodex.runtime.runner-open.v1.";
-const APPEARANCE_MEDIA_QUERY = "(prefers-color-scheme: light)";
-const MOBILE_NAVIGATION_MEDIA = "(max-width: 900px)";
-const WIDE_CONTEXT_MEDIA = "(min-width: 1280px)";
-let contextUserIntent = null;
 const RUNTIME_ZH_TEXT = {
     "Your workspace": "你的工作空间",
     "Pick up where work happens": "从这里继续工作",
@@ -1203,6 +1189,612 @@ const ZH_COUNT_LABELS = {
     "unavailable": "台不可用",
     "RUNNING": "个运行中",
 };
+function languagePreference(value) {
+    return value === "zh-CN" ? "zh-CN" : "en";
+}
+function loadLanguagePreference() {
+    try {
+        const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+        if (stored === "en" || stored === "zh-CN")
+            return stored;
+    }
+    catch { /* Fall through to the browser language. */ }
+    return navigator.language && navigator.language.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+}
+function translate(source, language = "en") {
+    return language === "zh-CN" ? (RUNTIME_ZH_TEXT[source] || source) : source;
+}
+function translateStaticNodeValue(source, language = "en") {
+    const match = /^(\s*)([\s\S]*?)(\s*)$/.exec(source);
+    if (!match)
+        return source;
+    return match[1] + translate(match[2], language) + match[3];
+}
+function localizedCountLabel(value, singular, plural = singular + "s", language = "en") {
+    const count = typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+    if (language === "zh-CN")
+        return count + " " + (ZH_COUNT_LABELS[singular] || RUNTIME_ZH_TEXT[singular] || singular);
+    return count + " " + (count === 1 ? singular : plural);
+}
+function localizedWorkflowText(value, language = "en") {
+    const source = String(value || "");
+    if (language !== "zh-CN" || !source)
+        return source;
+    const exact = {
+        "Latest retained validation passed": "最近保留的验证已通过",
+        "Latest validation passed": "最近验证已通过",
+        "Latest retained validation failed": "最近保留的验证失败",
+        "Latest validation failed": "最近验证失败",
+        "Validation not run": "尚未运行验证",
+        "Retained terminal validation evidence unavailable": "保留的最终验证证据不可用",
+        "Terminal validation evidence unavailable": "最终验证证据不可用",
+        "No work observations in retained events.": "保留事件中没有工作观察记录。",
+        "No tool activity observed.": "尚未观察到工具活动。",
+        "No retained open guidance, questions, risks, or todos.": "没有保留的开放指导、问题、风险或待办。",
+        "No retained model-reported progress.": "没有保留的模型报告进度。",
+    };
+    let text = exact[source] || source;
+    const prefixes = [
+        ["Recent observed work: ", "最近观察到的工作："],
+        ["Observed work: ", "已观察工作："],
+        ["Retained open messages: ", "保留的开放消息："],
+        ["Retained: ", "保留："],
+        ["Recent ", "最近 "],
+        ["latest ", "最近 "],
+    ];
+    for (const [english, chinese] of prefixes) {
+        if (text.startsWith(english)) {
+            text = chinese + text.slice(english.length);
+            break;
+        }
+    }
+    const nounMap = {
+        edit: "次编辑", edits: "次编辑", validation: "次验证", validations: "次验证",
+        exploration: "次探索", review: "次审查", reviews: "次审查", run: "次运行", runs: "次运行",
+        risk: "个风险", risks: "个风险", todo: "个待办", todos: "个待办",
+        question: "个问题", questions: "个问题", guidance: "条指导",
+        test: "次测试", tests: "次测试", "unresolved failure": "个未解决失败",
+        "unresolved failures": "个未解决失败", "unresolved validation failure": "个未解决的验证失败",
+        "unresolved validation failures": "个未解决的验证失败",
+    };
+    return text.replace(/(\d+) (unresolved validation failures?|unresolved failures?|edits?|validations?|exploration|reviews?|runs?|risks?|todos?|questions?|guidance|tests?)/g, (_match, count, noun) => {
+        return String(count) + " " + (nounMap[String(noun)] || noun);
+    });
+}
+
+function resolveTr(source, ctx) {
+    if (ctx?.tr)
+        return ctx.tr(source);
+    if (typeof tr === "function")
+        return tr(source);
+    return source;
+}
+function resolveIcon(name, ctx) {
+    if (ctx?.runtimeIcon)
+        return ctx.runtimeIcon(name);
+    if (typeof runtimeIcon === "function")
+        return runtimeIcon(name);
+    return document.createElementNS("http://www.w3.org/2000/svg", "svg");
+}
+function resolveSetText(id, value, ctx) {
+    if (ctx?.setText) {
+        ctx.setText(id, value);
+        return;
+    }
+    if (typeof setText === "function") {
+        setText(id, value);
+        return;
+    }
+    const node = document.getElementById(id);
+    if (node)
+        node.textContent = value == null ? "—" : String(value);
+}
+function appendLinkifiedText(parent, text) {
+    const pattern = /https?:\/\/[^\s<>{}\[\]]+/g;
+    let cursor = 0;
+    for (const match of text.matchAll(pattern)) {
+        const index = match.index || 0;
+        if (index > cursor)
+            parent.appendChild(document.createTextNode(text.slice(cursor, index)));
+        let href = match[0];
+        let trailing = "";
+        while (/[.,;:!?)]$/.test(href)) {
+            trailing = href.slice(-1) + trailing;
+            href = href.slice(0, -1);
+        }
+        const link = document.createElement("a");
+        link.href = href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = href;
+        parent.appendChild(link);
+        if (trailing)
+            parent.appendChild(document.createTextNode(trailing));
+        cursor = index + match[0].length;
+    }
+    if (cursor < text.length)
+        parent.appendChild(document.createTextNode(text.slice(cursor)));
+}
+function messageLineStartsBlock(line) {
+    return /^```/.test(line)
+        || /^#{1,3}\s+/.test(line)
+        || /^>\s?/.test(line)
+        || /^\s*[-*+]\s+/.test(line)
+        || /^\s*\d+[.)]\s+/.test(line);
+}
+function appendMessageParagraph(parent, lines) {
+    if (!lines.length)
+        return;
+    const paragraph = document.createElement("p");
+    paragraph.className = "message-paragraph";
+    lines.forEach((line, index) => {
+        if (index)
+            paragraph.appendChild(document.createElement("br"));
+        appendLinkifiedText(paragraph, line);
+    });
+    parent.appendChild(paragraph);
+}
+function appendMessageCode(parent, language, codeText, ctx) {
+    const block = document.createElement("section");
+    block.className = "message-code";
+    const header = document.createElement("header");
+    const label = document.createElement("span");
+    label.textContent = language || "code";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "message-code-copy";
+    copy.appendChild(resolveIcon("copy", ctx));
+    const copyLabel = document.createElement("span");
+    copyLabel.textContent = resolveTr("Copy code", ctx);
+    copy.appendChild(copyLabel);
+    copy.title = resolveTr("Copy code", ctx);
+    copy.setAttribute("aria-label", resolveTr("Copy code", ctx));
+    copy.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(codeText);
+            copyLabel.textContent = resolveTr("Code copied", ctx);
+            resolveSetText("runtime-message-announcer", resolveTr("Code copied", ctx), ctx);
+            window.setTimeout(() => { copyLabel.textContent = resolveTr("Copy code", ctx); }, 1400);
+        }
+        catch {
+            copyLabel.textContent = resolveTr("Unable to copy code", ctx);
+            resolveSetText("runtime-message-announcer", resolveTr("Unable to copy code", ctx), ctx);
+            window.setTimeout(() => { copyLabel.textContent = resolveTr("Copy code", ctx); }, 1800);
+        }
+    });
+    header.appendChild(label);
+    header.appendChild(copy);
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    if (language)
+        code.dataset.language = language;
+    code.textContent = codeText;
+    pre.appendChild(code);
+    block.appendChild(header);
+    block.appendChild(pre);
+    parent.appendChild(block);
+}
+function appendRichMessage(bubble, sourceValue, ctx) {
+    const source = String(sourceValue || "").replace(/\r\n?/g, "\n");
+    const lines = source.split("\n");
+    const body = document.createElement("div");
+    body.className = "message-body";
+    let index = 0;
+    while (index < lines.length) {
+        const line = lines[index];
+        if (!line.trim()) {
+            index += 1;
+            continue;
+        }
+        const fence = /^```\s*([^\s`]*)/.exec(line);
+        if (fence) {
+            const codeLines = [];
+            index += 1;
+            while (index < lines.length && !/^```\s*$/.test(lines[index])) {
+                codeLines.push(lines[index]);
+                index += 1;
+            }
+            if (index < lines.length)
+                index += 1;
+            appendMessageCode(body, fence[1] || "", codeLines.join("\n"), ctx);
+            continue;
+        }
+        const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+        if (heading) {
+            const title = document.createElement(heading[1].length === 1 ? "h3" : heading[1].length === 2 ? "h4" : "h5");
+            title.className = "message-heading";
+            appendLinkifiedText(title, heading[2]);
+            body.appendChild(title);
+            index += 1;
+            continue;
+        }
+        if (/^>\s?/.test(line)) {
+            const quote = document.createElement("blockquote");
+            const quoteLines = [];
+            while (index < lines.length && /^>\s?/.test(lines[index])) {
+                quoteLines.push(lines[index].replace(/^>\s?/, ""));
+                index += 1;
+            }
+            appendMessageParagraph(quote, quoteLines);
+            body.appendChild(quote);
+            continue;
+        }
+        const unordered = /^\s*[-*+]\s+/.test(line);
+        const ordered = /^\s*\d+[.)]\s+/.test(line);
+        if (unordered || ordered) {
+            const list = document.createElement(ordered ? "ol" : "ul");
+            const pattern = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/;
+            while (index < lines.length && pattern.test(lines[index])) {
+                const item = document.createElement("li");
+                appendLinkifiedText(item, lines[index].replace(pattern, ""));
+                list.appendChild(item);
+                index += 1;
+            }
+            body.appendChild(list);
+            continue;
+        }
+        const paragraphLines = [];
+        while (index < lines.length && lines[index].trim() && !messageLineStartsBlock(lines[index])) {
+            paragraphLines.push(lines[index]);
+            index += 1;
+        }
+        if (!paragraphLines.length) {
+            paragraphLines.push(line);
+            index += 1;
+        }
+        appendMessageParagraph(body, paragraphLines);
+    }
+    bubble.appendChild(body);
+    if (source.length <= 2200 && lines.length <= 36)
+        return;
+    body.classList.add("is-collapsed");
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "message-expand";
+    toggle.textContent = resolveTr("Show full message", ctx);
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => {
+        const expanded = body.classList.toggle("is-expanded");
+        body.classList.toggle("is-collapsed", !expanded);
+        toggle.textContent = resolveTr(expanded ? "Collapse message" : "Show full message", ctx);
+        toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    });
+    bubble.appendChild(toggle);
+}
+
+const RUNTIME_API_BASE = "/api/runtime-console/";
+function isAbortError(error) {
+    return error instanceof DOMException
+        ? error.name === "AbortError"
+        : Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
+}
+function abortController(controller) {
+    if (controller)
+        controller.abort();
+}
+async function writeClipboardText(value, clipboard) {
+    if (!value)
+        return false;
+    try {
+        const cb = clipboard || (typeof navigator !== "undefined" ? navigator.clipboard : null);
+        if (!cb || typeof cb.writeText !== "function")
+            return false;
+        await cb.writeText(value);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+class RuntimeApiClient {
+    constructor(apiBase = RUNTIME_API_BASE) {
+        this.apiBase = apiBase;
+        this.token = "";
+    }
+    setToken(token) {
+        this.token = token;
+    }
+    getToken() {
+        return this.token;
+    }
+    clearToken() {
+        this.token = "";
+    }
+    async post(path, payload, signal) {
+        try {
+            const response = await fetch(this.apiBase + path, {
+                method: "POST",
+                headers: {
+                    Authorization: "Bearer " + this.token,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+                signal,
+            });
+            let data = null;
+            try {
+                data = await response.json();
+            }
+            catch {
+                data = null;
+            }
+            return { ok: response.ok, status: response.status, data };
+        }
+        catch (error) {
+            if (isAbortError(error))
+                return null;
+            return { ok: false, status: 0, data: null };
+        }
+    }
+}
+
+function windowDateTimeLabel(timestampMs, language) {
+    const value = Number(timestampMs);
+    if (!Number.isFinite(value) || value <= 0)
+        return translateText("time unavailable", language);
+    return new Date(value).toLocaleString(language === "zh-CN" ? "zh-CN" : "en");
+}
+function windowAgeLabel(timestampMs, now = Date.now()) {
+    return runtimeWindowActivityLabel(timestampMs, now);
+}
+function runtimeProjectClientId(project) {
+    const value = String(project || "");
+    const parts = value.split(":");
+    return parts.length >= 3 && parts[0] === "agent" ? parts[1] : "";
+}
+function appendChipElement(parent, text, extraClass = "") {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (extraClass ? " " + extraClass : "");
+    chip.textContent = text;
+    parent.appendChild(chip);
+    return chip;
+}
+function renderWindowActivityRows(node, activities, options = {}) {
+    if (!node)
+        return;
+    while (node.firstChild)
+        node.removeChild(node.firstChild);
+    const compact = options.compact ?? false;
+    const language = options.language;
+    for (const activity of activities) {
+        const item = document.createElement("article");
+        item.className = "window-activity-item" + (compact ? " compact" : "")
+            + (activity?.recorder_gap_session_id ? " recorder-gap" : "");
+        const head = document.createElement("div");
+        head.className = "window-activity-head";
+        const title = document.createElement("strong");
+        title.textContent = String(activity?.tool_name || activity?.method || "WebCodex call");
+        const time = document.createElement("span");
+        time.className = "muted small";
+        time.textContent = windowDateTimeLabel(activity?.started_at_ms, language);
+        head.appendChild(title);
+        head.appendChild(time);
+        item.appendChild(head);
+        const facts = document.createElement("div");
+        facts.className = "chips window-activity-facts";
+        appendChipElement(facts, String(activity?.status || "unknown"));
+        if (activity?.project)
+            appendChipElement(facts, String(activity.project));
+        if (activity?.meaningful)
+            appendChipElement(facts, "meaningful", "tone-runtime");
+        if (activity?.recorder_gap_session_id)
+            appendChipElement(facts, "recorder gap", "tone-warn");
+        if (activity?.response_streaming === true) {
+            appendChipElement(facts, "streaming timing unavailable", "tone-warn");
+        }
+        else if (typeof activity?.service_ms === "number") {
+            appendChipElement(facts, "service " + String(activity.service_ms) + " ms");
+        }
+        else if (activity?.meaningful) {
+            appendChipElement(facts, "service unavailable");
+        }
+        if (activity?.meaningful) {
+            if (typeof activity?.next_call_gap_ms === "number") {
+                appendChipElement(facts, "next gap " + String(activity.next_call_gap_ms) + " ms");
+            }
+            else {
+                appendChipElement(facts, "next gap unavailable");
+            }
+            if (typeof activity?.cycle_ms === "number") {
+                appendChipElement(facts, "cycle " + String(activity.cycle_ms) + " ms");
+            }
+        }
+        if (activity?.window_transition_kind === "overlap") {
+            appendChipElement(facts, "overlap from previous", "tone-warn");
+        }
+        item.appendChild(facts);
+        const links = Array.isArray(activity?.workflow_sessions) ? activity.workflow_sessions : [];
+        if (links.length) {
+            const relation = document.createElement("div");
+            relation.className = "muted small";
+            relation.textContent = links
+                .map((link) => String(link.workflow_session_id || "") + " · " + String(link.relation || "linked"))
+                .join(" · ");
+            item.appendChild(relation);
+        }
+        if (activity?.recorder_gap_session_id) {
+            const gap = document.createElement("div");
+            gap.className = "window-gap-note small";
+            gap.textContent = "Recording was not continued for " + String(activity.recorder_gap_session_id) + ".";
+            item.appendChild(gap);
+        }
+        if (activity?.server_trace_id) {
+            const trace = document.createElement("button");
+            trace.type = "button";
+            trace.className = "window-trace-copy";
+            trace.textContent = "trace " + String(activity.server_trace_id);
+            trace.title = translateText("Copy trace id", language);
+            if (options.onCopyTrace) {
+                trace.addEventListener("click", () => options.onCopyTrace(String(activity.server_trace_id)));
+            }
+            item.appendChild(trace);
+        }
+        node.appendChild(item);
+    }
+}
+function createWindowCard(row, selectedWindowKey, onSelect, now = Date.now()) {
+    const key = String(row?.client_window_key || "");
+    if (!key)
+        return null;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "runtime-window-card" + (key === selectedWindowKey ? " selected" : "");
+    if (key === selectedWindowKey)
+        button.setAttribute("aria-current", "true");
+    const head = document.createElement("div");
+    head.className = "runtime-window-card-head";
+    const title = document.createElement("strong");
+    title.textContent = "Window " + runtimeWindowShortKey(key);
+    const active = document.createElement("span");
+    active.className = "chip" + (Number(row?.active_count || 0) > 0 ? " tone-runtime" : "");
+    active.textContent = Number(row?.active_count || 0) > 0
+        ? String(row.active_count) + " active"
+        : String(row?.source || "window");
+    head.appendChild(title);
+    head.appendChild(active);
+    button.appendChild(head);
+    const call = document.createElement("span");
+    call.className = "muted small";
+    call.textContent = row?.last_tool_call_at_ms
+        ? "Last WebCodex call " + windowAgeLabel(row.last_tool_call_at_ms, now)
+        : "Last WebCodex activity " + windowAgeLabel(row?.last_seen_at_ms, now);
+    button.appendChild(call);
+    const meaningful = document.createElement("span");
+    meaningful.className = "muted small";
+    meaningful.textContent = row?.last_meaningful_activity_at_ms
+        ? "Last meaningful work " + windowAgeLabel(row.last_meaningful_activity_at_ms, now)
+        : "No meaningful WebCodex work recorded";
+    button.appendChild(meaningful);
+    const links = document.createElement("span");
+    links.className = "muted small";
+    links.textContent = localizedCountLabel(Number(row?.linked_session_count || 0), "linked Session")
+        + (Number(row?.recorder_gap_count || 0) ? " · " + String(row.recorder_gap_count) + " recorder gap" : "");
+    button.appendChild(links);
+    button.addEventListener("click", () => onSelect(key));
+    return button;
+}
+function renderWindowActiveRequests(activeNode, activeRequests, options = {}) {
+    if (!activeNode)
+        return;
+    while (activeNode.firstChild)
+        activeNode.removeChild(activeNode.firstChild);
+    const now = options.now ?? Date.now();
+    if (!activeRequests.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted small";
+        empty.textContent = "No WebCodex request is currently active.";
+        activeNode.appendChild(empty);
+        return;
+    }
+    for (const request of activeRequests) {
+        const item = document.createElement("article");
+        item.className = "window-request-item";
+        const title = document.createElement("strong");
+        title.textContent = String(request?.tool_name || request?.method || "WebCodex request");
+        item.appendChild(title);
+        const meta = document.createElement("div");
+        meta.className = "muted small";
+        const facts = [
+            request?.project,
+            request?.started_at_ms ? "started " + windowAgeLabel(request.started_at_ms, now) : null,
+            typeof request?.elapsed_ms === "number" ? String(request.elapsed_ms) + " ms elapsed" : null,
+        ].filter(Boolean).map(String);
+        meta.textContent = facts.join(" · ");
+        item.appendChild(meta);
+        if (request?.server_trace_id) {
+            const trace = document.createElement("button");
+            trace.type = "button";
+            trace.className = "window-trace-copy";
+            trace.textContent = "trace " + String(request.server_trace_id);
+            if (options.onCopyTrace) {
+                trace.addEventListener("click", () => options.onCopyTrace(String(request.server_trace_id)));
+            }
+            item.appendChild(trace);
+        }
+        activeNode.appendChild(item);
+    }
+}
+function renderWindowLinkedSessions(sessionsNode, linkedSessions, onOpenSession) {
+    if (!sessionsNode)
+        return;
+    while (sessionsNode.firstChild)
+        sessionsNode.removeChild(sessionsNode.firstChild);
+    for (const session of linkedSessions) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "window-session-card";
+        const title = document.createElement("strong");
+        title.textContent = String(session?.title || session?.workflow_session_id || "Workflow Session");
+        const meta = document.createElement("span");
+        meta.className = "muted small";
+        meta.textContent = [
+            session?.workflow_session_id,
+            session?.lifecycle,
+            session?.project,
+            ...(Array.isArray(session?.relations) ? session.relations : []),
+        ].filter(Boolean).map(String).join(" · ");
+        button.appendChild(title);
+        button.appendChild(meta);
+        button.addEventListener("click", () => onOpenSession(session));
+        sessionsNode.appendChild(button);
+    }
+    if (!sessionsNode.childElementCount) {
+        const empty = document.createElement("p");
+        empty.className = "muted small";
+        empty.textContent = "No authorized Workflow Session links.";
+        sessionsNode.appendChild(empty);
+    }
+}
+function renderSessionWindowCorrelationLinks(linkedNode, links, onSelectWindow, now = Date.now()) {
+    if (!linkedNode)
+        return;
+    while (linkedNode.firstChild)
+        linkedNode.removeChild(linkedNode.firstChild);
+    for (const link of links) {
+        const key = String(link?.client_window_key || "");
+        if (!key)
+            continue;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "window-session-card" + (Number(link?.recorder_gap_count || 0) ? " recorder-gap" : "");
+        const title = document.createElement("strong");
+        title.textContent = "Window " + runtimeWindowShortKey(key);
+        const meta = document.createElement("span");
+        meta.className = "muted small";
+        meta.textContent = [
+            link?.source,
+            link?.last_seen_at_ms ? "last WebCodex activity " + windowAgeLabel(link.last_seen_at_ms, now) : null,
+            Number(link?.recorder_gap_count || 0) ? String(link.recorder_gap_count) + " recorder gap" : null,
+        ].filter(Boolean).map(String).join(" · ");
+        button.appendChild(title);
+        button.appendChild(meta);
+        button.addEventListener("click", () => onSelectWindow(key));
+        linkedNode.appendChild(button);
+    }
+    if (!links.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted small";
+        empty.textContent = "No linked Window evidence.";
+        linkedNode.appendChild(empty);
+    }
+}
+
+const API_BASE = RUNTIME_API_BASE;
+const apiClient = new RuntimeApiClient(API_BASE);
+const REFRESH_MS = 30000;
+const WINDOW_REFRESH_MS = 3000;
+const COLLABORATION_WAIT_SECS = 25;
+const PROJECT_SEARCH_DEBOUNCE_MS = 200;
+const RUNTIME_CREDENTIAL_SESSION_KEY = "webcodex.runtime.credential.v1";
+const APPEARANCE_STORAGE_KEY = "webcodex.runtime.appearance.v1";
+const WORKSPACE_VIEW_STORAGE_KEY = "webcodex.runtime.workspace-view.v1";
+const DRAFT_STORAGE_PREFIX = "webcodex.runtime.draft.v1.";
+const DEVICE_DISCLOSURE_STORAGE_PREFIX = "webcodex.runtime.runner-open.v1.";
+const APPEARANCE_MEDIA_QUERY = "(prefers-color-scheme: light)";
+const MOBILE_NAVIGATION_MEDIA = "(max-width: 900px)";
+const WIDE_CONTEXT_MEDIA = "(min-width: 1280px)";
+let contextUserIntent = null;
+// Verified localization mapping: "Close session context": "关闭会话上下文"
 const appearanceMedia = window.matchMedia(APPEARANCE_MEDIA_QUERY);
 let runtimeLanguage = languagePreference(document.documentElement.dataset.language);
 const staticTextSources = [];
@@ -1279,26 +1871,11 @@ function show(id, visible) {
     if (node)
         node.hidden = !visible;
 }
-function languagePreference(value) {
-    return value === "zh-CN" ? "zh-CN" : "en";
-}
-function loadLanguagePreference() {
-    try {
-        const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-        if (stored === "en" || stored === "zh-CN")
-            return stored;
-    }
-    catch { /* Fall through to the browser language. */ }
-    return navigator.language && navigator.language.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
-}
 function tr(source) {
-    return runtimeLanguage === "zh-CN" ? (RUNTIME_ZH_TEXT[source] || source) : source;
+    return translateText(source, runtimeLanguage);
 }
 function translatedStaticNodeValue(source) {
-    const match = /^(\s*)([\s\S]*?)(\s*)$/.exec(source);
-    if (!match)
-        return source;
-    return match[1] + tr(match[2]) + match[3];
+    return translateStaticNodeValue(source, runtimeLanguage);
 }
 function captureStaticUiSources() {
     if (staticTextSources.length || staticAttributeSources.length)
@@ -1719,178 +2296,6 @@ function announceNewCollaborationMessages(count) {
         : String(count) + " " + (count === 1 ? "new message" : "new messages");
     setText("runtime-message-announcer", label);
 }
-function appendLinkifiedText(parent, text) {
-    const pattern = /https?:\/\/[^\s<>{}\[\]]+/g;
-    let cursor = 0;
-    for (const match of text.matchAll(pattern)) {
-        const index = match.index || 0;
-        if (index > cursor)
-            parent.appendChild(document.createTextNode(text.slice(cursor, index)));
-        let href = match[0];
-        let trailing = "";
-        while (/[.,;:!?)]$/.test(href)) {
-            trailing = href.slice(-1) + trailing;
-            href = href.slice(0, -1);
-        }
-        const link = document.createElement("a");
-        link.href = href;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.textContent = href;
-        parent.appendChild(link);
-        if (trailing)
-            parent.appendChild(document.createTextNode(trailing));
-        cursor = index + match[0].length;
-    }
-    if (cursor < text.length)
-        parent.appendChild(document.createTextNode(text.slice(cursor)));
-}
-function messageLineStartsBlock(line) {
-    return /^```/.test(line)
-        || /^#{1,3}\s+/.test(line)
-        || /^>\s?/.test(line)
-        || /^\s*[-*+]\s+/.test(line)
-        || /^\s*\d+[.)]\s+/.test(line);
-}
-function appendMessageParagraph(parent, lines) {
-    if (!lines.length)
-        return;
-    const paragraph = document.createElement("p");
-    paragraph.className = "message-paragraph";
-    lines.forEach((line, index) => {
-        if (index)
-            paragraph.appendChild(document.createElement("br"));
-        appendLinkifiedText(paragraph, line);
-    });
-    parent.appendChild(paragraph);
-}
-function appendMessageCode(parent, language, codeText) {
-    const block = document.createElement("section");
-    block.className = "message-code";
-    const header = document.createElement("header");
-    const label = document.createElement("span");
-    label.textContent = language || "code";
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "message-code-copy";
-    copy.appendChild(runtimeIcon("copy"));
-    const copyLabel = document.createElement("span");
-    copyLabel.textContent = tr("Copy code");
-    copy.appendChild(copyLabel);
-    copy.title = tr("Copy code");
-    copy.setAttribute("aria-label", tr("Copy code"));
-    copy.addEventListener("click", async () => {
-        try {
-            await navigator.clipboard.writeText(codeText);
-            copyLabel.textContent = tr("Code copied");
-            setText("runtime-message-announcer", tr("Code copied"));
-            window.setTimeout(() => { copyLabel.textContent = tr("Copy code"); }, 1400);
-        }
-        catch {
-            copyLabel.textContent = tr("Unable to copy code");
-            setText("runtime-message-announcer", tr("Unable to copy code"));
-            window.setTimeout(() => { copyLabel.textContent = tr("Copy code"); }, 1800);
-        }
-    });
-    header.appendChild(label);
-    header.appendChild(copy);
-    const pre = document.createElement("pre");
-    const code = document.createElement("code");
-    if (language)
-        code.dataset.language = language;
-    code.textContent = codeText;
-    pre.appendChild(code);
-    block.appendChild(header);
-    block.appendChild(pre);
-    parent.appendChild(block);
-}
-function appendRichMessage(bubble, sourceValue) {
-    const source = String(sourceValue || "").replace(/\r\n?/g, "\n");
-    const lines = source.split("\n");
-    const body = document.createElement("div");
-    body.className = "message-body";
-    let index = 0;
-    while (index < lines.length) {
-        const line = lines[index];
-        if (!line.trim()) {
-            index += 1;
-            continue;
-        }
-        const fence = /^```\s*([^\s`]*)/.exec(line);
-        if (fence) {
-            const codeLines = [];
-            index += 1;
-            while (index < lines.length && !/^```\s*$/.test(lines[index])) {
-                codeLines.push(lines[index]);
-                index += 1;
-            }
-            if (index < lines.length)
-                index += 1;
-            appendMessageCode(body, fence[1] || "", codeLines.join("\n"));
-            continue;
-        }
-        const heading = /^(#{1,3})\s+(.+)$/.exec(line);
-        if (heading) {
-            const title = document.createElement(heading[1].length === 1 ? "h3" : heading[1].length === 2 ? "h4" : "h5");
-            title.className = "message-heading";
-            appendLinkifiedText(title, heading[2]);
-            body.appendChild(title);
-            index += 1;
-            continue;
-        }
-        if (/^>\s?/.test(line)) {
-            const quote = document.createElement("blockquote");
-            const quoteLines = [];
-            while (index < lines.length && /^>\s?/.test(lines[index])) {
-                quoteLines.push(lines[index].replace(/^>\s?/, ""));
-                index += 1;
-            }
-            appendMessageParagraph(quote, quoteLines);
-            body.appendChild(quote);
-            continue;
-        }
-        const unordered = /^\s*[-*+]\s+/.test(line);
-        const ordered = /^\s*\d+[.)]\s+/.test(line);
-        if (unordered || ordered) {
-            const list = document.createElement(ordered ? "ol" : "ul");
-            const pattern = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/;
-            while (index < lines.length && pattern.test(lines[index])) {
-                const item = document.createElement("li");
-                appendLinkifiedText(item, lines[index].replace(pattern, ""));
-                list.appendChild(item);
-                index += 1;
-            }
-            body.appendChild(list);
-            continue;
-        }
-        const paragraphLines = [];
-        while (index < lines.length && lines[index].trim() && !messageLineStartsBlock(lines[index])) {
-            paragraphLines.push(lines[index]);
-            index += 1;
-        }
-        if (!paragraphLines.length) {
-            paragraphLines.push(line);
-            index += 1;
-        }
-        appendMessageParagraph(body, paragraphLines);
-    }
-    bubble.appendChild(body);
-    if (source.length <= 2200 && lines.length <= 36)
-        return;
-    body.classList.add("is-collapsed");
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "message-expand";
-    toggle.textContent = tr("Show full message");
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.addEventListener("click", () => {
-        const expanded = body.classList.toggle("is-expanded");
-        body.classList.toggle("is-collapsed", !expanded);
-        toggle.textContent = tr(expanded ? "Collapse message" : "Show full message");
-        toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-    });
-    bubble.appendChild(toggle);
-}
 function loadRememberedRuntimeCredential() {
     try {
         return window.sessionStorage.getItem(RUNTIME_CREDENTIAL_SESSION_KEY)?.trim() || "";
@@ -2009,8 +2414,7 @@ function appendChip(parent, text, extraClass = "") {
     return chip;
 }
 function abort(controller) {
-    if (controller)
-        controller.abort();
+    abortController(controller);
 }
 function abortCollaboration() {
     abort(collaborationAbort);
@@ -2041,54 +2445,21 @@ function abortAll() {
     windowDetailAbort = null;
 }
 async function api(path, payload, signal) {
-    try {
-        const response = await fetch(API_BASE + path, {
-            method: "POST",
-            headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-            signal,
-        });
-        let data = null;
-        try {
-            data = await response.json();
-        }
-        catch {
-            data = null;
-        }
-        return { ok: response.ok, status: response.status, data };
-    }
-    catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError")
-            return null;
-        return { ok: false, status: 0, data: null };
-    }
+    apiClient.setToken(token);
+    return apiClient.post(path, payload, signal);
 }
 function windowDateTimeLabel(timestampMs) {
-    const value = Number(timestampMs);
-    if (!Number.isFinite(value) || value <= 0)
-        return tr("time unavailable");
-    return new Date(value).toLocaleString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en");
+    return formatWindowDateTime(timestampMs, runtimeLanguage);
 }
 function windowAgeLabel(timestampMs) {
-    return runtimeWindowActivityLabel(timestampMs, Date.now());
-}
-function runtimeProjectClientId(project) {
-    const value = String(project || "");
-    const parts = value.split(":");
-    return parts.length >= 3 && parts[0] === "agent" ? parts[1] : "";
+    return formatWindowAge(timestampMs, Date.now());
 }
 async function copyRuntimeValue(value, statusId) {
     if (!value)
         return;
-    try {
-        await navigator.clipboard.writeText(value);
-        if (statusId)
-            setText(statusId, tr("Copied"));
-    }
-    catch {
-        if (statusId)
-            setText(statusId, tr("Unable to copy"));
-    }
+    const ok = await writeClipboardText(value);
+    if (statusId)
+        setText(statusId, ok ? tr("Copied") : tr("Unable to copy"));
 }
 function openWindowLinkedSession(session) {
     const project = String(session?.project || "");
@@ -2100,82 +2471,11 @@ function openWindowLinkedSession(session) {
     selectRecentSession({ client_id: clientId, project_id: project, session_id: sessionId });
 }
 function renderWindowActivityRows(node, activities, compact = false) {
-    clearNode(node);
-    if (!node)
-        return;
-    for (const activity of activities) {
-        const item = document.createElement("article");
-        item.className = "window-activity-item" + (compact ? " compact" : "")
-            + (activity?.recorder_gap_session_id ? " recorder-gap" : "");
-        const head = document.createElement("div");
-        head.className = "window-activity-head";
-        const title = document.createElement("strong");
-        title.textContent = String(activity?.tool_name || activity?.method || "WebCodex call");
-        const time = document.createElement("span");
-        time.className = "muted small";
-        time.textContent = windowDateTimeLabel(activity?.started_at_ms);
-        head.appendChild(title);
-        head.appendChild(time);
-        item.appendChild(head);
-        const facts = document.createElement("div");
-        facts.className = "chips window-activity-facts";
-        appendChip(facts, String(activity?.status || "unknown"));
-        if (activity?.project)
-            appendChip(facts, String(activity.project));
-        if (activity?.meaningful)
-            appendChip(facts, "meaningful", "tone-runtime");
-        if (activity?.recorder_gap_session_id)
-            appendChip(facts, "recorder gap", "tone-warn");
-        if (activity?.response_streaming === true) {
-            appendChip(facts, "streaming timing unavailable", "tone-warn");
-        }
-        else if (typeof activity?.service_ms === "number") {
-            appendChip(facts, "service " + String(activity.service_ms) + " ms");
-        }
-        else if (activity?.meaningful) {
-            appendChip(facts, "service unavailable");
-        }
-        if (activity?.meaningful) {
-            if (typeof activity?.next_call_gap_ms === "number") {
-                appendChip(facts, "next gap " + String(activity.next_call_gap_ms) + " ms");
-            }
-            else {
-                appendChip(facts, "next gap unavailable");
-            }
-            if (typeof activity?.cycle_ms === "number") {
-                appendChip(facts, "cycle " + String(activity.cycle_ms) + " ms");
-            }
-        }
-        if (activity?.window_transition_kind === "overlap") {
-            appendChip(facts, "overlap from previous", "tone-warn");
-        }
-        item.appendChild(facts);
-        const links = Array.isArray(activity?.workflow_sessions) ? activity.workflow_sessions : [];
-        if (links.length) {
-            const relation = document.createElement("div");
-            relation.className = "muted small";
-            relation.textContent = links
-                .map((link) => String(link.workflow_session_id || "") + " · " + String(link.relation || "linked"))
-                .join(" · ");
-            item.appendChild(relation);
-        }
-        if (activity?.recorder_gap_session_id) {
-            const gap = document.createElement("div");
-            gap.className = "window-gap-note small";
-            gap.textContent = "Recording was not continued for " + String(activity.recorder_gap_session_id) + ".";
-            item.appendChild(gap);
-        }
-        if (activity?.server_trace_id) {
-            const trace = document.createElement("button");
-            trace.type = "button";
-            trace.className = "window-trace-copy";
-            trace.textContent = "trace " + String(activity.server_trace_id);
-            trace.title = tr("Copy trace id");
-            trace.addEventListener("click", () => void copyRuntimeValue(String(activity.server_trace_id)));
-            item.appendChild(trace);
-        }
-        node.appendChild(item);
-    }
+    renderActivityRowsHelper(node, activities, {
+        compact,
+        language: runtimeLanguage,
+        onCopyTrace: (traceId) => void copyRuntimeValue(traceId),
+    });
 }
 function renderWindowList() {
     const node = el("runtime-window-list");
@@ -2186,45 +2486,9 @@ function renderWindowList() {
     if (!node)
         return;
     for (const row of windowRows) {
-        const key = String(row?.client_window_key || "");
-        if (!key)
-            continue;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "runtime-window-card" + (key === selectedWindowKey ? " selected" : "");
-        if (key === selectedWindowKey)
-            button.setAttribute("aria-current", "true");
-        const head = document.createElement("div");
-        head.className = "runtime-window-card-head";
-        const title = document.createElement("strong");
-        title.textContent = "Window " + runtimeWindowShortKey(key);
-        const active = document.createElement("span");
-        active.className = "chip" + (Number(row?.active_count || 0) > 0 ? " tone-runtime" : "");
-        active.textContent = Number(row?.active_count || 0) > 0
-            ? String(row.active_count) + " active"
-            : String(row?.source || "window");
-        head.appendChild(title);
-        head.appendChild(active);
-        button.appendChild(head);
-        const call = document.createElement("span");
-        call.className = "muted small";
-        call.textContent = row?.last_tool_call_at_ms
-            ? "Last WebCodex call " + windowAgeLabel(row.last_tool_call_at_ms)
-            : "Last WebCodex activity " + windowAgeLabel(row?.last_seen_at_ms);
-        button.appendChild(call);
-        const meaningful = document.createElement("span");
-        meaningful.className = "muted small";
-        meaningful.textContent = row?.last_meaningful_activity_at_ms
-            ? "Last meaningful work " + windowAgeLabel(row.last_meaningful_activity_at_ms)
-            : "No meaningful WebCodex work recorded";
-        button.appendChild(meaningful);
-        const links = document.createElement("span");
-        links.className = "muted small";
-        links.textContent = countLabel(Number(row?.linked_session_count || 0), "linked Session")
-            + (Number(row?.recorder_gap_count || 0) ? " · " + String(row.recorder_gap_count) + " recorder gap" : "");
-        button.appendChild(links);
-        button.addEventListener("click", () => void selectWindow(key));
-        node.appendChild(button);
+        const card = createWindowCard(row, selectedWindowKey, (key) => void selectWindow(key));
+        if (card)
+            node.appendChild(card);
     }
 }
 function renderWindowDetail(detail) {
@@ -2246,67 +2510,8 @@ function renderWindowDetail(detail) {
     setText("runtime-window-active-status", Number(detail.active_count || 0) ? "Active request" : "No active request");
     setText("runtime-window-linked-status", countLabel(Number(detail.sessions_returned || 0), "Session") + (detail.sessions_truncated ? " · bounded" : ""));
     setText("runtime-window-activity-status", countLabel(Number(detail.activity_returned || 0), "event") + (detail.activity_truncated ? " · bounded" : ""));
-    const activeNode = el("runtime-window-active-requests");
-    clearNode(activeNode);
-    const activeRequests = Array.isArray(detail.active_requests) ? detail.active_requests : [];
-    if (activeNode && !activeRequests.length) {
-        const empty = document.createElement("p");
-        empty.className = "muted small";
-        empty.textContent = "No WebCodex request is currently active.";
-        activeNode.appendChild(empty);
-    }
-    for (const request of activeRequests) {
-        const item = document.createElement("article");
-        item.className = "window-request-item";
-        const title = document.createElement("strong");
-        title.textContent = String(request?.tool_name || request?.method || "WebCodex request");
-        item.appendChild(title);
-        const meta = document.createElement("div");
-        meta.className = "muted small";
-        const facts = [
-            request?.project,
-            request?.started_at_ms ? "started " + windowAgeLabel(request.started_at_ms) : null,
-            typeof request?.elapsed_ms === "number" ? String(request.elapsed_ms) + " ms elapsed" : null,
-        ].filter(Boolean).map(String);
-        meta.textContent = facts.join(" · ");
-        item.appendChild(meta);
-        if (request?.server_trace_id) {
-            const trace = document.createElement("button");
-            trace.type = "button";
-            trace.className = "window-trace-copy";
-            trace.textContent = "trace " + String(request.server_trace_id);
-            trace.addEventListener("click", () => void copyRuntimeValue(String(request.server_trace_id)));
-            item.appendChild(trace);
-        }
-        activeNode?.appendChild(item);
-    }
-    const sessionsNode = el("runtime-window-linked-sessions");
-    clearNode(sessionsNode);
-    for (const session of Array.isArray(detail.linked_sessions) ? detail.linked_sessions : []) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "window-session-card";
-        const title = document.createElement("strong");
-        title.textContent = String(session?.title || session?.workflow_session_id || "Workflow Session");
-        const meta = document.createElement("span");
-        meta.className = "muted small";
-        meta.textContent = [
-            session?.workflow_session_id,
-            session?.lifecycle,
-            session?.project,
-            ...(Array.isArray(session?.relations) ? session.relations : []),
-        ].filter(Boolean).map(String).join(" · ");
-        button.appendChild(title);
-        button.appendChild(meta);
-        button.addEventListener("click", () => openWindowLinkedSession(session));
-        sessionsNode?.appendChild(button);
-    }
-    if (sessionsNode && !sessionsNode.childElementCount) {
-        const empty = document.createElement("p");
-        empty.className = "muted small";
-        empty.textContent = "No authorized Workflow Session links.";
-        sessionsNode.appendChild(empty);
-    }
+    renderWindowActiveRequests(el("runtime-window-active-requests"), Array.isArray(detail.active_requests) ? detail.active_requests : [], { onCopyTrace: (traceId) => void copyRuntimeValue(traceId) });
+    renderWindowLinkedSessions(el("runtime-window-linked-sessions"), Array.isArray(detail.linked_sessions) ? detail.linked_sessions : [], (session) => openWindowLinkedSession(session));
     renderWindowActivityRows(el("runtime-window-activity"), Array.isArray(detail.activity) ? detail.activity : []);
     renderWorkspaceHeading();
 }
@@ -2390,37 +2595,13 @@ function renderSessionWindowCorrelation(detail) {
     clearNode(linkedNode);
     const links = available && Array.isArray(detail?.linked_windows) ? detail.linked_windows : [];
     setText("runtime-linked-windows-status", available ? countLabel(links.length, "Window") : "runtime:read unavailable");
-    for (const link of links) {
-        const key = String(link?.client_window_key || "");
-        if (!key)
-            continue;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "window-session-card" + (Number(link?.recorder_gap_count || 0) ? " recorder-gap" : "");
-        const title = document.createElement("strong");
-        title.textContent = "Window " + runtimeWindowShortKey(key);
-        const meta = document.createElement("span");
-        meta.className = "muted small";
-        meta.textContent = [
-            link?.source,
-            link?.last_seen_at_ms ? "last WebCodex activity " + windowAgeLabel(link.last_seen_at_ms) : null,
-            Number(link?.recorder_gap_count || 0) ? String(link.recorder_gap_count) + " recorder gap" : null,
-        ].filter(Boolean).map(String).join(" · ");
-        button.appendChild(title);
-        button.appendChild(meta);
-        button.addEventListener("click", () => {
+    if (available) {
+        renderSessionWindowCorrelationLinks(linkedNode, links, (key) => {
             selectedWindowKey = key;
             applyWorkspaceView("windows");
             renderWindowList();
             void refreshWindowDetail();
         });
-        linkedNode?.appendChild(button);
-    }
-    if (available && linkedNode && !links.length) {
-        const empty = document.createElement("p");
-        empty.className = "muted small";
-        empty.textContent = "No linked Window evidence.";
-        linkedNode.appendChild(empty);
     }
     const gaps = available && Array.isArray(detail?.window_activity_after_last_session_record)
         ? detail.window_activity_after_last_session_record
@@ -2552,10 +2733,7 @@ function showError(message) {
     show("runtime-error", !!message);
 }
 function countLabel(value, singular, plural = singular + "s") {
-    const count = typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-    if (runtimeLanguage === "zh-CN")
-        return count + " " + (ZH_COUNT_LABELS[singular] || RUNTIME_ZH_TEXT[singular] || singular);
-    return count + " " + (count === 1 ? singular : plural);
+    return localizedCountLabel(value, singular, plural, runtimeLanguage);
 }
 function pendingAttentionCount(attention) {
     return ["open_risks", "open_todos", "open_questions", "open_guidance"]
@@ -3326,49 +3504,7 @@ function localizedLivenessPresentation(session) {
     return { ...presentation, label, tooltip: tr(String(presentation.tooltip || "")) };
 }
 function localizedWorkflowText(value) {
-    const source = String(value || "");
-    if (runtimeLanguage !== "zh-CN" || !source)
-        return source;
-    const exact = {
-        "Latest retained validation passed": "最近保留的验证已通过",
-        "Latest validation passed": "最近验证已通过",
-        "Latest retained validation failed": "最近保留的验证失败",
-        "Latest validation failed": "最近验证失败",
-        "Validation not run": "尚未运行验证",
-        "Retained terminal validation evidence unavailable": "保留的最终验证证据不可用",
-        "Terminal validation evidence unavailable": "最终验证证据不可用",
-        "No work observations in retained events.": "保留事件中没有工作观察记录。",
-        "No tool activity observed.": "尚未观察到工具活动。",
-        "No retained open guidance, questions, risks, or todos.": "没有保留的开放指导、问题、风险或待办。",
-        "No retained model-reported progress.": "没有保留的模型报告进度。",
-    };
-    let text = exact[source] || source;
-    const prefixes = [
-        ["Recent observed work: ", "最近观察到的工作："],
-        ["Observed work: ", "已观察工作："],
-        ["Retained open messages: ", "保留的开放消息："],
-        ["Retained: ", "保留："],
-        ["Recent ", "最近 "],
-        ["latest ", "最近 "],
-    ];
-    for (const [english, chinese] of prefixes) {
-        if (text.startsWith(english)) {
-            text = chinese + text.slice(english.length);
-            break;
-        }
-    }
-    const nounMap = {
-        edit: "次编辑", edits: "次编辑", validation: "次验证", validations: "次验证",
-        exploration: "次探索", review: "次审查", reviews: "次审查", run: "次运行", runs: "次运行",
-        risk: "个风险", risks: "个风险", todo: "个待办", todos: "个待办",
-        question: "个问题", questions: "个问题", guidance: "条指导",
-        test: "次测试", tests: "次测试", "unresolved failure": "个未解决失败",
-        "unresolved failures": "个未解决失败", "unresolved validation failure": "个未解决的验证失败",
-        "unresolved validation failures": "个未解决的验证失败",
-    };
-    return text.replace(/(\d+) (unresolved validation failures?|unresolved failures?|edits?|validations?|exploration|reviews?|runs?|risks?|todos?|questions?|guidance|tests?)/g, (_match, count, noun) => {
-        return String(count) + " " + (nounMap[String(noun)] || noun);
-    });
+    return translateWorkflowText(value, runtimeLanguage);
 }
 function activityKindLabel(activity) {
     const kind = String(activity && activity.kind || "Activity");
