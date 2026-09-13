@@ -217,6 +217,8 @@ pub(crate) fn handle_project_lifecycle_op(
 
 #[cfg(test)]
 mod durability_tests {
+    #[cfg(windows)]
+    use super::managed_worktree::managed_worktree_git_cli_path;
     use super::*;
 
     #[cfg(windows)]
