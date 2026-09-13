@@ -30,9 +30,10 @@ mod websocket_connect;
 
 use crate::{
     build_register_request_with_provider_status, dispatch_request_with_outcome, handle_one_poll,
-    register, CommandResult, JobManager, PollingDispatchSupervisor, PollingRecoveryAction,
-    RegisterRecoveryAction, RunnerHttpError, RunnerHttpErrorKind,
+    register, JobManager, PollingDispatchSupervisor, PollingRecoveryAction, RegisterRecoveryAction,
 };
+#[cfg(test)]
+use crate::{CommandResult, RunnerHttpError, RunnerHttpErrorKind};
 use reqwest::blocking::Client;
 #[cfg(test)]
 use result_submission::{
