@@ -156,7 +156,7 @@ canonical Runtime surface是 `List / Resolve / Read`，Management surface是 `Ve
 
 `lock_wait` 定义为调用 `Mutex::lock` 前的 monotonic timestamp 到成功取得 connection guard；`hold` 定义为成功取得 connection guard 到真实 `MutexGuard<Connection>` 释放。后者是 **connection critical-section duration**，不是 SQLite statement duration：一个 guard 内可能包含多条 query、transaction、validation、CAS 检查、commit 和少量 Rust 逻辑。若某个 domain 的 hold 异常，再做 statement/transaction drill-down；Stage 3A 不包装 rusqlite API。
 
-默认 observation 以 `webcodex_store::connection` target 的 structured trace 发出。真实 connection guard 在 observer callback 前先释放，因此 trace subscriber 不会扩大被测 connection critical section，也不会让其它 store caller 因 telemetry 继续等待该 mutex。observer panic 在这个小边界内 `catch_unwind`，不会被翻译成 DB/business error；原有 `Mutex::lock().unwrap()` poison panic 仍保持。启用的同步 trace subscriber 理论上仍可能在 **mutex 已释放后** 延迟当前 caller 返回，Stage 3A 不为此增加后台 telemetry worker；dogfood 采样时也应观察这一开销。
+默认 observation 以 `webcodex_store::connection` target 的 structured trace 发出，并使用 `trace` level，避免每次 connection acquisition 在普通 `info` 日志中产生高频噪声。Server 默认 `RUST_LOG`/fallback filter 是 `info`，因此 **这些样本默认不会输出**；dogfood 采样窗口必须显式启用该 target，例如 `RUST_LOG=info,webcodex_store::connection=trace`（保留部署环境原有其它 filter 时应合并而不是覆盖）。没有该 target 的 trace event 只能说明采样未启用或没有观测到事件，不能解释为 `lock_wait=0`。真实 connection guard 在 observer callback 前先释放，因此 trace subscriber 不会扩大被测 connection critical section，也不会让其它 store caller 因 telemetry 继续等待该 mutex。observer panic 在这个小边界内 `catch_unwind`，不会被翻译成 DB/business error；原有 `Mutex::lock().unwrap()` poison panic 仍保持。启用的同步 trace subscriber 理论上仍可能在 **mutex 已释放后** 延迟当前 caller 返回，Stage 3A 不为此增加后台 telemetry worker；dogfood 采样时也应观察这一开销。
 
 因此 Stage 3A 的结论只是“现在可以测量”，不是“数据库需要优化”。p50/p95 必须来自 dogfood 或 production-like workload，不伪造 benchmark 改善数字。Stage 3B 只有在数据支持时才进入：
 
