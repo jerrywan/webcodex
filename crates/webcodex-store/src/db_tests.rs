@@ -6,6 +6,219 @@ use crate::models::{
     OAuthRefreshTokenRecord, UserRecord,
 };
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::connection_observation::{
+    StoreConnectionObserver, STORE_CONNECTION_ACQUISITIONS_TOTAL, STORE_CONNECTION_HOLD_SECONDS,
+    STORE_CONNECTION_LOCK_WAIT_SECONDS,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordedConnectionObservation {
+    Acquisition(StoreDomain, Duration),
+    Hold(StoreDomain, Duration),
+}
+
+#[derive(Default)]
+struct RecordingConnectionObserver {
+    observations: std::sync::Mutex<Vec<RecordedConnectionObservation>>,
+}
+
+impl RecordingConnectionObserver {
+    fn snapshot(&self) -> Vec<RecordedConnectionObservation> {
+        self.observations.lock().unwrap().clone()
+    }
+}
+
+impl StoreConnectionObserver for RecordingConnectionObserver {
+    fn record_acquisition(&self, domain: StoreDomain, wait: Duration) {
+        self.observations
+            .lock()
+            .unwrap()
+            .push(RecordedConnectionObservation::Acquisition(domain, wait));
+    }
+
+    fn record_hold(&self, domain: StoreDomain, hold: Duration) {
+        self.observations
+            .lock()
+            .unwrap()
+            .push(RecordedConnectionObservation::Hold(domain, hold));
+    }
+}
+
+struct PanickingConnectionObserver;
+
+impl StoreConnectionObserver for PanickingConnectionObserver {
+    fn record_acquisition(&self, _domain: StoreDomain, _wait: Duration) {
+        panic!("injected acquisition observer panic");
+    }
+
+    fn record_hold(&self, _domain: StoreDomain, _hold: Duration) {
+        panic!("injected hold observer panic");
+    }
+}
+
+#[test]
+fn store_connection_domains_and_metric_names_are_closed_and_stable() {
+    let domains = StoreDomain::ALL.map(StoreDomain::as_str);
+    assert_eq!(
+        domains,
+        [
+            "accounts",
+            "activity",
+            "admin_project_lifecycle",
+            "agent_task",
+            "agent_wake",
+            "audit",
+            "communication",
+            "core",
+            "executions",
+            "goal",
+            "job_receipts",
+            "memory",
+            "oauth",
+            "schema",
+            "task_kernel",
+            "window_activity",
+        ]
+    );
+    assert_eq!(
+        domains.iter().copied().collect::<HashSet<_>>().len(),
+        domains.len()
+    );
+    assert_eq!(
+        STORE_CONNECTION_ACQUISITIONS_TOTAL,
+        "store_connection_acquisitions_total"
+    );
+    assert_eq!(
+        STORE_CONNECTION_LOCK_WAIT_SECONDS,
+        "store_connection_lock_wait_seconds"
+    );
+    assert_eq!(
+        STORE_CONNECTION_HOLD_SECONDS,
+        "store_connection_hold_seconds"
+    );
+}
+
+#[test]
+fn observed_connection_guard_records_wait_and_hold_and_preserves_mutable_transactions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut db = Database::open(&tmp.path().join("observed-connection.db")).unwrap();
+    let observer = Arc::new(RecordingConnectionObserver::default());
+    db.connection_observer = observer.clone();
+
+    {
+        let mut conn = db.lock_connection(StoreDomain::Memory);
+        let tx = conn.transaction().unwrap();
+        assert_eq!(
+            tx.query_row("SELECT 1", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        tx.commit().unwrap();
+    }
+
+    let observations = observer.snapshot();
+    assert_eq!(observations.len(), 2);
+    assert!(matches!(
+        observations[0],
+        RecordedConnectionObservation::Acquisition(StoreDomain::Memory, duration)
+            if duration >= Duration::ZERO
+    ));
+    assert!(matches!(
+        observations[1],
+        RecordedConnectionObservation::Hold(StoreDomain::Memory, duration)
+            if duration >= Duration::ZERO
+    ));
+}
+
+#[test]
+fn connection_observer_panics_are_fail_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut db = Database::open(&tmp.path().join("observer-panic.db")).unwrap();
+    db.connection_observer = Arc::new(PanickingConnectionObserver);
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let mut conn = db.lock_connection(StoreDomain::Core);
+        let tx = conn.transaction().unwrap();
+        assert_eq!(
+            tx.query_row("SELECT 1", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        tx.commit().unwrap();
+    }));
+    assert!(result.is_ok());
+}
+
+#[test]
+fn connection_mutex_poison_still_panics_at_the_observed_boundary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Arc::new(Database::open(&tmp.path().join("poison.db")).unwrap());
+    let poison_target = db.clone();
+    assert!(std::thread::spawn(move || {
+        let _guard = poison_target.conn.lock().unwrap();
+        panic!("poison connection mutex");
+    })
+    .join()
+    .is_err());
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let _guard = db.lock_connection(StoreDomain::Core);
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
+fn production_store_connection_locks_use_the_observed_boundary() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut direct_database_locks = Vec::new();
+    fn collect_direct_database_locks(
+        root: &std::path::Path,
+        directory: &std::path::Path,
+        direct_database_locks: &mut Vec<(String, usize)>,
+    ) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_direct_database_locks(root, &path, direct_database_locks);
+                continue;
+            }
+            if path.extension().and_then(|value| value.to_str()) != Some("rs")
+                || path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|name| name.ends_with("_tests.rs"))
+            {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let count = text.matches(".conn.lock(").count();
+            if count > 0 {
+                direct_database_locks.push((
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    count,
+                ));
+            }
+        }
+    }
+    collect_direct_database_locks(&src, &src, &mut direct_database_locks);
+    direct_database_locks.sort();
+    assert_eq!(direct_database_locks, vec![("lib.rs".to_string(), 1)]);
+
+    let helper = std::fs::read_to_string(src.join("connection_observation.rs")).unwrap();
+    assert_eq!(helper.matches("connection.lock().unwrap()").count(), 1);
+    let root = std::fs::read_to_string(src.join("lib.rs")).unwrap();
+    assert!(root.contains(
+        "pub fn conn_for_tests(&self) -> std::sync::MutexGuard<'_, Connection> {\n        self.conn.lock().unwrap()"
+    ));
+}
 
 #[test]
 fn open_enables_wal_busy_timeout_and_foreign_keys() {

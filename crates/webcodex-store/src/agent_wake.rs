@@ -726,7 +726,7 @@ impl Database {
                 "Server ownership proof does not match this database state",
             ));
         }
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -815,7 +815,7 @@ impl Database {
         validate_id(endpoint_id, AGENT_ENDPOINT_ID_PREFIX, "invalid_endpoint_id")?;
         let adapter_kind = validate_adapter_kind(adapter_kind)?;
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -964,7 +964,7 @@ impl Database {
         validate_wake_mutation_ids(agent_id, endpoint_id, wake_id, attempt_id)?;
         validate_communication_principal(principal)?;
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1036,7 +1036,7 @@ impl Database {
             "invalid_wake_consume_token",
         )?;
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1178,7 +1178,7 @@ impl Database {
     ) -> Result<(), CommunicationStoreError> {
         validate_wake_mutation_ids(agent_id, endpoint_id, wake_id, attempt_id)?;
         validate_communication_principal(principal)?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1273,7 +1273,7 @@ impl Database {
         validate_wake_mutation_ids(agent_id, endpoint_id, wake_id, attempt_id)?;
         validate_communication_principal(principal)?;
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1411,7 +1411,7 @@ impl Database {
             AGENT_WAKE_CONSUME_TOKEN_PREFIX,
             "invalid_wake_consume_token",
         )?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1638,7 +1638,7 @@ impl Database {
             validate_id(wake_id, AGENT_WAKE_ID_PREFIX, "invalid_wake_id")?;
         }
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let endpoint = require_current_endpoint(
             &conn,
             principal,
@@ -1798,7 +1798,7 @@ impl Database {
             &consume_token_digest[..32]
         );
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1950,7 +1950,7 @@ impl Database {
         wake_id: &str,
     ) -> Result<Option<AgentWakeRecord>, CommunicationStoreError> {
         validate_id(wake_id, AGENT_WAKE_ID_PREFIX, "invalid_wake_id")?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::AgentWake);
         load_wake(&conn, wake_id)
     }
 
@@ -1960,7 +1960,7 @@ impl Database {
         wake_id: &str,
     ) -> Result<Vec<AgentWakeAttemptRecord>, CommunicationStoreError> {
         validate_id(wake_id, AGENT_WAKE_ID_PREFIX, "invalid_wake_id")?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::AgentWake);
         let mut statement = conn
             .prepare(
                 "SELECT attempt_id, wake_id, endpoint_id, controller_generation,

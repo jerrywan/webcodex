@@ -22,7 +22,7 @@ impl Database {
             None if receipt.owner_at_admission.is_some() => ("managed_owner", None),
             None => ("managed_unowned", None),
         };
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::JobReceipts);
         let tx = conn.transaction()?;
         prune_expired(&tx, now)?;
         tx.execute("INSERT INTO wc_job_receipts (job_id, client_id, runner_instance_id, auth_kind, auth_partition, owner_at_admission, kind, snapshot, terminal_observed_at, expires_at)
@@ -41,11 +41,14 @@ impl Database {
     }
 
     pub fn prune_job_receipts(&self, now: i64) -> anyhow::Result<usize> {
-        Ok(prune_expired(&self.conn.lock().unwrap(), now)?)
+        Ok(prune_expired(
+            &self.lock_connection(crate::StoreDomain::JobReceipts),
+            now,
+        )?)
     }
 
     pub fn load_job_receipts(&self, now: i64) -> anyhow::Result<Vec<RetainedJobReceipt>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::JobReceipts);
         prune_expired(&conn, now)?;
         // Also repair excessive history from an older/manual database. Each
         // payload is size-checked in SQLite before being materialized in Rust.

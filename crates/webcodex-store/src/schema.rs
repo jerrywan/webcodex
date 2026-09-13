@@ -2,7 +2,6 @@ use super::Database;
 use anyhow::Context;
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 impl Database {
     pub fn open(db_path: &PathBuf) -> anyhow::Result<Self> {
@@ -19,11 +18,7 @@ impl Database {
             ",
         )?;
         let state_path = std::fs::canonicalize(db_path).context("resolve database state path")?;
-        let db = Self {
-            conn: Mutex::new(conn),
-            state_path,
-            window_projects: Mutex::new(std::collections::HashMap::new()),
-        };
+        let db = Self::from_connection(conn, state_path);
         db.init_tables()?;
         // Personal-use instance: reclaim dead auth rows on every open rather
         // than running a background reaper.
@@ -36,7 +31,7 @@ impl Database {
     /// Delete expired / used / revoked auth material that can never be used
     /// again. Safe to call repeatedly; returns the total number of deleted rows.
     pub fn purge_stale_auth_rows(&self, now: i64) -> anyhow::Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Core);
         let mut deleted = 0usize;
         deleted += conn.execute(
             "DELETE FROM oauth_authorization_codes
@@ -73,7 +68,7 @@ impl Database {
     }
 
     fn init_tables(&self) -> anyhow::Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Schema);
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS wc_job_receipts (
@@ -1016,7 +1011,7 @@ mod action_event_window_migration_tests {
         assert!(!rows[0].window_meaningful);
         assert!(rows[0].recorder_gap_session_id.is_none());
         {
-            let conn = db.conn.lock().unwrap();
+            let conn = db.conn_for_tests();
             let columns = table_columns(&conn, "action_events").unwrap();
             for expected in [
                 "client_window_key",

@@ -55,7 +55,7 @@ impl Database {
         let error_summary = record
             .error_summary
             .map(|error| truncate_chars(error, ERROR_SUMMARY_MAX_CHARS));
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Activity);
         conn.execute(
             "INSERT INTO workspace_activity (
                 created_at, project, tool, surface, client, success, session_id,
@@ -142,7 +142,7 @@ impl Database {
             return Ok(Vec::new());
         }
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Activity);
         let select = "SELECT id, created_at, project, tool, surface, client, success, session_id,
                     command_preview, paths_json, error_summary
              FROM workspace_activity";

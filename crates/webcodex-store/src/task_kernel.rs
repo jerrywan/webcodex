@@ -713,7 +713,7 @@ impl Database {
         subject_id: &str,
         project_root_sha256: &str,
     ) -> Result<Option<ConnectorWindowContext>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let stored = conn
             .query_row(
                 "SELECT task_id, target_path, fingerprint_json, created_at, updated_at
@@ -751,7 +751,7 @@ impl Database {
         project_id: &str,
         subject_id: &str,
     ) -> Result<Option<ConnectorWindowContext>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let stored = conn
             .query_row(
                 "SELECT task_id, target_path, fingerprint_json, created_at, updated_at
@@ -795,7 +795,7 @@ impl Database {
         fingerprint: &ProjectContextFingerprint,
         now: i64,
     ) -> Result<(), ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         bind_window_context(
             &tx,
@@ -819,7 +819,7 @@ impl Database {
         &self,
         binding: ConnectorBinding<'_>,
     ) -> Result<(), ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO wc_projects (id, name, created_at, updated_at)
@@ -890,7 +890,7 @@ impl Database {
             task.baseline_commit,
             task.baseline_tree,
         )?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let granted = tx
             .query_row(
@@ -998,7 +998,7 @@ impl Database {
         binding: Option<ConnectorWindowBinding<'_>>,
     ) -> Result<(ConnectorTaskSnapshot, i64, ConnectorTaskMode), ConnectorTaskStoreError> {
         let requested_mode = ConnectorTaskMode::requested(continuation.mode)?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(
             &tx,
@@ -1164,7 +1164,7 @@ impl Database {
         binding: Option<ConnectorWindowBinding<'_>>,
     ) -> Result<i64, ConnectorTaskStoreError> {
         let requested_mode = ConnectorTaskMode::requested(requested_mode)?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(&tx, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -1224,7 +1224,7 @@ impl Database {
         project_id: &str,
         subject_id: &str,
     ) -> Result<ConnectorTaskSnapshot, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         load_task(&conn, task_id, project_id, subject_id)?.ok_or(ConnectorTaskStoreError::NotFound)
     }
 
@@ -1237,7 +1237,7 @@ impl Database {
         payload: &Value,
         now: i64,
     ) -> Result<i64, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(&tx, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -1271,7 +1271,7 @@ impl Database {
         payload: &Value,
         now: i64,
     ) -> Result<i64, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(&tx, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -1299,7 +1299,7 @@ impl Database {
         request_sha256: &str,
         now: i64,
     ) -> Result<ConnectorEditOperationGate, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(&tx, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -1370,7 +1370,7 @@ impl Database {
         result: &Value,
         now: i64,
     ) -> Result<(), ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(&tx, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -1404,7 +1404,7 @@ impl Database {
         request_sha256: &str,
         now: i64,
     ) -> Result<(), ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let updated = conn.execute(
             "UPDATE wc_edit_operations SET state = 'failed', updated_at = ?1
              WHERE task_id = ?2 AND operation_id = ?3 AND request_sha256 = ?4
@@ -1436,7 +1436,7 @@ impl Database {
                 "task result patch metadata is inconsistent".to_string(),
             ));
         }
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(&tx, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -1501,7 +1501,7 @@ impl Database {
         cleanup_warning: Option<&str>,
         now: i64,
     ) -> Result<i64, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(&tx, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -1577,7 +1577,7 @@ impl Database {
         subject_id: &str,
         max_guidance: usize,
     ) -> Result<Vec<ConnectorTaskEvent>, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn
             .transaction()
             .map_err(|error| ConnectorTaskStoreError::Storage(error.into()))?;
@@ -1659,7 +1659,7 @@ impl Database {
         task_id: &str,
         project_id: &str,
     ) -> Result<Option<GuidanceReadState>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let exists = conn
             .query_row(
                 "SELECT 1 FROM wc_tasks WHERE id = ?1 AND project_id = ?2",
@@ -1707,7 +1707,7 @@ impl Database {
         subject_id: &str,
         cap: usize,
     ) -> Result<AppliedPaths, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         if load_task(&conn, task_id, project_id, subject_id)?.is_none() {
             return Err(ConnectorTaskStoreError::NotFound);
         }
@@ -1759,7 +1759,7 @@ impl Database {
         subject_id: &str,
         limit: usize,
     ) -> Result<Vec<ConnectorTaskEvent>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         if load_task(&conn, task_id, project_id, subject_id)?.is_none() {
             return Err(ConnectorTaskStoreError::NotFound);
         }
@@ -1800,7 +1800,7 @@ impl Database {
         project_id: &str,
         subject_id: &str,
     ) -> Result<Option<ConnectorTaskResult>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         if load_task(&conn, task_id, project_id, subject_id)?.is_none() {
             return Err(ConnectorTaskStoreError::NotFound);
         }
@@ -1811,7 +1811,7 @@ impl Database {
         &self,
         project_id: &str,
     ) -> Result<Vec<ConnectorPreservedWorkspace>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let mut statement = conn.prepare(
             "SELECT t.id, r.id, ctx.execution_root, ctx.execution_executor_ref,
                     ctx.baseline_commit
@@ -1848,7 +1848,7 @@ impl Database {
         now: i64,
         expires_at: i64,
     ) -> Result<ConnectorApprovalGate, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let task = load_task(&tx, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -1980,7 +1980,7 @@ impl Database {
         project_id: &str,
         limit: usize,
     ) -> Result<Vec<ConnectorTaskSnapshot>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let pairs = {
             let mut statement = conn.prepare(
                 "SELECT id, owner_subject_id FROM wc_tasks
@@ -2006,7 +2006,7 @@ impl Database {
         include_completed: bool,
         limit: usize,
     ) -> Result<Vec<LocalReviewableTask>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let mut statement = conn.prepare(
             "SELECT q.task_id, q.goal, q.task_status, q.updated_at, q.execution_status,
                     json_extract(q.validation_json, '$.status'),
@@ -2075,7 +2075,7 @@ impl Database {
         subject_id: &str,
         limit: usize,
     ) -> Result<Vec<LocalReviewableTask>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let mut statement = conn.prepare(
             "SELECT q.task_id, q.goal, q.task_status, q.updated_at, q.execution_status,
                     json_extract(q.validation_json, '$.status'),
@@ -2138,7 +2138,7 @@ impl Database {
         task_id: &str,
         project_id: &str,
     ) -> Result<ConnectorTaskSnapshot, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let subject_id = conn
             .query_row(
                 "SELECT owner_subject_id FROM wc_tasks WHERE id = ?1 AND project_id = ?2",
@@ -2155,7 +2155,7 @@ impl Database {
         task_id: &str,
         project_id: &str,
     ) -> Result<Option<ConnectorTaskResult>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let exists = conn
             .query_row(
                 "SELECT 1 FROM wc_tasks WHERE id = ?1 AND project_id = ?2",
@@ -2185,7 +2185,7 @@ impl Database {
         task_id: &str,
         project_id: &str,
     ) -> Result<Vec<ConnectorApproval>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let exists = conn
             .query_row(
                 "SELECT 1 FROM wc_tasks WHERE id = ?1 AND project_id = ?2",
@@ -2212,7 +2212,7 @@ impl Database {
         project_id: &str,
         now: i64,
     ) -> Result<Vec<(ConnectorApproval, String)>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let mut statement = conn.prepare(
             "SELECT a.id, a.task_id, a.run_id, a.action_kind, a.action_hash, a.action_summary,
                     a.state, a.requested_at, a.expires_at, a.decided_by, a.decided_at,
@@ -2235,7 +2235,7 @@ impl Database {
         actor: &str,
         now: i64,
     ) -> Result<ConnectorTaskSnapshot, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let subject_id = tx
             .query_row(
@@ -2298,7 +2298,7 @@ impl Database {
         actor: &str,
         now: i64,
     ) -> Result<ConnectorTaskResult, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let (run_id, cursor) = tx
             .query_row(
@@ -2376,7 +2376,7 @@ impl Database {
         now: i64,
     ) -> Result<(), ConnectorTaskStoreError> {
         let decision = ConnectorResultDecision::requested(decision)?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let inserted = conn.execute(
             "INSERT INTO wc_result_decision_intents
                 (task_id, result_id, decision, actor, started_at)
@@ -2411,7 +2411,7 @@ impl Database {
         task_id: &str,
         result_id: &str,
     ) -> Result<(), ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         conn.execute(
             "DELETE FROM wc_result_decision_intents WHERE task_id = ?1 AND result_id = ?2",
             params![task_id, result_id],
@@ -2423,7 +2423,7 @@ impl Database {
         &self,
         project_id: &str,
     ) -> Result<Vec<(String, String, ConnectorResultDecision)>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let mut statement = conn.prepare(
             "SELECT i.task_id, i.result_id, i.decision
              FROM wc_result_decision_intents i
@@ -2451,7 +2451,7 @@ impl Database {
         error_message: &str,
         now: i64,
     ) -> Result<(), ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let (run_id, cursor) = tx
             .query_row(
@@ -2511,7 +2511,7 @@ impl Database {
         cleanup_warning: Option<&str>,
         now: i64,
     ) -> Result<ConnectorTaskResult, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let (decision, actor, run_id, cursor) = tx
             .query_row(
@@ -2608,7 +2608,7 @@ impl Database {
         reason: Option<&str>,
         now: i64,
     ) -> Result<ConnectorApproval, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::TaskKernel);
         let tx = conn.transaction()?;
         let subject_id = tx
             .query_row(

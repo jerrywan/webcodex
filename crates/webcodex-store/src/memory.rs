@@ -928,7 +928,7 @@ impl Database {
         memory_scope_id: &str,
     ) -> Result<Vec<ProjectMemoryRecord>, MemoryStoreError> {
         validate_scope(memory_scope_id)?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Memory);
         list_project_memories_with_conn(&conn, memory_scope_id)
     }
 
@@ -939,7 +939,7 @@ impl Database {
     ) -> Result<Option<ProjectMemoryRecord>, MemoryStoreError> {
         validate_scope(memory_scope_id)?;
         validate_memory_key(memory_key)?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Memory);
         let record = conn
             .query_row(
                 &format!("{SELECT_RECORD} WHERE memory_scope_id = ?1 AND memory_key = ?2"),
@@ -985,7 +985,7 @@ impl Database {
             &input.tags,
         );
         let now = chrono::Utc::now().timestamp_millis();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Memory);
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| MemoryStoreError::DatabaseUnavailable)?;
@@ -1194,7 +1194,7 @@ impl Database {
         validate_memory_key(memory_key)?;
         validate_memory_revision(expected_revision)?;
         let now = chrono::Utc::now().timestamp_millis();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Memory);
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| MemoryStoreError::DatabaseUnavailable)?;
@@ -1321,7 +1321,7 @@ impl Database {
         // signed integer representation; callers still observe the effective
         // offset normalized against total below.
         let offset = offset.min(MAX_MEMORIES_GLOBAL);
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Memory);
         let total: i64 = conn
             .query_row("SELECT COUNT(*) FROM project_memory_scopes", [], |row| {
                 row.get(0)
@@ -1373,7 +1373,7 @@ impl Database {
         memory_scope_id: &str,
     ) -> Result<Option<ProjectMemoryScopeSnapshot>, MemoryStoreError> {
         validate_scope(memory_scope_id)?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Memory);
         let Some(scope) = get_scope_record(&conn, memory_scope_id)? else {
             let count: i64 = conn
                 .query_row(
@@ -1403,7 +1403,7 @@ impl Database {
         if !valid_memory_catalog_revision(expected_catalog_revision) {
             return Err(MemoryStoreError::InvalidRevision);
         }
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Memory);
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| MemoryStoreError::DatabaseUnavailable)?;

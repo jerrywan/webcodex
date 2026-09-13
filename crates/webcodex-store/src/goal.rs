@@ -288,7 +288,7 @@ impl Database {
             "objective": objective,
         }));
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Goal);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(goal_store_error)?;
@@ -353,7 +353,7 @@ impl Database {
     ) -> Result<GoalDetail, GoalStoreError> {
         validate_goal_principal(principal)?;
         validate_goal_id(goal_id)?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Goal);
         load_owned_goal(&conn, principal, goal_id)
     }
 
@@ -377,7 +377,7 @@ impl Database {
                 "offset exceeds the durable Goal store range",
             )
         })?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Goal);
         let (total_count, goal_ids) = match lifecycle {
             Some(lifecycle) => {
                 let total_count = conn
@@ -532,7 +532,7 @@ impl Database {
             "terminal_reason": terminal_reason,
         }));
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Goal);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(goal_store_error)?;
@@ -709,7 +709,7 @@ impl Database {
             "kind": kind,
             "reference_id": reference_id,
         }));
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Goal);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(goal_store_error)?;

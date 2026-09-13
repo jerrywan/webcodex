@@ -35,7 +35,7 @@ impl Database {
         principal: Option<(&str, &str)>,
         limit: usize,
     ) -> anyhow::Result<Vec<WindowActivitySummaryRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::WindowActivity);
         let (principal_sql, kind, id) = principal_predicate(principal);
         let sql = format!(
             "SELECT e.client_window_key,
@@ -79,7 +79,7 @@ impl Database {
         &self,
         principal: Option<(&str, &str)>,
     ) -> anyhow::Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::WindowActivity);
         let count = match principal {
             Some((kind, id)) => conn.query_row(
                 "SELECT COUNT(DISTINCT client_window_key)
@@ -108,7 +108,7 @@ impl Database {
         window_key: &str,
         principal: Option<(&str, &str)>,
     ) -> anyhow::Result<Option<WindowActivitySummaryRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::WindowActivity);
         let row = match principal {
             Some((kind, id)) => conn
                 .query_row(
@@ -156,7 +156,7 @@ impl Database {
         principal: Option<(&str, &str)>,
         limit: usize,
     ) -> anyhow::Result<Vec<WindowActivityEventRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::WindowActivity);
         let (principal_sql, kind, id) = principal_predicate(principal);
         let sql = format!(
             "SELECT e.event_id, e.client_window_key, e.client_window_source,
@@ -200,7 +200,7 @@ impl Database {
         principal_id: &str,
         project: &str,
     ) -> anyhow::Result<Option<WindowWorkflowAffinityRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::WindowActivity);
         conn.query_row(
             "SELECT l.workflow_session_id, l.project, l.workflow_session_relation, l.linked_at_ms
              FROM action_event_workflow_links l
@@ -233,7 +233,7 @@ impl Database {
         principal: Option<(&str, &str)>,
         limit: usize,
     ) -> anyhow::Result<Vec<WindowWorkflowSessionSummaryRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::WindowActivity);
         let (principal_sql, kind, id) = principal_predicate(principal);
         let sql = format!(
             "SELECT l.workflow_session_id, MAX(l.project), MIN(l.linked_at_ms),
@@ -267,7 +267,7 @@ impl Database {
         principal: Option<(&str, &str)>,
         limit: usize,
     ) -> anyhow::Result<Vec<WindowSessionLinkSummaryRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::WindowActivity);
         let limit = bounded_limit(limit, MAX_WINDOW_LINK_LIMIT);
         match principal {
             Some((kind, id)) => {

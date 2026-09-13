@@ -64,7 +64,7 @@ impl Database {
                 "execution kind and check plan do not match".to_string(),
             )
         })?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let current = load_task(&tx, &task.task_id, &task.project_id, &task.owner_subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -138,7 +138,7 @@ impl Database {
         execution_id: &str,
         now: i64,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -159,7 +159,7 @@ impl Database {
         &self,
         execution_id: &str,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Executions);
         load_execution(&conn, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)
     }
 
@@ -169,7 +169,7 @@ impl Database {
         project_id: &str,
         subject_id: &str,
     ) -> Result<(ConnectorTaskSnapshot, ConnectorExecution), ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Executions);
         let execution =
             load_execution(&conn, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
         let task = load_task(&conn, &execution.task_id, project_id, subject_id)?
@@ -184,7 +184,7 @@ impl Database {
         subject_id: &str,
         now: i64,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -218,7 +218,7 @@ impl Database {
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
         let output_tail_json = serialize_mcp_task_output_tail(Some(output_tail))?
             .expect("serializing a provided MCP task output tail returns Some");
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -245,7 +245,7 @@ impl Database {
         &self,
         execution: &ConnectorExecution,
     ) -> Result<i64, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Executions);
         conn.query_row(
             "SELECT MAX(sequence)
              FROM wc_task_events
@@ -268,7 +268,7 @@ impl Database {
         execution_id: &str,
         now: i64,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -299,7 +299,7 @@ impl Database {
     pub fn terminal_ready_connector_executions(
         &self,
     ) -> Result<Vec<ConnectorExecution>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Executions);
         let mut statement = conn.prepare(&format!(
             "SELECT {EXECUTION_COLUMNS} FROM wc_executions
              WHERE {TERMINAL_CONTINUATION_READY_PREDICATE}
@@ -315,7 +315,7 @@ impl Database {
     pub fn claim_next_terminal_continuation(
         &self,
     ) -> Result<Option<ConnectorTerminalContinuationClaim>, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         // Serialize the select+claim decision across independent DB handles as
         // well as this process-local mutex. A second claimant observes the
         // committed Claimed state instead of selecting the same ready row.
@@ -432,7 +432,7 @@ impl Database {
         next: ConnectorTerminalContinuationDeliveryState,
         clear_fence: bool,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -487,7 +487,7 @@ impl Database {
         subject_id: &str,
         operation_id: Option<&str>,
     ) -> Result<Option<ConnectorExecution>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Executions);
         let task = load_task(&conn, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
         match operation_id {
@@ -511,7 +511,7 @@ impl Database {
                 "execution kind must be command or check".to_string(),
             )
         })?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Executions);
         load_task(&conn, task_id, project_id, subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
         latest_execution_by_kind(&conn, task_id, kind).map_err(ConnectorTaskStoreError::from)
@@ -524,7 +524,7 @@ impl Database {
         executor_status: &str,
         now: i64,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -589,7 +589,7 @@ impl Database {
         failure_code: &str,
         now: i64,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -613,7 +613,7 @@ impl Database {
         execution_id: &str,
         observation: ConnectorExecutionObservation<'_>,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -809,7 +809,7 @@ impl Database {
         reason: Option<&str>,
         now: i64,
     ) -> Result<Option<ConnectorExecution>, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let current = load_task(&tx, &task.task_id, &task.project_id, &task.owner_subject_id)?
             .ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -895,7 +895,7 @@ impl Database {
         execution_id: &str,
         now: i64,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;
@@ -924,7 +924,7 @@ impl Database {
         &self,
         task_id: &str,
     ) -> Result<Option<ConnectorExecution>, ConnectorTaskStoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::Executions);
         Ok(latest_execution(&conn, task_id)?.filter(ConnectorExecution::blocks_finish))
     }
 
@@ -951,7 +951,7 @@ impl Database {
         now: i64,
         recover_terminal_continuation_delivery: bool,
     ) -> Result<(usize, usize), ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         if recover_terminal_continuation_delivery {
             let claimed_released = tx.execute(
@@ -1035,7 +1035,7 @@ impl Database {
         failure: ConnectorExecutionFailure,
         now: i64,
     ) -> Result<ConnectorExecution, ConnectorTaskStoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::Executions);
         let tx = conn.transaction()?;
         let execution =
             load_execution(&tx, execution_id)?.ok_or(ConnectorTaskStoreError::NotFound)?;

@@ -1,10 +1,14 @@
 //! Durable WebCodex state persistence and SQLite storage semantics.
 
+use self::connection_observation::{
+    lock_connection as observed_lock_connection, StoreConnectionGuard, StoreConnectionObserver,
+    TracingStoreConnectionObserver,
+};
 use crate::models::PairingCodeRecord;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 mod accounts;
 mod activity;
@@ -14,6 +18,7 @@ mod agent_task;
 mod agent_wake;
 mod audit;
 mod communication;
+mod connection_observation;
 mod execution_model;
 mod executions;
 mod goal;
@@ -55,6 +60,7 @@ pub use self::communication::{
     NewConversationMessage, COMMUNICATION_PRINCIPAL_DIGEST_PREFIX, MAX_COMMUNICATION_LIST_LIMIT,
     MAX_DURABLE_AGENTS,
 };
+pub(crate) use self::connection_observation::StoreDomain;
 pub use self::execution_model::{
     ConnectorExecution, ConnectorExecutionFailure, ConnectorExecutionKind,
     ConnectorExecutionObservation, ConnectorExecutionReservation, ConnectorExecutionState,
@@ -101,8 +107,10 @@ pub use self::task_kernel::{
     WindowProjectActivation,
 };
 pub use self::window_activity::{MAX_WINDOW_ACTIVITY_LIMIT, MAX_WINDOW_LINK_LIMIT};
+
 pub struct Database {
     conn: Mutex<Connection>,
+    connection_observer: Arc<dyn StoreConnectionObserver>,
     state_path: PathBuf,
     /// Ephemeral navigation only. Connector work stays in wc_tasks and
     /// wc_window_project_contexts; AgentTask owns separate durable tables, and
@@ -111,6 +119,19 @@ pub struct Database {
 }
 
 impl Database {
+    fn from_connection(conn: Connection, state_path: PathBuf) -> Self {
+        Self {
+            conn: Mutex::new(conn),
+            connection_observer: Arc::new(TracingStoreConnectionObserver),
+            state_path,
+            window_projects: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub(crate) fn lock_connection(&self, domain: StoreDomain) -> StoreConnectionGuard<'_> {
+        observed_lock_connection(&self.conn, self.connection_observer.as_ref(), domain)
+    }
+
     pub(crate) fn state_path(&self) -> &Path {
         &self.state_path
     }

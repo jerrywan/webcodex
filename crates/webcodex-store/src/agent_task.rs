@@ -734,7 +734,7 @@ impl Database {
             "referenced_project_id": referenced_project_id,
         }));
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -829,7 +829,7 @@ impl Database {
             ));
         }
         let now = now_unix_ms();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let (total_count, task_ids) = if let Some(agent_id) = assignee_agent_id.as_deref() {
             let total_count = conn
                 .query_row(
@@ -932,7 +932,7 @@ impl Database {
     ) -> Result<AgentTaskDetail, CommunicationStoreError> {
         validate_communication_principal(principal)?;
         validate_id(task_id, AGENT_TASK_ID_PREFIX, "invalid_agent_task_id")?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::AgentTask);
         Ok(load_owned_task(&conn, principal, task_id, now)?.detail(now))
     }
 
@@ -970,7 +970,7 @@ impl Database {
             DURABLE_AGENT_ID_PREFIX,
             "invalid_agent_id",
         )?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1086,7 +1086,7 @@ impl Database {
             "task_id": task_id,
             "assignee_agent_id": assignee_agent_id,
         }));
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1288,7 +1288,7 @@ impl Database {
             })
             .to_string(),
         );
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1462,7 +1462,7 @@ impl Database {
             attempt_fence,
             attempt_controller_generation,
         )?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1535,7 +1535,7 @@ impl Database {
             attempt_fence,
             expected_controller_generation,
         )?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1655,7 +1655,7 @@ impl Database {
             "terminal_result": terminal_result,
             "terminal_reason": terminal_reason,
         }));
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -1837,7 +1837,7 @@ impl Database {
             attempt_fence,
             attempt_controller_generation,
         )?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let task = load_owned_task(&conn, principal, task_id, now)?;
         let referenced_project = task.referenced_project_id.as_deref().ok_or_else(|| {
             CommunicationStoreError::new(
@@ -1945,7 +1945,7 @@ impl Database {
             attempt_fence,
             attempt_controller_generation,
         )?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -2092,7 +2092,7 @@ impl Database {
             AGENT_TASK_ATTEMPT_ID_PREFIX,
             "invalid_agent_task_attempt_id",
         )?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let task = load_owned_task(&conn, principal, task_id, now_unix_ms())?;
         load_attempt_for_task(&conn, task_id, attempt_id, now_unix_ms())?.ok_or_else(|| {
             CommunicationStoreError::new(
@@ -2127,7 +2127,7 @@ impl Database {
             attempt_fence,
             attempt_controller_generation,
         )?;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -2192,7 +2192,7 @@ impl Database {
         run_id: &str,
     ) -> Result<AgentTaskCodingRunBindingRecord, CommunicationStoreError> {
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -2239,7 +2239,7 @@ impl Database {
         observation: &AgentTaskCodingRunObservation,
     ) -> Result<AgentTaskCodingRunBindingRecord, CommunicationStoreError> {
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -2264,7 +2264,7 @@ impl Database {
         attempt_id: &str,
     ) -> Result<AgentTaskCodingRunBindingRecord, CommunicationStoreError> {
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
@@ -2310,7 +2310,7 @@ impl Database {
         let terminal_result = validate_optional_terminal_text(terminal_result, "terminal_result")?;
         let terminal_reason = validate_optional_terminal_text(terminal_reason, "terminal_reason")?;
         let now = now_unix_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(store_error)?;
