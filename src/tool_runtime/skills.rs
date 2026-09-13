@@ -2001,6 +2001,9 @@ fn stable_skill_store_error(error: Option<&str>) -> String {
         .next()
         .unwrap_or("skill_store_unavailable")
         .trim();
+    if base == "skill_capability_unavailable" {
+        return "skill_store_capability_unavailable".to_string();
+    }
     if base.starts_with("skill_")
         && base.len() <= 96
         && base
@@ -2308,6 +2311,12 @@ mod tests {
         assert_eq!(
             runner_skill_enqueue_error_kind(&unavailable, true),
             "skill_store_runner_unavailable"
+        );
+        assert_eq!(
+            stable_skill_store_error(Some(
+                "skill_capability_unavailable: exact Runner no longer advertises skill_management before dispatch"
+            )),
+            "skill_store_capability_unavailable"
         );
     }
 
