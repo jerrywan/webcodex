@@ -40,11 +40,11 @@ struct PendingProjectInventoryPage {
 
 #[derive(Debug, Clone)]
 pub(super) struct ProjectInventorySync {
-    pub(super) generation: String,
+    generation: String,
     pub(super) snapshot_sequence: u64,
     pub(super) projects: Vec<RunnerProjectSummary>,
-    pub(super) cursor: usize,
-    pub(super) page_index: u32,
+    cursor: usize,
+    page_index: u32,
     pending: Option<PendingProjectInventoryPage>,
 }
 
@@ -368,9 +368,9 @@ pub(super) fn handle_project_inventory_status(
 }
 
 pub(super) struct StreamingProjectInventoryCoordinator {
-    pub(super) supported: bool,
+    supported: bool,
     pub(super) sync: Option<ProjectInventorySync>,
-    pub(super) project_cache: RunnerProjectCache,
+    project_cache: RunnerProjectCache,
     pub(super) retry_backoff: RetryBackoff,
     pub(super) retry_at: Option<tokio::time::Instant>,
 }
