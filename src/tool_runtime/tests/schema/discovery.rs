@@ -1511,6 +1511,42 @@ async fn tool_manifest_projects_canonical_execution_selection_for_exact_and_filt
     assert_eq!(exact.output["tools"][0]["execution"], expected);
     assert_eq!(exact.output["contract"]["availability"], "direct");
 
+    let specs = registered_tool_specs();
+    let manifest_spec = spec_named(&specs, "tool_manifest");
+    let output_properties = output_schema_properties(manifest_spec);
+    let execution_schema = &output_properties["execution"];
+    assert_eq!(
+        execution_schema["properties"]["form"]["enum"],
+        json!([
+            "native_argv",
+            "typed_script",
+            "shell_command",
+            "structured_validation",
+            "persistent_shell_command"
+        ])
+    );
+    assert_eq!(
+        execution_schema["properties"]["lifetime"]["enum"],
+        json!(["runner", "supervisor", "session_shell"])
+    );
+    assert_eq!(
+        execution_schema["properties"]["start"]["enum"],
+        json!(["sync_first", "async_immediate", "existing_session"])
+    );
+    assert_eq!(
+        execution_schema["properties"]["continuation"]["enum"],
+        json!(["observe_jobs", "session_shell", "none"])
+    );
+
+    let mut sparse_exact = crate::tool_runtime::ToolResult::ok(exact.output.clone());
+    crate::tool_runtime::surface::sparsify_tool_manifest_model_result(&mut sparse_exact);
+    assert_eq!(sparse_exact.output["execution"], expected);
+    assert_payload_keys_declared(
+        "tool_manifest sparse exact execution",
+        &sparse_exact.output,
+        output_properties,
+    );
+
     let filtered = runtime
         .dispatch(ToolCall::ToolManifest {
             tool_name: None,
