@@ -179,6 +179,7 @@ function runtimeImportTarget(specifier) {
 
 export function analyzeRuntimeClassicBundleModules(modules) {
   const moduleNames = new Set(modules.map(({ fileName }) => fileName));
+  const moduleOrder = new Map(modules.map(({ fileName }, index) => [fileName, index]));
   const bindingsByModule = new Map();
   const declarationSites = new Map();
   for (const { fileName, source } of modules) {
@@ -257,6 +258,15 @@ export function analyzeRuntimeClassicBundleModules(modules) {
             reason: "value import target is not part of the classic Runtime bundle",
           });
           continue;
+        }
+        if (moduleOrder.get(targetFile) > moduleOrder.get(fileName)) {
+          unresolvedImports.push({
+            file: fileName,
+            fromModule,
+            imported,
+            line,
+            reason: `value import target ${targetFile} must precede ${fileName} in classic Runtime module order`,
+          });
         }
         if (!bindingsByModule.get(targetFile)?.has(imported)) {
           unresolvedImports.push({

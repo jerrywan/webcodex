@@ -122,3 +122,23 @@ test("every stripped value import must have a canonical binding in an inlined mo
     /canonical value import binding error\(s\)/,
   );
 });
+
+test("classic Runtime module order places every value-import provider before its consumer", () => {
+  const modules = [
+    {
+      fileName: "consumer.ts",
+      source:
+        "import { value } from './provider.js';\n" +
+        "export const result = value + 1;\n",
+    },
+    { fileName: "provider.ts", source: "export const value = 1;\n" },
+  ];
+  const analysis = analyzeRuntimeClassicBundleModules(modules);
+  assert.equal(analysis.unresolvedImports.length, 1);
+  assert.equal(analysis.unresolvedImports[0].imported, "value");
+  assert.match(analysis.unresolvedImports[0].reason, /must precede consumer\.ts/);
+  assert.throws(
+    () => assertRuntimeClassicBundleModules(modules),
+    /canonical value import binding error\(s\)/,
+  );
+});
