@@ -567,14 +567,15 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
         MCP_AGENT_CONTINUATION_APP_HTML.contains("function markCurrentEndpointHealthy()"),
         "a healthy exact controller must reopen future expired-endpoint recovery eligibility"
     );
+    let normalized_app_html = MCP_AGENT_CONTINUATION_APP_HTML.replace("\r\n", "\n");
     assert!(
-        MCP_AGENT_CONTINUATION_APP_HTML.contains(
+        normalized_app_html.contains(
             "bindingId = viewBindingId;\n    markCurrentEndpointHealthy();\n    renderWithWait(projection);"
         ),
         "a successful exact bind must end the current recovery-probe episode"
     );
     assert!(
-        MCP_AGENT_CONTINUATION_APP_HTML.contains(
+        normalized_app_html.contains(
             "markCurrentEndpointHealthy();\n    renderWithWait(projection);\n    return projection;"
         ),
         "a successful exact heartbeat must allow a later lease expiry to probe again"
