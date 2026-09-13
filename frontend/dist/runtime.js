@@ -2122,18 +2122,169 @@ function renderTimelineEvents(container, activities, language) {
     }
 }
 
-const API_BASE = RUNTIME_API_BASE;
-const apiClient = new RuntimeApiClient(API_BASE);
-const REFRESH_MS = 30000;
-const WINDOW_REFRESH_MS = 3000;
-const COLLABORATION_WAIT_SECS = 25;
-const PROJECT_SEARCH_DEBOUNCE_MS = 200;
 const RUNTIME_CREDENTIAL_SESSION_KEY = "webcodex.runtime.credential.v1";
 const APPEARANCE_STORAGE_KEY = "webcodex.runtime.appearance.v1";
 const WORKSPACE_VIEW_STORAGE_KEY = "webcodex.runtime.workspace-view.v1";
 const DRAFT_STORAGE_PREFIX = "webcodex.runtime.draft.v1.";
 const DEVICE_DISCLOSURE_STORAGE_PREFIX = "webcodex.runtime.runner-open.v1.";
 const APPEARANCE_MEDIA_QUERY = "(prefers-color-scheme: light)";
+function appearancePreference(value) {
+    return value === "light" || value === "dark" || value === "system" ? value : "system";
+}
+function loadAppearancePreference() {
+    try {
+        return appearancePreference(window.localStorage.getItem(APPEARANCE_STORAGE_KEY));
+    }
+    catch {
+        return "system";
+    }
+}
+function persistAppearancePreference(preference) {
+    try {
+        window.localStorage.setItem(APPEARANCE_STORAGE_KEY, preference);
+    }
+    catch {
+        /* Storage can be unavailable in hardened browser contexts. */
+    }
+}
+function resolvedAppearance(preference, prefersLight) {
+    if (preference !== "system")
+        return preference;
+    return prefersLight ? "light" : "dark";
+}
+function workspaceViewPreference(value) {
+    return value === "operations" || value === "windows" ? value : "sessions";
+}
+function loadWorkspaceViewPreference() {
+    try {
+        return workspaceViewPreference(window.localStorage.getItem(WORKSPACE_VIEW_STORAGE_KEY));
+    }
+    catch {
+        return "sessions";
+    }
+}
+function persistWorkspaceViewPreference(view) {
+    try {
+        window.localStorage.setItem(WORKSPACE_VIEW_STORAGE_KEY, view);
+    }
+    catch {
+        /* Storage can be unavailable in hardened browser contexts. */
+    }
+}
+function loadRememberedRuntimeCredential() {
+    try {
+        return window.sessionStorage.getItem(RUNTIME_CREDENTIAL_SESSION_KEY)?.trim() || "";
+    }
+    catch {
+        return "";
+    }
+}
+function persistRuntimeCredentialForTab(token, remember) {
+    try {
+        if (remember && token) {
+            window.sessionStorage.setItem(RUNTIME_CREDENTIAL_SESSION_KEY, token);
+        }
+        else {
+            window.sessionStorage.removeItem(RUNTIME_CREDENTIAL_SESSION_KEY);
+        }
+    }
+    catch {
+        /* Storage can be unavailable in hardened browser contexts. */
+    }
+}
+function clearRememberedRuntimeCredential() {
+    try {
+        window.sessionStorage.removeItem(RUNTIME_CREDENTIAL_SESSION_KEY);
+    }
+    catch {
+        /* Storage can be unavailable in hardened browser contexts. */
+    }
+}
+function currentDraftStorageKey(project, sessionId) {
+    const projectId = String(project || "");
+    const workflowSessionId = String(sessionId || "");
+    return projectId && workflowSessionId
+        ? DRAFT_STORAGE_PREFIX + encodeURIComponent(projectId) + "." + encodeURIComponent(workflowSessionId)
+        : "";
+}
+function loadDraft(project, sessionId) {
+    const key = currentDraftStorageKey(project, sessionId);
+    if (!key)
+        return "";
+    try {
+        return window.sessionStorage.getItem(key) || "";
+    }
+    catch {
+        return "";
+    }
+}
+function saveDraft(project, sessionId, text) {
+    const key = currentDraftStorageKey(project, sessionId);
+    if (!key)
+        return;
+    try {
+        if (text)
+            window.sessionStorage.setItem(key, text);
+        else
+            window.sessionStorage.removeItem(key);
+    }
+    catch {
+        /* Draft remains in active input when storage is unavailable. */
+    }
+}
+function clearDraft(project, sessionId) {
+    const key = currentDraftStorageKey(project, sessionId);
+    if (!key)
+        return;
+    try {
+        window.sessionStorage.removeItem(key);
+    }
+    catch {
+        /* No-op in hardened browser contexts. */
+    }
+}
+function clearRuntimeDrafts() {
+    try {
+        const keys = [];
+        for (let index = 0; index < window.sessionStorage.length; index += 1) {
+            const key = window.sessionStorage.key(index);
+            if (key?.startsWith(DRAFT_STORAGE_PREFIX))
+                keys.push(key);
+        }
+        for (const key of keys)
+            window.sessionStorage.removeItem(key);
+    }
+    catch {
+        /* No-op in hardened browser contexts. */
+    }
+}
+function deviceDisclosureStorageKey(clientId) {
+    return DEVICE_DISCLOSURE_STORAGE_PREFIX + encodeURIComponent(clientId);
+}
+function storedDeviceDisclosure(clientId) {
+    try {
+        const value = window.localStorage.getItem(deviceDisclosureStorageKey(clientId));
+        return value === "open" ? true : value === "closed" ? false : null;
+    }
+    catch {
+        return null;
+    }
+}
+function persistDeviceDisclosure(clientId, open) {
+    try {
+        window.localStorage.setItem(deviceDisclosureStorageKey(clientId), open ? "open" : "closed");
+    }
+    catch {
+        /* Disclosure remains active for current render. */
+    }
+}
+
+const API_BASE = RUNTIME_API_BASE;
+const apiClient = new RuntimeApiClient(API_BASE);
+const REFRESH_MS = 30000;
+const WINDOW_REFRESH_MS = 3000;
+const COLLABORATION_WAIT_SECS = 25;
+const PROJECT_SEARCH_DEBOUNCE_MS = 200;
 const MOBILE_NAVIGATION_MEDIA = "(max-width: 900px)";
 const WIDE_CONTEXT_MEDIA = "(min-width: 1280px)";
 let contextUserIntent = null;
@@ -2296,20 +2447,13 @@ function applyLanguage(language, persist = true, rerender = true) {
         renderLanguageSensitiveUi();
 }
 function appearancePreference(value) {
-    return value === "light" || value === "dark" || value === "system" ? value : "system";
+    return validateAppearancePreference(value);
 }
 function loadAppearancePreference() {
-    try {
-        return appearancePreference(window.localStorage.getItem(APPEARANCE_STORAGE_KEY));
-    }
-    catch {
-        return "system";
-    }
+    return loadAppearanceFromStorage();
 }
 function resolvedAppearance(preference) {
-    if (preference !== "system")
-        return preference;
-    return appearanceMedia.matches ? "light" : "dark";
+    return resolveThemeAppearance(preference, appearanceMedia.matches);
 }
 function applyAppearance(preference, persist = true) {
     const resolved = resolvedAppearance(preference);
@@ -2324,23 +2468,14 @@ function applyAppearance(preference, persist = true) {
         trigger.title = label;
         trigger.setAttribute("aria-label", runtimeLanguage === "zh-CN" ? label + "。" + tr("Choose appearance") : label + ". " + tr("Choose appearance"));
     });
-    if (!persist)
-        return;
-    try {
-        window.localStorage.setItem(APPEARANCE_STORAGE_KEY, preference);
-    }
-    catch { /* Appearance remains active when storage is unavailable. */ }
+    if (persist)
+        persistAppearanceToStorage(preference);
 }
 function workspaceViewPreference(value) {
-    return value === "operations" || value === "windows" ? value : "sessions";
+    return validateWorkspaceViewPreference(value);
 }
 function loadWorkspaceViewPreference() {
-    try {
-        return workspaceViewPreference(window.localStorage.getItem(WORKSPACE_VIEW_STORAGE_KEY));
-    }
-    catch {
-        return "sessions";
-    }
+    return loadWorkspaceViewFromStorage();
 }
 function renderWorkspaceHeading() {
     if (workspaceView === "operations") {
@@ -2395,12 +2530,8 @@ function applyWorkspaceView(view, persist = true) {
     renderWorkspaceHeading();
     syncResponsiveNavigation();
     setMobileNavigationOpen(false, false);
-    if (persist) {
-        try {
-            window.localStorage.setItem(WORKSPACE_VIEW_STORAGE_KEY, workspaceView);
-        }
-        catch { /* The selected view remains active when storage is unavailable. */ }
-    }
+    if (persist)
+        persistWorkspaceViewToStorage(workspaceView);
 }
 function revealOperationsSection(targetId) {
     applyWorkspaceView("operations");
@@ -2640,82 +2771,35 @@ function announceNewCollaborationMessages(count) {
     setText("runtime-message-announcer", label);
 }
 function loadRememberedRuntimeCredential() {
-    try {
-        return window.sessionStorage.getItem(RUNTIME_CREDENTIAL_SESSION_KEY)?.trim() || "";
-    }
-    catch {
-        return "";
-    }
+    return loadCredentialFromStorage();
 }
 function persistRuntimeCredentialForTab() {
-    try {
-        if (rememberCredentialForTab && token)
-            window.sessionStorage.setItem(RUNTIME_CREDENTIAL_SESSION_KEY, token);
-        else
-            window.sessionStorage.removeItem(RUNTIME_CREDENTIAL_SESSION_KEY);
-    }
-    catch { /* Storage can be unavailable in hardened browser contexts. */ }
+    persistCredentialToStorage(token, rememberCredentialForTab);
 }
 function clearRememberedRuntimeCredential() {
-    try {
-        window.sessionStorage.removeItem(RUNTIME_CREDENTIAL_SESSION_KEY);
-    }
-    catch { /* Storage can be unavailable in hardened browser contexts. */ }
+    clearCredentialFromStorage();
 }
 function currentDraftStorageKey(project = state.selectedProject, sessionId = state.workflow?.selectedSessionId) {
-    const projectId = String(project || "");
-    const workflowSessionId = String(sessionId || "");
-    return projectId && workflowSessionId
-        ? DRAFT_STORAGE_PREFIX + encodeURIComponent(projectId) + "." + encodeURIComponent(workflowSessionId)
-        : "";
+    return draftStorageKey(project, sessionId);
 }
 function saveCurrentDraft() {
-    const key = currentDraftStorageKey();
     const body = el("runtime-message-body");
-    if (!key || !body)
+    if (!body)
         return;
-    try {
-        if (body.value)
-            window.sessionStorage.setItem(key, body.value);
-        else
-            window.sessionStorage.removeItem(key);
-    }
-    catch { /* Draft remains available in the current input when storage is unavailable. */ }
+    saveDraft(state.selectedProject, state.workflow?.selectedSessionId, body.value);
 }
 function restoreCurrentDraft() {
-    const key = currentDraftStorageKey();
     const body = el("runtime-message-body");
-    if (!key || !body)
+    if (!body)
         return;
-    try {
-        body.value = window.sessionStorage.getItem(key) || "";
-    }
-    catch {
-        body.value = "";
-    }
+    body.value = loadDraft(state.selectedProject, state.workflow?.selectedSessionId);
     syncCollaborationComposerLayout();
 }
 function clearCurrentDraft() {
-    const key = currentDraftStorageKey();
-    if (!key)
-        return;
-    try {
-        window.sessionStorage.removeItem(key);
-    }
-    catch { /* No-op in hardened browser contexts. */ }
+    clearDraft(state.selectedProject, state.workflow?.selectedSessionId);
 }
 function clearRuntimeDrafts() {
-    try {
-        const keys = [];
-        for (let index = 0; index < window.sessionStorage.length; index += 1) {
-            const key = window.sessionStorage.key(index);
-            if (key?.startsWith(DRAFT_STORAGE_PREFIX))
-                keys.push(key);
-        }
-        for (const key of keys)
-            window.sessionStorage.removeItem(key);
-    }
-    catch { /* No-op in hardened browser contexts. */ }
+    clearAllRuntimeDrafts();
 }
 function rememberLocalCollaborationMessage(messageId) {
     const id = typeof messageId === "string" ? messageId : "";
@@ -2724,22 +2808,13 @@ function rememberLocalCollaborationMessage(messageId) {
     locallyAuthoredCollaborationMessageIds.add(id);
 }
 function deviceDisclosureStorageKey(clientId) {
-    return DEVICE_DISCLOSURE_STORAGE_PREFIX + encodeURIComponent(clientId);
+    return runnerDisclosureKey(clientId);
 }
 function storedDeviceDisclosure(clientId) {
-    try {
-        const value = window.localStorage.getItem(deviceDisclosureStorageKey(clientId));
-        return value === "open" ? true : value === "closed" ? false : null;
-    }
-    catch {
-        return null;
-    }
+    return loadDeviceDisclosure(clientId);
 }
 function persistDeviceDisclosure(clientId, open) {
-    try {
-        window.localStorage.setItem(deviceDisclosureStorageKey(clientId), open ? "open" : "closed");
-    }
-    catch { /* Disclosure remains active for the current render. */ }
+    saveDeviceDisclosure(clientId, open);
 }
 function revealRunner(clientId) {
     if (!clientId)

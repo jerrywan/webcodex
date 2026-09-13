@@ -113,6 +113,34 @@ import {
   appendActivityPreview,
   renderTimelineEvents,
 } from "./runtime_activity.js";
+import {
+  RUNTIME_CREDENTIAL_SESSION_KEY,
+  APPEARANCE_STORAGE_KEY,
+  WORKSPACE_VIEW_STORAGE_KEY,
+  DRAFT_STORAGE_PREFIX,
+  DEVICE_DISCLOSURE_STORAGE_PREFIX,
+  APPEARANCE_MEDIA_QUERY,
+  type AppearancePreference,
+  type RuntimeWorkspaceView,
+  appearancePreference as validateAppearancePreference,
+  loadAppearancePreference as loadAppearanceFromStorage,
+  persistAppearancePreference as persistAppearanceToStorage,
+  resolvedAppearance as resolveThemeAppearance,
+  workspaceViewPreference as validateWorkspaceViewPreference,
+  loadWorkspaceViewPreference as loadWorkspaceViewFromStorage,
+  persistWorkspaceViewPreference as persistWorkspaceViewToStorage,
+  loadRememberedRuntimeCredential as loadCredentialFromStorage,
+  persistRuntimeCredentialForTab as persistCredentialToStorage,
+  clearRememberedRuntimeCredential as clearCredentialFromStorage,
+  currentDraftStorageKey as draftStorageKey,
+  loadDraft,
+  saveDraft,
+  clearDraft,
+  clearRuntimeDrafts as clearAllRuntimeDrafts,
+  deviceDisclosureStorageKey as runnerDisclosureKey,
+  storedDeviceDisclosure as loadDeviceDisclosure,
+  persistDeviceDisclosure as saveDeviceDisclosure,
+} from "./runtime_storage.js";
 
 const API_BASE = RUNTIME_API_BASE;
 const apiClient = new RuntimeApiClient(API_BASE);
@@ -120,20 +148,12 @@ const REFRESH_MS = 30000;
 const WINDOW_REFRESH_MS = 3000;
 const COLLABORATION_WAIT_SECS = 25;
 const PROJECT_SEARCH_DEBOUNCE_MS = 200;
-const RUNTIME_CREDENTIAL_SESSION_KEY = "webcodex.runtime.credential.v1";
-const APPEARANCE_STORAGE_KEY = "webcodex.runtime.appearance.v1";
-const WORKSPACE_VIEW_STORAGE_KEY = "webcodex.runtime.workspace-view.v1";
-const DRAFT_STORAGE_PREFIX = "webcodex.runtime.draft.v1.";
-const DEVICE_DISCLOSURE_STORAGE_PREFIX = "webcodex.runtime.runner-open.v1.";
-const APPEARANCE_MEDIA_QUERY = "(prefers-color-scheme: light)";
 const MOBILE_NAVIGATION_MEDIA = "(max-width: 900px)";
 const WIDE_CONTEXT_MEDIA = "(min-width: 1280px)";
 
 let contextUserIntent: boolean | null = null;
 
-type AppearancePreference = "system" | "light" | "dark";
 type RuntimeLanguage = "en" | "zh-CN";
-type RuntimeWorkspaceView = "sessions" | "operations" | "windows";
 
 // Verified localization mapping: "Close session context": "关闭会话上下文"
 
@@ -303,17 +323,15 @@ function applyLanguage(language: RuntimeLanguage, persist = true, rerender = tru
 }
 
 function appearancePreference(value: unknown): AppearancePreference {
-  return value === "light" || value === "dark" || value === "system" ? value : "system";
+  return validateAppearancePreference(value);
 }
 
 function loadAppearancePreference(): AppearancePreference {
-  try { return appearancePreference(window.localStorage.getItem(APPEARANCE_STORAGE_KEY)); }
-  catch { return "system"; }
+  return loadAppearanceFromStorage();
 }
 
 function resolvedAppearance(preference: AppearancePreference): "light" | "dark" {
-  if (preference !== "system") return preference;
-  return appearanceMedia.matches ? "light" : "dark";
+  return resolveThemeAppearance(preference, appearanceMedia.matches);
 }
 
 function applyAppearance(preference: AppearancePreference, persist = true): void {
@@ -332,18 +350,15 @@ function applyAppearance(preference: AppearancePreference, persist = true): void
     trigger.title = label;
     trigger.setAttribute("aria-label", runtimeLanguage === "zh-CN" ? label + "。" + tr("Choose appearance") : label + ". " + tr("Choose appearance"));
   });
-  if (!persist) return;
-  try { window.localStorage.setItem(APPEARANCE_STORAGE_KEY, preference); }
-  catch { /* Appearance remains active when storage is unavailable. */ }
+  if (persist) persistAppearanceToStorage(preference);
 }
 
 function workspaceViewPreference(value: unknown): RuntimeWorkspaceView {
-  return value === "operations" || value === "windows" ? value : "sessions";
+  return validateWorkspaceViewPreference(value);
 }
 
 function loadWorkspaceViewPreference(): RuntimeWorkspaceView {
-  try { return workspaceViewPreference(window.localStorage.getItem(WORKSPACE_VIEW_STORAGE_KEY)); }
-  catch { return "sessions"; }
+  return loadWorkspaceViewFromStorage();
 }
 
 function renderWorkspaceHeading(): void {
@@ -398,10 +413,7 @@ function applyWorkspaceView(view: RuntimeWorkspaceView, persist = true): void {
   renderWorkspaceHeading();
   syncResponsiveNavigation();
   setMobileNavigationOpen(false, false);
-  if (persist) {
-    try { window.localStorage.setItem(WORKSPACE_VIEW_STORAGE_KEY, workspaceView); }
-    catch { /* The selected view remains active when storage is unavailable. */ }
-  }
+  if (persist) persistWorkspaceViewToStorage(workspaceView);
 }
 
 function revealOperationsSection(targetId: string): void {
@@ -647,65 +659,40 @@ function announceNewCollaborationMessages(count: number): void {
 }
 
 function loadRememberedRuntimeCredential(): string {
-  try { return window.sessionStorage.getItem(RUNTIME_CREDENTIAL_SESSION_KEY)?.trim() || ""; }
-  catch { return ""; }
+  return loadCredentialFromStorage();
 }
 
 function persistRuntimeCredentialForTab(): void {
-  try {
-    if (rememberCredentialForTab && token) window.sessionStorage.setItem(RUNTIME_CREDENTIAL_SESSION_KEY, token);
-    else window.sessionStorage.removeItem(RUNTIME_CREDENTIAL_SESSION_KEY);
-  } catch { /* Storage can be unavailable in hardened browser contexts. */ }
+  persistCredentialToStorage(token, rememberCredentialForTab);
 }
 
 function clearRememberedRuntimeCredential(): void {
-  try { window.sessionStorage.removeItem(RUNTIME_CREDENTIAL_SESSION_KEY); }
-  catch { /* Storage can be unavailable in hardened browser contexts. */ }
+  clearCredentialFromStorage();
 }
 
 function currentDraftStorageKey(project = state.selectedProject, sessionId = state.workflow?.selectedSessionId): string {
-  const projectId = String(project || "");
-  const workflowSessionId = String(sessionId || "");
-  return projectId && workflowSessionId
-    ? DRAFT_STORAGE_PREFIX + encodeURIComponent(projectId) + "." + encodeURIComponent(workflowSessionId)
-    : "";
+  return draftStorageKey(project, sessionId);
 }
 
 function saveCurrentDraft(): void {
-  const key = currentDraftStorageKey();
   const body = el("runtime-message-body") as HTMLTextAreaElement | null;
-  if (!key || !body) return;
-  try {
-    if (body.value) window.sessionStorage.setItem(key, body.value);
-    else window.sessionStorage.removeItem(key);
-  } catch { /* Draft remains available in the current input when storage is unavailable. */ }
+  if (!body) return;
+  saveDraft(state.selectedProject, state.workflow?.selectedSessionId, body.value);
 }
 
 function restoreCurrentDraft(): void {
-  const key = currentDraftStorageKey();
   const body = el("runtime-message-body") as HTMLTextAreaElement | null;
-  if (!key || !body) return;
-  try { body.value = window.sessionStorage.getItem(key) || ""; }
-  catch { body.value = ""; }
+  if (!body) return;
+  body.value = loadDraft(state.selectedProject, state.workflow?.selectedSessionId);
   syncCollaborationComposerLayout();
 }
 
 function clearCurrentDraft(): void {
-  const key = currentDraftStorageKey();
-  if (!key) return;
-  try { window.sessionStorage.removeItem(key); }
-  catch { /* No-op in hardened browser contexts. */ }
+  clearDraft(state.selectedProject, state.workflow?.selectedSessionId);
 }
 
 function clearRuntimeDrafts(): void {
-  try {
-    const keys: string[] = [];
-    for (let index = 0; index < window.sessionStorage.length; index += 1) {
-      const key = window.sessionStorage.key(index);
-      if (key?.startsWith(DRAFT_STORAGE_PREFIX)) keys.push(key);
-    }
-    for (const key of keys) window.sessionStorage.removeItem(key);
-  } catch { /* No-op in hardened browser contexts. */ }
+  clearAllRuntimeDrafts();
 }
 
 function rememberLocalCollaborationMessage(messageId: unknown): void {
@@ -715,19 +702,15 @@ function rememberLocalCollaborationMessage(messageId: unknown): void {
 }
 
 function deviceDisclosureStorageKey(clientId: string): string {
-  return DEVICE_DISCLOSURE_STORAGE_PREFIX + encodeURIComponent(clientId);
+  return runnerDisclosureKey(clientId);
 }
 
 function storedDeviceDisclosure(clientId: string): boolean | null {
-  try {
-    const value = window.localStorage.getItem(deviceDisclosureStorageKey(clientId));
-    return value === "open" ? true : value === "closed" ? false : null;
-  } catch { return null; }
+  return loadDeviceDisclosure(clientId);
 }
 
 function persistDeviceDisclosure(clientId: string, open: boolean): void {
-  try { window.localStorage.setItem(deviceDisclosureStorageKey(clientId), open ? "open" : "closed"); }
-  catch { /* Disclosure remains active for the current render. */ }
+  saveDeviceDisclosure(clientId, open);
 }
 
 function revealRunner(clientId: string): void {
