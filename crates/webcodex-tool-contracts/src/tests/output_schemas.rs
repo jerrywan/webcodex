@@ -1111,6 +1111,23 @@ fn key_tool_output_schemas_include_expected_fields() {
                     Some("completed"),
                 ),
             ),
+            ("non-promoted execution with continuation semantics", {
+                let mut instance = structured_execution_output(
+                    execution_source,
+                    "completed",
+                    true,
+                    true,
+                    false,
+                    true,
+                    None,
+                    None,
+                );
+                instance["output"]["continuation_semantics"] = serde_json::json!({
+                    "kind": "observe",
+                    "carrier": "observation_token"
+                });
+                instance
+            }),
             (
                 "not_started execution with command_started=true",
                 structured_execution_output(

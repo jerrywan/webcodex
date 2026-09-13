@@ -273,6 +273,7 @@ fn structured_execution_lifecycle_constraints(execution_source: &str) -> Value {
                     "job_id": {"type": "null"},
                     "job_status": {"type": "null"},
                     "continuation": {"enum": []},
+                    "continuation_semantics": {"enum": []},
                     "execution_state": {
                         "enum": ["not_started", "outcome_unknown", "completed", "timed_out"]
                     }
