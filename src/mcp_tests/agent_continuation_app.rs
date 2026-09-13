@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::Arc;
 
-const APP_TOOLS: [&str; 7] = [
+const APP_TOOLS: [&str; 8] = [
     "agent_continuation_bind",
     "agent_continuation_recover_endpoint",
     "agent_continuation_state",
@@ -9,6 +9,7 @@ const APP_TOOLS: [&str; 7] = [
     "agent_continuation_wake_prepare",
     "agent_continuation_wake_finish",
     "agent_continuation_unbind",
+    "agent_wait_state",
 ];
 
 fn tool<'a>(payload: &'a Value, name: &str) -> Option<&'a Value> {
@@ -241,7 +242,7 @@ fn post_message(
 async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed() {
     assert_eq!(
         MCP_AGENT_CONTINUATION_UI_RESOURCE_URI,
-        "ui://webcodex/agent-continuation/v16"
+        "ui://webcodex/agent-continuation/v17"
     );
     let (_temp, _db, adaptive) = continuation_runtime(ModelSurface::AdaptiveRuntime);
     let auth = continuation_auth("continuation-surface");
@@ -260,12 +261,19 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
         panic!("expected UI tools/list")
     };
     let present = tool(&ui["result"], "present_agent_continuation")
-        .expect("present_agent_continuation must remain the sole card-creating entry");
+        .expect("present_agent_continuation must remain a card-creating entry");
+    let wait = tool(&ui["result"], "wait_for_agent_events")
+        .expect("wait_for_agent_events must be a descriptor-time continuation card entry");
     assert_eq!(
         present.pointer("/_meta/ui/resourceUri"),
         Some(&json!(MCP_AGENT_CONTINUATION_UI_RESOURCE_URI))
     );
     assert!(present.pointer("/_meta/ui/visibility").is_none());
+    assert_eq!(
+        wait.pointer("/_meta/ui/resourceUri"),
+        Some(&json!(MCP_AGENT_CONTINUATION_UI_RESOURCE_URI))
+    );
+    assert!(wait.pointer("/_meta/ui/visibility").is_none());
     let bound_tools: Vec<_> = ui["result"]["tools"]
         .as_array()
         .unwrap()
@@ -277,8 +285,9 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
         })
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(bound_tools.len(), APP_TOOLS.len() + 1);
+    assert_eq!(bound_tools.len(), APP_TOOLS.len() + 2);
     assert!(bound_tools.contains(&"present_agent_continuation"));
+    assert!(bound_tools.contains(&"wait_for_agent_events"));
     for name in APP_TOOLS {
         let descriptor = tool(&ui["result"], name).unwrap_or_else(|| panic!("missing {name}"));
         assert_eq!(
@@ -338,6 +347,11 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
         .unwrap()
         .pointer("/_meta/ui/resourceUri")
         .is_none());
+    assert!(tool(&plain["result"], "wait_for_agent_events").is_some());
+    assert!(tool(&plain["result"], "wait_for_agent_events")
+        .unwrap()
+        .pointer("/_meta/ui/resourceUri")
+        .is_none());
     for name in APP_TOOLS {
         assert!(tool(&plain["result"], name).is_none());
     }
@@ -358,6 +372,10 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
     };
     assert!(tool(&disabled["result"], "present_agent_continuation")
         .expect("presentation remains ordinary bounded read")
+        .pointer("/_meta/ui/resourceUri")
+        .is_none());
+    assert!(tool(&disabled["result"], "wait_for_agent_events")
+        .expect("Wait creation remains an ordinary model tool when Apps are unavailable")
         .pointer("/_meta/ui/resourceUri")
         .is_none());
     for name in APP_TOOLS {
@@ -447,6 +465,7 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
                     | "ui://webcodex/agent-continuation/v13"
                     | "ui://webcodex/agent-continuation/v14"
                     | "ui://webcodex/agent-continuation/v15"
+                    | "ui://webcodex/agent-continuation/v16"
             )
         )));
     for uri in [
@@ -466,6 +485,7 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
         "ui://webcodex/agent-continuation/v13",
         "ui://webcodex/agent-continuation/v14",
         "ui://webcodex/agent-continuation/v15",
+        "ui://webcodex/agent-continuation/v16",
     ] {
         let read = handle_with_server_apps_enabled(
             &adaptive,
@@ -549,13 +569,13 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
     );
     assert!(
         MCP_AGENT_CONTINUATION_APP_HTML.contains(
-            "bindingId = viewBindingId;\n    markCurrentEndpointHealthy();\n    render(projection);"
+            "bindingId = viewBindingId;\n    markCurrentEndpointHealthy();\n    renderWithWait(projection);"
         ),
         "a successful exact bind must end the current recovery-probe episode"
     );
     assert!(
         MCP_AGENT_CONTINUATION_APP_HTML.contains(
-            "markCurrentEndpointHealthy();\n    render(projection);\n    return projection;"
+            "markCurrentEndpointHealthy();\n    renderWithWait(projection);\n    return projection;"
         ),
         "a successful exact heartbeat must allow a later lease expiry to probe again"
     );
@@ -596,11 +616,11 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
     assert!(
         MCP_AGENT_CONTINUATION_APP_HTML
             .contains("for (let hop = 0; hop < MAX_ENDPOINT_SUCCESSOR_HOPS; hop++)"),
-        "v16 successor recovery must remain explicitly bounded"
+        "v17 successor recovery must remain explicitly bounded"
     );
     assert!(
-        MCP_AGENT_CONTINUATION_APP_HTML.contains("version: \"16.0.0\""),
-        "App protocol version must advance with the v16 resource"
+        MCP_AGENT_CONTINUATION_APP_HTML.contains("version: \"17.0.0\""),
+        "App protocol version must advance with the v17 resource"
     );
     assert!(
         MCP_AGENT_CONTINUATION_APP_HTML.contains("const DEBUG_DIAGNOSTICS = false;"),
@@ -613,6 +633,14 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
     assert!(
         MCP_AGENT_CONTINUATION_APP_HTML.contains("app_call_id"),
         "server-side App call correlation must remain available while UI diagnostics are hidden"
+    );
+    assert!(
+        MCP_AGENT_CONTINUATION_APP_HTML.contains("agent_wait_state"),
+        "v17 Wait presentation must poll only the exact durable Wait read surface"
+    );
+    assert!(
+        MCP_AGENT_CONTINUATION_APP_HTML.contains("id=\"waitSummary\""),
+        "v17 card must render the one-shot Wait lifecycle without a second dispatcher"
     );
     assert!(
         MCP_AGENT_CONTINUATION_APP_HTML.contains("function restartRecoveryOf(projection)"),
@@ -1335,6 +1363,11 @@ async fn agent_continuation_app_protocol_uses_standard_result_without_model_proj
         .scopes
         .retain(|scope| scope != crate::auth::SCOPE_COMMUNICATION_MANAGE);
     for name in APP_TOOLS {
+        if name == "agent_wait_state" {
+            // Agent Wait state is a separate read-only App projection keyed by wait_id;
+            // Store/runtime tests own exact Wait authority and existence-hiding coverage.
+            continue;
+        }
         let mut args = json!({
             "agent_id": receiver, "endpoint_id": receiver_endpoint,
             "expected_controller_generation": receiver_generation, "binding_id": binding_id,

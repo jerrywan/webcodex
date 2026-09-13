@@ -127,7 +127,7 @@ fn access_from_endpoint(
     }
 }
 
-fn communication_store_unavailable() -> ToolResult {
+pub(super) fn communication_store_unavailable() -> ToolResult {
     ToolResult::err_with_output(
         "Durable Agent and Conversation storage is unavailable in this runtime",
         json!({
@@ -155,7 +155,7 @@ fn communication_recovery_kind(
     }
 }
 
-fn communication_error(
+pub(super) fn communication_error(
     error: CommunicationStoreError,
     store_failure_recovery: RecoveryKind,
 ) -> ToolResult {
@@ -172,7 +172,7 @@ fn communication_error(
     .with_recovery(recovery, None)
 }
 
-fn serialized_success<T: Serialize>(value: T) -> ToolResult {
+pub(super) fn serialized_success<T: Serialize>(value: T) -> ToolResult {
     match to_value(value) {
         Ok(value) => ToolResult::ok(value),
         Err(error) => ToolResult::err_with_output(
@@ -186,7 +186,7 @@ fn serialized_success<T: Serialize>(value: T) -> ToolResult {
     }
 }
 
-fn agent_continuation_projection(
+pub(super) fn agent_continuation_projection(
     bootstrap: crate::db::AgentConversationBootstrapRecord,
     binding: crate::agent_wake::AgentHostBindingStatus,
     observation: Option<crate::agent_wake::McpAppHostBindingObservation>,
@@ -220,6 +220,9 @@ fn agent_continuation_projection(
                 "wake_id": wake.wake_id,
                 "state": wake.state,
                 "revision": wake.revision,
+                "wait_id": wake.wait_id,
+                "wait_match_count": wake.wait_match_count,
+                "wait_match_sequence": wake.wait_match_sequence,
             })),
             "queued_delivery_count": bootstrap.inbox.queued_delivery_count,
             "dispatch_observation": dispatch_observation,

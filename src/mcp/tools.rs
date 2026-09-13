@@ -646,6 +646,7 @@ fn is_agent_continuation_app_tool_name(tool_name: &str) -> bool {
             | "agent_continuation_wake_prepare"
             | "agent_continuation_wake_finish"
             | "agent_continuation_unbind"
+            | "agent_wait_state"
     )
 }
 

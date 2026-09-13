@@ -728,6 +728,13 @@ impl ToolRuntime {
                         controller.schedule_agent(&mutation.attempt.assignee_agent_id);
                     }
                 }
+                if mutation.state_changed {
+                    if let Some(controller) = self.agent_continuations.as_ref() {
+                        for agent_id in &mutation.wait_target_agent_ids {
+                            controller.schedule_agent(agent_id);
+                        }
+                    }
+                }
                 let mut output =
                     coding_run_binding_projection(&mutation.binding, mutation.state_changed, false);
                 if let Some(object) = output.as_object_mut() {
@@ -841,6 +848,13 @@ impl ToolRuntime {
                 if result.state_changed && result.attention_event_count > 0 {
                     if let Some(controller) = self.agent_continuations.as_ref() {
                         controller.schedule_agent(&assignee_agent_id);
+                    }
+                }
+                if result.state_changed {
+                    if let Some(controller) = self.agent_continuations.as_ref() {
+                        for agent_id in &result.wait_target_agent_ids {
+                            controller.schedule_agent(agent_id);
+                        }
                     }
                 }
                 serialized_task_success(result)

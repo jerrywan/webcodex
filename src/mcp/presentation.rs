@@ -34,7 +34,10 @@ pub(super) fn tool_supports_goal_plan_app(tool_name: &str) -> bool {
 /// App-only coordination tools may still declare the same resource association
 /// as a Host compatibility hint without exposing them to the model or granting authority.
 pub(super) fn tool_supports_agent_continuation_app(tool_name: &str) -> bool {
-    tool_name == "present_agent_continuation"
+    matches!(
+        tool_name,
+        "present_agent_continuation" | "wait_for_agent_events"
+    )
 }
 
 /// Bounded presentation projections retained for current milestone cards and for

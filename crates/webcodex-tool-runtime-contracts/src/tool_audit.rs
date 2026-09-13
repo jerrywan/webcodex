@@ -3672,6 +3672,29 @@ impl ToolCall {
                     "idempotency_key": idempotency_key,
                 }),
             ),
+            Self::WaitForAgentEvents {
+                agent_id,
+                endpoint_id,
+                expected_controller_generation,
+                events,
+                idempotency_key,
+            } => serde_json::json!({
+                "agent_id": agent_id,
+                "endpoint_id": endpoint_id,
+                "expected_controller_generation": expected_controller_generation,
+                "event_count": events.len(),
+                "idempotency_key_present": !idempotency_key.is_empty(),
+            }),
+            Self::ReadAgentWait { wait_id } | Self::AgentWaitState { wait_id } => {
+                serde_json::json!({"wait_id": wait_id})
+            }
+            Self::CancelAgentWait {
+                wait_id,
+                idempotency_key,
+            } => serde_json::json!({
+                "wait_id": wait_id,
+                "idempotency_key_present": !idempotency_key.is_empty(),
+            }),
             Self::CreateAgentTask {
                 title,
                 instruction,

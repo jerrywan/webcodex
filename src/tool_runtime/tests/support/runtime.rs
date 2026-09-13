@@ -121,6 +121,11 @@ pub(in crate::tool_runtime::tests) fn sample_field_value(field: &str) -> Value {
         "agent_id" => json!(format!("wc_dagent_{}", "a".repeat(32))),
         "assignee_agent_id" => json!(format!("wc_dagent_{}", "a".repeat(32))),
         "task_id" => json!(format!("wc_agent_task_{}", "1".repeat(32))),
+        "wait_id" => json!(format!("wc_agent_wait_{}", "6".repeat(32))),
+        "events" => json!([{
+            "kind": "agent_task_terminal",
+            "task_id": format!("wc_agent_task_{}", "1".repeat(32))
+        }]),
         "goal_id" => json!(format!("wc_goal_{}", "0".repeat(32))),
         "attempt_id" => json!(format!("wc_agent_task_attempt_{}", "2".repeat(32))),
         "attempt_fence" => json!(format!("wc_agent_task_fence_{}", "3".repeat(32))),

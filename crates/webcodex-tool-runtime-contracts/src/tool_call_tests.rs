@@ -74,6 +74,50 @@ fn heartbeat_agent_task_attempt_parses_optional_active_turn_proof() {
 }
 
 #[test]
+fn agent_wait_calls_parse_closed_selectors_and_keep_audit_payload_free() {
+    const PRIVATE_TASK: &str = "wc_agent_task_abcdefabcdefabcdefabcdefabcdefab";
+    const PRIVATE_KEY: &str = "PRIVATE_WAIT_KEY_MUST_NOT_PERSIST";
+    let call = ToolCall::from_tool_name(
+        "wait_for_agent_events",
+        json!({
+            "agent_id": "wc_dagent_0123456789abcdef0123456789abcdef",
+            "endpoint_id": "wc_endpoint_0123456789abcdef0123456789abcdef",
+            "expected_controller_generation": 4,
+            "events": [{"kind":"agent_task_terminal","task_id":PRIVATE_TASK}],
+            "idempotency_key": PRIVATE_KEY,
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        call,
+        ToolCall::WaitForAgentEvents {
+            expected_controller_generation: 4,
+            ref events,
+            ..
+        } if events.len() == 1 && events[0].kind == "agent_task_terminal" && events[0].task_id == PRIVATE_TASK
+    ));
+    let audit = call.session_log_arguments();
+    assert_eq!(audit["event_count"], 1);
+    assert_eq!(audit["idempotency_key_present"], true);
+    let audit_text = audit.to_string();
+    assert!(!audit_text.contains(PRIVATE_TASK));
+    assert!(!audit_text.contains(PRIVATE_KEY));
+
+    let read = ToolCall::from_tool_name(
+        "read_agent_wait",
+        json!({"wait_id": format!("wc_agent_wait_{}", "6".repeat(32))}),
+    )
+    .unwrap();
+    assert!(matches!(read, ToolCall::ReadAgentWait { .. }));
+    let state = ToolCall::from_tool_name(
+        "agent_wait_state",
+        json!({"wait_id": format!("wc_agent_wait_{}", "6".repeat(32))}),
+    )
+    .unwrap();
+    assert!(matches!(state, ToolCall::AgentWaitState { .. }));
+}
+
+#[test]
 fn runner_config_tools_parse_closed_contracts_and_keep_governance_split() {
     use webcodex_tool_contracts::{
         RunnerCapabilityRequirement, ToolApprovalPolicy, ToolEffect, ToolIdempotency, ToolRisk,

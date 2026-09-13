@@ -33,6 +33,7 @@ pub(crate) const NON_MEANINGFUL_ACTIVITY_TOOLS: &[&str] = &[
     // sufficient to classify a tool as non-meaningful.
     "goal_plan_state",
     "work_result_state",
+    "agent_wait_state",
     "agent_continuation_bind",
     "agent_continuation_recover_endpoint",
     "agent_continuation_state",
@@ -55,6 +56,7 @@ mod activity_classification_tests {
         for tool in [
             "goal_plan_state",
             "work_result_state",
+            "agent_wait_state",
             "agent_continuation_bind",
             "agent_continuation_recover_endpoint",
             "agent_continuation_state",

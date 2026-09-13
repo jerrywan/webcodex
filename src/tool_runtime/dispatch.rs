@@ -1861,6 +1861,30 @@ impl ToolRuntime {
                     .await
             }
 
+            ToolCall::WaitForAgentEvents {
+                agent_id,
+                endpoint_id,
+                expected_controller_generation,
+                events,
+                idempotency_key,
+            } => self.wait_for_agent_events(
+                auth,
+                agent_id,
+                endpoint_id,
+                expected_controller_generation,
+                events,
+                idempotency_key,
+            ),
+
+            ToolCall::ReadAgentWait { wait_id } => self.read_agent_wait(auth, wait_id),
+
+            ToolCall::CancelAgentWait {
+                wait_id,
+                idempotency_key,
+            } => self.cancel_agent_wait(auth, wait_id, idempotency_key),
+
+            ToolCall::AgentWaitState { wait_id } => self.agent_wait_state(auth, wait_id),
+
             ToolCall::CreateAgentTask {
                 title,
                 instruction,

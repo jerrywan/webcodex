@@ -1,4 +1,5 @@
 use super::agent_attention::create_agent_task_terminal_attention_in_transaction;
+use super::agent_wait::record_agent_task_terminal_wait_matches_in_transaction;
 use super::agent_wake::{
     AgentWakeState, AGENT_WAKE_CONSUME_TOKEN_PREFIX, AGENT_WAKE_ID_PREFIX,
     WAKE_TRIGGER_AGENT_TASK_ATTEMPT,
@@ -341,6 +342,7 @@ pub struct AgentTaskCodingRunReconcileMutation {
     pub binding: AgentTaskCodingRunBindingRecord,
     pub state_changed: bool,
     pub attention_event_count: usize,
+    pub wait_target_agent_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -426,6 +428,8 @@ pub struct AgentTaskAttemptCompletionMutation {
     pub state_changed: bool,
     #[serde(skip_serializing)]
     pub attention_event_count: usize,
+    #[serde(skip_serializing)]
+    pub wait_target_agent_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1828,6 +1832,7 @@ impl Database {
                 replayed: true,
                 state_changed: false,
                 attention_event_count: 0,
+                wait_target_agent_ids: Vec::new(),
             });
         }
 
@@ -1881,6 +1886,14 @@ impl Database {
             outcome,
             now,
         )?;
+        let wait_matches = record_agent_task_terminal_wait_matches_in_transaction(
+            &transaction,
+            principal,
+            task_id,
+            attempt_id,
+            outcome,
+            now,
+        )?;
         record_idempotent_resource(
             &transaction,
             principal,
@@ -1905,6 +1918,7 @@ impl Database {
             replayed: false,
             state_changed: true,
             attention_event_count,
+            wait_target_agent_ids: wait_matches.schedule_agent_ids,
         })
     }
 
@@ -2528,6 +2542,7 @@ impl Database {
                 binding,
                 state_changed: false,
                 attention_event_count: 0,
+                wait_target_agent_ids: Vec::new(),
             });
         }
         let attempt_state = match desired_task_state {
@@ -2584,6 +2599,14 @@ impl Database {
             desired_task_state,
             now,
         )?;
+        let wait_matches = record_agent_task_terminal_wait_matches_in_transaction(
+            &transaction,
+            principal,
+            task_id,
+            attempt_id,
+            desired_task_state,
+            now,
+        )?;
         let task = load_owned_task(&transaction, principal, task_id, now)?;
         let attempt =
             load_attempt_for_task(&transaction, task_id, attempt_id, now)?.ok_or_else(|| {
@@ -2606,6 +2629,7 @@ impl Database {
             binding,
             state_changed: true,
             attention_event_count,
+            wait_target_agent_ids: wait_matches.schedule_agent_ids,
         })
     }
 }

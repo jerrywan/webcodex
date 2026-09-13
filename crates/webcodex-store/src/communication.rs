@@ -2786,7 +2786,7 @@ pub(super) fn read_conversation_in_connection(
     })
 }
 
-fn require_agent_owner(
+pub(super) fn require_agent_owner(
     conn: &Connection,
     principal: &CommunicationPrincipal,
     agent_id: &str,

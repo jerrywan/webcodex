@@ -70,7 +70,7 @@ fn endpoint_schema() -> Value {
     })
 }
 
-fn agent_continuation_projection_schema() -> Value {
+pub(super) fn agent_continuation_projection_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
@@ -99,9 +99,12 @@ fn agent_continuation_projection_schema() -> Value {
                         "properties": {
                             "wake_id": schema_type("string", "Exact unresolved durable Wake identity."),
                             "state": {"type": "string", "enum": ["pending", "claimed", "prepared", "delivered", "delivery_unknown"]},
-                            "revision": schema_type("integer", "Current durable Wake revision.")
+                            "revision": schema_type("integer", "Current durable Wake revision."),
+                            "wait_id": nullable_string("Exact AgentWait source for an agent_wait_events Wake; null for other Wake kinds."),
+                            "wait_match_count": nullable_integer("Frozen/coalescing Wait match-count snapshot for agent_wait_events; null for other Wake kinds."),
+                            "wait_match_sequence": nullable_integer("Frozen/coalescing Wait match high-watermark for agent_wait_events; null for other Wake kinds.")
                         },
-                        "required": ["wake_id", "state", "revision"]
+                        "required": ["wake_id", "state", "revision", "wait_id", "wait_match_count", "wait_match_sequence"]
                     },
                     {"type": "null"}
                 ]

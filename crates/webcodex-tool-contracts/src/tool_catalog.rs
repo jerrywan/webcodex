@@ -7,6 +7,7 @@ pub const TOOL_DISCOVERY_GROUP_CLEANUP: &str = "cleanup";
 pub const TOOL_DISCOVERY_GROUP_CODING_AGENT: &str = "coding_agent";
 pub const TOOL_DISCOVERY_GROUP_COMMUNICATION: &str = "communication";
 pub const TOOL_DISCOVERY_GROUP_AGENT_TASK: &str = "agent_task";
+pub const TOOL_DISCOVERY_GROUP_AGENT_WAIT: &str = "agent_wait";
 pub const TOOL_DISCOVERY_GROUP_EDIT: &str = "edit";
 pub const TOOL_DISCOVERY_GROUP_FILE_TRANSFER: &str = "file_transfer";
 pub const TOOL_DISCOVERY_GROUP_GIT: &str = "git";
@@ -90,6 +91,14 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
             "reconcile_agent_task_coding_run",
             "heartbeat_agent_task_attempt",
             "complete_agent_task_attempt",
+        ],
+    },
+    ToolDiscoveryGroup {
+        name: TOOL_DISCOVERY_GROUP_AGENT_WAIT,
+        tools: &[
+            "wait_for_agent_events",
+            "read_agent_wait",
+            "cancel_agent_wait",
         ],
     },
     ToolDiscoveryGroup {

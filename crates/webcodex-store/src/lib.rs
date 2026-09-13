@@ -15,6 +15,7 @@ mod activity;
 mod admin_project_lifecycle;
 mod agent_attention;
 mod agent_task;
+mod agent_wait;
 mod agent_wake;
 mod audit;
 mod communication;
@@ -41,6 +42,12 @@ pub use self::agent_task::{
     AgentTaskExecutionKind, AgentTaskExecutionRecoveryKind, AgentTaskExecutionStatus,
     AgentTaskMutation, AgentTaskPage, AgentTaskState, AgentTaskSummary, NewAgentTask,
     MAX_AGENT_TASK_LIST_LIMIT, MAX_AGENT_TASK_TERMINAL_TEXT_BYTES,
+};
+pub use self::agent_wait::{
+    AgentWaitDetail, AgentWaitEventSelector, AgentWaitMatchRecord, AgentWaitMutation,
+    AgentWaitSourceRecord, AgentWaitState, NewAgentWait, AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL,
+    AGENT_WAIT_ID_PREFIX, MAX_ACTIVE_AGENT_WAITS_PER_AGENT, MAX_AGENT_WAITS_PER_SOURCE,
+    MAX_AGENT_WAIT_SOURCES,
 };
 #[allow(unused_imports)]
 pub use self::agent_wake::{
@@ -159,6 +166,8 @@ impl Database {
 mod agent_attention_tests;
 #[cfg(test)]
 mod agent_task_tests;
+#[cfg(test)]
+mod agent_wait_tests;
 #[cfg(test)]
 mod agent_wake_recovery_tests;
 #[cfg(test)]

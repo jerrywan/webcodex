@@ -428,6 +428,13 @@ pub struct ComputerSnapshotRegion {
     pub height: u32,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentWaitEventSelectorCall {
+    pub kind: String,
+    pub task_id: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "tool", content = "params", rename_all = "snake_case")]
 pub enum ToolCall {
@@ -1215,6 +1222,31 @@ pub enum ToolCall {
         goal_id: String,
         session_id: String,
         idempotency_key: String,
+    },
+
+    /// Create one explicit durable one-shot interest in future AgentTask terminal facts.
+    WaitForAgentEvents {
+        agent_id: String,
+        endpoint_id: String,
+        expected_controller_generation: i64,
+        events: Vec<AgentWaitEventSelectorCall>,
+        idempotency_key: String,
+    },
+
+    /// Read one exact caller-owned durable AgentWait.
+    ReadAgentWait {
+        wait_id: String,
+    },
+
+    /// Cancel one exact AgentWait before the durable Host-dispatch fence.
+    CancelAgentWait {
+        wait_id: String,
+        idempotency_key: String,
+    },
+
+    /// App-only exact read of one caller-owned AgentWait.
+    AgentWaitState {
+        wait_id: String,
     },
 
     /// Create explicit durable Agent work independent from communication messages and execution backends.
@@ -2887,6 +2919,10 @@ impl ToolCall {
             Self::UpdateGoal { .. } => "update_goal",
             Self::AssociateGoalAgentTask { .. } => "associate_goal_agent_task",
             Self::AssociateGoalWorkflowSession { .. } => "associate_goal_workflow_session",
+            Self::WaitForAgentEvents { .. } => "wait_for_agent_events",
+            Self::ReadAgentWait { .. } => "read_agent_wait",
+            Self::CancelAgentWait { .. } => "cancel_agent_wait",
+            Self::AgentWaitState { .. } => "agent_wait_state",
             Self::CreateAgentTask { .. } => "create_agent_task",
             Self::ListAgentTasks { .. } => "list_agent_tasks",
             Self::ReadAgentTask { .. } => "read_agent_task",

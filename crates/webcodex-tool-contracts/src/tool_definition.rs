@@ -6,6 +6,7 @@
 //! while the registry migration proceeds in small steps.
 
 mod agent_tasks;
+mod agent_waits;
 mod artifacts;
 #[cfg(feature = "workspace-checkpoints")]
 mod checkpoints;
@@ -845,6 +846,7 @@ impl ToolDefinition {
 }
 
 pub const TOOL_CATEGORY_AGENT_TASK: &str = "agent_task";
+pub const TOOL_CATEGORY_AGENT_WAIT: &str = "agent_wait";
 pub const TOOL_CATEGORY_ARTIFACT: &str = "artifact";
 pub const TOOL_CATEGORY_CHECKPOINT: &str = "checkpoint";
 pub const TOOL_CATEGORY_CODING_AGENT: &str = "coding_agent";
@@ -1135,6 +1137,7 @@ const TOOL_DEFINITION_GROUPS: &[&[ToolDefinition]] = &[
     communication::DEFINITIONS,
     goals::DEFINITIONS,
     agent_tasks::DEFINITIONS,
+    agent_waits::DEFINITIONS,
     memory::DEFINITIONS,
     skills::DEFINITIONS,
     hygiene::DEFINITIONS,

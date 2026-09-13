@@ -14,6 +14,7 @@ pub(crate) enum StoreDomain {
     Activity,
     AdminProjectLifecycle,
     AgentTask,
+    AgentWait,
     AgentWake,
     Audit,
     Communication,
@@ -30,11 +31,12 @@ pub(crate) enum StoreDomain {
 
 impl StoreDomain {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 16] = [
+    pub(crate) const ALL: [Self; 17] = [
         Self::Accounts,
         Self::Activity,
         Self::AdminProjectLifecycle,
         Self::AgentTask,
+        Self::AgentWait,
         Self::AgentWake,
         Self::Audit,
         Self::Communication,
@@ -55,6 +57,7 @@ impl StoreDomain {
             Self::Activity => "activity",
             Self::AdminProjectLifecycle => "admin_project_lifecycle",
             Self::AgentTask => "agent_task",
+            Self::AgentWait => "agent_wait",
             Self::AgentWake => "agent_wake",
             Self::Audit => "audit",
             Self::Communication => "communication",

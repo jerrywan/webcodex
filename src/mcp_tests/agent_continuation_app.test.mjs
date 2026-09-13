@@ -12,6 +12,7 @@ const assertAppCallId = call => assert.match(appCallId(call), /^wc_app_call_[0-9
 const wake = {
   wake_id: `wc_wake_${"4".repeat(32)}`, attempt_id: `wc_wake_attempt_${"5".repeat(32)}`,
   state: "claimed", revision: 2, dispatch_observation: null,
+  wait_id: null, wait_match_count: null, wait_match_sequence: null,
 };
 const projection = {
   version: 1, agent_id: `wc_dagent_${"1".repeat(32)}`, endpoint_id: `wc_endpoint_${"2".repeat(32)}`,
@@ -22,6 +23,20 @@ const projection = {
 const input = {
   agent_id: projection.agent_id, endpoint_id: projection.endpoint_id,
   expected_controller_generation: projection.controller_generation,
+};
+const waitId = `wc_agent_wait_${"6".repeat(32)}`;
+const waitTaskA = `wc_agent_task_${"7".repeat(32)}`;
+const waitTaskB = `wc_agent_task_${"8".repeat(32)}`;
+const waitingWait = {
+  wait_id: waitId, target_agent_id: projection.agent_id, state: "waiting", revision: 1,
+  created_at_unix_ms: 1000, updated_at_unix_ms: 1000,
+  triggered_at_unix_ms: null, resumed_at_unix_ms: null, cancelled_at_unix_ms: null,
+  source_count: 2, match_count: 0, match_sequence: 0,
+  sources: [
+    { ordinal: 0, kind: "agent_task_terminal", task_id: waitTaskA },
+    { ordinal: 1, kind: "agent_task_terminal", task_id: waitTaskB },
+  ],
+  matches: [],
 };
 const prepared = (current = wake, automatic_message = "Exact test continuation") => toolResult({
   agent_id: input.agent_id, endpoint_id: input.endpoint_id, controller_generation: input.expected_controller_generation,
@@ -49,6 +64,9 @@ function projectContinuationByPublishedSchema(value) {
       wake_id: value.wake.wake_id,
       state: value.wake.state,
       revision: value.wake.revision,
+      wait_id: value.wake.wait_id,
+      wait_match_count: value.wake.wait_match_count,
+      wait_match_sequence: value.wake.wait_match_sequence,
     },
     queued_delivery_count: value.queued_delivery_count,
     dispatch_observation: value.dispatch_observation,
@@ -65,6 +83,106 @@ async function boundView(options = { deliverToolMeta: false }) {
   await view.reply(view.calls("agent_continuation_bind").at(-1), toolResult({ agent_continuation: projection }));
   return view;
 }
+
+test("Agent Wait card tracks waiting -> triggered -> resuming -> resumed without a second dispatcher", async () => {
+  const view = app("mcp_agent_continuation_app.html");
+  await view.initialize();
+  view.toolInput({
+    ...input,
+    events: [
+      { kind: "agent_task_terminal", task_id: waitTaskA },
+      { kind: "agent_task_terminal", task_id: waitTaskB },
+    ],
+    idempotency_key: "wait-card",
+  });
+  const quiet = { ...projection, wake: null, queued_delivery_count: 0 };
+  view.toolResult({ agent_wait: waitingWait, agent_continuation: quiet });
+  await view.reply(view.calls("agent_continuation_bind")[0], toolResult({ agent_continuation: quiet }));
+  assert.equal(view.nodes.waitSummary.hidden, false);
+  assert.equal(view.nodes.waitState.textContent, "Waiting");
+  assert.equal(view.nodes.waitMatches.textContent, "0");
+  assert.equal(view.nodes.status.textContent, "Waiting for selected event");
+
+  const triggeredWake = {
+    ...wake,
+    state: "pending",
+    revision: 2,
+    wait_id: waitId,
+    wait_match_count: 1,
+    wait_match_sequence: 1,
+  };
+  const triggeredProjection = { ...projection, wake: triggeredWake, queued_delivery_count: 0 };
+  await view.reply(
+    view.calls("agent_continuation_state").at(-1),
+    toolResult({ agent_continuation: triggeredProjection }),
+  );
+  const waitStateCall = view.calls("agent_wait_state").at(-1);
+  assert.ok(waitStateCall);
+  assert.deepEqual(businessArgs(waitStateCall), { wait_id: waitId });
+  const triggeredWait = {
+    ...waitingWait,
+    state: "triggered",
+    revision: 2,
+    updated_at_unix_ms: 2000,
+    triggered_at_unix_ms: 2000,
+    match_count: 1,
+    match_sequence: 1,
+    matches: [{
+      sequence: 1, kind: "agent_task_terminal", task_id: waitTaskA,
+      task_attempt_id: `wc_agent_task_attempt_${"9".repeat(32)}`,
+      terminal_task_state: "succeeded", occurred_at_unix_ms: 2000,
+    }],
+  };
+  await view.reply(waitStateCall, toolResult({ agent_wait: triggeredWait }));
+  assert.equal(view.nodes.waitState.textContent, "Triggered");
+  assert.equal(view.nodes.waitMatches.textContent, "1");
+  assert.equal(view.nodes.status.textContent, "Triggered · resuming…");
+
+  await view.reply(view.calls("agent_continuation_wake_acquire").at(-1), toolResult({ wake }));
+  await view.reply(view.calls("agent_continuation_wake_prepare").at(-1), prepared());
+  assert.equal(hostMessages(view).length, 1);
+  await view.reply(hostMessages(view)[0], {});
+  await view.reply(view.calls("agent_continuation_wake_finish").at(-1), toolResult({}));
+
+  await view.fireTimers(3000);
+  const resumedProjection = { ...quiet, dispatch_observation: "continuation_consumed" };
+  await view.reply(
+    view.calls("agent_continuation_state").at(-1),
+    toolResult({ agent_continuation: resumedProjection }),
+  );
+  const resumedStateCall = view.calls("agent_wait_state").at(-1);
+  await view.reply(resumedStateCall, toolResult({ agent_wait: {
+    ...triggeredWait,
+    state: "resumed",
+    revision: 3,
+    updated_at_unix_ms: 3000,
+    resumed_at_unix_ms: 3000,
+  } }));
+  assert.equal(view.nodes.waitState.textContent, "Resumed");
+  assert.equal(view.nodes.status.textContent, "Wait resumed");
+  assert.equal(hostMessages(view).length, 1);
+});
+
+test("Agent Wait card never filters a competing non-Wait Agent Wake", async () => {
+  const view = app("mcp_agent_continuation_app.html");
+  await view.initialize();
+  view.toolInput({ ...input, events: [{ kind: "agent_task_terminal", task_id: waitTaskA }], idempotency_key: "wait-competition" });
+  const quiet = { ...projection, wake: null, queued_delivery_count: 0 };
+  const oneSourceWait = { ...waitingWait, source_count: 1, sources: waitingWait.sources.slice(0, 1) };
+  view.toolResult({ agent_wait: oneSourceWait, agent_continuation: quiet });
+  await view.reply(view.calls("agent_continuation_bind")[0], toolResult({ agent_continuation: quiet }));
+
+  const inboxWake = { ...wake, state: "pending", revision: 1 };
+  const competing = { ...projection, wake: inboxWake, queued_delivery_count: 1 };
+  await view.reply(
+    view.calls("agent_continuation_state").at(-1),
+    toolResult({ agent_continuation: competing }),
+  );
+  await view.reply(view.calls("agent_wait_state").at(-1), toolResult({ agent_wait: oneSourceWait }));
+  await view.reply(view.calls("agent_continuation_wake_acquire").at(-1), toolResult({ wake }));
+  await view.reply(view.calls("agent_continuation_wake_prepare").at(-1), prepared());
+  assert.equal(hostMessages(view).length, 1, "Wait presentation must reuse the global Agent dispatcher for competing Wakes");
+});
 
 for (const outcome of ["success", "error", "timeout"]) {
   for (const early of [true, false]) {
@@ -811,6 +929,9 @@ test("published outputSchema projection preserves restart recovery and triggers 
       wake_id: projection.wake.wake_id,
       state: projection.wake.state,
       revision: projection.wake.revision,
+      wait_id: projection.wake.wait_id,
+      wait_match_count: projection.wake.wait_match_count,
+      wait_match_sequence: projection.wake.wait_match_sequence,
     },
     recovery: { kind: "host_binding_missing_in_process" },
   };

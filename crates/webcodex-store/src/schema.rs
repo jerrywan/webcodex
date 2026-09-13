@@ -644,15 +644,18 @@ impl Database {
         // communication domain. Workflow Session and project Memory ledgers
         // remain separate authoritative stores.
         Self::ensure_communication_schema(&mut conn)?;
-        // Agent Wake is a distinct durable continuation/outbox domain. It is
-        // initialized only after Agent, Endpoint, Message, and Inbox tables so
-        // all stable references are enforceable by foreign keys.
-        Self::ensure_agent_wake_schema(&mut conn)?;
-
         // AgentTask and AgentTaskAttempt are an independent durable work-ownership
         // domain. They reference durable Agents/Conversations for correlation only
         // and deliberately do not bind any execution backend in A3.
         Self::ensure_agent_task_schema(&mut conn)?;
+
+        // AgentWait is a one-shot durable interest in future source facts. Sources
+        // reference AgentTasks, while the Wait itself owns no source-domain authority.
+        Self::ensure_agent_wait_schema(&mut conn)?;
+
+        // Agent Wake is the shared durable continuation/outbox domain. Initialize it
+        // after AgentTask and AgentWait so every source foreign key is enforceable.
+        Self::ensure_agent_wake_schema(&mut conn)?;
 
         // Goal is independent high-level durable intent/control state. It may
         // correlate AgentTasks and Workflow Sessions, but owns no execution authority.

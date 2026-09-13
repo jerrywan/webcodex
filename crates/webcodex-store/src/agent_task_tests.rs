@@ -1,4 +1,7 @@
 use super::agent_task::*;
+use super::agent_wait::{
+    AgentWaitEventSelector, AgentWaitState, NewAgentWait, AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL,
+};
 use super::agent_wake::{AgentWakeState, AGENT_WAKE_CONSUME_TOKEN_PREFIX};
 use super::communication::{
     CommunicationPrincipal, NewAgentEndpoint, NewAgentIdentity, NewConversation,
@@ -674,8 +677,39 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
     let db = Database::open(&temp.path().join("agent-task-coding-terminal.db")).unwrap();
     let owner = principal('4');
     let assignee = agent(&db, &owner, "coding-terminal-agent");
+    let waiter = agent(&db, &owner, "coding-terminal-waiter");
+    let wait_endpoint = db
+        .attach_agent_endpoint(
+            &owner,
+            NewAgentEndpoint {
+                agent_id: waiter.clone(),
+                host: "ChatGPT".to_string(),
+                client_attachment_id: Some("coding-terminal-wait-view".to_string()),
+                wake_capable: true,
+                idempotency_key: "coding-terminal-wait-endpoint".to_string(),
+            },
+        )
+        .unwrap()
+        .endpoint;
     let now = wall_now_ms();
     let task_id = create_assigned_task(&db, &owner, &assignee, "coding-terminal-task");
+    let agent_wait = db
+        .create_agent_wait(
+            &owner,
+            NewAgentWait {
+                target_agent_id: waiter.clone(),
+                endpoint_id: wait_endpoint.endpoint_id.clone(),
+                expected_controller_generation: wait_endpoint.controller_generation,
+                events: vec![AgentWaitEventSelector {
+                    kind: AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL.to_string(),
+                    task_id: task_id.clone(),
+                }],
+                idempotency_key: "coding-terminal-agent-wait".to_string(),
+            },
+        )
+        .unwrap()
+        .agent_wait;
+    assert_eq!(agent_wait.state, AgentWaitState::Waiting);
     let goal_id = db
         .create_goal_at(
             &owner,
@@ -758,6 +792,23 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
         .unwrap();
     assert!(reconciled.state_changed);
     assert_eq!(reconciled.attention_event_count, 1);
+    assert_eq!(reconciled.wait_target_agent_ids, vec![waiter.clone()]);
+    let resumed_wait = db.read_agent_wait(&owner, &agent_wait.wait_id).unwrap();
+    assert_eq!(resumed_wait.state, AgentWaitState::Triggered);
+    assert_eq!(resumed_wait.match_count, 1);
+    assert_eq!(resumed_wait.matches[0].task_id, task_id);
+    assert_eq!(
+        db.conn_for_tests()
+            .query_row(
+                "SELECT COUNT(*) FROM wc_agent_wakes
+                 WHERE trigger_kind = 'agent_wait_events' AND source_wait_id = ?1 AND state = 'pending'",
+                [agent_wait.wait_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1,
+        "terminal CodingAgent reconciliation must durably trigger the Agent Wait in the same transaction"
+    );
     assert_eq!(reconciled.task.state, AgentTaskState::Succeeded);
     assert_eq!(reconciled.attempt.state, AgentTaskAttemptState::Succeeded);
     assert_eq!(

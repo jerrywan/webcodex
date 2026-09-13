@@ -702,6 +702,7 @@ Keep the meanings separate:
 ```text
 Event = a durable fact that something happened
 Wake  = a durable opportunity for one Agent to reason again
+Wait  = one explicit durable one-shot interest in future source facts
 Task  = durable work that may still be incomplete
 Goal  = durable high-level intent/control truth
 ```
@@ -711,6 +712,49 @@ durable events may coalesce into one reasoning opportunity; the resumed model re
 the authoritative source domains rather than treating copied event payloads as
 execution truth. Event identity/reference must not transfer the source domain's
 authority.
+
+### Durable Agent Wait v1
+
+`AgentWait` is the small model-facing rendezvous built on that distinction. It is not a
+Task, Goal, Event log, Conversation, Workflow Session, or Host binding, and it never owns
+or inherits authority over its sources. A Wait durably records only the caller-owned
+target Agent, its bounded source selectors, and bounded semantic match references. The
+Endpoint/generation supplied at creation is re-authorized only as the current Host
+presentation/carrier selector and is not persisted as Wait execution ownership.
+
+Wait v1 is deliberately one-shot with lifecycle
+`waiting -> triggered -> resumed` or `waiting|triggered -> cancelled`. It supports only
+1..8 exact `agent_task_terminal` selectors with fixed ANY semantics. Registration and the
+current authoritative Task terminal snapshot occur in one SQLite IMMEDIATE transaction,
+and both explicit TaskAttempt completion and CodingAgentRun terminal reconciliation write
+matching Wait facts in their same source-terminal transaction. Admission bounds active
+Waits per Agent and active Waits per source before terminalization, so a normal accepted
+Wait cannot turn Task completion into unbounded fanout.
+
+The first match creates one `agent_wait_events` Wake through the existing Agent-level
+continuation queue. Further matching facts update that same Wake only while it is
+`pending` or `claimed`; `prepared`, `delivered`, and `delivery_unknown` are the durable
+batch seal because the Host may already have received the resume envelope. A sealed
+one-shot Wait never manufactures a successor turn for later matches. Exact Wake consume
+atomically changes `triggered -> resumed`; consume replay is inert. A resumed model reads
+the bounded Wait references and independently re-reads each authoritative source Task.
+If it still needs future attention it creates a new Wait.
+
+Cancellation is similarly bounded: `waiting`, `pending`, or `claimed` work can be
+cancelled/revoked before Host dispatch preparation; cancellation fails closed after the
+prepare fence because WebCodex can no longer prove that the Host did not receive the
+resume message. Server restart preserves Waits, sources, matches, and Wakes but does not
+reconstruct process-local Host ownership. The MCP App card reuses the existing Agent
+Continuation controller/dispatcher and may poll an exact read-only Wait projection for
+presentation; card, Window, Endpoint, Goal, or polling activity grants no source authority
+and cannot renew a TaskAttempt lease.
+
+Natural future source kinds include `deadline_reached`, Job terminal state,
+Plugin/external completion, and human approval. They should be added only when each has an
+authoritative source transition and bounded registration/fanout contract. Wait v1 does
+not introduce a timer scheduler, generic event bus, public `publish_event`, recurring
+subscription, predicate language, ALL/AND/OR conditions, DAG, reducer, automatic Goal
+progression, or automatic successor Task creation.
 
 Goal should remain the deliberately small `active | completed | cancelled` lifecycle.
 States such as `implementing`, `waiting_ci`, `waiting_human`, `blocked`, or

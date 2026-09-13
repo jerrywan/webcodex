@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 mod agent_tasks;
+mod agent_waits;
 mod artifacts;
 #[cfg(feature = "workspace-checkpoints")]
 mod checkpoints;
@@ -29,6 +30,9 @@ use common::default_output_schema;
 
 pub fn output_schema_for_tool(name: &str) -> Value {
     if let Some(schema) = agent_tasks::output_schema_for_tool(name) {
+        return schema;
+    }
+    if let Some(schema) = agent_waits::output_schema_for_tool(name) {
         return schema;
     }
     if let Some(schema) = goals::output_schema_for_tool(name) {
