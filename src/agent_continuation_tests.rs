@@ -268,6 +268,16 @@ fn wake_id_for(db: &Database, agent_id: &str) -> String {
         .unwrap()
 }
 
+fn task_attempt_lease_expires_at(db: &Database, attempt_id: &str) -> i64 {
+    db.conn_for_tests()
+        .query_row(
+            "SELECT lease_expires_at_unix_ms FROM wc_agent_task_attempts WHERE attempt_id = ?1",
+            [attempt_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
 fn bind_mcp_app(
     runtime: &ToolRuntime,
     agent_id: &str,
@@ -2325,6 +2335,135 @@ fn mcp_app_view_replacement_fences_pre_and_post_dispatch_without_second_lifecycl
         blocked["wake"].is_null(),
         "an unresolved post-fence Wake must not manufacture a second model-turn Attempt"
     );
+}
+
+#[test]
+fn mcp_app_state_heartbeat_never_renews_consumed_a4b_task_attempt() {
+    let fixture = mcp_continuation_fixture("mcp-a4b-lease-independence");
+    let created = fixture.runtime.create_agent_task(
+        None,
+        "A4b lease independence".to_string(),
+        "Prove Host carrier liveness never becomes TaskAttempt renewal authority.".to_string(),
+        Some(fixture.receiver.clone()),
+        None,
+        None,
+        None,
+        "mcp-a4b-lease-task".to_string(),
+    );
+    assert!(created.success, "{:?}", created.output);
+    let task_id = created.output["task"]["summary"]["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let started = fixture.runtime.start_agent_task_attempt(
+        None,
+        task_id.clone(),
+        fixture.receiver.clone(),
+        "mcp-a4b-lease-attempt".to_string(),
+    );
+    assert!(started.success, "{:?}", started.output);
+    let task_attempt_id = started.output["attempt"]["attempt_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let attempt_fence = started.output["attempt_fence"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let attempt_controller_generation = started.output["attempt"]["attempt_controller_generation"]
+        .as_i64()
+        .unwrap();
+    let execution = fixture.runtime.start_agent_task_endpoint_continuation(
+        None,
+        task_id,
+        task_attempt_id.clone(),
+        fixture.receiver.clone(),
+        attempt_fence,
+        attempt_controller_generation,
+    );
+    assert!(execution.success, "{:?}", execution.output);
+    let wake_id = execution.output["execution"]["wake_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let binding = bind_mcp_app(
+        &fixture.runtime,
+        &fixture.receiver,
+        &fixture.receiver_endpoint,
+        fixture.receiver_generation,
+    );
+    let acquired = acquire_mcp_app(
+        &fixture.runtime,
+        &fixture.receiver,
+        &fixture.receiver_endpoint,
+        fixture.receiver_generation,
+        &binding,
+    );
+    assert_eq!(acquired["wake"]["wake_id"], wake_id);
+    let wake_attempt_id = acquired["wake"]["attempt_id"].as_str().unwrap().to_string();
+    let (_, automatic_message) = prepare_mcp_app(
+        &fixture.runtime,
+        &fixture.receiver,
+        &fixture.receiver_endpoint,
+        fixture.receiver_generation,
+        &binding,
+        &wake_id,
+        &wake_attempt_id,
+    );
+    let pre_takeover_lease = task_attempt_lease_expires_at(&fixture.db, &task_attempt_id);
+
+    let host_ack = fixture.runtime.agent_continuation_wake_finish(
+        None,
+        fixture.receiver.clone(),
+        fixture.receiver_endpoint.clone(),
+        fixture.receiver_generation,
+        binding.clone(),
+        wake_id.clone(),
+        wake_attempt_id,
+        "dispatch_accepted".to_string(),
+    );
+    assert!(host_ack.success, "{:?}", host_ack.output);
+    assert_eq!(
+        task_attempt_lease_expires_at(&fixture.db, &task_attempt_id),
+        pre_takeover_lease,
+        "Host ui/message acceptance is delivery evidence only and must not renew TaskAttempt"
+    );
+
+    let consumed = fixture.runtime.consume_agent_wake(
+        None,
+        fixture.receiver.clone(),
+        fixture.receiver_endpoint.clone(),
+        fixture.receiver_generation,
+        wake_id,
+        resume_field(&automatic_message, "consume_token"),
+    );
+    assert!(consumed.success, "{:?}", consumed.output);
+    let active_turn_lease = task_attempt_lease_expires_at(&fixture.db, &task_attempt_id);
+    assert!(
+        active_turn_lease > pre_takeover_lease,
+        "first exact Task-origin Wake consume must establish the bounded active-turn reservation"
+    );
+
+    for poll in 0..4 {
+        let state = fixture.runtime.agent_continuation_state(
+            None,
+            fixture.receiver.clone(),
+            fixture.receiver_endpoint.clone(),
+            fixture.receiver_generation,
+            binding.clone(),
+        );
+        assert!(state.success, "poll {poll}: {:?}", state.output);
+        assert_eq!(
+            state.output["agent_continuation"]["dispatch_observation"],
+            "continuation_consumed"
+        );
+        assert_eq!(
+            task_attempt_lease_expires_at(&fixture.db, &task_attempt_id),
+            active_turn_lease,
+            "MCP App state/Endpoint heartbeat must never slide the TaskAttempt active-turn lease"
+        );
+    }
 }
 
 #[test]

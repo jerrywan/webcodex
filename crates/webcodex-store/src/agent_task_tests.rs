@@ -2894,6 +2894,8 @@ fn endpoint_continuation_start_is_endpoint_independent_replay_safe_and_payload_f
         "same exact Attempt identity plus active_turn_wake_id=this wake_id",
         "active_turn_consume_token=this consume_token",
         "another bounded 30-minute reservation",
+        "before the current lease expires",
+        "Once the Attempt lease expires it is stale and this proof cannot revive it",
         "Window activity and Endpoint heartbeat do not renew it",
         "Complete only through complete_agent_task_attempt",
     ] {

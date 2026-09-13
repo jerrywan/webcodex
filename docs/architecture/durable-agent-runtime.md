@@ -648,6 +648,19 @@ Goal soft liveness, and ordinary model tool traffic never renew a TaskAttempt. T
 / ClientWindow five-minute liveness signal remains diagnostics/human-attention evidence
 only and is not a correctness lease input.
 
+A4b lifecycle v1 intentionally closes here. Automatic renewal would require a truthful,
+exact model-turn lifetime signal that proves this specific resumed turn is still running
+and eventually identifies its end. The current ChatGPT/MCP App carrier contract does not
+provide one: `ui/message` acceptance proves only Host delivery, View/App/Endpoint
+liveness proves only carrier coordination, and exact `consume_agent_wake` proves a model
+turn took over at least once but not that it remains alive minutes later. None of those
+signals may be promoted into TaskAttempt renewal authority. If a future Host contract
+exposes exact turn identity plus trustworthy running/end lifecycle, a bounded
+process-local controller may use the existing explicit active-turn heartbeat while that
+proof remains live. Until then, long A4b turns explicitly renew before expiry; Server
+restart safely restores durable lease truth without reconstructing process-local turn
+ownership or persisting the raw consume token.
+
 Claiming a Task-origin Wake atomically installs the actual Endpoint carrier and advances
 `attempt_controller_generation`. Releasing or losing that carrier before the dispatch
 fence clears the backend carrier; a replacement carrier must claim again and therefore
