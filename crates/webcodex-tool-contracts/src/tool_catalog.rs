@@ -346,14 +346,16 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
     },
     ToolRecommendedFlow {
         name: "execution_lifetime",
-        summary: "Execution lifetime: ordinary long work stays Runner-owned. Before restarting/upgrading/stopping/replacing the Runner, use run_detached_process for any native child that must survive. run_job is only for intentional immediate asynchronous shell start.",
+        summary: "Execution selection: run_process/run_script/run_shell and structured validation are Runner-owned sync-first; run_job is Runner-owned immediate async; run_detached_process is supervisor-owned immediate async; session_shell_exec continues an existing Session shell.",
         manifest_purpose:
-            "Choose execution by lifetime ownership, not duration. Ordinary process/shell/validation work starts on its canonical tool and may hand off as the same Runner-owned Job. When the workflow itself will restart, upgrade, stop, or replace the current Runner, any native service, GUI application, daemon, or other child that must survive must be started with run_detached_process before the Runner lifecycle change; run_job does not provide that ownership transfer. run_job is only for intentionally asynchronous shell launch from the first call.",
+            "Choose execution by form, lifetime, start mode, and continuation rather than duration. Runner-owned sync-first run_process/run_script/run_shell and structured validation keep the same execution when handed off and continue with observe_jobs. run_job is Runner-owned immediate async. run_detached_process is supervisor-owned immediate async and is only for a native child that must survive Runner restart/upgrade/stop/replacement; duration alone is not a reason to detach. session_shell_exec continues an existing persistent Session shell instead of creating a Job.",
         tools: &[
             "run_process",
+            "run_script",
             "run_shell",
-            "run_detached_process",
             "run_job",
+            "run_detached_process",
+            "session_shell_exec",
             "observe_jobs",
             "stop_job",
         ],
@@ -405,10 +407,11 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
     ToolRecommendedFlow {
         name: "validate",
         summary:
-            "Validate: use cargo_check / cargo_test / go_test; long validation continues as a Job. Prefer structured validation tools. Use run_shell only for shell-specific validation and keep independent validation/effect boundaries separate.",
+            "Validate: cargo_fmt / cargo_check / cargo_test / go_test are structured Runner-owned sync-first validation; when a mode supports handoff, unfinished same execution continues as a Job observed with observe_jobs.",
         manifest_purpose:
-            "Use structured Rust or Go validation; long checks become Jobs. run_shell remains available for shell-specific validation, but do not combine validation, commit, push, deploy, restart, or other independent failure/permission boundaries into one shell chain.",
+            "Use structured Rust or Go validation. These tools are Runner-owned sync-first; when the selected mode supports async handoff, unfinished work keeps the same execution identity and continues through observe_jobs. Tool-specific effect and evidence semantics remain authoritative: cargo_fmt check=false stays synchronous and may mutate, while check=true is read-only and may hand off. Use run_shell only for shell-specific validation and keep independent failure/permission boundaries separate.",
         tools: &[
+            "cargo_fmt",
             "cargo_check",
             "cargo_test",
             "go_test",

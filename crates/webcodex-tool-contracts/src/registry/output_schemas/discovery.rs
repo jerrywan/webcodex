@@ -334,7 +334,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                     "anyOf": [
                         {
                             "type": "object",
-                            "description": "Exact one-tool contract containing name, description, canonical effect/risk/approval/idempotency semantics, input_schema, annotations, and current MCP model-surface invocation routing. output_schema is intentionally omitted.",
+                            "description": "Exact one-tool contract containing name, description, canonical effect/risk/approval/idempotency semantics, optional execution selection semantics, input_schema, annotations, and current MCP model-surface invocation routing. output_schema is intentionally omitted.",
                             "additionalProperties": false,
                             "properties": {
                                 "name": {"type": "string"},
@@ -358,6 +358,18 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                                     "type": "string",
                                     "enum": ["pure_read", "desired_state", "keyed", "fenced_replay", "non_idempotent"],
                                     "description": "Canonical retry/idempotency contract."
+                                },
+                                "execution": {
+                                    "type": "object",
+                                    "description": "Optional canonical ordinary-execution selection semantics. This is model guidance only and does not grant authority or change runtime lifecycle behavior.",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "form": {"type": "string", "enum": ["native_argv", "typed_script", "shell_command", "structured_validation", "persistent_shell_command"]},
+                                        "lifetime": {"type": "string", "enum": ["runner", "supervisor", "session_shell"]},
+                                        "start": {"type": "string", "enum": ["sync_first", "async_immediate", "existing_session"]},
+                                        "continuation": {"type": "string", "enum": ["observe_jobs", "session_shell", "none"]}
+                                    },
+                                    "required": ["form", "lifetime", "start", "continuation"]
                                 },
                                 "input_schema": {"type": "object", "additionalProperties": true},
                                 "annotations": {"type": "object", "additionalProperties": true},

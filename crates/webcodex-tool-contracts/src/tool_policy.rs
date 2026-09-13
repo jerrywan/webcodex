@@ -5,9 +5,10 @@ use super::metadata::{
 };
 use super::tool_definition::{
     tool_definitions, RunnerCapabilityRequirement, ToolAuditPolicy, ToolContextContinuityPolicy,
-    ToolDefinition, ToolEffectAnnotations, ToolOperatorExtensionFamily, ToolSessionEvidencePolicy,
-    PERMISSION_RISK_ARTIFACT_WRITE, PERMISSION_RISK_DESTRUCTIVE, PERMISSION_RISK_PATCH,
-    PERMISSION_RISK_SHELL, PERMISSION_RISK_VALIDATION, PERMISSION_RISK_WRITE,
+    ToolDefinition, ToolEffectAnnotations, ToolExecutionContract, ToolOperatorExtensionFamily,
+    ToolSessionEvidencePolicy, PERMISSION_RISK_ARTIFACT_WRITE, PERMISSION_RISK_DESTRUCTIVE,
+    PERMISSION_RISK_PATCH, PERMISSION_RISK_SHELL, PERMISSION_RISK_VALIDATION,
+    PERMISSION_RISK_WRITE,
 };
 
 impl ToolDefinition {
@@ -149,6 +150,13 @@ pub fn lookup_tool_definition(name: &str) -> Option<&'static ToolDefinition> {
 /// closed unless a ToolDefinition explicitly declares a family.
 pub fn runtime_tool_operator_extension_family(name: &str) -> Option<ToolOperatorExtensionFamily> {
     lookup_tool_definition(name).and_then(|definition| definition.operator_extension_family)
+}
+
+/// Returns canonical model-selection semantics for ordinary execution tools.
+/// Unknown and non-execution tools return `None`; callers must not infer the
+/// contract from names, descriptions, effects, or Runner capabilities.
+pub fn runtime_tool_execution_contract(name: &str) -> Option<ToolExecutionContract> {
+    lookup_tool_definition(name).and_then(|definition| definition.execution)
 }
 
 pub fn runtime_tool_session_evidence_policy(name: &str) -> ToolSessionEvidencePolicy {

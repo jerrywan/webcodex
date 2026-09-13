@@ -2460,10 +2460,11 @@ async fn tool_manifest_recommends_default_remote_coding_loop() {
         );
     }
     assert!(
-        serialized.contains("run_shell")
-            && serialized.contains("shell semantics or one tightly related observation goal")
-            && serialized.contains("do not combine validation, commit, push, deploy, restart"),
-        "recommended_flows should keep run_shell selection and effect-boundary guidance: {serialized}"
+        serialized.contains("runner-owned sync-first")
+            && serialized.contains("run_job is runner-owned immediate async")
+            && serialized.contains("run_detached_process is supervisor-owned immediate async")
+            && serialized.contains("session_shell_exec continues an existing persistent session shell"),
+        "recommended_flows should expose the canonical execution selection vocabulary: {serialized}"
     );
 }
 

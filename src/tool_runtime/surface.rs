@@ -13,10 +13,11 @@ use super::registry::{
 use super::runtime::ToolRuntime;
 use super::tool_definition::{
     available_tool_manifest_intent_names, is_model_visible_tool_name, resolve_tool_manifest_intent,
-    runtime_tool_category, runtime_tool_metadata, runtime_tool_operator_extension_family,
-    ToolManifestIntent, ToolOperatorExtensionFamily, TOOL_CATEGORY_ARTIFACT, TOOL_CATEGORY_EDIT,
-    TOOL_CATEGORY_GIT, TOOL_CATEGORY_PATCH, TOOL_CATEGORY_RUNTIME, TOOL_CATEGORY_SESSION,
-    TOOL_CATEGORY_VALIDATION, TOOL_DISCOVERY_GROUPS, TOOL_RECOMMENDED_FLOWS,
+    runtime_tool_category, runtime_tool_execution_contract, runtime_tool_metadata,
+    runtime_tool_operator_extension_family, ToolExecutionContract, ToolManifestIntent,
+    ToolOperatorExtensionFamily, TOOL_CATEGORY_ARTIFACT, TOOL_CATEGORY_EDIT, TOOL_CATEGORY_GIT,
+    TOOL_CATEGORY_PATCH, TOOL_CATEGORY_RUNTIME, TOOL_CATEGORY_SESSION, TOOL_CATEGORY_VALIDATION,
+    TOOL_DISCOVERY_GROUPS, TOOL_RECOMMENDED_FLOWS,
 };
 use super::tool_inputs::ListToolsOptions;
 use super::tool_result::ToolResult;
@@ -304,6 +305,9 @@ impl ToolRuntime {
             "categories": Value::Object(exact_categories),
             "tools": [compact_manifest_tool_entry(spec, model_surface)],
         });
+        if let Some(execution) = runtime_tool_execution_contract(spec.name.as_str()) {
+            output["contract"]["execution"] = manifest_execution_projection(execution);
+        }
         if include_risk_summary {
             output["risk_summary"] = build_risk_summary(&[spec]);
         }
@@ -739,6 +743,7 @@ pub(super) fn sparsify_tool_manifest_model_result(result: &mut ToolResult) {
             "approval",
             "idempotency",
             "annotations",
+            "execution",
         ] {
             if let Some(value) = contract.get(key) {
                 projected.insert(key.to_string(), value.clone());
@@ -803,6 +808,9 @@ pub(super) fn sparsify_tool_manifest_model_result(result: &mut ToolResult) {
                         if let Some(effect) = tool.get("effect") {
                             entry.insert("effect".to_string(), effect.clone());
                         }
+                        if let Some(execution) = tool.get("execution") {
+                            entry.insert("execution".to_string(), execution.clone());
+                        }
                         if tool.get("effect").and_then(Value::as_str) != Some("observe") {
                             if let Some(risk) = tool.get("risk") {
                                 entry.insert("risk".to_string(), risk.clone());
@@ -862,6 +870,15 @@ pub(super) fn sparsify_tool_manifest_model_result(result: &mut ToolResult) {
     result.output = Value::Object(projected);
 }
 
+fn manifest_execution_projection(execution: ToolExecutionContract) -> Value {
+    json!({
+        "form": execution.form.as_str(),
+        "lifetime": execution.lifetime.as_str(),
+        "start": execution.start.as_str(),
+        "continuation": execution.continuation.as_str(),
+    })
+}
+
 pub(super) fn compact_manifest_tool_entry(
     spec: &ToolSpec,
     model_surface: crate::model_surface::ModelSurface,
@@ -869,7 +886,7 @@ pub(super) fn compact_manifest_tool_entry(
     let name = spec.name.as_str();
     let m = runtime_tool_metadata(name);
     let (availability, gateway_tool) = tool_manifest_route(spec, model_surface);
-    json!({
+    let mut entry = json!({
         "name": name,
         "category": runtime_tool_category(name),
         "accepted_flattened_args": accepted_flattened_args_for_spec(spec),
@@ -887,7 +904,11 @@ pub(super) fn compact_manifest_tool_entry(
         "authority": manifest_authority(m.authority),
         "availability": availability,
         "gateway_tool": gateway_tool,
-    })
+    });
+    if let Some(execution) = runtime_tool_execution_contract(name) {
+        entry["execution"] = manifest_execution_projection(execution);
+    }
+    entry
 }
 
 fn list_tool_matches_features(name: &str, features: &str) -> bool {
@@ -1004,10 +1025,28 @@ where
             if tools.is_empty() {
                 return None;
             }
+            let omitted_tools: Vec<&str> = flow
+                .tools
+                .iter()
+                .copied()
+                .filter(|tool| !visible.contains(*tool))
+                .collect();
+            if omitted_tools.is_empty() {
+                return Some(json!({
+                    "name": flow.name,
+                    "purpose": flow.manifest_purpose,
+                    "tools": tools,
+                }));
+            }
             Some(json!({
                 "name": flow.name,
-                "purpose": flow.manifest_purpose,
+                "purpose": format!(
+                    "Partial projection of the canonical flow; omitted_tools lists unavailable members. {}",
+                    flow.manifest_purpose
+                ),
                 "tools": tools,
+                "partial": true,
+                "omitted_tools": omitted_tools,
             }))
         })
         .collect()

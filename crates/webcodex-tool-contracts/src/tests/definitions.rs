@@ -45,6 +45,84 @@ fn tool_definitions_cover_known_names_and_public_specs() {
 }
 
 #[test]
+fn execution_selection_contract_is_canonical_closed_and_sparse() {
+    use ToolExecutionContinuation::{ObserveJobs, SessionShell};
+    use ToolExecutionForm::{
+        NativeArgv, PersistentShellCommand, ShellCommand, StructuredValidation, TypedScript,
+    };
+    use ToolExecutionLifetime::{Runner, SessionShell as SessionShellLifetime, Supervisor};
+    use ToolExecutionStart::{AsyncImmediate, ExistingSession, SyncFirst};
+
+    let cases = [
+        (
+            "run_process",
+            ToolExecutionContract::new(NativeArgv, Runner, SyncFirst, ObserveJobs),
+        ),
+        (
+            "run_script",
+            ToolExecutionContract::new(TypedScript, Runner, SyncFirst, ObserveJobs),
+        ),
+        (
+            "run_shell",
+            ToolExecutionContract::new(ShellCommand, Runner, SyncFirst, ObserveJobs),
+        ),
+        (
+            "run_job",
+            ToolExecutionContract::new(ShellCommand, Runner, AsyncImmediate, ObserveJobs),
+        ),
+        (
+            "run_detached_process",
+            ToolExecutionContract::new(NativeArgv, Supervisor, AsyncImmediate, ObserveJobs),
+        ),
+        (
+            "session_shell_exec",
+            ToolExecutionContract::new(
+                PersistentShellCommand,
+                SessionShellLifetime,
+                ExistingSession,
+                SessionShell,
+            ),
+        ),
+        (
+            "cargo_fmt",
+            ToolExecutionContract::new(StructuredValidation, Runner, SyncFirst, ObserveJobs),
+        ),
+        (
+            "cargo_check",
+            ToolExecutionContract::new(StructuredValidation, Runner, SyncFirst, ObserveJobs),
+        ),
+        (
+            "cargo_test",
+            ToolExecutionContract::new(StructuredValidation, Runner, SyncFirst, ObserveJobs),
+        ),
+        (
+            "go_test",
+            ToolExecutionContract::new(StructuredValidation, Runner, SyncFirst, ObserveJobs),
+        ),
+    ];
+    for (name, expected) in cases {
+        let definition = lookup_tool_definition(name).unwrap_or_else(|| panic!("missing {name}"));
+        assert_eq!(definition.execution, Some(expected), "{name}");
+        assert_eq!(
+            runtime_tool_execution_contract(name),
+            Some(expected),
+            "{name}"
+        );
+    }
+
+    for name in [
+        "read_files",
+        "apply_text_edits",
+        "show_changes",
+        "observe_jobs",
+        "stop_job",
+        "open_session_shell",
+    ] {
+        assert_eq!(runtime_tool_execution_contract(name), None, "{name}");
+    }
+}
+
+#[test]
 fn every_runtime_tool_has_an_explicit_fail_closed_audit_contract() {
     for definition in tool_definitions() {
         assert_eq!(

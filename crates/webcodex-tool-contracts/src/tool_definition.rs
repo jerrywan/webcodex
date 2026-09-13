@@ -57,9 +57,10 @@ pub use super::tool_policy::{
     model_visible_tool_definitions, model_visible_tool_names_csv, runtime_tool_accepts_context_ack,
     runtime_tool_advances_context_checkpoint, runtime_tool_approval_policy,
     runtime_tool_captures_validation_output, runtime_tool_category,
-    runtime_tool_effect_annotations, runtime_tool_is_change_summary_like, runtime_tool_is_git_like,
-    runtime_tool_is_read_like, runtime_tool_is_shell_like, runtime_tool_is_write_like,
-    runtime_tool_metadata, runtime_tool_operator_extension_family, runtime_tool_permission_risk,
+    runtime_tool_effect_annotations, runtime_tool_execution_contract,
+    runtime_tool_is_change_summary_like, runtime_tool_is_git_like, runtime_tool_is_read_like,
+    runtime_tool_is_shell_like, runtime_tool_is_write_like, runtime_tool_metadata,
+    runtime_tool_operator_extension_family, runtime_tool_permission_risk,
     runtime_tool_requires_permission, runtime_tool_runner_capability,
     runtime_tool_session_evidence_policy, runtime_tool_session_risk_class,
 };
@@ -695,6 +696,107 @@ impl ToolSessionEvidencePolicy {
     }
 }
 
+/// Closed model-selection vocabulary for ordinary execution primitives. These
+/// fields describe how a model should select and continue an execution tool;
+/// they do not grant authority, change permissions, or redefine runtime state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecutionForm {
+    NativeArgv,
+    TypedScript,
+    ShellCommand,
+    StructuredValidation,
+    PersistentShellCommand,
+}
+
+impl ToolExecutionForm {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeArgv => "native_argv",
+            Self::TypedScript => "typed_script",
+            Self::ShellCommand => "shell_command",
+            Self::StructuredValidation => "structured_validation",
+            Self::PersistentShellCommand => "persistent_shell_command",
+        }
+    }
+}
+
+/// Runtime carrier responsible for the accepted execution lifetime. This is
+/// deliberately unrelated to resource ownership, principal identity, or auth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecutionLifetime {
+    Runner,
+    Supervisor,
+    SessionShell,
+}
+
+impl ToolExecutionLifetime {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Runner => "runner",
+            Self::Supervisor => "supervisor",
+            Self::SessionShell => "session_shell",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecutionStart {
+    SyncFirst,
+    AsyncImmediate,
+    ExistingSession,
+}
+
+impl ToolExecutionStart {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SyncFirst => "sync_first",
+            Self::AsyncImmediate => "async_immediate",
+            Self::ExistingSession => "existing_session",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecutionContinuation {
+    ObserveJobs,
+    SessionShell,
+    None,
+}
+
+impl ToolExecutionContinuation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ObserveJobs => "observe_jobs",
+            Self::SessionShell => "session_shell",
+            Self::None => "none",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolExecutionContract {
+    pub form: ToolExecutionForm,
+    pub lifetime: ToolExecutionLifetime,
+    pub start: ToolExecutionStart,
+    pub continuation: ToolExecutionContinuation,
+}
+
+impl ToolExecutionContract {
+    pub const fn new(
+        form: ToolExecutionForm,
+        lifetime: ToolExecutionLifetime,
+        start: ToolExecutionStart,
+        continuation: ToolExecutionContinuation,
+    ) -> Self {
+        Self {
+            form,
+            lifetime,
+            start,
+            continuation,
+        }
+    }
+}
+
 /// Static Stateless Operator protocol-extension classification. This declares only
 /// which protocol capability family admits a hidden runtime tool; authorization,
 /// permission, Project authority, and Runner capability remain independent.
@@ -714,6 +816,8 @@ pub struct ToolDefinition {
     pub model_spec: Option<ToolModelSpecDeclaration>,
     pub model_surface: ToolModelSurfaceDeclaration,
     pub operator_extension_family: Option<ToolOperatorExtensionFamily>,
+    /// Optional canonical selection semantics for ordinary execution tools.
+    pub execution: Option<ToolExecutionContract>,
     pub visibility: ToolVisibility,
     pub category: &'static str,
     pub metadata: ToolMetadata,
@@ -731,6 +835,11 @@ impl ToolDefinition {
         family: ToolOperatorExtensionFamily,
     ) -> Self {
         self.operator_extension_family = Some(family);
+        self
+    }
+
+    pub const fn with_execution(mut self, execution: ToolExecutionContract) -> Self {
+        self.execution = Some(execution);
         self
     }
 }
@@ -876,6 +985,7 @@ const fn def(
         model_spec: None,
         model_surface: ToolModelSurfaceDeclaration::DEFAULT,
         operator_extension_family: None,
+        execution: None,
         visibility,
         category,
         metadata: make_tool_metadata(

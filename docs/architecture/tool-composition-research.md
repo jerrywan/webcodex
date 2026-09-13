@@ -136,6 +136,16 @@ A WebCodex composition layer should follow these rules:
 10. **Direct tools remain first-class.** Composition is an optimization for a
     known plan, not a requirement for ordinary single-tool work.
 
+## Current execution selection contract (T1)
+
+Ordinary model-facing execution primitives now declare a small canonical selection contract on `ToolDefinition`. It has four independent dimensions: `form` (`native_argv`, `typed_script`, `shell_command`, `structured_validation`, `persistent_shell_command`), `lifetime` (`runner`, `supervisor`, `session_shell`), `start` (`sync_first`, `async_immediate`, `existing_session`), and `continuation` (`observe_jobs`, `session_shell`, or `none`). `tool_manifest` projects these facts directly instead of asking the model to reconstruct them from descriptions or route names.
+
+This vocabulary is selection metadata, not a new execution layer. `lifetime=supervisor` does not grant authority; none of the four fields changes Project resolution, scope checks, permission/approval, Runner capability admission, timeout behavior, Job transitions, retry safety, OutcomeUnknown semantics, detached-process fencing, or Session-shell lifecycle. `run_shell` and `run_job`, for example, remain distinct canonical tools: both are shell commands owned by the Runner, but the former is `sync_first` while the latter is `async_immediate`. `run_process` and `run_detached_process` are both native argv forms, but their lifetime carriers are `runner` and `supervisor` respectively. Persistent `session_shell_exec` reuses an existing Session shell rather than becoming a Job.
+
+Structured validation keeps its tool-specific effects and evidence. `cargo_fmt`, `cargo_check`, `cargo_test`, and `go_test` share the selection shape `structured_validation / runner / sync_first / observe_jobs`; this does not imply identical mutation semantics. In particular, `cargo_fmt check=false` remains synchronous ensure-format mutation while `check=true` may use the existing same-execution Job handoff.
+
+T1 also makes filtered recommended-flow projections explicit when only part of a canonical flow is visible: partial projections identify themselves and list omitted canonical members instead of silently pairing complete-flow prose with a truncated tool list. T2 remains a separate future step for recovery/continuation vocabulary such as observation tokens, offsets, ACKs, and recovery envelopes. Composition work must build on these canonical primitive semantics; this stage does not add JavaScript Code Mode, a generic composition runtime, or a universal execution abstraction.
+
 ## Proposed shape
 
 Conceptually:
