@@ -77,12 +77,36 @@ fn goal_detail_schema() -> Value {
     })
 }
 
+fn goal_activity_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "available": {"type": "boolean", "description": "Whether runtime liveness evidence is authorized and available. False never reveals Window existence, counts, or timestamps."},
+            "state": {"type": "string", "enum": ["active", "attention_needed", "unobserved", "not_applicable"], "description": "Derived soft liveness observation only; never authoritative Goal or Task state."},
+            "idle_threshold_ms": {"type": "integer", "const": 300000, "description": "Internal five-minute soft-attention heuristic, not an execution timeout."},
+            "last_seen_at_ms": nullable_integer("Latest caller-visible WebCodex Window activity, including non-meaningful Host/App control traffic."),
+            "last_meaningful_activity_at_ms": nullable_integer("Latest caller-visible meaningful WebCodex business activity across correlated Windows."),
+            "quiet_for_ms": nullable_integer("Milliseconds since latest visible meaningful activity at projection time, or null when unobserved."),
+            "linked_window_count": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 16}, {"type": "null"}], "description": "Bounded count of legally observable correlated Window candidates, or null when runtime observation is unavailable/not applicable."},
+            "active_meaningful_request_count": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 64}, {"type": "null"}], "description": "Visible in-flight meaningful WebCodex requests across candidate Windows, or null when unavailable/not applicable."},
+            "coverage_partial": {"type": "boolean", "description": "True when bounded scans or active-request retention may omit evidence. Partial coverage never produces attention_needed."}
+        },
+        "required": [
+            "available", "state", "idle_threshold_ms", "last_seen_at_ms",
+            "last_meaningful_activity_at_ms", "quiet_for_ms", "linked_window_count",
+            "active_meaningful_request_count", "coverage_partial"
+        ],
+        "description": "Payload-free ClientWindow liveness evidence derived only after exact Goal/Session/Project re-authorization. It grants no authority and never exposes Window keys or raw Host metadata."
+    })
+}
+
 fn goal_plan_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "version": {"type": "integer", "const": 1, "description": "Goal Plan presentation projection version."},
+            "version": {"type": "integer", "const": 2, "description": "Goal Plan presentation projection version."},
             "goal_id": {"type": "string", "pattern": "^wc_goal_[0-9a-f]{32}$", "description": "Exact durable Goal identity used for refresh/rehydration and app-only polling. Identity is never authority."},
             "title": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Bounded Goal title."},
             "objective": {"type": "string", "minLength": 1, "maxLength": 8192, "description": "Bounded authoritative Goal objective; the Store enforces the same 8192-byte UTF-8 ceiling."},
@@ -91,12 +115,13 @@ fn goal_plan_schema() -> Value {
             "updated_at_unix_ms": schema_type("integer", "Latest authoritative Goal mutation time."),
             "terminal_at_unix_ms": nullable_integer("Terminal transition time, or null while active."),
             "agent_task_count": {"type": "integer", "minimum": 0, "maximum": 64, "description": "Count of explicit AgentTask correlations; no target-domain state or authority is projected."},
-            "workflow_session_count": {"type": "integer", "minimum": 0, "maximum": 64, "description": "Count of explicit Workflow Session correlations; no Session ledger, Project state, or authority is projected."}
+            "workflow_session_count": {"type": "integer", "minimum": 0, "maximum": 64, "description": "Count of explicit Workflow Session correlations; no Session ledger, Project state, or authority is projected."},
+            "activity": goal_activity_schema()
         },
         "required": [
             "version", "goal_id", "title", "objective", "lifecycle", "revision",
             "updated_at_unix_ms", "terminal_at_unix_ms", "agent_task_count",
-            "workflow_session_count"
+            "workflow_session_count", "activity"
         ],
         "description": "Read-only bounded Goal Plan presentation projection. It contains no execution authority, fences, tokens, credentials, Session ledger, Job logs, stdout, or stderr."
     })

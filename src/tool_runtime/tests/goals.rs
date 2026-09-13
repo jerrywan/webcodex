@@ -1,7 +1,7 @@
 use super::support::*;
 use crate::auth::scopes::{
     COMMUNICATION_MANAGE_SCOPES, COMMUNICATION_READ_SCOPES, SCOPE_COMMUNICATION_MANAGE,
-    SCOPE_COMMUNICATION_READ, SCOPE_SESSION_COLLABORATE,
+    SCOPE_COMMUNICATION_READ, SCOPE_PROJECT_READ, SCOPE_RUNTIME_READ, SCOPE_SESSION_COLLABORATE,
 };
 use crate::tool_runtime::metadata::{
     ToolApprovalPolicy, ToolAuthorityPolicy, ToolEffect, ToolIdempotency, ToolRisk,
@@ -35,6 +35,178 @@ fn create_goal(
         .as_str()
         .unwrap()
         .to_string()
+}
+
+fn runtime_with_goal_activity_db() -> (tempfile::TempDir, Arc<crate::db::Database>, ToolRuntime) {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Arc::new(crate::db::Database::open(&temp.path().join("goal-activity.db")).unwrap());
+    let runtime = ToolRuntime::new_for_tests()
+        .with_communication_database(db.clone())
+        .with_window_activity_database(db.clone());
+    (temp, db, runtime)
+}
+
+fn goal_activity_auth(username: &str) -> crate::auth::AuthContext {
+    let mut auth = auth_context(Some(username), false);
+    auth.scopes = vec![
+        SCOPE_COMMUNICATION_READ.to_string(),
+        SCOPE_COMMUNICATION_MANAGE.to_string(),
+        SCOPE_SESSION_COLLABORATE.to_string(),
+        SCOPE_RUNTIME_READ.to_string(),
+        SCOPE_PROJECT_READ.to_string(),
+    ];
+    auth
+}
+
+async fn register_goal_activity_project(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    owner: &str,
+    project_id: &str,
+    root: &std::path::Path,
+) -> String {
+    let instance_id = format!("inst-{client_id}");
+    runtime
+        .runner_registry
+        .register(crate::runner_protocol::RunnerRegisterRequest {
+            process_started_at: None,
+            build: None,
+            job_concurrency_limit: Some(4),
+            job_inventory: None,
+            coding_agent_providers: None,
+            coding_agent_inventory: None,
+            client_id: client_id.to_string(),
+            runner_instance_id: instance_id.clone(),
+            runner_protocol_generation: crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
+            display_name: Some(format!("{owner} Goal activity runner")),
+            owner: Some(owner.to_string()),
+            hostname: Some(format!("{owner}-goal-activity-host")),
+            host_context: None,
+            capabilities: crate::test_support::current_runner_capabilities(
+                crate::runner_protocol::RunnerCapabilities::default(),
+            ),
+            policy: None,
+        })
+        .await
+        .unwrap();
+    crate::test_support::apply_project_inventory_snapshot(
+        &runtime.runner_registry,
+        client_id,
+        &instance_id,
+        vec![registered_project(project_id, &root.to_string_lossy())],
+    )
+    .await;
+    crate::tool_runtime::runner_project_runtime_id(client_id, project_id)
+}
+
+fn start_goal_activity_session(
+    runtime: &ToolRuntime,
+    auth: &crate::auth::AuthContext,
+    project: &str,
+    title: &str,
+) -> crate::tool_runtime::sessions::SessionSummary {
+    let fingerprint =
+        super::super::session_context::workflow_session_authority_fingerprint(Some(auth))
+            .expect("stable Goal activity test authority");
+    runtime
+        .sessions
+        .start_session_with_options(
+            crate::tool_runtime::sessions::SessionCreateOptions::new(
+                Some(project.to_string()),
+                Some(title.to_string()),
+                crate::tool_runtime::SessionMode::Normal,
+                crate::tool_runtime::sessions::SessionGuards::default(),
+            )
+            .with_owner_authority_fingerprint(Some(fingerprint)),
+        )
+        .unwrap()
+}
+
+async fn link_goal_activity_session(
+    runtime: &ToolRuntime,
+    auth: &crate::auth::AuthContext,
+    goal_id: &str,
+    session_id: &str,
+    key: &str,
+) {
+    let linked = runtime
+        .associate_goal_workflow_session(
+            Some(auth),
+            goal_id.to_string(),
+            session_id.to_string(),
+            key.to_string(),
+        )
+        .await;
+    assert!(linked.success, "{:?}", linked.output);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_goal_window_event(
+    db: &Arc<crate::db::Database>,
+    auth: &crate::auth::AuthContext,
+    window_id: &str,
+    project: &str,
+    operation: &str,
+    meaningful: bool,
+    linked_session_id: Option<&str>,
+    at_ms: i64,
+) {
+    let window = crate::client_window::ClientWindow::for_test(window_id);
+    let (principal_kind, principal_id) =
+        crate::tool_runtime::runtime_observation_principal(Some(auth)).unwrap();
+    crate::action_audit_sessions::record_action_event(
+        db,
+        crate::action_audit_sessions::ActionAuditEventInput {
+            explicit_session_id: None,
+            session_title: None,
+            endpoint: "/mcp".to_string(),
+            action_name: "toolsCall".to_string(),
+            operation: Some(operation.to_string()),
+            project: Some(project.to_string()),
+            principal_kind: None,
+            principal_user_id: None,
+            oauth_client_id: None,
+            status: "success".to_string(),
+            http_status: Some(200),
+            started_at: at_ms / 1000,
+            ended_at: at_ms / 1000,
+            duration_ms: 1,
+            error_summary: None,
+            warning_summary: None,
+            changed_files: Vec::new(),
+            ids: json!({}),
+            summary: json!({}),
+            request_bytes: None,
+            response_bytes: None,
+            client_window_key: Some(window.key().to_string()),
+            client_window_source: Some(window.source().to_string()),
+            server_trace_id: Some(format!("goal-activity-{window_id}-{operation}-{at_ms}")),
+            principal_correlation_kind: Some(principal_kind),
+            principal_correlation_id: Some(principal_id),
+            window_started_at_ms: Some(at_ms),
+            window_ended_at_ms: Some(at_ms + 1),
+            request_observed_at_ms: None,
+            response_handed_at_ms: None,
+            window_transition_kind: None,
+            response_streaming: None,
+            window_continuity_eligible: None,
+            window_meaningful: meaningful,
+            recorder_gap_session_id: None,
+            workflow_links: linked_session_id
+                .map(|session_id| {
+                    vec![crate::action_audit_sessions::ActionAuditWorkflowLinkInput {
+                        workflow_session_id: session_id.to_string(),
+                        relation: crate::action_audit_sessions::WorkflowSessionRelation::Recording,
+                        project: Some(project.to_string()),
+                    }]
+                })
+                .unwrap_or_default(),
+        },
+    );
+}
+
+fn goal_activity<'a>(result: &'a crate::tool_runtime::ToolResult) -> &'a serde_json::Value {
+    &result.output["goal_plan"]["activity"]
 }
 
 #[test]
@@ -151,7 +323,15 @@ fn goal_schemas_are_bounded_private_and_existing_coding_tools_do_not_accept_goal
     let present = spec("present_goal_plan");
     assert_eq!(present.input_schema["required"], json!(["goal_id"]));
     let plan = &present.output_schema["properties"]["output"]["properties"]["goal_plan"];
-    assert_eq!(plan["properties"]["version"]["const"], 1);
+    assert_eq!(plan["properties"]["version"]["const"], 2);
+    assert_eq!(
+        plan["properties"]["activity"]["additionalProperties"],
+        false
+    );
+    assert_eq!(
+        plan["properties"]["activity"]["properties"]["idle_threshold_ms"]["const"],
+        300_000
+    );
     assert_eq!(plan["properties"]["title"]["maxLength"], 200);
     assert_eq!(plan["properties"]["objective"]["maxLength"], 8192);
     assert_eq!(
@@ -421,22 +601,26 @@ fn goal_runtime_crud_replay_and_exact_read_hide_foreign_existence() {
     assert_eq!(update_replay.output["goal"]["summary"]["revision"], 2);
 }
 
-#[test]
-fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden() {
+#[tokio::test]
+async fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden() {
     let (_temp, _db, runtime) = runtime_with_goal_db();
     let bob = auth_context(Some("bob-plan"), false);
     let alice = auth_context(Some("alice-plan"), false);
     let goal_id = create_goal(&runtime, Some(&bob), "bob-plan-create");
 
-    let initial = runtime.present_goal_plan(Some(&bob), goal_id.clone());
+    let initial = runtime.present_goal_plan(Some(&bob), goal_id.clone()).await;
     assert!(initial.success, "{:?}", initial.output);
     let plan = &initial.output["goal_plan"];
-    assert_eq!(plan["version"], 1);
+    assert_eq!(plan["version"], 2);
     assert_eq!(plan["goal_id"], goal_id);
     assert_eq!(plan["lifecycle"], "active");
     assert_eq!(plan["revision"], 1);
     assert_eq!(plan["agent_task_count"], 0);
     assert_eq!(plan["workflow_session_count"], 0);
+    assert_eq!(plan["activity"]["available"], false);
+    assert_eq!(plan["activity"]["state"], "unobserved");
+    assert!(plan["activity"]["last_seen_at_ms"].is_null());
+    assert!(plan["activity"]["linked_window_count"].is_null());
     assert!(plan["terminal_at_unix_ms"].is_null());
     assert_eq!(
         plan.as_object()
@@ -445,6 +629,7 @@ fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>(),
         [
+            "activity",
             "agent_task_count",
             "goal_id",
             "lifecycle",
@@ -461,7 +646,7 @@ fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden()
         .collect()
     );
 
-    let polled = runtime.goal_plan_state(Some(&bob), goal_id.clone());
+    let polled = runtime.goal_plan_state(Some(&bob), goal_id.clone()).await;
     assert!(polled.success);
     assert_eq!(polled.output["goal_plan"]["revision"], 1);
     assert_eq!(
@@ -469,8 +654,10 @@ fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden()
         1
     );
 
-    let foreign = runtime.goal_plan_state(Some(&alice), goal_id.clone());
-    let missing = runtime.goal_plan_state(Some(&alice), format!("wc_goal_{}", "f".repeat(32)));
+    let foreign = runtime.goal_plan_state(Some(&alice), goal_id.clone()).await;
+    let missing = runtime
+        .goal_plan_state(Some(&alice), format!("wc_goal_{}", "f".repeat(32)))
+        .await;
     assert!(!foreign.success);
     assert!(!missing.success);
     assert_eq!(foreign.output["error_kind"], "goal_not_found");
@@ -487,7 +674,7 @@ fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden()
         "bob-plan-update".to_string(),
     );
     assert!(updated.success, "{:?}", updated.output);
-    let after_update = runtime.goal_plan_state(Some(&bob), goal_id.clone());
+    let after_update = runtime.goal_plan_state(Some(&bob), goal_id.clone()).await;
     assert!(after_update.success);
     assert_eq!(after_update.output["goal_plan"]["revision"], 2);
     assert_eq!(
@@ -506,10 +693,15 @@ fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden()
         "bob-plan-complete".to_string(),
     );
     assert!(completed.success, "{:?}", completed.output);
-    let terminal = runtime.goal_plan_state(Some(&bob), goal_id.clone());
+    let terminal = runtime.goal_plan_state(Some(&bob), goal_id.clone()).await;
     assert!(terminal.success);
     assert_eq!(terminal.output["goal_plan"]["lifecycle"], "completed");
     assert_eq!(terminal.output["goal_plan"]["revision"], 3);
+    assert_eq!(
+        terminal.output["goal_plan"]["activity"]["state"],
+        "not_applicable"
+    );
+    assert_eq!(terminal.output["goal_plan"]["activity"]["available"], false);
     assert!(terminal.output["goal_plan"]["terminal_at_unix_ms"].is_i64());
     assert_eq!(
         runtime.get_goal(Some(&bob), goal_id).output["goal"]["summary"]["revision"],
@@ -517,8 +709,338 @@ fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden()
     );
 }
 
-#[test]
-fn goal_plan_projection_fails_closed_on_malformed_persisted_goal() {
+#[tokio::test]
+async fn goal_activity_tracks_window_wide_work_and_separates_seen_from_meaningful() {
+    let (temp, db, runtime) = runtime_with_goal_activity_db();
+    let auth = goal_activity_auth("goal-window-wide");
+    let project_a = register_goal_activity_project(
+        &runtime,
+        "goal-live-a",
+        "goal-window-wide",
+        "a",
+        temp.path(),
+    )
+    .await;
+    let project_b = register_goal_activity_project(
+        &runtime,
+        "goal-live-b",
+        "goal-window-wide",
+        "b",
+        temp.path(),
+    )
+    .await;
+    let session = start_goal_activity_session(&runtime, &auth, &project_a, "Goal Session A");
+    let goal_id = create_goal(&runtime, Some(&auth), "goal-window-wide-create");
+    link_goal_activity_session(
+        &runtime,
+        &auth,
+        &goal_id,
+        &session.session_id,
+        "goal-window-wide-link",
+    )
+    .await;
+
+    let now = 10_000_000;
+    let old = now - 7 * 60_000;
+    record_goal_window_event(
+        &db,
+        &auth,
+        "goal-window-wide",
+        &project_a,
+        "read_files",
+        true,
+        Some(&session.session_id),
+        old,
+    );
+    let stale = runtime
+        .goal_plan_state_at(Some(&auth), goal_id.clone(), now)
+        .await;
+    assert!(stale.success, "{:?}", stale.output);
+    assert_eq!(goal_activity(&stale)["state"], "attention_needed");
+    assert_eq!(
+        goal_activity(&stale)["last_meaningful_activity_at_ms"],
+        old + 1
+    );
+
+    let poll_at = now - 3_000;
+    record_goal_window_event(
+        &db,
+        &auth,
+        "goal-window-wide",
+        &project_a,
+        "goal_plan_state",
+        false,
+        None,
+        poll_at,
+    );
+    let polled = runtime
+        .goal_plan_state_at(Some(&auth), goal_id.clone(), now)
+        .await;
+    assert_eq!(goal_activity(&polled)["state"], "attention_needed");
+    assert_eq!(goal_activity(&polled)["last_seen_at_ms"], poll_at + 1);
+    assert_eq!(
+        goal_activity(&polled)["last_meaningful_activity_at_ms"],
+        old + 1
+    );
+
+    // Historical Session A linkage discovers W, but later same-principal work in
+    // another currently-visible Project/Session still refreshes Window-wide liveness.
+    let recent = now - 60_000;
+    record_goal_window_event(
+        &db,
+        &auth,
+        "goal-window-wide",
+        &project_b,
+        "search_project_texts",
+        true,
+        None,
+        recent,
+    );
+    let refreshed = runtime.goal_plan_state_at(Some(&auth), goal_id, now).await;
+    assert_eq!(goal_activity(&refreshed)["state"], "active");
+    assert_eq!(
+        goal_activity(&refreshed)["last_meaningful_activity_at_ms"],
+        recent + 1
+    );
+    assert_eq!(goal_activity(&refreshed)["linked_window_count"], 1);
+}
+
+#[tokio::test]
+async fn goal_activity_is_unobserved_without_windows_and_inflight_work_prevents_false_attention() {
+    let (temp, db, runtime) = runtime_with_goal_activity_db();
+    let auth = goal_activity_auth("goal-inflight");
+    let project = register_goal_activity_project(
+        &runtime,
+        "goal-inflight",
+        "goal-inflight",
+        "demo",
+        temp.path(),
+    )
+    .await;
+    let session = start_goal_activity_session(&runtime, &auth, &project, "Goal inflight");
+    let goal_id = create_goal(&runtime, Some(&auth), "goal-inflight-create");
+    link_goal_activity_session(
+        &runtime,
+        &auth,
+        &goal_id,
+        &session.session_id,
+        "goal-inflight-link",
+    )
+    .await;
+    let now = 20_000_000;
+
+    let unobserved = runtime
+        .goal_plan_state_at(Some(&auth), goal_id.clone(), now)
+        .await;
+    assert_eq!(goal_activity(&unobserved)["state"], "unobserved");
+    assert_eq!(goal_activity(&unobserved)["linked_window_count"], 0);
+
+    for (window, at) in [
+        ("goal-inflight-old", now - 8 * 60_000),
+        ("goal-inflight-recent", now - 2 * 60_000),
+    ] {
+        record_goal_window_event(
+            &db,
+            &auth,
+            window,
+            &project,
+            "read_files",
+            true,
+            Some(&session.session_id),
+            at,
+        );
+    }
+    let multi = runtime
+        .goal_plan_state_at(Some(&auth), goal_id.clone(), now)
+        .await;
+    assert_eq!(goal_activity(&multi)["state"], "active");
+    assert_eq!(goal_activity(&multi)["linked_window_count"], 2);
+
+    let later = now + 10 * 60_000;
+    let window = crate::client_window::ClientWindow::for_test("goal-inflight-old");
+    let (kind, id) = crate::tool_runtime::runtime_observation_principal(Some(&auth)).unwrap();
+    let guard = runtime.window_activity_registry().start_observed(
+        &window,
+        "goal-inflight-long-request",
+        "tools/call",
+        Some("run_process"),
+        Some((&kind, &id)),
+        later - 7 * 60_000,
+    );
+    guard.update(Some("run_process"), Some(&project));
+    let running = runtime
+        .goal_plan_state_at(Some(&auth), goal_id.clone(), later)
+        .await;
+    assert_eq!(goal_activity(&running)["state"], "active");
+    assert_eq!(
+        goal_activity(&running)["active_meaningful_request_count"],
+        1
+    );
+
+    let revision = runtime.get_goal(Some(&auth), goal_id.clone()).output["goal"]["summary"]
+        ["revision"]
+        .as_i64()
+        .unwrap();
+    let completed = runtime.update_goal(
+        Some(&auth),
+        goal_id.clone(),
+        revision,
+        None,
+        None,
+        Some("completed".to_string()),
+        Some("terminal Goal ignores Window liveness".to_string()),
+        "goal-inflight-terminal".to_string(),
+    );
+    assert!(completed.success, "{:?}", completed.output);
+    let terminal = runtime
+        .goal_plan_state_at(Some(&auth), goal_id, later)
+        .await;
+    assert_eq!(goal_activity(&terminal)["state"], "not_applicable");
+    assert!(goal_activity(&terminal)["active_meaningful_request_count"].is_null());
+    drop(guard);
+}
+
+#[tokio::test]
+async fn goal_activity_respects_principal_project_visibility_and_runtime_read_scope() {
+    let (temp, db, runtime) = runtime_with_goal_activity_db();
+    let mut alice = goal_activity_auth("goal-visible-alice");
+    alice.allowed_client_id = Some("goal-visible-client".to_string());
+    let bob = goal_activity_auth("goal-visible-bob");
+    let visible = register_goal_activity_project(
+        &runtime,
+        "goal-visible-client",
+        "goal-visible-alice",
+        "visible",
+        temp.path(),
+    )
+    .await;
+    let hidden = register_goal_activity_project(
+        &runtime,
+        "goal-hidden-client",
+        "goal-visible-bob",
+        "hidden",
+        temp.path(),
+    )
+    .await;
+    let session = start_goal_activity_session(&runtime, &alice, &visible, "Visible Goal Session");
+    let goal_id = create_goal(&runtime, Some(&alice), "goal-visibility-create");
+    link_goal_activity_session(
+        &runtime,
+        &alice,
+        &goal_id,
+        &session.session_id,
+        "goal-visibility-link",
+    )
+    .await;
+    let now = 30_000_000;
+    let old = now - 8 * 60_000;
+    record_goal_window_event(
+        &db,
+        &alice,
+        "goal-visibility-window",
+        &visible,
+        "read_files",
+        true,
+        Some(&session.session_id),
+        old,
+    );
+    record_goal_window_event(
+        &db,
+        &bob,
+        "goal-visibility-window",
+        &visible,
+        "search_project_texts",
+        true,
+        None,
+        now - 10_000,
+    );
+    record_goal_window_event(
+        &db,
+        &alice,
+        "goal-visibility-window",
+        &hidden,
+        "run_process",
+        true,
+        None,
+        now - 5_000,
+    );
+    let projected = runtime
+        .goal_plan_state_at(Some(&alice), goal_id.clone(), now)
+        .await;
+    assert_eq!(goal_activity(&projected)["state"], "attention_needed");
+    assert_eq!(goal_activity(&projected)["last_seen_at_ms"], old + 1);
+    assert_eq!(
+        goal_activity(&projected)["last_meaningful_activity_at_ms"],
+        old + 1
+    );
+
+    let mut no_runtime_read = alice.clone();
+    no_runtime_read
+        .scopes
+        .retain(|scope| scope != SCOPE_RUNTIME_READ);
+    let unavailable = runtime
+        .goal_plan_state_at(Some(&no_runtime_read), goal_id, now)
+        .await;
+    assert!(unavailable.success, "{:?}", unavailable.output);
+    let activity = goal_activity(&unavailable);
+    assert_eq!(activity["available"], false);
+    assert_eq!(activity["state"], "unobserved");
+    for field in [
+        "last_seen_at_ms",
+        "last_meaningful_activity_at_ms",
+        "quiet_for_ms",
+        "linked_window_count",
+        "active_meaningful_request_count",
+    ] {
+        assert!(activity[field].is_null(), "{field}");
+    }
+}
+
+#[tokio::test]
+async fn goal_activity_bounded_partial_window_scan_never_manufactures_attention() {
+    let (temp, db, runtime) = runtime_with_goal_activity_db();
+    let auth = goal_activity_auth("goal-partial");
+    let project = register_goal_activity_project(
+        &runtime,
+        "goal-partial",
+        "goal-partial",
+        "demo",
+        temp.path(),
+    )
+    .await;
+    let session = start_goal_activity_session(&runtime, &auth, &project, "Partial Goal Session");
+    let goal_id = create_goal(&runtime, Some(&auth), "goal-partial-create");
+    link_goal_activity_session(
+        &runtime,
+        &auth,
+        &goal_id,
+        &session.session_id,
+        "goal-partial-link",
+    )
+    .await;
+    let now = 40_000_000;
+    for index in 0..17 {
+        record_goal_window_event(
+            &db,
+            &auth,
+            &format!("goal-partial-window-{index}"),
+            &project,
+            "read_files",
+            true,
+            Some(&session.session_id),
+            now - (10 + index as i64) * 60_000,
+        );
+    }
+    let projection = runtime.goal_plan_state_at(Some(&auth), goal_id, now).await;
+    let activity = goal_activity(&projection);
+    assert_eq!(activity["available"], true);
+    assert_eq!(activity["coverage_partial"], true);
+    assert_eq!(activity["linked_window_count"], 16);
+    assert_eq!(activity["state"], "unobserved");
+}
+
+#[tokio::test]
+async fn goal_plan_projection_fails_closed_on_malformed_persisted_goal() {
     let (_temp, db, runtime) = runtime_with_goal_db();
     let bob = auth_context(Some("bob-plan-corrupt"), false);
     let goal_id = create_goal(&runtime, Some(&bob), "bob-plan-corrupt-create");
@@ -534,8 +1056,8 @@ fn goal_plan_projection_fails_closed_on_malformed_persisted_goal() {
         conn.execute_batch("PRAGMA ignore_check_constraints = OFF;")
             .unwrap();
     }
-    let presented = runtime.present_goal_plan(Some(&bob), goal_id.clone());
-    let polled = runtime.goal_plan_state(Some(&bob), goal_id);
+    let presented = runtime.present_goal_plan(Some(&bob), goal_id.clone()).await;
+    let polled = runtime.goal_plan_state(Some(&bob), goal_id).await;
     assert!(!presented.success);
     assert!(!polled.success);
     assert_eq!(presented.output["error_kind"], "goal_store_unavailable");

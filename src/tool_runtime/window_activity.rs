@@ -1,11 +1,13 @@
+use crate::auth::AuthContext;
 use crate::client_window::ClientWindow;
 use crate::tool_request_trace::RequestCompletionTiming;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 pub(crate) const MAX_ACTIVE_WINDOW_REQUESTS: usize = 64;
 pub(crate) const MAX_ACTIVE_REQUESTS_PER_WINDOW: usize = 8;
 pub(crate) const MAX_WINDOW_LOOP_CONTINUITIES: usize = 256;
+const MAX_UNTRACKED_ACTIVE_PRINCIPALS: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowLoopTransition {
@@ -86,6 +88,12 @@ pub(crate) struct ActiveWindowRequest {
     pub(crate) started_at_ms: i64,
 }
 
+impl ActiveWindowRequest {
+    pub(crate) fn is_meaningful(&self) -> bool {
+        self.meaningful
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActiveWindowSummary {
     pub(crate) client_window_key: String,
@@ -98,6 +106,38 @@ pub(crate) struct ActiveWindowSummary {
 struct WindowActivityRegistryInner {
     by_trace: BTreeMap<String, ActiveWindowRequest>,
     previous_meaningful: BTreeMap<WindowContinuityKey, CompletedMeaningfulCall>,
+    // Active requests evicted by the global bounded registry are still owned by
+    // their RAII guards. Keep a bounded principal-scoped count so one caller's
+    // overflow does not normally degrade another caller's liveness projection.
+    untracked_active_by_principal: BTreeMap<PrincipalCoverageKey, usize>,
+    untracked_unscoped_count: usize,
+    untracked_principal_overflow_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PrincipalCoverageKey {
+    principal_kind: String,
+    principal_id: String,
+}
+
+impl PrincipalCoverageKey {
+    fn from_request(request: &ActiveWindowRequest) -> Option<Self> {
+        Some(Self {
+            principal_kind: request.principal_correlation_kind.clone()?,
+            principal_id: request.principal_correlation_id.clone()?,
+        })
+    }
+
+    fn from_continuity(key: &WindowContinuityKey) -> Self {
+        Self {
+            principal_kind: key.principal_kind.clone(),
+            principal_id: key.principal_id.clone(),
+        }
+    }
+
+    fn matches(&self, principal: (&str, &str)) -> bool {
+        self.principal_kind == principal.0 && self.principal_id == principal.1
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -184,7 +224,24 @@ impl WindowActivityRegistry {
                 .min_by_key(|request| request.started_at_ms)
                 .map(|request| request.server_trace_id.clone())
             {
-                inner.by_trace.remove(&oldest);
+                if let Some(evicted) = inner.by_trace.remove(&oldest) {
+                    if let Some(key) = PrincipalCoverageKey::from_request(&evicted) {
+                        if let Some(count) = inner.untracked_active_by_principal.get_mut(&key) {
+                            *count = count.saturating_add(1);
+                        } else if inner.untracked_principal_overflow_count == 0
+                            && inner.untracked_active_by_principal.len()
+                                < MAX_UNTRACKED_ACTIVE_PRINCIPALS
+                        {
+                            inner.untracked_active_by_principal.insert(key, 1);
+                        } else {
+                            inner.untracked_principal_overflow_count =
+                                inner.untracked_principal_overflow_count.saturating_add(1);
+                        }
+                    } else {
+                        inner.untracked_unscoped_count =
+                            inner.untracked_unscoped_count.saturating_add(1);
+                    }
+                }
             }
         }
         inner.by_trace.insert(server_trace_id.to_string(), record);
@@ -237,6 +294,24 @@ impl WindowActivityRegistry {
                 .then_with(|| a.server_trace_id.cmp(&b.server_trace_id))
         });
         records
+    }
+
+    pub(crate) fn coverage_partial_for(&self, principal: Option<(&str, &str)>) -> bool {
+        let inner = self.inner.lock().expect("Window activity mutex poisoned");
+        match principal {
+            None => {
+                inner.untracked_unscoped_count > 0
+                    || inner.untracked_principal_overflow_count > 0
+                    || !inner.untracked_active_by_principal.is_empty()
+            }
+            Some(principal) => {
+                inner.untracked_principal_overflow_count > 0
+                    || inner
+                        .untracked_active_by_principal
+                        .keys()
+                        .any(|key| key.matches(principal))
+            }
+        }
     }
 
     pub(crate) fn active_windows(
@@ -307,6 +382,22 @@ impl WindowActivityRegistry {
             return;
         };
         let finished_request = inner.by_trace.remove(server_trace_id);
+        if finished_request.is_none() {
+            if let Some(key) = continuity_key.map(PrincipalCoverageKey::from_continuity) {
+                let mut remove_key = false;
+                if let Some(count) = inner.untracked_active_by_principal.get_mut(&key) {
+                    *count = count.saturating_sub(1);
+                    remove_key = *count == 0;
+                } else if inner.untracked_principal_overflow_count > 0 {
+                    inner.untracked_principal_overflow_count -= 1;
+                }
+                if remove_key {
+                    inner.untracked_active_by_principal.remove(&key);
+                }
+            } else if inner.untracked_unscoped_count > 0 {
+                inner.untracked_unscoped_count -= 1;
+            }
+        }
         let overlapped = finished_request
             .as_ref()
             .is_some_and(|request| request.overlapped);
@@ -397,6 +488,68 @@ fn principal_visible(request: &ActiveWindowRequest, principal: Option<(&str, &st
                 && request.principal_correlation_id.as_deref() == Some(id)
         }
     }
+}
+
+pub(crate) async fn window_project_visible_cached(
+    runtime: &super::ToolRuntime,
+    auth: &AuthContext,
+    cache: &mut HashMap<String, bool>,
+    project: Option<&str>,
+) -> bool {
+    let Some(project) = project else {
+        return true;
+    };
+    if let Some(visible) = cache.get(project) {
+        return *visible;
+    }
+    let visible = runtime.exact_project_visible_to_auth(auth, project).await;
+    cache.insert(project.to_string(), visible);
+    visible
+}
+
+pub(crate) async fn window_event_visible_cached(
+    runtime: &super::ToolRuntime,
+    auth: &AuthContext,
+    cache: &mut HashMap<String, bool>,
+    event: &webcodex_store::models::WindowActivityEventRecord,
+) -> bool {
+    if event.project.is_some() {
+        return window_project_visible_cached(runtime, auth, cache, event.project.as_deref()).await;
+    }
+    if event.workflow_links.is_empty() {
+        return true;
+    }
+    for link in &event.workflow_links {
+        match link.project.as_deref() {
+            None => return true,
+            Some(project)
+                if window_project_visible_cached(runtime, auth, cache, Some(project)).await =>
+            {
+                return true;
+            }
+            Some(_) => {}
+        }
+    }
+    false
+}
+
+pub(crate) async fn active_window_request_visible_cached(
+    runtime: &super::ToolRuntime,
+    auth: &AuthContext,
+    cache: &mut HashMap<String, bool>,
+    request: &ActiveWindowRequest,
+) -> bool {
+    if request.project.is_some() {
+        return window_project_visible_cached(runtime, auth, cache, request.project.as_deref())
+            .await;
+    }
+    if auth.is_admin_caller() || request.method == "tools/list" {
+        return true;
+    }
+    request
+        .tool_name
+        .as_deref()
+        .is_some_and(|tool| !crate::tool_runtime::observations::is_meaningful_activity_tool(tool))
 }
 
 pub(crate) struct WindowActivityGuard {
@@ -774,6 +927,69 @@ mod tests {
             let recovered = meaningful_start(&registry, &window, "recovered", principal, 1_700);
             assert_eq!(recovered.transition().gap_ms(), Some(100));
         }
+    }
+
+    #[test]
+    fn app_control_requests_remain_seen_but_are_not_meaningful() {
+        let registry = WindowActivityRegistry::default();
+        let window = window("app-control-classification");
+        let app_control = registry.start_observed(
+            &window,
+            "trace-goal-plan-state",
+            "tools/call",
+            Some("goal_plan_state"),
+            Some(("username", "alice")),
+            1_000,
+        );
+        let business = registry.start_observed(
+            &window,
+            "trace-read-files",
+            "tools/call",
+            Some("read_files"),
+            Some(("username", "alice")),
+            1_001,
+        );
+        let requests = registry.list_for_window(
+            &window_key("app-control-classification"),
+            Some(("username", "alice")),
+        );
+        assert_eq!(requests.len(), 2);
+        assert!(!requests
+            .iter()
+            .find(|request| request.server_trace_id == "trace-goal-plan-state")
+            .unwrap()
+            .is_meaningful());
+        assert!(requests
+            .iter()
+            .find(|request| request.server_trace_id == "trace-read-files")
+            .unwrap()
+            .is_meaningful());
+        drop((app_control, business));
+    }
+
+    #[test]
+    fn active_request_eviction_marks_observation_partial_until_evicted_guard_finishes() {
+        let registry = WindowActivityRegistry::default();
+        let mut guards = Vec::new();
+        for index in 0..=MAX_ACTIVE_WINDOW_REQUESTS {
+            guards.push(registry.start_observed(
+                &window(&format!("bounded-{index}")),
+                &format!("trace-bounded-{index}"),
+                "tools/call",
+                Some("run_process"),
+                Some(("username", "alice")),
+                1_000 + index as i64,
+            ));
+        }
+        assert!(registry.coverage_partial_for(Some(("username", "alice"))));
+        assert!(!registry.coverage_partial_for(Some(("username", "bob"))));
+        assert_eq!(
+            registry.active_windows(None).len(),
+            MAX_ACTIVE_WINDOW_REQUESTS
+        );
+        drop(guards.remove(0));
+        assert!(!registry.coverage_partial_for(Some(("username", "alice"))));
+        drop(guards);
     }
 
     #[test]

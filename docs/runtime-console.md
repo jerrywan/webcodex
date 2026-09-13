@@ -35,7 +35,7 @@ meaningful same-Window/same-principal request, and `cycle_ms` is request start t
 the next meaningful request start. The gap is explicitly outside-WebCodex time;
 it may include network, host scheduling, model inference, user interaction, or
 other unobservable work and is never presented as model think/reasoning time.
-Status/discovery calls do not break the meaningful sequence. Overlapping calls
+Status/discovery calls and MCP App controller/polling calls (including Goal Plan state and Agent continuation bind/state/acquire/prepare/finish/recovery/unbind traffic) remain ordinary Window-seen evidence but do not count as meaningful business activity or break the meaningful sequence. Model visibility is not the classifier: real read/search/edit/Git/process/validation/work calls remain meaningful. Overlapping calls
 are classified as overlap rather than producing a negative serial gap. Streaming
 handoff is not stream completion, and a Server restart loses process-local prior
 completion state, so both cases leave ordinary next-call timing unavailable.

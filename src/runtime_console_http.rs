@@ -1411,12 +1411,8 @@ async fn authorize_exact_project(
     if !valid_project_id(project) {
         return Err(RuntimeConsoleError::Invalid);
     }
-    let (visible, _, _) =
-        listed_projects_for_auth(runtime, auth, None, Some(project.to_string()), None, 1).await?;
-    if visible
-        .iter()
-        .any(|value| value.get("id").and_then(Value::as_str) == Some(project))
-    {
+    require_project_read(auth)?;
+    if runtime.exact_project_visible_to_auth(auth, project).await {
         Ok(())
     } else {
         Err(RuntimeConsoleError::NotFound)
@@ -1580,24 +1576,8 @@ async fn window_event_visible_cached(
     cache: &mut HashMap<String, bool>,
     event: &webcodex_store::models::WindowActivityEventRecord,
 ) -> bool {
-    if event.project.is_some() {
-        return window_project_visible_cached(runtime, auth, cache, event.project.as_deref()).await;
-    }
-    if event.workflow_links.is_empty() {
-        return true;
-    }
-    for link in &event.workflow_links {
-        match link.project.as_deref() {
-            None => return true,
-            Some(project)
-                if window_project_visible_cached(runtime, auth, cache, Some(project)).await =>
-            {
-                return true;
-            }
-            Some(_) => {}
-        }
-    }
-    false
+    crate::tool_runtime::window_activity::window_event_visible_cached(runtime, auth, cache, event)
+        .await
 }
 
 async fn active_window_request_visible_cached(
@@ -1606,17 +1586,10 @@ async fn active_window_request_visible_cached(
     cache: &mut HashMap<String, bool>,
     request: &crate::tool_runtime::ActiveWindowRequest,
 ) -> bool {
-    if request.project.is_some() {
-        return window_project_visible_cached(runtime, auth, cache, request.project.as_deref())
-            .await;
-    }
-    if auth.is_admin_caller() || request.method == "tools/list" {
-        return true;
-    }
-    request
-        .tool_name
-        .as_deref()
-        .is_some_and(|tool| !crate::tool_runtime::observations::is_meaningful_activity_tool(tool))
+    crate::tool_runtime::window_activity::active_window_request_visible_cached(
+        runtime, auth, cache, request,
+    )
+    .await
 }
 
 fn project_window_loop_timings(
@@ -1762,17 +1735,10 @@ async fn window_project_visible_cached(
     cache: &mut HashMap<String, bool>,
     project: Option<&str>,
 ) -> bool {
-    let Some(project) = project else {
-        return true;
-    };
-    if let Some(visible) = cache.get(project) {
-        return *visible;
-    }
-    let visible = authorize_exact_project(runtime, auth, project)
-        .await
-        .is_ok();
-    cache.insert(project.to_string(), visible);
-    visible
+    crate::tool_runtime::window_activity::window_project_visible_cached(
+        runtime, auth, cache, project,
+    )
+    .await
 }
 
 async fn visible_window_summary_for_auth(

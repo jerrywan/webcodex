@@ -1817,9 +1817,9 @@ impl ToolRuntime {
 
             ToolCall::GetGoal { goal_id } => self.get_goal(auth, goal_id),
 
-            ToolCall::PresentGoalPlan { goal_id } => self.present_goal_plan(auth, goal_id),
+            ToolCall::PresentGoalPlan { goal_id } => self.present_goal_plan(auth, goal_id).await,
 
-            ToolCall::GoalPlanState { goal_id } => self.goal_plan_state(auth, goal_id),
+            ToolCall::GoalPlanState { goal_id } => self.goal_plan_state(auth, goal_id).await,
 
             ToolCall::ListGoals {
                 lifecycle,

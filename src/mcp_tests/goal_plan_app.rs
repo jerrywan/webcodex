@@ -317,6 +317,23 @@ async fn goal_plan_poll_reads_authoritative_revision_without_ui_request_identity
         present["result"]["structuredContent"]["output"]["goal_plan"]["revision"],
         1
     );
+    assert_eq!(
+        present["result"]["structuredContent"]["output"]["goal_plan"]["version"],
+        2
+    );
+    assert_eq!(
+        present["result"]["structuredContent"]["output"]["goal_plan"]["activity"]["available"],
+        false
+    );
+    assert_eq!(
+        present["result"]["structuredContent"]["output"]["goal_plan"]["activity"]["state"],
+        "unobserved"
+    );
+    assert!(
+        present["result"]["structuredContent"]["output"]["goal_plan"]["activity"]
+            ["last_seen_at_ms"]
+            .is_null()
+    );
 
     // App polling must not rely on the initiating tools/list/call carrying UI capability
     // metadata. Exact Goal identity plus the caller's normal Goal authority is sufficient.
@@ -341,6 +358,10 @@ async fn goal_plan_poll_reads_authoritative_revision_without_ui_request_identity
     assert_eq!(
         poll["result"]["structuredContent"]["output"]["goal_plan"]["revision"],
         1
+    );
+    assert_eq!(
+        poll["result"]["structuredContent"]["output"]["goal_plan"]["activity"]["available"],
+        false
     );
     assert_eq!(
         runtime.get_goal(Some(&bob), goal_id.clone()).output["goal"]["summary"]["revision"],

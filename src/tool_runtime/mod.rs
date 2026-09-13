@@ -96,7 +96,7 @@ mod tool_spec;
 mod validation_events;
 pub(crate) mod validation_parser;
 pub(crate) mod validation_profile;
-mod window_activity;
+pub(crate) mod window_activity;
 mod work_result;
 pub(crate) use window_activity::{ActiveWindowRequest, MAX_ACTIVE_REQUESTS_PER_WINDOW};
 

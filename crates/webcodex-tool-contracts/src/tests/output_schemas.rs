@@ -121,6 +121,56 @@ fn agent_continuation_projection_schema_requires_strict_nullable_restart_recover
 }
 
 #[test]
+fn goal_plan_activity_schema_is_bounded_soft_and_payload_free() {
+    let schema = output_schema_for_tool("present_goal_plan");
+    let plan = &schema["properties"]["output"]["properties"]["goal_plan"];
+    assert_eq!(plan["properties"]["version"]["const"], 2);
+    assert!(plan["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|field| field == "activity"));
+    let activity = &plan["properties"]["activity"];
+    assert_eq!(activity["additionalProperties"], false);
+    assert_eq!(
+        activity["properties"]["idle_threshold_ms"]["const"],
+        300_000
+    );
+    assert_eq!(
+        activity["properties"]["state"]["enum"],
+        json!(["active", "attention_needed", "unobserved", "not_applicable"])
+    );
+    let linked = activity["properties"]["linked_window_count"]["anyOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|variant| variant["type"] == "integer")
+        .unwrap();
+    assert_eq!(linked["maximum"], 16);
+    let active = activity["properties"]["active_meaningful_request_count"]["anyOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|variant| variant["type"] == "integer")
+        .unwrap();
+    assert_eq!(active["maximum"], 64);
+    let encoded = activity.to_string();
+    for forbidden in [
+        "client_window_key",
+        "openai/session",
+        "tool_arguments",
+        "tool_outputs",
+        "attempt_fence",
+        "consume_token",
+    ] {
+        assert!(
+            !encoded.contains(forbidden),
+            "activity schema leaked {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn git_diff_hunks_output_schema_keeps_page_and_model_budgets_distinct() {
     let specs = registered_tool_specs();
     let spec = spec_named(&specs, "git_diff_hunks");

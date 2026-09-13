@@ -16,6 +16,8 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
 .meta { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 14px; font-size: 12px; color: color-mix(in srgb, CanvasText 72%, transparent); }
 .meta b { color: CanvasText; font-weight: 600; }
 .status { min-height: 1.4em; font-size: 11px; color: color-mix(in srgb, CanvasText 60%, transparent); }
+.activity { padding: 7px 9px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); border-radius: 7px; font-size: 12px; color: color-mix(in srgb, CanvasText 76%, transparent); }
+.activity-attention_needed { border-style: dashed; color: CanvasText; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -29,6 +31,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     <span>Revision <b id="revision">—</b></span>
     <span>Updated <b id="updated">—</b></span>
   </div>
+  <div id="activity" class="activity" hidden></div>
   <div id="status" class="status">Initializing…</div>
 </main>
 <script>
@@ -37,6 +40,8 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
   const GOAL_ID = /^wc_goal_[0-9a-f]{32}$/;
   const APP_PROTOCOL = "2026-01-26";
   const LIFECYCLES = new Set(["active", "completed", "cancelled"]);
+  const ACTIVITY_STATES = new Set(["active", "attention_needed", "unobserved", "not_applicable"]);
+  const ACTIVITY_IDLE_THRESHOLD_MS = 300000;
   const POLL_MS = 3000;
   const CALL_TIMEOUT_MS = 10000;
   let nextId = 1;
@@ -84,9 +89,26 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     return true;
   }
 
+  function nullableSafeInteger(value) {
+    return value === null || Number.isSafeInteger(value);
+  }
+
+  function validActivity(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    if (typeof value.available !== "boolean" || !ACTIVITY_STATES.has(value.state)) return false;
+    if (value.idle_threshold_ms !== ACTIVITY_IDLE_THRESHOLD_MS || typeof value.coverage_partial !== "boolean") return false;
+    for (const key of ["last_seen_at_ms", "last_meaningful_activity_at_ms", "quiet_for_ms"]) {
+      if (!nullableSafeInteger(value[key]) || (value[key] !== null && value[key] < 0 && key === "quiet_for_ms")) return false;
+    }
+    if (!(value.linked_window_count === null || (Number.isSafeInteger(value.linked_window_count) && value.linked_window_count >= 0 && value.linked_window_count <= 16))) return false;
+    if (!(value.active_meaningful_request_count === null || (Number.isSafeInteger(value.active_meaningful_request_count) && value.active_meaningful_request_count >= 0 && value.active_meaningful_request_count <= 64))) return false;
+    if (!value.available && [value.last_seen_at_ms, value.last_meaningful_activity_at_ms, value.quiet_for_ms, value.linked_window_count, value.active_meaningful_request_count].some(v => v !== null)) return false;
+    return true;
+  }
+
   function validPlan(value) {
     if (!value || typeof value !== "object") return null;
-    if (value.version !== 1 || !validGoalId(value.goal_id)) return null;
+    if (value.version !== 2 || !validGoalId(value.goal_id)) return null;
     if (typeof value.title !== "string" || Array.from(value.title).length < 1 || Array.from(value.title).length > 200) return null;
     if (typeof value.objective !== "string" || utf8Encoder.encode(value.objective).length < 1 || utf8Encoder.encode(value.objective).length > 8192) return null;
     if (!LIFECYCLES.has(value.lifecycle) || !Number.isSafeInteger(value.revision) || value.revision < 1) return null;
@@ -95,6 +117,9 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     for (const key of ["agent_task_count", "workflow_session_count"]) {
       if (!Number.isSafeInteger(value[key]) || value[key] < 0 || value[key] > 64) return null;
     }
+    if (!validActivity(value.activity)) return null;
+    if (value.lifecycle === "active" && value.activity.state === "not_applicable") return null;
+    if (value.lifecycle !== "active" && value.activity.state !== "not_applicable") return null;
     return value;
   }
 
@@ -119,6 +144,48 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     return value === "active" ? "Active" : value === "completed" ? "Completed" : "Cancelled";
   }
 
+  function formatQuiet(ms) {
+    if (!Number.isSafeInteger(ms) || ms < 0) return "an unknown interval";
+    if (ms < 60000) return "less than 1m";
+    const minutes = Math.floor(ms / 60000);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
+  }
+
+  function renderActivity(activity) {
+    const node = el("activity");
+    node.hidden = false;
+    node.className = `activity activity-${activity.state}`;
+    if (activity.state === "not_applicable") {
+      node.textContent = "Window activity observation is not applicable to this terminal Goal.";
+      return;
+    }
+    if (!activity.available) {
+      node.textContent = "Window activity observation unavailable.";
+      return;
+    }
+    if (activity.state === "unobserved") {
+      node.textContent = activity.coverage_partial
+        ? "Window activity evidence is partial; no inactivity conclusion is safe."
+        : "No observable correlated Window activity yet.";
+      return;
+    }
+    if (activity.state === "active") {
+      node.textContent = (activity.active_meaningful_request_count || 0) > 0
+        ? "Meaningful WebCodex work is currently running."
+        : "Meaningful WebCodex activity was observed recently.";
+      return;
+    }
+    const quiet = formatQuiet(activity.quiet_for_ms);
+    node.textContent = activity.last_seen_at_ms !== null
+      && activity.last_meaningful_activity_at_ms !== null
+      && activity.last_seen_at_ms > activity.last_meaningful_activity_at_ms
+      ? `Window still recently observed; no meaningful WebCodex work for ${quiet}. This Goal may need attention.`
+      : `No meaningful WebCodex activity for ${quiet}. This Goal may need attention.`;
+  }
+
   function render(plan) {
     if (tornDown) return;
     el("title").textContent = plan.title;
@@ -130,6 +197,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     const date = new Date(plan.updated_at_unix_ms);
     el("updated").textContent = Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
     el("meta").hidden = false;
+    renderActivity(plan.activity);
     if (hostInitialized) showTrackingStatus();
   }
 
@@ -154,13 +222,12 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
       const response = await send("tools/call", { name: "goal_plan_state", arguments: { goal_id: goalId } });
       const plan = extractPlan(response);
       if (!plan || !acceptIdentity(plan.goal_id)) throw new Error("Invalid Goal Plan state");
-      if (plan.revision > lastRevision) {
-        lastRevision = plan.revision;
-        lastLifecycle = plan.lifecycle;
-        render(plan);
-      } else if (plan.revision === lastRevision && plan.lifecycle === "active" && el("status").textContent === "State refresh pending") {
-        el("status").textContent = "Tracking authoritative Goal state";
+      if (plan.revision < lastRevision || (plan.revision === lastRevision && lastLifecycle !== null && plan.lifecycle !== lastLifecycle)) {
+        throw new Error("Stale or inconsistent Goal Plan state");
       }
+      lastRevision = plan.revision;
+      lastLifecycle = plan.lifecycle;
+      render(plan);
       if (isTerminal()) stopPolling();
     } catch (_) {
       if (!tornDown) el("status").textContent = "State refresh pending";
@@ -189,7 +256,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     if (tornDown) return;
     const plan = extractPlan(result);
     if (!plan || !acceptIdentity(plan.goal_id)) return;
-    if (plan.revision > lastRevision) {
+    if (plan.revision >= lastRevision && (lastLifecycle === null || plan.revision > lastRevision || plan.lifecycle === lastLifecycle)) {
       lastRevision = plan.revision;
       lastLifecycle = plan.lifecycle;
       render(plan);

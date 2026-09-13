@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use super::tool_result::{RecoveryKind, ToolResult};
 use super::{runner_project_runtime_id, ToolRuntime};
-use crate::auth::AuthContext;
+use crate::auth::{AuthContext, SCOPE_PROJECT_READ};
 use crate::runner_http::{RunnerFeature, RunnerSemanticView};
 use crate::runner_protocol::{RunnerProjectSummary, RUNNER_CAPABILITY_PROJECT_PATH_REGISTRATION};
 
@@ -160,6 +160,41 @@ impl ToolRuntime {
             .await;
         self.list_projects_from_semantic_clients(auth, &options, query.as_deref(), limit, &clients)
             .await
+    }
+
+    /// Reuse the canonical Runner/project visibility projection for an exact
+    /// Project id without dispatching a model-visible tool. This is an
+    /// observability fence only: it grants no Project authority and callers
+    /// must still hold `project:read` explicitly.
+    pub(crate) async fn exact_project_visible_to_auth(
+        &self,
+        auth: &AuthContext,
+        project: &str,
+    ) -> bool {
+        if !auth.has_scope(SCOPE_PROJECT_READ) {
+            return false;
+        }
+        let result = self
+            .list_projects_with_options(
+                Some(auth),
+                ListProjectsOptions {
+                    project: Some(project.to_string()),
+                    limit: Some(1),
+                    summary_only: true,
+                    ..ListProjectsOptions::default()
+                },
+            )
+            .await;
+        result.success
+            && result
+                .output
+                .get("projects")
+                .and_then(Value::as_array)
+                .is_some_and(|projects| {
+                    projects
+                        .iter()
+                        .any(|value| value.get("id").and_then(Value::as_str) == Some(project))
+                })
     }
 
     #[cfg(test)]

@@ -3,11 +3,24 @@ import assert from "node:assert/strict";
 import { app, flush, toolResult } from "./app_test_support.mjs";
 
 const plan = {
-  version: 1, goal_id: `wc_goal_${"1".repeat(32)}`, title: "Ship Goal",
+  version: 2, goal_id: `wc_goal_${"1".repeat(32)}`, title: "Ship Goal",
   objective: "Review and validate the Goal flow", lifecycle: "active", revision: 1,
   updated_at_unix_ms: 1000, terminal_at_unix_ms: null,
   agent_task_count: 0, workflow_session_count: 0,
+  activity: {
+    available: true, state: "active", idle_threshold_ms: 300000,
+    last_seen_at_ms: 1000, last_meaningful_activity_at_ms: 1000, quiet_for_ms: 0,
+    linked_window_count: 1, active_meaningful_request_count: 0, coverage_partial: false,
+  },
 };
+const terminalPlan = (revision = 2) => ({
+  ...plan, lifecycle: "completed", revision, terminal_at_unix_ms: 2000,
+  activity: {
+    available: false, state: "not_applicable", idle_threshold_ms: 300000,
+    last_seen_at_ms: null, last_meaningful_activity_at_ms: null, quiet_for_ms: null,
+    linked_window_count: null, active_meaningful_request_count: null, coverage_partial: false,
+  },
+});
 const input = { goal_id: plan.goal_id };
 
 for (const outcome of ["success", "error", "timeout"]) {
@@ -32,10 +45,9 @@ for (const outcome of ["success", "error", "timeout"]) {
         assert.equal(view.calls("goal_plan_state").length, 1);
         await view.fireTimers(3000);
         assert.equal(view.calls("goal_plan_state").length, 2);
-        await view.reply(view.calls("goal_plan_state")[1], toolResult({ goal_plan: {
-          ...plan, lifecycle: "completed", revision: 2, terminal_at_unix_ms: 2000,
-        } }));
+        await view.reply(view.calls("goal_plan_state")[1], toolResult({ goal_plan: terminalPlan() }));
         assert.equal(view.nodes.lifecycle.textContent, "Completed");
+        assert.equal(view.nodes.activity.textContent, "Window activity observation is not applicable to this terminal Goal.");
         assert.equal(view.timers.size, 0);
       }
     });
@@ -204,15 +216,47 @@ for (const outcome of ["success", "error", "timeout"]) {
   }
 }
 
+test("Goal activity refreshes on the same authoritative revision in both directions", async () => {
+  const view = app("mcp_goal_plan_app.html");
+  await view.initialize();
+  view.toolResult({ goal_plan: plan });
+  assert.match(view.nodes.activity.textContent, /observed recently/);
+  assert.equal(view.nodes.revision.textContent, "1");
+
+  await view.fireTimers(3000);
+  const attention = {
+    ...plan,
+    activity: {
+      ...plan.activity,
+      state: "attention_needed",
+      last_seen_at_ms: 480000,
+      last_meaningful_activity_at_ms: 1000,
+      quiet_for_ms: 480000,
+    },
+  };
+  await view.reply(view.calls("goal_plan_state").at(-1), toolResult({ goal_plan: attention }));
+  assert.match(view.nodes.activity.textContent, /Window still recently observed/);
+  assert.match(view.nodes.activity.textContent, /may need attention/);
+  assert.equal(view.nodes.revision.textContent, "1");
+
+  await view.fireTimers(3000);
+  const running = {
+    ...plan,
+    activity: { ...plan.activity, active_meaningful_request_count: 1 },
+  };
+  await view.reply(view.calls("goal_plan_state").at(-1), toolResult({ goal_plan: running }));
+  assert.equal(view.nodes.activity.textContent, "Meaningful WebCodex work is currently running.");
+  assert.equal(view.nodes.revision.textContent, "1");
+  assert.equal(view.timers.size, 1);
+});
+
 test("terminal Goal stays terminal and stops polling after late active results and visibility changes", async () => {
   const view = app("mcp_goal_plan_app.html");
   await view.initialize();
   view.toolResult({ goal_plan: plan });
   await view.fireTimers(3000);
   const request = view.calls("goal_plan_state").at(-1);
-  await view.reply(request, toolResult({ goal_plan: {
-    ...plan, lifecycle: "completed", revision: 2, terminal_at_unix_ms: 2000,
-  } }));
+  await view.reply(request, toolResult({ goal_plan: terminalPlan() }));
   view.toolResult({ goal_plan: plan });
   await view.fireTimers(3000);
   await view.visibility(false);
