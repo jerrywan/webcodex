@@ -134,13 +134,23 @@ canonical Runtime surface是 `List / Resolve / Read`，Management surface是 `Ve
 
 本阶段明确没有 cache、persistent reverse index、数据库表、background refresh、source priority/shadowing或 partial catalog success。旧 `ConfiguredSkillRootsRequest` family、旧 read-side `SkillStoreRequest::{ListActive,Read}`、旧两个wire kind、三个旧capability与compatibility-only enqueue wrappers/tests均已删除；不维持尚未形成真实用户负担的Runner/Server交叉版本适配层。
 
-### C. 区分仓库知识身份与执行 worktree 身份（P1 产品设计）
+### C. 区分仓库知识身份与执行 worktree 身份（Stage 4A1 foundation 已建立）
 
-当前隔离有理由：新 managed worktree 是普通新 Project，Memory scope 不等于主工作区；Plugin 的 cwd 也不会自动指向新 worktree。因此同仓库分析中看到空目录，不一定是 provider 不工作。
+当前隔离继续保留：managed worktree 仍是独立 execution Project，自己的 `ProjectConfig.path`、file/patch authority、Session Project guard、Plugin cwd/binding、LSP root、artifact root、Runner operation target 与 Job/process authority 都指向 target worktree。Repository knowledge association 是另一条只读描述关系，不会改写这些 execution facts；现有 `repository_identity` 仍由 target execution root 计算，没有被偷偷改成 source repository identity。
 
-可以增加显式、只读的知识关联，例如“本 worktree 可引用 source repository 的指定 Memory/Skill 快照”。它应包含来源、引用版本、适用范围、撤销/失效及审计；读取源知识仍须授权。不应仅凭相同 Git remote URL 判定同一仓库，也不能顺带继承主工作区写权限、Session guard 或 Plugin 执行 cwd。
+Stage 4A1 把关联的 authoritative owner 放在 Runner project registry，而不是 Server DB。原因是 managed-worktree 的 `managed_source`、`managed_base_sha`、managed lifecycle 与 Project root canonicalization 本来就由 owning Runner 创建并持久化；Runner 也是唯一能在创建时用自己的 canonical registry 精确回答“这个 source root 当前对应哪个 Runner Project”的组件。Server 只消费 `RunnerProjectSummary.lineage` 的 typed projection，不再建立第二份 lineage truth，也没有新增 SQLite table、migration、background reconciler 或 cache。
 
-这属于可选新能力，不能冒充纯重构。首先改善解释性诊断：资源属于哪里，为什么在当前 worktree 不出现，以及应在何处配置；不枚举用户无权得知的资源。
+canonical lineage 是 closed `RunnerProjectLineage::ManagedWorktreeSource`。新 managed record 除原有 `managed_source` 与 `managed_base_sha` 外，还持久化 `managed_source_project_id` 与 `managed_source_root_fingerprint`；只有这两个新字段同时存在时才产生 knowledge association。source Project identity 是 **exact Runner Project id + independent root fingerprint** 的组合：project id 防止 path-only 猜测，root fingerprint 防止 project id 被 unregister 后重新注册到另一个 root 时 silent retarget。fingerprint 使用独立 domain `webcodex-project-root-identity-v1` 与 `wc_projroot_` 前缀，并复用 Runner config 已有 `normalize_path_identity` 的平台 path semantics；它不是 Memory scope fingerprint 类型，也不会进入 model-facing metadata。
+
+新 managed worktree 创建要求 source checkout 已经在同一 Runner registry 中以唯一、enabled Project 存在；Git remote、仓库名、basename、Git config、`registration_source` 或“看起来像 worktree”的路径都不会建立 association。带显式 lineage 的 resume 重新解析同一 source root，并验证 persisted source Project id 与 root fingerprint 都仍相同；任一变化都 fail closed。旧 managed record若只有 `managed_source` 而没有新 authoritative pair，仍可按原 execution 语义存在/恢复，但 `lineage=None`，不会通过 heuristic 自动升级。
+
+Server `ResolvedProject` 只增加独立 `knowledge_association` descriptor；source path绝不塞入 `ProjectConfig`。canonical resolver `resolve_project_knowledge_source_for_auth` 每次使用都重新观察 target owning Runner、要求当前 project inventory `complete`、按 exact source id 取 source、要求 source enabled且 current root fingerprint 与 persisted identity 相同，然后再次走普通 `resolve_project_input_for_auth`。association 不是 capability token，也不缓存一次成功的 authorization。当前 Project authority主要由 Runner/project visibility表达；如果以后增加更细粒度 Project ACL，这个重复走 canonical source resolution 的边界会自然继承它，而不是引入 `knowledge_read_scope` 绕开现有权限。
+
+resolution 语义刻意把“association存在”与“source当前可用”分开：普通 Project是 `NotAssociated`；Runner offline、inventory incomplete、source missing/disabled、source root identity不可证明或 caller无当前 source authority都是 `Unavailable`；source id相同但root fingerprint改变是 `Stale`；只有全部 current checks通过才是 `Available`。`Unavailable/Stale` 只使 source knowledge unavailable，不会让 target Project 本身停止普通 coding、改变 cwd 或丢失自己的权限。诊断层在有 association 时才投影；available 可显示 caller已经有权看到的 source runtime Project id和创建时 `base_sha`，unavailable/unauthorized 不显示 source id，所有状态都不输出 absolute source path、root fingerprint、managed operation id，且明确 `read_through=false`。
+
+`managed_base_sha` 只证明“这个 managed worktree 最初从 source repository 的哪个 Git commit 创建”。它不证明 Memory snapshot、Skill catalog/content revision、Plugin revision 或统一 Knowledge revision。Memory 是独立 durable mutable state，Project Skill 当前是 live filesystem knowledge；真正 snapshot若未来需要，必须分别使用各领域自己的 catalog/content revision 或 Git object read，不能把 base SHA提升成跨资源 authority/version。
+
+Stage 4A1 因此只建立 lineage、current authorization resolution、失效语义和 path-safe diagnostics。Memory 与 Project Skill 的 read-through 延到 Stage 4A2 分别设计：Memory仍需解决 target/source scope、只读 source、key conflict、catalog revision 与 source mutation；Project Skill仍需解决 target/source/Runner-local uniqueness、definition revision、read pin 与 opaque-id collision。Runner Skill本来就是 Runner-local，不经 repository association重复继承；Plugin有 execution/cwd semantics，明确不从 association继承。
 
 ### D. ToolRuntime 是逐渐膨胀的组合对象（P2，维护风险）
 
@@ -237,11 +247,14 @@ Plugin 已有 `NotStarted / OutcomeUnknown / Completed`，见 [plugin.rs](../../
 | 0，本轮 | 启动目录投影的小型复用、基线表征测试、本文 | JSON 形状、顺序、hint、预算、来源发现和权限均不改 | 新旧 JSON oracle 对照，空/不可用/上游截断、Unicode/转义、超大条目；既有 startup 测试 |
 | 1，后续已完成 | 扩展家族 admission 声明归 ToolDefinition；Runner Skill provider enqueue typed error 小切片 | 外部错误、scope、surface、direct/gateway 语义不改 | family/registry invariant、ModelHidden invariant、surface/principal focused tests、typed-to-legacy error-kind 对照 |
 | 2，后续已完成 | Skill catalog observer / known-id exact resolver 分离；Configured + Managed 收敛到一个 Runner Skill runtime/management boundary | opaque identity、Project authority、请求时授权、catalog 完整语义、management outcome-unknown、revision/race 语义不改 | before/after request fanout、canonical wire/capability inventory、duplicate target、source unavailable、source identity race、revision race、configured identity-first scan tests |
-| 3A，本轮 | Store connection contention observability baseline：closed-domain acquisition count、lock wait、connection hold | DB authority、schema、transaction/CAS/replay、poison 与 async execution model 均不改 | observer primitive tests、production raw-lock invariant、representative store behavior；dogfood 后聚合 p50/p95 |
+| 3A，已完成 | Store connection contention observability baseline：closed-domain acquisition count、lock wait、connection hold | DB authority、schema、transaction/CAS/replay、poison 与 async execution model 均不改 | observer primitive tests、production raw-lock invariant、representative store behavior；dogfood 后聚合 p50/p95 |
 | 3B，仅实测需要时 | 有证据驱动的 critical-section 缩短、bounded blocking worker / DB actor 或 fenced cache | 未知结果、事务、重放、authority 与 revision 语义不改 | 与 3A 实际 workload 基线比较 p50/p95、cross-domain wait、hold share、资源上限和故障注入；无证据则不实施 |
-| 4，独立功能设计 | 用户私有命名空间、显式仓库知识复用、统一资源浏览界面 | 不隐式继承权限，不改变执行 cwd | principal 隔离、分享撤销、worktree 来源、冲突展示与迁移方案 |
+| 4A1，本轮 | Repository knowledge association foundation：Runner-owned managed lineage、current source identity/authorization resolver、path-safe diagnostics | target execution Project、cwd、Session、Plugin、permission、repository identity 均不改；无 resource read-through | managed creation/resume lineage、inventory corruption、source id/root drift、incomplete inventory、unauthorized privacy、target execution independence |
+| 4A2，后续 | Resource-specific read-through：Memory / Project Skill 分别设计 | source只读；Runner Skill与Plugin不经 repository association继承 | Memory scope/CAS/catalog revision；Project Skill uniqueness/definition revision/read pin分别验收 |
+| 4B，后续 | User-private namespace / sharing | 不从 repository association 推导用户 sharing ACL | principal隔离、授权/撤销、可见性与迁移 |
+| 4C，后续 | Unified resource browser | browser只消费各领域 canonical facts，不成为执行/授权事实 | completeness、冲突、来源、分页与privacy projection |
 
-区分纯重构和新增功能很重要：共同描述结构可以先不改变任何用户功能；跨 worktree 共享或 user namespace 一定要另行定义产品行为。阶段 4 不应成为阶段 1/2 的前提。
+区分 foundation 与 read-through 同样重要：Stage 4A1 只回答 association identity、current availability、authorization 与 diagnostics，不让 `memory_*`、Project `skill_*`、Plugin 或 Runner Skill自动跨 source。真正跨 worktree 的知识读取和 user namespace 仍是独立产品行为，必须各自定义 conflict/revision/revocation 语义；Stage 4也不反向成为Stage 1/2/3的前提。
 
 阶段 2 已按这些前置条件落地：`skill_read_file` 不再调用完整 `discover_skills`。Project exact probe继续使用 bounded package identities；Runner-local exact probe只发一个 canonical `RunnerSkillRequest::Resolve`，由 Runner内部同时判断 configured/managed membership，再用 source-pinned `Read`读取实际资源。所有 applicable authority source都参与 target uniqueness证明；unsupported `skill_runtime`时Project-only target仍可工作，capability适用但source uncertainty或target ambiguity时继续fail closed。Configured resolver不为unrelated packages读取定义；Managed仍通过 `list_skill_keys()`做 O(N) opaque-id scan，尚未声称O(1)。完整 catalog observer继续独立承担Project+Runner duplicate-id、name conflict、catalog revision、diagnostics/truncation；Runner-local List内部再承担Configured+Managed duplicate-id fail-close。后续若实测需要优化managed key scan，应另行设计与store lifecycle一致的reverse mapping，而不是在本阶段偷加cache/index。
 
