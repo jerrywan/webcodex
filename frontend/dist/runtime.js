@@ -2425,6 +2425,143 @@ function formatRuntimeOverviewMetrics(data, language) {
     };
 }
 
+function operationKey(prefix) {
+    const random = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+    return prefix + "-" + random;
+}
+function idempotencyKeyFor(pending, fingerprint, prefix) {
+    return pending && pending.fingerprint === fingerprint
+        ? pending
+        : { fingerprint, key: operationKey(prefix) };
+}
+function formatCommunicationAvailability(readAvailable, manageAvailable, language) {
+    const available = readAvailable !== false;
+    if (readAvailable === null) {
+        return language === "zh-CN" ? "正在检查 communication:read…" : "communication:read checking…";
+    }
+    if (!available) {
+        return language === "zh-CN" ? "communication:read 不可用" : "communication:read unavailable";
+    }
+    return ("communication:read" +
+        (manageAvailable === false
+            ? language === "zh-CN"
+                ? " · 只读"
+                : " · read only"
+            : language === "zh-CN"
+                ? " · 当前视图每 30 秒刷新 · 端点租约每 30 秒续期"
+                : " · 30s refresh while visible · 30s endpoint lease renewal"));
+}
+function formatAgentCardRevision(agent, language) {
+    return ((language === "zh-CN" ? "配置版本 " : "Profile revision ") +
+        String(agent?.profile_revision || 0) +
+        (language === "zh-CN" ? " · 控制器代数 " : " · controller generation ") +
+        String(agent?.current_controller_generation || 0) +
+        (language === "zh-CN" ? " · 更新于 " : " · updated ") +
+        formatCommunicationTime(agent?.updated_at_unix_ms, language));
+}
+function formatAgentWakeStatus(agent, language) {
+    const unresolvedWakeCount = Number(agent?.unresolved_wake_count || 0);
+    const latestWakeState = String(agent?.latest_wake_state || "none");
+    return (localizedCountLabel(unresolvedWakeCount, "unresolved Wake", "unresolved Wakes", language) +
+        (language === "zh-CN" ? " · 最近状态 " : " · latest ") +
+        translateText(latestWakeState, language) +
+        (language === "zh-CN"
+            ? " · 收件箱投递与唤醒消费彼此独立"
+            : " · Inbox Delivery and Wake consumption remain independent"));
+}
+function formatAgentEndpointStatus(endpoint, language) {
+    if (!endpoint) {
+        return language === "zh-CN"
+            ? "此窗口尚未作为该 Agent。Agent 卡片、对话、收件箱投递和唤醒意图仍会持久保留。"
+            : "This window is not acting as the Agent. Agent Card, Conversations, Inbox deliveries, and Wake Intents remain durable.";
+    }
+    return ((language === "zh-CN" ? "浏览器端点 " : "Browser Endpoint ") +
+        endpoint.endpoint_id +
+        " · " +
+        translateText(endpoint.lifecycle, language) +
+        (language === "zh-CN" ? " · 代数 " : " · generation ") +
+        String(endpoint.controller_generation) +
+        (language === "zh-CN" ? " · 租约至 " : " · lease ") +
+        formatCommunicationTime(endpoint.lease_expires_at_unix_ms, language) +
+        (language === "zh-CN"
+            ? " · 运行控制台适配器：仅轮询（运行时可唤醒："
+            : " · Runtime Console adapter: polling only (runtime wake capable: ") +
+        String(endpoint.wake_capable) +
+        ")");
+}
+function formatConversationSeq(summary, detail, language) {
+    return ((language === "zh-CN" ? "序号 " : "seq ") +
+        String(summary?.last_seq || 0) +
+        " · " +
+        localizedCountLabel(summary?.message_count, "message", "messages", language) +
+        (Number(detail?.after_seq || 0) > 0 || detail?.truncated
+            ? language === "zh-CN"
+                ? " · 最近有界页面"
+                : " · recent bounded page"
+            : ""));
+}
+function validateAgentCreateInputs(handle, displayName, description, labelsRaw) {
+    const cleanHandle = handle.trim();
+    const cleanName = displayName.trim();
+    const cleanDescription = description.trim();
+    const labels = parseAgentIds(labelsRaw);
+    if (!cleanHandle || !cleanName) {
+        return { valid: false, error: "Handle and display name are required." };
+    }
+    const fingerprint = JSON.stringify({
+        handle: cleanHandle,
+        displayName: cleanName,
+        description: cleanDescription,
+        labels,
+    });
+    return {
+        valid: true,
+        data: {
+            handle: cleanHandle,
+            displayName: cleanName,
+            description: cleanDescription,
+            labels,
+            fingerprint,
+        },
+    };
+}
+function validateAgentUpdateInputs(handle, displayName, description, labelsRaw) {
+    const cleanHandle = handle.trim();
+    const cleanName = displayName.trim();
+    const cleanDescription = description.trim();
+    const specialtyLabels = parseAgentIds(labelsRaw);
+    if (!cleanHandle || !cleanName) {
+        return { valid: false, error: "Handle and display name are required." };
+    }
+    return {
+        valid: true,
+        data: {
+            handle: cleanHandle,
+            displayName: cleanName,
+            description: cleanDescription,
+            specialtyLabels,
+        },
+    };
+}
+function validateConversationCreateInputs(title, agentIdsRaw, defaultAgentId = "") {
+    const cleanTitle = title.trim();
+    const agentIds = parseAgentIds(agentIdsRaw || defaultAgentId);
+    if (agentIds.length === 0) {
+        return { valid: false, error: "At least one Agent id is required." };
+    }
+    const fingerprint = JSON.stringify({ title: cleanTitle, agentIds: [...agentIds].sort() });
+    return {
+        valid: true,
+        data: {
+            title: cleanTitle,
+            agentIds,
+            fingerprint,
+        },
+    };
+}
+
 const RUNTIME_ICON_PATHS = {
     folder: ["M3 6h7l2 2h9v10H3V6Z"],
     monitor: ["M4 5h16v12H4V5Z", "M8 21h8", "M12 17v4"],
@@ -5031,12 +5168,6 @@ async function postHumanCollaborationMessage(event) {
     setText("runtime-message-send-status", tr("Sent."));
     renderCollaboration();
 }
-function operationKey(prefix) {
-    const random = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
-    return prefix + "-" + random;
-}
 function communicationTimeLabel(value) {
     return formatCommunicationTime(value, runtimeLanguage);
 }
@@ -5054,11 +5185,6 @@ function communicationEndpoint(agentId = selectedCommunicationAgentId) {
 }
 function communicationEndpointId(agentId = selectedCommunicationAgentId) {
     return communicationEndpoint(agentId)?.endpoint_id || "";
-}
-function idempotencyKeyFor(pending, fingerprint, prefix) {
-    return pending && pending.fingerprint === fingerprint
-        ? pending
-        : { fingerprint, key: operationKey(prefix) };
 }
 function resetCommunicationSurface() {
     communicationGeneration += 1;
@@ -5107,14 +5233,7 @@ function renderCommunicationAvailability() {
     const available = communicationReadAvailable !== false;
     show("runtime-communication-unavailable", !available);
     show("runtime-communication-surface", available);
-    const access = communicationReadAvailable === null
-        ? (runtimeLanguage === "zh-CN" ? "正在检查 communication:read…" : "communication:read checking…")
-        : available
-            ? "communication:read" + (communicationManageAvailable === false
-                ? (runtimeLanguage === "zh-CN" ? " · 只读" : " · read only")
-                : (runtimeLanguage === "zh-CN" ? " · 当前视图每 30 秒刷新 · 端点租约每 30 秒续期" : " · 30s refresh while visible · 30s endpoint lease renewal"))
-            : (runtimeLanguage === "zh-CN" ? "communication:read 不可用" : "communication:read unavailable");
-    setText("runtime-communication-status", access);
+    setText("runtime-communication-status", formatCommunicationAvailability(communicationReadAvailable, communicationManageAvailable, runtimeLanguage));
 }
 function renderCommunicationAgents() {
     setText("runtime-communication-count", countLabel(communicationAgents.length, "Agent"));
@@ -5145,9 +5264,7 @@ function renderCommunicationAgentCard() {
     setText("runtime-agent-card-name", String(agent.display_name || agent.handle || tr("Agent Card")) + " · @" + String(agent.handle || "agent"));
     setText("runtime-agent-card-id", agentId);
     setText("runtime-agent-card-description", String(agent.description || tr("No description.")));
-    setText("runtime-agent-card-revision", (runtimeLanguage === "zh-CN" ? "配置版本 " : "Profile revision ") + String(agent.profile_revision || 0)
-        + (runtimeLanguage === "zh-CN" ? " · 控制器代数 " : " · controller generation ") + String(agent.current_controller_generation || 0)
-        + (runtimeLanguage === "zh-CN" ? " · 更新于 " : " · updated ") + communicationTimeLabel(agent.updated_at_unix_ms));
+    setText("runtime-agent-card-revision", formatAgentCardRevision(agent, runtimeLanguage));
     setText("runtime-agent-unread", countLabel(agent.queued_delivery_count, "queued"));
     const labels = el("runtime-agent-card-labels");
     clearNode(labels);
@@ -5156,11 +5273,7 @@ function renderCommunicationAgentCard() {
             appendChip(labels, String(label));
         }
     }
-    const unresolvedWakeCount = Number(agent.unresolved_wake_count || 0);
-    const latestWakeState = String(agent.latest_wake_state || "none");
-    setText("runtime-agent-wake-status", countLabel(unresolvedWakeCount, "unresolved Wake")
-        + (runtimeLanguage === "zh-CN" ? " · 最近状态 " : " · latest ") + tr(latestWakeState)
-        + (runtimeLanguage === "zh-CN" ? " · 收件箱投递与唤醒消费彼此独立" : " · Inbox Delivery and Wake consumption remain independent"));
+    setText("runtime-agent-wake-status", formatAgentWakeStatus(agent, runtimeLanguage));
     const updateForm = el("runtime-agent-update-form");
     const revision = String(agent.profile_revision || 0);
     if (updateForm && (updateForm.dataset.agentId !== agentId
@@ -5185,16 +5298,7 @@ function renderCommunicationAgentCard() {
         setText("runtime-agent-update-status", "");
     }
     const endpoint = communicationEndpoint(agentId);
-    setText("runtime-agent-endpoint-status", endpoint
-        ? (runtimeLanguage === "zh-CN" ? "浏览器端点 " : "Browser Endpoint ") + endpoint.endpoint_id
-            + " · " + tr(endpoint.lifecycle)
-            + (runtimeLanguage === "zh-CN" ? " · 代数 " : " · generation ") + String(endpoint.controller_generation)
-            + (runtimeLanguage === "zh-CN" ? " · 租约至 " : " · lease ") + communicationTimeLabel(endpoint.lease_expires_at_unix_ms)
-            + (runtimeLanguage === "zh-CN" ? " · 运行控制台适配器：仅轮询（运行时可唤醒：" : " · Runtime Console adapter: polling only (runtime wake capable: ")
-            + String(endpoint.wake_capable) + ")"
-        : (runtimeLanguage === "zh-CN"
-            ? "此窗口尚未作为该 Agent。Agent 卡片、对话、收件箱投递和唤醒意图仍会持久保留。"
-            : "This window is not acting as the Agent. Agent Card, Conversations, Inbox deliveries, and Wake Intents remain durable."));
+    setText("runtime-agent-endpoint-status", formatAgentEndpointStatus(endpoint, runtimeLanguage));
     show("runtime-agent-attach", !endpoint);
     show("runtime-agent-detach", !!endpoint);
 }
@@ -5228,7 +5332,7 @@ function renderCommunicationConversation() {
         return;
     setText("runtime-conversation-name", String(summary.title || tr("Untitled Conversation")));
     setText("runtime-conversation-id", String(summary.conversation_id || ""));
-    setText("runtime-conversation-seq", (runtimeLanguage === "zh-CN" ? "序号 " : "seq ") + String(summary.last_seq || 0) + " · " + countLabel(summary.message_count, "message") + ((Number(detail?.after_seq || 0) > 0 || detail.truncated) ? (runtimeLanguage === "zh-CN" ? " · 最近有界页面" : " · recent bounded page") : ""));
+    setText("runtime-conversation-seq", formatConversationSeq(summary, detail, runtimeLanguage));
     const participants = el("runtime-conversation-participants");
     if (participants) {
         for (const participant of Array.isArray(detail.participants) ? detail.participants : []) {
@@ -5505,22 +5609,23 @@ function refreshCommunication(includeData = true) {
 }
 async function createCommunicationAgent(event) {
     event.preventDefault();
-    const handle = el("runtime-agent-handle")?.value.trim() || "";
-    const displayName = el("runtime-agent-display-name")?.value.trim() || "";
-    const description = el("runtime-agent-description")?.value.trim() || "";
-    const labels = parseAgentIds(el("runtime-agent-labels")?.value || "");
-    if (!handle || !displayName) {
-        setText("runtime-agent-create-status", tr("Handle and display name are required."));
+    const handle = el("runtime-agent-handle")?.value || "";
+    const displayName = el("runtime-agent-display-name")?.value || "";
+    const description = el("runtime-agent-description")?.value || "";
+    const labelsRaw = el("runtime-agent-labels")?.value || "";
+    const validation = validateAgentCreateInputs(handle, displayName, description, labelsRaw);
+    if (!validation.valid) {
+        setText("runtime-agent-create-status", tr(validation.error));
         return;
     }
-    const fingerprint = JSON.stringify({ handle, displayName, description, labels });
-    pendingAgentCreate = idempotencyKeyFor(pendingAgentCreate, fingerprint, "runtime-agent");
+    const { data } = validation;
+    pendingAgentCreate = idempotencyKeyFor(pendingAgentCreate, data.fingerprint, "runtime-agent");
     setText("runtime-agent-create-status", tr("Creating durable Agent…"));
     const response = await api("communication/agent/create", {
-        handle,
-        display_name: displayName,
-        description,
-        specialty_labels: labels,
+        handle: data.handle,
+        display_name: data.displayName,
+        description: data.description,
+        specialty_labels: data.labels,
         idempotency_key: pendingAgentCreate.key,
     });
     if (response?.status === 401) {
@@ -5557,22 +5662,24 @@ async function updateCommunicationAgent(event) {
     const agent = selectedCommunicationAgent();
     if (!agent)
         return;
-    const handle = el("runtime-agent-update-handle")?.value.trim() || "";
-    const displayName = el("runtime-agent-update-display-name")?.value.trim() || "";
-    const description = el("runtime-agent-update-description")?.value.trim() || "";
-    const specialtyLabels = parseAgentIds(el("runtime-agent-update-labels")?.value || "");
-    if (!handle || !displayName) {
-        setText("runtime-agent-update-status", tr("Handle and display name are required."));
+    const handle = el("runtime-agent-update-handle")?.value || "";
+    const displayName = el("runtime-agent-update-display-name")?.value || "";
+    const description = el("runtime-agent-update-description")?.value || "";
+    const labelsRaw = el("runtime-agent-update-labels")?.value || "";
+    const validation = validateAgentUpdateInputs(handle, displayName, description, labelsRaw);
+    if (!validation.valid) {
+        setText("runtime-agent-update-status", tr(validation.error));
         return;
     }
+    const { data } = validation;
     setText("runtime-agent-update-status", tr("Updating Agent Card…"));
     const response = await api("communication/agent/update", {
         agent_id: String(agent.agent_id || ""),
         expected_profile_revision: Number(agent.profile_revision || 0),
-        handle,
-        display_name: displayName,
-        description,
-        specialty_labels: specialtyLabels,
+        handle: data.handle,
+        display_name: data.displayName,
+        description: data.description,
+        specialty_labels: data.specialtyLabels,
     });
     if (response?.status === 401) {
         lock("Credential rejected.");
@@ -5698,19 +5805,19 @@ async function detachCommunicationEndpoint() {
 }
 async function createCommunicationConversation(event) {
     event.preventDefault();
-    const title = el("runtime-conversation-title")?.value.trim() || "";
+    const title = el("runtime-conversation-title")?.value || "";
     const idsInput = el("runtime-conversation-agent-ids")?.value || "";
-    const agentIds = parseAgentIds(idsInput || selectedCommunicationAgentId);
-    if (agentIds.length === 0) {
-        setText("runtime-conversation-create-status", tr("At least one Agent id is required."));
+    const validation = validateConversationCreateInputs(title, idsInput, selectedCommunicationAgentId);
+    if (!validation.valid) {
+        setText("runtime-conversation-create-status", tr(validation.error));
         return;
     }
-    const fingerprint = JSON.stringify({ title, agentIds: [...agentIds].sort() });
-    pendingConversationCreate = idempotencyKeyFor(pendingConversationCreate, fingerprint, "runtime-conversation");
+    const { data } = validation;
+    pendingConversationCreate = idempotencyKeyFor(pendingConversationCreate, data.fingerprint, "runtime-conversation");
     setText("runtime-conversation-create-status", tr("Creating durable Conversation…"));
     const response = await api("communication/conversation/create", {
-        title: title || null,
-        agent_ids: agentIds,
+        title: data.title || null,
+        agent_ids: data.agentIds,
         idempotency_key: pendingConversationCreate.key,
     });
     if (response?.status === 401) {

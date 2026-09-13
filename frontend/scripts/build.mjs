@@ -31,6 +31,7 @@ const watchedSources = new Set([
   "runtime_storage.ts",
   "runtime_overview.ts",
   "runtime_icons.ts",
+  "runtime_operations.ts",
   "runtime.css",
   "runtime.html",
   "admin.ts",
@@ -219,6 +220,20 @@ export function createOutputs(
         ""
       )
   );
+  const runtimeOperationsModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_operations.ts")
+  );
+  const runtimeOperationsClassic = stripModuleExports(
+    runtimeOperationsModule
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_i18n(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_communication(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+  );
   const runtimeIconsModule = buildJs(
     transpileTypeScript(sourceDirectory, "runtime_icons.ts")
   );
@@ -270,6 +285,10 @@ export function createOutputs(
         /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_icons(?:\.js)?["'];?\s*\n/m,
         ""
       )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_operations(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
   );
   const runtimeInlined = buildJs(
     workflowSessionStateClassic +
@@ -291,6 +310,8 @@ export function createOutputs(
       runtimeStorageClassic +
       "\n" +
       runtimeOverviewClassic +
+      "\n" +
+      runtimeOperationsClassic +
       "\n" +
       runtimeIconsClassic +
       "\n" +
@@ -357,6 +378,7 @@ export function createOutputs(
     ["runtime_activity.js", runtimeActivityModule],
     ["runtime_storage.js", runtimeStorageModule],
     ["runtime_overview.js", runtimeOverviewModule],
+    ["runtime_operations.js", runtimeOperationsModule],
     ["runtime_icons.js", runtimeIconsModule],
     ["admin_controller.js", adminControllerModule],
     ["admin_mutation_controller.js", adminMutationControllerModule],
