@@ -1217,6 +1217,15 @@ fn key_tool_output_schemas_include_expected_fields() {
             output_schema_property(&specs, name, "observation_token")["maxLength"],
             webcodex_core::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN
         );
+        let continuation_semantics = output_schema_property(&specs, name, "continuation_semantics");
+        assert_eq!(
+            continuation_semantics["properties"]["kind"]["const"], "observe",
+            "{name} continuation kind"
+        );
+        assert_eq!(
+            continuation_semantics["properties"]["carrier"]["const"], "observation_token",
+            "{name} continuation carrier"
+        );
         let continuation = output_schema_property(&specs, name, "continuation");
         assert_eq!(continuation["properties"]["tool"]["const"], "observe_jobs");
         assert_eq!(

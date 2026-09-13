@@ -1478,7 +1478,15 @@ mod tests {
     use std::os::unix::fs::{symlink, PermissionsExt};
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
+    #[cfg(target_os = "linux")]
+    use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
+
+    #[cfg(target_os = "linux")]
+    fn test_ssh_server_start_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     struct TestSshServer {
         _temp: tempfile::TempDir,
@@ -1498,7 +1506,14 @@ mod tests {
     impl TestSshServer {
         #[cfg(target_os = "linux")]
         fn start() -> Option<Self> {
+            // Reserve/start/readiness is one critical section. Without this,
+            // parallel fixtures can reuse the same ephemeral port after the
+            // reservation listener is dropped but before this sshd binds it.
+            let _startup_guard = test_ssh_server_start_lock()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let sshd = executable_on_path("sshd")?;
+            let ssh = executable_on_path("ssh")?;
             if Command::new(&sshd)
                 .arg("-V")
                 .stdout(Stdio::null())
@@ -1574,15 +1589,6 @@ mod tests {
                 .expect("start SSH test daemon");
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
-                if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                    return Some(Self {
-                        _temp: temp,
-                        child,
-                        client_config,
-                        alias,
-                        remote_cwd,
-                    });
-                }
                 if let Some(status) = child.try_wait().expect("poll SSH test daemon") {
                     let mut stderr = String::new();
                     if let Some(mut pipe) = child.stderr.take() {
@@ -1590,6 +1596,29 @@ mod tests {
                         let _ = pipe.read_to_string(&mut stderr);
                     }
                     panic!("SSH test daemon exited early ({status}): {stderr}");
+                }
+                if TcpStream::connect(("127.0.0.1", port)).is_ok()
+                    && Command::new(&ssh)
+                        .arg("-F")
+                        .arg(&client_config)
+                        .arg("-o")
+                        .arg("BatchMode=yes")
+                        .arg("-o")
+                        .arg("ConnectTimeout=1")
+                        .arg(&alias)
+                        .arg("true")
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status()
+                        .is_ok_and(|status| status.success())
+                {
+                    return Some(Self {
+                        _temp: temp,
+                        child,
+                        client_config,
+                        alias,
+                        remote_cwd,
+                    });
                 }
                 std::thread::sleep(Duration::from_millis(25));
             }

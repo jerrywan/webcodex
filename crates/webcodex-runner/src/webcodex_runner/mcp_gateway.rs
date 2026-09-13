@@ -7,7 +7,9 @@
 //! under the same provider identity and revalidate tool schema before dispatch.
 
 use super::config::{McpGatewayConfig, McpGatewayProviderConfig, MCP_GATEWAY_MAX_CWD_BYTES};
-use super::shell::{env_keys_equal, is_sensitive_env_key};
+#[cfg(windows)]
+use super::shell::env_keys_equal;
+use super::shell::is_sensitive_env_key;
 use crate::mcp_gateway::{
     validate_json_value, validate_request, validate_tool_result, validate_tools, McpGatewayContent,
     McpGatewayDispatchState, McpGatewayProvider, McpGatewayProviderState, McpGatewayRequest,

@@ -818,8 +818,15 @@ pub(crate) fn base_shell_env(
     profile: &ShellProfileConfig,
 ) -> Result<HashMap<String, String>, String> {
     let mut env: HashMap<String, String> = match shell.environment_mode {
-        ShellEnvironmentMode::Inherit => std::env::vars()
-            .filter(|(key, _)| should_inherit_env_key(key))
+        ShellEnvironmentMode::Inherit => std::env::vars_os()
+            .filter_map(|(key, value)| {
+                let key = key.into_string().ok()?;
+                if !should_inherit_env_key(&key) {
+                    return None;
+                }
+                let value = value.into_string().ok()?;
+                Some((key, value))
+            })
             .collect(),
         ShellEnvironmentMode::Isolated => {
             let mut env = HashMap::new();

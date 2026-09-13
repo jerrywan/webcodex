@@ -2781,6 +2781,10 @@ fn cargo_output_schema_enforces_handoff_terminal_and_rejection_branches() {
             "job_id": "job-123",
             "job_status": "running",
             "observation_token": "observation",
+            "continuation_semantics": {
+                "kind": "observe",
+                "carrier": "observation_token"
+            },
             "activity": {
                 "state": "working",
                 "phase": "validation_test",
@@ -2822,6 +2826,7 @@ fn cargo_output_schema_enforces_handoff_terminal_and_rejection_branches() {
         ("missing observation_token", 6),
         ("missing activity", 7),
         ("missing continuation", 8),
+        ("missing continuation semantics", 9),
     ] {
         let mut invalid = handoff.clone();
         let output = invalid["output"].as_object_mut().unwrap();
@@ -2852,6 +2857,9 @@ fn cargo_output_schema_enforces_handoff_terminal_and_rejection_branches() {
             }
             8 => {
                 output.remove("continuation");
+            }
+            9 => {
+                output.remove("continuation_semantics");
             }
             _ => unreachable!(),
         }
@@ -2913,6 +2921,15 @@ fn cargo_output_schema_enforces_handoff_terminal_and_rejection_branches() {
     let mut unknown_field = terminal.clone();
     unknown_field["output"]["unexpected"] = json!(true);
     assert!(!accepts(&unknown_field));
+    let mut terminal_with_continuation_semantics = terminal.clone();
+    terminal_with_continuation_semantics["output"]["continuation_semantics"] = json!({
+        "kind": "observe",
+        "carrier": "observation_token"
+    });
+    assert!(
+        !accepts(&terminal_with_continuation_semantics),
+        "non-promoted terminal result must not claim Job observation continuation semantics"
+    );
 
     let timeout = json!({
         "success": false,

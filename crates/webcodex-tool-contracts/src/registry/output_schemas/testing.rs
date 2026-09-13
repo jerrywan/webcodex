@@ -1,10 +1,11 @@
 use serde_json::{json, Value};
 
 use super::common::{
-    cargo_test_count_assertion_schema, job_activity_schema, nullable_schema,
-    observe_job_continuation_schema, open_object_schema, permission_decision_schema, schema_type,
-    session_hint_schema,
+    cargo_test_count_assertion_schema, continuation_semantics_schema, job_activity_schema,
+    nullable_schema, observe_job_continuation_schema, open_object_schema,
+    permission_decision_schema, schema_type, session_hint_schema,
 };
+use webcodex_core::runtime_contract::{ContinuationCarrier, ContinuationKind};
 
 pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
     match name {
@@ -109,6 +110,14 @@ fn cargo_output_schema(tool_name: &str) -> Value {
                     "maxLength": webcodex_core::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN,
                     "description": "Current opaque observation token for the exact public Job snapshot returned by a promoted validation handoff."
                 }),
+            ),
+            (
+                "continuation_semantics",
+                continuation_semantics_schema(
+                    ContinuationKind::Observe,
+                    ContinuationCarrier::ObservationToken,
+                    "A promoted structured validation continues by observing the exact Job stream; observation_token is a delta cursor, never retry authority or execution identity.",
+                ),
             ),
             ("activity", job_activity_schema()),
             (
@@ -289,7 +298,8 @@ fn cargo_output_schema(tool_name: &str) -> Value {
                             "project", "command_summary", "cwd", "shell", "executor",
                             "execution_source", "purpose", "promoted_to_job", "terminal",
                             "command_started", "command_completed", "execution_state", "job_id",
-                            "job_status", "observation_token", "activity", "continuation", "effective_timeout_secs", "sync_wait_secs",
+                            "job_status", "observation_token", "continuation_semantics", "activity",
+                            "continuation", "effective_timeout_secs", "sync_wait_secs",
                             "stdout_tail", "stderr_tail", "stdout_lines", "stderr_lines",
                             "stdout_truncated", "stderr_truncated"
                         ],
@@ -332,7 +342,8 @@ fn cargo_output_schema(tool_name: &str) -> Value {
                             "job_id": {"enum": []},
                             "job_status": {"enum": []},
                             "observation_token": {"enum": []},
-                            "continuation": {"enum": []}
+                            "continuation": {"enum": []},
+                            "continuation_semantics": {"enum": []}
                         }
                     }
                 }
@@ -355,7 +366,8 @@ fn cargo_output_schema(tool_name: &str) -> Value {
                             "job_id": {"enum": []},
                             "job_status": {"enum": []},
                             "observation_token": {"enum": []},
-                            "continuation": {"enum": []}
+                            "continuation": {"enum": []},
+                            "continuation_semantics": {"enum": []}
                         }
                     }
                 }
@@ -378,7 +390,8 @@ fn cargo_output_schema(tool_name: &str) -> Value {
                             "job_id": {"enum": []},
                             "job_status": {"enum": []},
                             "observation_token": {"enum": []},
-                            "continuation": {"enum": []}
+                            "continuation": {"enum": []},
+                            "continuation_semantics": {"enum": []}
                         }
                     }
                 }
@@ -401,7 +414,8 @@ fn cargo_output_schema(tool_name: &str) -> Value {
                             "job_id": {"enum": []},
                             "job_status": {"enum": []},
                             "observation_token": {"enum": []},
-                            "continuation": {"enum": []}
+                            "continuation": {"enum": []},
+                            "continuation_semantics": {"enum": []}
                         }
                     }
                 }
@@ -424,7 +438,8 @@ fn cargo_output_schema(tool_name: &str) -> Value {
                             "job_id": {"enum": []},
                             "job_status": {"enum": []},
                             "observation_token": {"enum": []},
-                            "continuation": {"enum": []}
+                            "continuation": {"enum": []},
+                            "continuation_semantics": {"enum": []}
                         }
                     }
                 }
@@ -444,6 +459,7 @@ fn cargo_output_schema(tool_name: &str) -> Value {
                             "job_status": {"enum": []},
                             "observation_token": {"enum": []},
                             "continuation": {"enum": []},
+                            "continuation_semantics": {"enum": []},
                             "passed": {"enum": []},
                             "promoted_to_job": {"enum": []},
                             "terminal": {"enum": []}

@@ -2064,5 +2064,20 @@ fn default_shell_preserves_non_unicode_environment_without_panicking() {
         "WEBCODEX_OPAQUE_TOOLCHAIN_ENV",
         OsString::from_vec(vec![0xff]),
     );
-    configured_process_command(&ShellConfig::default(), None, "true", &[], None).unwrap();
+    let shell = ShellConfig::default();
+    configured_process_command(&shell, None, "true", &[], None).unwrap();
+    let snapshot = base_shell_env(&shell, &ShellProfileConfig::default()).unwrap();
+    assert!(
+        !snapshot.contains_key("WEBCODEX_OPAQUE_TOOLCHAIN_ENV"),
+        "String-backed prepared environments must ignore inherited values they cannot represent instead of panicking"
+    );
+    PreparedExecutionEnvironment::prepare(
+        1,
+        &shell,
+        None,
+        Path::new("."),
+        &PreparedShellProfileCache::default(),
+        None,
+    )
+    .unwrap();
 }
