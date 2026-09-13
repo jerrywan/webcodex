@@ -1,6 +1,6 @@
 # WebCodex 资源模型与架构质量探索
 
-状态：探索性评审，不是新的运行时契约。除文末列出的启动目录投影重构外，本文提议均未实现，也不改变现有权限、协议、执行或部署行为。
+状态：探索性评审，不是新的运行时契约。本文会随真实 dogfood 和产品使用证据修订，而不是反过来要求实现服从路线图。2026-09-13 复审后，后续资源路线从 user-private / Memory-first 收缩为 usage-driven 的 Skill / Plugin-first；现有 Memory 保留但冻结扩张，Runner 继续承担执行与资源 placement，而不再作为面向用户的资源 scope。
 
 评审日期：2026-09-12。精确源码基线：`3d8332190c336fc7becaa0ae65700e0fd08cb43d`。分析在 special 主项目的独立 managed worktree 中进行，分支为 `explore/architecture-resource-boundaries`。下文源码行号指这一基线；符号名用于后续定位。
 
@@ -9,6 +9,8 @@
 WebCodex 不缺架构：Server/Runner 分离、分层 workspace、统一 ToolDefinition、RunnerOperation、事务式 Memory、精确 Plugin binding、独立 Workflow Session/Job/AgentTask 都已经存在。继续增加一层通用框架，未必比收拢现有概念更好。
 
 当前最值得投入的是：**统一观察与描述，收敛规则所有权，保留业务状态机，降低模型决策成本。** 目标应是以后新增一种资源或一种工具时，更少触碰不相关模块，而不是让所有对象实现同一个 CRUD 接口。
+
+新增一条优先级约束：**真实使用证据优先于架构完整性。** Skill 已被实际使用，Native Plugin 已完成多轮 dogfood 且是产品扩展能力的重点，因此它们应优先验证资源抽象；Project Memory 虽已有完整 CAS / revision / scope 实现，但尚缺真实使用反馈，不应仅因为已有 foundation 就继续派生 repository read-through、user-private namespace、sharing、ACL 或 migration。
 
 本轮按边界抽样追踪了 workspace 策略、工具契约/Kernel/MCP、Memory/Skill/Plugin、启动与上下文投影、执行预算、存储、卡片投影及相关测试。没有逐行审计所有代码，没有验证所有前端页面、Windows/macOS、真实断网/重启或部署场景，也没有做全仓性能画像。未发现并复现可在此直接定级为安全漏洞的问题；下面的维护风险、性能假设与功能提议分别标注。
 
@@ -28,32 +30,32 @@ WebCodex 不缺架构：Server/Runner 分离、分层 workspace、统一 ToolDef
 
 ## 3. Memory / Skill / Plugin 可以统一成什么
 
-### 3.1 不要把五个维度揉成一条继承链
+### 3.1 产品 scope、source 与 placement 分开，但不提前发明多租户资源 ACL
 
-`runner 级 / project 级 / 用户自定义级` 表达了真实需求，但包含不同维度：
+最初的 `runner 级 / project 级 / 用户自定义级` 需求可以收敛成更简单的产品模型：
 
-| 维度 | 回答的问题 | 例子 |
+| 维度 | 回答的问题 | 当前建议 |
 |---|---|---|
-| Kind | 这是什么？ | Memory、Skill、Plugin；以后可能是 WorkflowTemplate |
-| Owner / authority domain | 谁持有它并决定访问、变更？ | Control 存储域、一个 Runner、一个受权主体 |
-| Applicability / visibility | 在哪个上下文适用、可见？ | 某 Project、某 Runner 的项目、显式选择的个人空间 |
-| Origin / provenance | 从哪里来，谁维护？ | 仓库文件、operator 配置目录、安装包、用户编写 |
-| Lifecycle / operations | 它怎样变化、能做什么？ | 读文本、CAS 更新、安装并激活、describe 后调用进程 |
+| Kind | 这是什么？ | Memory、Skill、Plugin；以后确有需求再加入其它 kind |
+| Product scope | 用户如何理解它属于哪里？ | `user` 或 `project` |
+| Source / lifecycle | 内容或配置从哪里来、怎样变化？ | repository、configured root、managed package、Runner config、Control DB |
+| Placement / applicability | 它在哪里运行、在哪个 Project 适用？ | Runner placement、exact Project cwd、Control storage；不是新的 scope |
+| Domain operation | 怎样读取、绑定或执行？ | Skill read、Memory CAS、Plugin describe/call 各自保留 |
 
-“用户自定义”首先可能是来源，也可能是未来独立的用户私有命名空间，不能不加区分地排在 Project 或 Runner 之上。用户写的 Skill 可以存在项目目录，也可以由 operator 安装到 Runner；位置与作者不等价。审计记录中的 principal 归因也不自动等于个人隐私隔离。
+这里的 `user` 是产品层“当前 WebCodex 用户可用的个人资源”概念，不等价于新建一个 `AuthContext.user_id` 私有安全域。对当前 self-hosted 模式，能够操作某个 Runner 已经代表对该执行宿主的用户权限；资源抽象不再额外引入 principal namespace、resource ACL、sharing grant 或 admin enumeration 体系。现有 authentication、Runner access、tool scope、Project authority 与 Plugin exact binding 继续按各自边界执行。
 
-权限是这些条件与现有授权策略的交集，不是“更具体的 scope 覆盖上一级”。默认行为应是保留候选、标记冲突、让模型或用户选择精确身份，而不是隐式 last-wins。
+Runner 因此从面向用户的资源 scope 降为 **placement / provider host**。例如 configured / managed Skill 可以在产品层解释为 User Skill 的两种 source；Native Plugin 是由 Runner 托管的 User Plugin provider，再通过 exact cwd 等事实决定 Project applicability；Project Skill 仍直接来自 repository。Project 与 User 同名时是否默认优先、并存或 fail closed 属于具体资源的选择语义，不由一个通用 inheritance/ACL 框架决定。
 
 ### 3.2 当前支持情况，不把提议误写成现状
 
 | 资源 | 当前存放与作用域 | 读取/使用方式 | 生命周期 |
 |---|---|---|---|
-| Project Memory | Control 数据库；scope 由 Project runtime id、Runner client id、注册根目录共同派生 | memory_search / memory_read；读取还受 project 与 Memory scope 权限约束 | 行记录、定义哈希、实例身份、generation/CAS；非 Runner 文件 |
-| Project Skill | 项目 `.agents/skills` | skill_list / skill_read_file；正文需显式读取 | 仓库活文件，definition revision |
-| Runner configured Skill | Runner 的配置 roots | 同一 Skill 发现入口，Runner 解析 opaque id | 活目录；不等于已安装不可变包 |
-| Runner managed Skill | Runner 管理的 Skill store | 同一发现入口；安装/版本/激活/删除由管理操作负责 | 包 revision、active pointer、state revision、幂等记录 |
-| Native Plugin | Runner 持有进程与配置；项目启动目录只收录 cwd 精确匹配该项目根目录的 provider | plugin_tool list / describe / call；binding 固定实例与 schema | 进程实例、冻结 catalog、显式 reload、结果不确定性 |
-| 用户私有资源空间 | 本轮没有确认一个覆盖上述三种资源的统一实现 | 需要独立设计 principal namespace、分享和撤销 | 不是给 source_scope 增加一个字符串就完成 |
+| Project Memory | Product scope=`project`；Control DB 持久化，scope identity 仍由现有 Project runtime/Runner/root facts 派生 | memory_search / memory_read；读取继续受现有 project 与 Memory scopes 约束 | 现有实现保留；在缺少真实使用反馈前冻结新的 read-through / user scope / sharing 扩张 |
+| Project Skill | Product scope=`project`；source=`repository`，项目 `.agents/skills` | skill_list / skill_read_file；正文需显式读取 | 仓库活文件，definition revision |
+| Runner configured Skill | 产品上逐步解释为 scope=`user`、source=`configured`、placement=`runner`；当前 wire / descriptor 名称暂不要求兼容性重写 | 同一 Skill 发现入口，Runner 解析 opaque id | 活目录；不等于已安装不可变包 |
+| Runner managed Skill | 产品上逐步解释为 scope=`user`、source=`managed`、placement=`runner` | 同一发现入口；安装/版本/激活/删除由管理操作负责 | 包 revision、active pointer、state revision、幂等记录 |
+| Native Plugin | scope=`user`、placement=`runner` 的 executable provider；当前 Project applicability 由 provider cwd 与 exact Project root 匹配产生 | plugin_tool list / describe / call；binding 固定 exact Runner/provider instance 与 schema | 进程实例、冻结 catalog、check/reload、结果不确定性；现有 execution authority 不由资源目录替代 |
+| User-private ACL / sharing namespace | 当前无真实产品需求，近期不实现 | 不新增 `wc_userns_*`、resource ACL、share grant 或跨用户枚举 | 若未来出现真实多用户/SaaS需求，再以独立产品问题重新设计 |
 
 证据：[Memory scope](../../src/tool_runtime/memory.rs)，38–56；[Skill descriptor/locator](../../src/tool_runtime/skills.rs)，61–94、562–638；[Skill store](../../crates/webcodex-core/src/skill_store.rs)，35–103；[Plugin project catalog](../../crates/webcodex-runner/src/webcodex_runner/plugin.rs)，392–490。
 
@@ -68,8 +70,8 @@ Memory provider    Skill providers    Plugin provider
                           |
            bounded metadata projection / catalog
                           |
-         id + kind + source + applicability + revision
-         completeness + diagnostics + next read/describe
+         id + kind + scope + source + placement/applicability
+         revision + completeness + diagnostics + next read/describe
                           |
            domain-specific read / describe / mutation
 ```
@@ -150,7 +152,7 @@ resolution 语义刻意把“association存在”与“source当前可用”分�
 
 `managed_base_sha` 只证明“这个 managed worktree 最初从 source repository 的哪个 Git commit 创建”。它不证明 Memory snapshot、Skill catalog/content revision、Plugin revision 或统一 Knowledge revision。Memory 是独立 durable mutable state，Project Skill 当前是 live filesystem knowledge；真正 snapshot若未来需要，必须分别使用各领域自己的 catalog/content revision 或 Git object read，不能把 base SHA提升成跨资源 authority/version。
 
-Stage 4A1 因此只建立 lineage、current authorization resolution、失效语义和 path-safe diagnostics。Memory 与 Project Skill 的 read-through 延到 Stage 4A2 分别设计：Memory仍需解决 target/source scope、只读 source、key conflict、catalog revision 与 source mutation；Project Skill仍需解决 target/source/Runner-local uniqueness、definition revision、read pin 与 opaque-id collision。Runner Skill本来就是 Runner-local，不经 repository association重复继承；Plugin有 execution/cwd semantics，明确不从 association继承。
+Stage 4A1 因此保留为 **managed-worktree source lineage foundation**：它解决 source checkout 身份不会在 worktree 创建后丢失的问题，但不再自动生成一个必须完成的“knowledge inheritance”路线。现阶段不推进 Memory read-through；只有 managed-worktree 中复用 source Project Skill 出现真实使用需求时，才单独评估 Project Skill discovery/read，并继续保留 definition revision、exact identity 与冲突语义。Runner-hosted User Skill 不因 repository association重复继承；Plugin具有 executable process / cwd / binding 语义，继续明确不从 source association继承。
 
 ### D. ToolRuntime 是逐渐膨胀的组合对象（P2，维护风险）
 
@@ -234,31 +236,39 @@ Plugin 已有 `NotStarted / OutcomeUnknown / Completed`，见 [plugin.rs](../../
 ## 6. 不建议本轮采用的方案
 
 - 一个 `ResourceManager` 同时管理 Memory 数据、Skill 文件、Plugin 进程、Job 和 AgentTask：表面统一，实则塞入大量不适用字段与例外。
-- scope 直接定义成 User > Project > Runner 并隐式覆盖：混淆来源、所有权和授权，隐藏同名冲突。
+- 把 User / Project / Runner 做成通用 authority 继承链：产品目录可以使用 `user` / `project` scope，但 Runner 是 placement/source，不是更高或更低一层的资源权限；同名冲突仍由具体资源定义。
+- 在没有真实多用户需求时提前建立 `user_id` 私有 namespace、resource ACL、sharing/revocation、team/org/public scope：会把 self-hosted Runner authority 问题错误升级成多租户安全系统。
 - 全部对象共用一张 JSON/EAV 表：放弃已有事务/索引/约束，并没有消除领域差异。
 - 所有失败统一 retry，或把 outcome_unknown 转成普通业务失败：可能重复外部副作用。
 - 因文件行数多就拆 crate/微服务：文件长度包含测试和契约，不能独立证明职责错误。
 - 提前搭建动态注册框架：当前闭合集合适合 enum/静态声明；扩展点越靠近权限与执行，越不应无约束开放。
 
-## 7. 渐进落地顺序与验收
+## 7. 使用证据驱动的后续路线
+
+旧路线中的 4B `User-private namespace / sharing` 不再视为近期交付目标；4A1 也不再自动推出 Memory/Skill/Plugin 的完整 inheritance。后续优先级由真实使用频率、模型决策成本和已经存在的重复边界决定。
 
 | 阶段 | 交付 | 保持不变的边界 | 验收方式 |
 |---|---|---|---|
-| 0，本轮 | 启动目录投影的小型复用、基线表征测试、本文 | JSON 形状、顺序、hint、预算、来源发现和权限均不改 | 新旧 JSON oracle 对照，空/不可用/上游截断、Unicode/转义、超大条目；既有 startup 测试 |
-| 1，后续已完成 | 扩展家族 admission 声明归 ToolDefinition；Runner Skill provider enqueue typed error 小切片 | 外部错误、scope、surface、direct/gateway 语义不改 | family/registry invariant、ModelHidden invariant、surface/principal focused tests、typed-to-legacy error-kind 对照 |
-| 2，后续已完成 | Skill catalog observer / known-id exact resolver 分离；Configured + Managed 收敛到一个 Runner Skill runtime/management boundary | opaque identity、Project authority、请求时授权、catalog 完整语义、management outcome-unknown、revision/race 语义不改 | before/after request fanout、canonical wire/capability inventory、duplicate target、source unavailable、source identity race、revision race、configured identity-first scan tests |
-| 3A，已完成 | Store connection contention observability baseline：closed-domain acquisition count、lock wait、connection hold | DB authority、schema、transaction/CAS/replay、poison 与 async execution model 均不改 | observer primitive tests、production raw-lock invariant、representative store behavior；dogfood 后聚合 p50/p95 |
-| 3B，仅实测需要时 | 有证据驱动的 critical-section 缩短、bounded blocking worker / DB actor 或 fenced cache | 未知结果、事务、重放、authority 与 revision 语义不改 | 与 3A 实际 workload 基线比较 p50/p95、cross-domain wait、hold share、资源上限和故障注入；无证据则不实施 |
-| 4A1，本轮 | Repository knowledge association foundation：Runner-owned managed lineage、current source identity/authorization resolver、path-safe diagnostics | target execution Project、cwd、Session、Plugin、permission、repository identity 均不改；无 resource read-through | managed creation/resume lineage、inventory corruption、source id/root drift、incomplete inventory、unauthorized privacy、target execution independence |
-| 4A2，后续 | Resource-specific read-through：Memory / Project Skill 分别设计 | source只读；Runner Skill与Plugin不经 repository association继承 | Memory scope/CAS/catalog revision；Project Skill uniqueness/definition revision/read pin分别验收 |
-| 4B，后续 | User-private namespace / sharing | 不从 repository association 推导用户 sharing ACL | principal隔离、授权/撤销、可见性与迁移 |
-| 4C，后续 | Unified resource browser | browser只消费各领域 canonical facts，不成为执行/授权事实 | completeness、冲突、来源、分页与privacy projection |
+| 0，已完成 | 启动目录投影的小型复用、基线表征测试、本文 | JSON 形状、顺序、hint、预算、来源发现和权限均不改 | 新旧 JSON oracle 对照，空/不可用/上游截断、Unicode/转义、超大条目；既有 startup 测试 |
+| 1，已完成 | 扩展家族 admission 声明归 ToolDefinition；Runner Skill provider enqueue typed error 小切片 | 外部错误、scope、surface、direct/gateway 语义不改 | family/registry invariant、ModelHidden invariant、surface/principal focused tests、typed-to-legacy error-kind 对照 |
+| 2，已完成 | Skill catalog observer / known-id exact resolver 分离；Configured + Managed 收敛到一个 Runner Skill runtime/management boundary | opaque identity、Project authority、请求时授权、catalog 完整语义、management outcome-unknown、revision/race 语义不改 | before/after request fanout、canonical wire/capability inventory、duplicate target、source unavailable、source identity race、revision race、configured identity-first scan tests |
+| 3A，已完成 | Store connection contention observability baseline | DB authority、schema、transaction/CAS/replay、poison 与 async execution model 均不改 | dogfood / production-like 数据；没有显著 contention 就停止 |
+| 3B，仅数据证明需要时 | critical-section 缩短、bounded blocking worker / DB actor 或 fenced cache 中的最小必要项 | 未知结果、事务、重放、authority 与 revision 语义不改 | 必须优于 3A 实测基线；无证据则不实施 |
+| 4A1，已完成并保留 | managed-worktree source lineage：Runner-owned lineage、current source identity resolution、path-safe diagnostics | target execution Project、cwd、Session、Plugin、permission、repository identity 均不改 | creation/resume lineage、source id/root drift、inventory corruption、target execution independence |
+| R1，下一资源切片 | 统一产品描述词汇：`kind + scope(user/project) + source + placement/applicability`；只做 descriptor/projection，不建 ResourceManager | 不改现有 Skill/Plugin/Memory lifecycle，不新增 ACL/storage | startup/context/catalog projection 能解释资源来自哪里、属于 user 还是 project、下一步如何读取/describe |
+| R2 | Skill 产品映射：Project Skill；User configured Skill；User managed Skill | 保留现有 RunnerSkillRequest、opaque id、definition/package revision、management lifecycle | 同一底层行为下减少 Runner-source 实现细节对模型/用户的暴露；exact read 行为不退化 |
+| R3 | Plugin 产品映射：User Plugin + Project applicability + Runner placement | 保留 gateway-only、describe binding、exact Runner/provider/schema、scope checks、OutcomeUnknown | startup/resource catalog 能解释 Plugin placement/applicability；call 仍必须走现有 exact binding |
+| R4，仅真实需求出现时 | managed worktree 复用 source **Project Skill** | source Skill只读；不继承 Plugin；不把 base SHA 当 Skill revision | source/target Skill identity、definition revision 与 conflict 语义有真实 dogfood证明 |
+| R5，R1-R3稳定后 | 轻量 Resource browser / startup browser | browser只消费 canonical facts，不成为执行/授权事实 | completeness、冲突、来源、分页；不创建第二套状态机 |
+| Memory freeze | 保留现有 Project Memory，不新增 user scope、repository read-through、sharing/ACL | CAS、scope identity、catalog revision、现有 tools 全部保持 | 只有出现具体、重复的真实使用场景才解除 freeze |
 
-区分 foundation 与 read-through 同样重要：Stage 4A1 只回答 association identity、current availability、authorization 与 diagnostics，不让 `memory_*`、Project `skill_*`、Plugin 或 Runner Skill自动跨 source。真正跨 worktree 的知识读取和 user namespace 仍是独立产品行为，必须各自定义 conflict/revision/revocation 语义；Stage 4也不反向成为Stage 1/2/3的前提。
+这条路线不否认未来可能出现多用户/private sharing需求，而是拒绝现在预付其复杂度。当前 self-hosted 产品里，Runner access已经是关键用户执行 authority；`user` resource scope是产品可见性/归属词汇，不是新的 bearer capability或 ACL namespace。若未来 SaaS、多租户或资源分享成为真实需求，应以当时的principal模型、部署方式和用户故事重新设计，而不是让今天的 `AuthContext.user_id` 决定永久资源 schema。
 
 阶段 2 已按这些前置条件落地：`skill_read_file` 不再调用完整 `discover_skills`。Project exact probe继续使用 bounded package identities；Runner-local exact probe只发一个 canonical `RunnerSkillRequest::Resolve`，由 Runner内部同时判断 configured/managed membership，再用 source-pinned `Read`读取实际资源。所有 applicable authority source都参与 target uniqueness证明；unsupported `skill_runtime`时Project-only target仍可工作，capability适用但source uncertainty或target ambiguity时继续fail closed。Configured resolver不为unrelated packages读取定义；Managed仍通过 `list_skill_keys()`做 O(N) opaque-id scan，尚未声称O(1)。完整 catalog observer继续独立承担Project+Runner duplicate-id、name conflict、catalog revision、diagnostics/truncation；Runner-local List内部再承担Configured+Managed duplicate-id fail-close。后续若实测需要优化managed key scan，应另行设计与store lifecycle一致的reverse mapping，而不是在本阶段偷加cache/index。
 
-建议持续关注的指标不是抽象数量，而是：新增一个工具需要改多少个独立分类点；精确 Skill 读取触发多少次 Runner 请求；为了做一个简单选择要给模型多少 schema 字节；失败是否直接给出可执行的下一步；核心改动需要编译和运行哪些无关测试。
+资源模型不应长期占据主线。如果 R1-R3 能用很薄的描述层解释 Skill/Plugin，就应停止继续抽象，把主要工程投入重新转回**工具层**：模型可见 schema 成本、direct/gateway 发现一致性、错误恢复提示、批量/组合调用、Job handoff 和常用工具 ergonomics。已有 [tool-composition-research.md](tool-composition-research.md) 可作为下一轮重新评估起点，但同样必须由真实调用成本和 dogfood 证据筛选，而不是按文档逐项实现。
+
+建议持续关注的指标不是抽象数量，而是：新增一个工具需要改多少个独立分类点；精确 Skill/Plugin 使用触发多少次 Runner 请求；为了做一个简单选择要给模型多少 schema 字节；失败是否直接给出可执行的下一步；核心改动需要编译和运行哪些无关测试。
 
 ## 8. 本轮工具使用反馈
 
