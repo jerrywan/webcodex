@@ -138,7 +138,7 @@ const POLLING_PROJECT_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 /// exact lease-conflict error; current Servers use explicit registration takeover.
 const POLLING_LEASE_CONFLICT_MAX_WAIT: Duration = Duration::from_secs(75);
 const RUNNER_OFFLINE_PATH: &str = "/api/shell/agent/offline";
-pub(super) fn send_provider_metadata(
+fn send_provider_metadata(
     tx: &tokio::sync::mpsc::Sender<RunnerEnvelope>,
     runtime: &ReloadableRunnerConfig,
     expected_generation: Option<u64>,
@@ -436,7 +436,7 @@ fn shutdown_phase(
     }
 }
 
-pub(super) fn sleep_or_shutdown(delay: Duration, shutdown: &AtomicBool) -> bool {
+fn sleep_or_shutdown(delay: Duration, shutdown: &AtomicBool) -> bool {
     let start = Instant::now();
     while start.elapsed() < delay {
         if shutdown.load(Ordering::SeqCst) {
@@ -656,7 +656,7 @@ fn is_fatal_config_or_tls_error(message: &str) -> bool {
     )
 }
 
-pub(super) fn classify_session_error(message: impl Into<String>) -> RunnerTransportError {
+fn classify_session_error(message: impl Into<String>) -> RunnerTransportError {
     let message = message.into();
     if is_fatal_auth_or_register_error(&message) || is_fatal_config_or_tls_error(&message) {
         RunnerTransportError::fatal(message)
@@ -695,7 +695,7 @@ fn redact_url_queries(message: &str) -> String {
     redacted
 }
 
-pub(super) fn concise_log_error(message: &str, token: &str) -> String {
+fn concise_log_error(message: &str, token: &str) -> String {
     let mut sanitized = redact_url_queries(message).replace(['\r', '\n'], " ");
     let token = token.trim();
     if !token.is_empty() {
@@ -711,7 +711,7 @@ pub(super) fn concise_log_error(message: &str, token: &str) -> String {
     }
 }
 
-pub(super) fn server_log_label(server_url: &str) -> String {
+fn server_log_label(server_url: &str) -> String {
     match url::Url::parse(server_url) {
         Ok(parsed) => {
             let Some(host) = parsed.host_str() else {
@@ -2007,7 +2007,7 @@ fn run_polling_runner_with_shutdown(
 /// Interval between agent-initiated keepalive Pings.
 const QUIC_PING_INTERVAL: Duration = Duration::from_secs(30);
 
-pub(super) type RunnerWebSocket =
+type RunnerWebSocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 enum StreamRead {
