@@ -3219,6 +3219,7 @@ mod startup_runner_tests {
                 client_id: client_id.to_string(),
                 allow_patch: true,
             },
+            root_fingerprint: None,
             knowledge_association: None,
         }
     }

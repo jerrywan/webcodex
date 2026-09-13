@@ -1004,6 +1004,10 @@ async fn repository_knowledge_association_revalidates_identity_availability_and_
         "agent:repo-association:source"
     );
     assert_eq!(available.source.config.path, source_path);
+    assert_eq!(
+        available.source.root_fingerprint.as_deref(),
+        Some(source_fingerprint.as_str())
+    );
     assert_eq!(available.base_sha, base_sha);
     let diagnostic = runtime
         .project_knowledge_association_diagnostic(&resolved_target, Some(&auth))

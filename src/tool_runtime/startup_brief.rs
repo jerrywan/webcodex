@@ -2064,6 +2064,7 @@ mod tests {
                 client_id: "size".to_string(),
                 allow_patch: true,
             },
+            root_fingerprint: None,
             knowledge_association: None,
         };
         let instructions = instruction_snapshot();

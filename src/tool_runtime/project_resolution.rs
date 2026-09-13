@@ -12,6 +12,7 @@ pub(crate) struct ProjectResolverCandidate {
     pub(crate) name: Option<String>,
     pub(crate) path: String,
     pub(crate) allow_patch: bool,
+    pub(crate) root_fingerprint: Option<String>,
     pub(crate) lineage: Option<RunnerProjectLineage>,
     pub(crate) connected: bool,
     pub(crate) status: String,
@@ -58,6 +59,10 @@ pub(crate) struct ResolvedProject {
     pub(crate) input: String,
     pub(crate) resolved_id: String,
     pub(crate) config: ProjectConfig,
+    /// Root identity from the same Runner project-inventory snapshot that
+    /// produced this resolution. It is descriptive only and never authorizes
+    /// access by itself.
+    pub(crate) root_fingerprint: Option<String>,
     /// Descriptive Runner-owned lineage only. It never changes execution cwd,
     /// ProjectConfig, Session authority, Plugin placement, or tool permission.
     pub(crate) knowledge_association: Option<RunnerProjectLineage>,
@@ -175,6 +180,7 @@ impl ToolRuntime {
             name: project.name.clone(),
             path: project.path.clone(),
             allow_patch: project.allow_patch,
+            root_fingerprint: project.root_fingerprint.clone(),
             lineage: project.lineage.clone(),
             connected: client.connected,
             status: client.status.clone(),
@@ -198,6 +204,7 @@ impl ToolRuntime {
             input: input.to_string(),
             resolved_id: candidate.id.clone(),
             config: Self::project_config_from_candidate(candidate),
+            root_fingerprint: candidate.root_fingerprint.clone(),
             knowledge_association: candidate.lineage.clone(),
         }
     }
@@ -439,6 +446,21 @@ impl ToolRuntime {
             || source.resolved_id != source_runtime_id
         {
             return ProjectKnowledgeSourceResolution::Stale;
+        }
+        // The initial Runner view and canonical Project resolution are two
+        // observations. Re-pin the final resolved source to the persisted root
+        // identity so a same-id re-registration between those observations
+        // cannot silently retarget knowledge reads.
+        match source.root_fingerprint.as_deref() {
+            None => {
+                return ProjectKnowledgeSourceResolution::Unavailable(
+                    ProjectKnowledgeUnavailableReason::SourceIdentityUnavailable,
+                );
+            }
+            Some(current) if current != source_root_fingerprint => {
+                return ProjectKnowledgeSourceResolution::Stale;
+            }
+            Some(_) => {}
         }
         ProjectKnowledgeSourceResolution::Available(AuthorizedProjectKnowledgeSource {
             source,
