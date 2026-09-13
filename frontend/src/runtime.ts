@@ -149,6 +149,8 @@ import {
   attentionLabel as formatAttentionLabel,
   formatProjectIdentity,
   extractProjectSelectorDevices,
+  formatProjectLabel,
+  mergeEffectiveProjects,
   formatRuntimeOverviewMetrics,
 } from "./runtime_overview.js";
 
@@ -1138,11 +1140,7 @@ async function fetchOverview(request: any): Promise<boolean> {
 }
 
 function projectLabel(project: any): string {
-  const name = project && project.name ? String(project.name) : "";
-  const id = project && project.id ? String(project.id) : "";
-  const identity = name && name !== id ? name + " — " + id : id;
-  const status = project && project.connected ? String(project.agent_status || "online") : "offline";
-  return identity + " · " + status;
+  return formatProjectLabel(project);
 }
 
 async function fetchProjects(request: any, unlocking = false): Promise<boolean> {
@@ -1226,14 +1224,7 @@ async function fetchProjects(request: any, unlocking = false): Promise<boolean> 
 }
 
 function effectiveProjects(projects: any[]): any[] {
-  const aggregates = new Map<string, any>();
-  for (const row of homeProjectRows) {
-    if (row && typeof row.id === "string") aggregates.set(row.id, row);
-  }
-  return (Array.isArray(projects) ? projects : []).map((project) => {
-    const aggregate = aggregates.get(String(project?.id || ""));
-    return aggregate ? { ...project, sessions: aggregate.sessions } : project;
-  });
+  return mergeEffectiveProjects(projects, homeProjectRows);
 }
 
 function projectSelectorDevices(projects: any[]): string[] {

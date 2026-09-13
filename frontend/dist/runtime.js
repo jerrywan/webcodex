@@ -2357,6 +2357,24 @@ function extractProjectSelectorDevices(projects, knownDevices = [], runnerRows =
         devices.add(selectedDevice);
     return Array.from(devices).sort((left, right) => left.localeCompare(right));
 }
+function formatProjectLabel(project) {
+    const name = project && project.name ? String(project.name) : "";
+    const id = project && project.id ? String(project.id) : "";
+    const identity = name && name !== id ? name + " — " + id : id;
+    const status = project && project.connected ? String(project.agent_status || "online") : "offline";
+    return identity + " · " + status;
+}
+function mergeEffectiveProjects(projects, homeProjectRows = []) {
+    const aggregates = new Map();
+    for (const row of homeProjectRows) {
+        if (row && typeof row.id === "string")
+            aggregates.set(row.id, row);
+    }
+    return (Array.isArray(projects) ? projects : []).map((project) => {
+        const aggregate = aggregates.get(String(project?.id || ""));
+        return aggregate ? { ...project, sessions: aggregate.sessions } : project;
+    });
+}
 function formatRuntimeOverviewMetrics(data, language) {
     if (!data)
         return null;
@@ -3352,11 +3370,7 @@ async function fetchOverview(request) {
     return true;
 }
 function projectLabel(project) {
-    const name = project && project.name ? String(project.name) : "";
-    const id = project && project.id ? String(project.id) : "";
-    const identity = name && name !== id ? name + " — " + id : id;
-    const status = project && project.connected ? String(project.agent_status || "online") : "offline";
-    return identity + " · " + status;
+    return formatProjectLabel(project);
 }
 async function fetchProjects(request, unlocking = false) {
     const priorSelectedProject = selectedProjectRow();
@@ -3444,15 +3458,7 @@ async function fetchProjects(request, unlocking = false) {
     return true;
 }
 function effectiveProjects(projects) {
-    const aggregates = new Map();
-    for (const row of homeProjectRows) {
-        if (row && typeof row.id === "string")
-            aggregates.set(row.id, row);
-    }
-    return (Array.isArray(projects) ? projects : []).map((project) => {
-        const aggregate = aggregates.get(String(project?.id || ""));
-        return aggregate ? { ...project, sessions: aggregate.sessions } : project;
-    });
+    return mergeEffectiveProjects(projects, homeProjectRows);
 }
 function projectSelectorDevices(projects) {
     return extractProjectSelectorDevices(projects, knownProjectDevices, runnerRows, String(state.selectedDevice || ""));

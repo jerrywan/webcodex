@@ -6,6 +6,8 @@ import {
   attentionLabel,
   formatProjectIdentity,
   extractProjectSelectorDevices,
+  formatProjectLabel,
+  mergeEffectiveProjects,
   formatRuntimeOverviewMetrics,
 } from "../dist/runtime_overview.js";
 
@@ -85,6 +87,39 @@ test("extractProjectSelectorDevices consolidates and deduplicates devices", () =
 
   const result = extractProjectSelectorDevices(projects, known, runners, selected);
   assert.deepEqual(result, ["runner-a", "runner-b", "runner-c", "runner-d", "runner-e"]);
+});
+
+test("formatProjectLabel formats project identity and online/offline status", () => {
+  assert.equal(
+    formatProjectLabel({ id: "p1", name: "Project One", connected: true, agent_status: "idle" }),
+    "Project One — p1 · idle"
+  );
+  assert.equal(
+    formatProjectLabel({ id: "p1", name: "p1", connected: false }),
+    "p1 · offline"
+  );
+  assert.equal(
+    formatProjectLabel(null),
+    " · offline"
+  );
+});
+
+test("mergeEffectiveProjects combines project rows with home project aggregated sessions", () => {
+  const projects = [
+    { id: "proj-1", name: "Project 1" },
+    { id: "proj-2", name: "Project 2" },
+  ];
+  const homeProjects = [
+    { id: "proj-1", sessions: { active: 3 } },
+    { id: "proj-3", sessions: { active: 1 } },
+  ];
+
+  const merged = mergeEffectiveProjects(projects, homeProjects);
+  assert.equal(merged.length, 2);
+  assert.deepEqual(merged[0].sessions, { active: 3 });
+  assert.equal(merged[1].sessions, undefined);
+
+  assert.deepEqual(mergeEffectiveProjects(null, homeProjects), []);
 });
 
 test("formatRuntimeOverviewMetrics formats overview metric views", () => {
