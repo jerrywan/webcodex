@@ -1129,27 +1129,31 @@ impl ConnectorRuntime {
     fn single_batch_item_output(tool_name: &str, output: Value) -> Result<Value, KernelFailure> {
         let Some(items) = output.get("items").and_then(Value::as_array) else {
             return Err(KernelFailure::Adapter(format!(
-                "kernel tool {tool_name} returned non-array items payload"
+                "{tool_name} returned a malformed batch result without items"
             )));
         };
         if items.len() != 1 {
             return Err(KernelFailure::Adapter(format!(
-                "kernel tool {tool_name} returned {} items for single item batch",
+                "{tool_name} returned {} items for a one-item connector request",
                 items.len()
             )));
         }
-        let item = items[0].clone();
-        match item.get("ok").and_then(Value::as_bool) {
-            Some(true) => Ok(item),
+        let item = &items[0];
+        match item.get("success").and_then(Value::as_bool) {
+            Some(true) => item.get("output").cloned().ok_or_else(|| {
+                KernelFailure::Adapter(format!(
+                    "{tool_name} returned a successful item without output"
+                ))
+            }),
             Some(false) => Err(KernelFailure::Tool {
                 error: item
                     .get("error")
                     .and_then(Value::as_str)
                     .map(str::to_string),
-                output: item,
+                output: item.get("output").cloned().unwrap_or(Value::Null),
             }),
             None => Err(KernelFailure::Adapter(format!(
-                "kernel tool {tool_name} batch item missing boolean 'ok' field"
+                "{tool_name} returned an item without a boolean success field"
             ))),
         }
     }
@@ -1492,6 +1496,42 @@ fn code_navigation_tool_call(input: &CodeNavigateInput) -> Result<(&'static str,
                 "hover",
                 json!({ "path": path, "line": line, "column": column }),
             ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_batch_item_output_preserves_canonical_runtime_envelope() {
+        let success = json!({
+            "items": [{
+                "index": 0,
+                "success": true,
+                "output": { "text": "ready" }
+            }]
+        });
+        assert_eq!(
+            ConnectorRuntime::single_batch_item_output("read_files", success).unwrap(),
+            json!({ "text": "ready" })
+        );
+
+        let failure = json!({
+            "items": [{
+                "index": 0,
+                "success": false,
+                "error": "read failed",
+                "output": { "reason_code": "not_found" }
+            }]
+        });
+        match ConnectorRuntime::single_batch_item_output("read_files", failure).unwrap_err() {
+            KernelFailure::Tool { error, output } => {
+                assert_eq!(error.as_deref(), Some("read failed"));
+                assert_eq!(output, json!({ "reason_code": "not_found" }));
+            }
+            other => panic!("expected tool failure, got {other:?}"),
         }
     }
 }
