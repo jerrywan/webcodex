@@ -2,6 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import {
+  formatWorkspaceBreadcrumb,
+  formatSelectedProjectIdentity,
+  formatSessionWorkspaceIdentity,
+  formatDeviceStatusText,
+  formatProjectStatusText,
+  formatRunnerCountText,
+  formatRecentSessionStatusText,
+} from "../dist/runtime_navigation.js";
 
 test("operation navigation shows one destination and moves focus without replacing its form", async () => {
   const source = await readFile(new URL("../dist/runtime.js", import.meta.url), "utf8");
@@ -208,6 +217,7 @@ test("workspace disclosure survives rerender and ignores detached toggle events"
   let disclosure;
   const context = vm.createContext({
     clientId: "runner-a", project: { id: "project-a" }, state: { selectedProject: "project-a" },
+    options: { selectedProject: "project-a" },
     window: { localStorage: { getItem: (key) => stored.get(key), setItem: (key, value) => stored.set(key, value) } },
     document: { createElement: () => (disclosure = {
       isConnected: true,
@@ -230,4 +240,90 @@ test("workspace disclosure survives rerender and ignores detached toggle events"
   context.clientId = "runner-b";
   render();
   assert.equal(disclosure.open, true);
+});
+
+test("formatWorkspaceBreadcrumb formats runner and project breadcrumb labels", () => {
+  assert.deepEqual(formatWorkspaceBreadcrumb(null, "en"), {
+    runnerText: "Fleet",
+    projectText: "Projects",
+  });
+  assert.deepEqual(formatWorkspaceBreadcrumb(null, "zh-CN"), {
+    runnerText: "设备群",
+    projectText: "项目",
+  });
+  assert.deepEqual(
+    formatWorkspaceBreadcrumb({ client_id: "macbook", name: "engine", id: "p1" }, "en"),
+    { runnerText: "macbook", projectText: "engine" },
+  );
+  assert.deepEqual(
+    formatWorkspaceBreadcrumb({ client_id: "macbook", id: "p1" }, "en"),
+    { runnerText: "macbook", projectText: "p1" },
+  );
+});
+
+test("formatSelectedProjectIdentity and formatSessionWorkspaceIdentity produce correct labels", () => {
+  const project = { id: "p1", name: "Engine", path: "/opt/repo", client_id: "macbook" };
+  assert.equal(
+    formatSelectedProjectIdentity(project, "en"),
+    "Runner: macbook · Project: p1 · Workspace: /opt/repo",
+  );
+  assert.equal(
+    formatSelectedProjectIdentity(project, "zh-CN"),
+    "运行器：macbook · 项目：p1 · 工作空间：/opt/repo",
+  );
+  assert.equal(
+    formatSessionWorkspaceIdentity(project, "en"),
+    "Runner: macbook · Project: p1 · Workspace: /opt/repo",
+  );
+  assert.equal(
+    formatSessionWorkspaceIdentity(project, "zh-CN"),
+    "运行器：macbook · 项目：p1 · 工作空间：/opt/repo",
+  );
+});
+
+test("formatDeviceStatusText and formatRunnerCountText format runner counts", () => {
+  assert.equal(formatDeviceStatusText(0, "", "en"), "No authorized Runners");
+  assert.equal(formatDeviceStatusText(0, "", "zh-CN"), "没有已授权运行器");
+  assert.equal(formatDeviceStatusText(2, "", "en"), "2 authorized Runners · All Runners");
+  assert.equal(formatDeviceStatusText(2, "node-1", "en"), "2 authorized Runners · filtered");
+  assert.equal(formatDeviceStatusText(2, "node-1", "zh-CN"), "2 台已授权运行器 · 已筛选");
+
+  assert.equal(formatRunnerCountText(1, "en"), "1 Runner");
+  assert.equal(formatRunnerCountText(3, "en"), "3 Runners");
+  assert.equal(formatRunnerCountText(3, "zh-CN"), "3 台运行器");
+});
+
+test("formatProjectStatusText formats matching, visible, bounded, and scoped project facts", () => {
+  assert.equal(
+    formatProjectStatusText(5, 5, false, "", "", "en"),
+    "5 visible Projects across fleet",
+  );
+  assert.equal(
+    formatProjectStatusText(3, 3, false, "runner-1", "", "en"),
+    "3 visible Projects on runner-1",
+  );
+  assert.equal(
+    formatProjectStatusText(2, 5, true, "runner-1", "test", "en"),
+    "2 of 5 matching Projects shown on runner-1 · bounded",
+  );
+  assert.equal(
+    formatProjectStatusText(2, 5, true, "", "test", "zh-CN"),
+    "已显示 2 / 5 个匹配项目 · 跨全部设备 · 有界",
+  );
+});
+
+test("formatRecentSessionStatusText formats session count with optional truncation markers", () => {
+  assert.equal(formatRecentSessionStatusText(null, "en"), "");
+  assert.equal(
+    formatRecentSessionStatusText({ returned: 4, truncated: false, scan_truncated: false }, "en"),
+    "4 Sessions",
+  );
+  assert.equal(
+    formatRecentSessionStatusText({ returned: 4, truncated: true, scan_truncated: true }, "en"),
+    "4 Sessions · top 4 · partial scan",
+  );
+  assert.equal(
+    formatRecentSessionStatusText({ returned: 4, truncated: true, scan_truncated: true }, "zh-CN"),
+    "4 个会话 · 前 4 · 扫描不完整",
+  );
 });

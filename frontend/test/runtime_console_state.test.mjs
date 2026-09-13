@@ -274,6 +274,7 @@ test("session switch invalidates old collaboration responses", () => {
 
 test("runtime collaboration rendering uses textContent and explicitly reloads on history loss", async () => {
   const source = await readFile(new URL("../src/runtime.ts", import.meta.url), "utf8");
+  const navigationSource = await readFile(new URL("../src/runtime_navigation.ts", import.meta.url), "utf8");
   const html = await readFile(new URL("../src/runtime.html", import.meta.url), "utf8");
   const css = await readFile(new URL("../src/runtime.css", import.meta.url), "utf8");
   assert.equal(html.includes("runtime-project-" + "select"), false);
@@ -378,7 +379,7 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   assert.doesNotMatch(source, /api\("runner"/);
   assert.match(source, /selectRuntimeSessionLocation/);
   assert.doesNotMatch(source, /project-row-path/);
-  assert.match(source, /runtimeProjectIdentityText\(project\)/);
+  assert.match(navigationSource, /runtimeProjectIdentityText\(project\)/);
   assert.match(source, /runtimeCollaborationMessageSides\(messages, locallyAuthoredCollaborationMessageIds\)/);
   assert.match(source, /provenance-unknown/);
   assert.match(source, /sessionListMetaSnapshot = \{\s*total: typeof response\.data\.total === "number" \? Math\.max\(sessionRows\.length, response\.data\.total\) : sessionRows\.length,\s*truncated: !!response\.data\.truncated,\s*\}/);
@@ -405,10 +406,10 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   assert.match(source, /setText\("runtime-session-id", String\(detail\.session_id/);
   assert.match(source, /setText\("runtime-session-created", dateTimeLabel\(detail\.created_at\)\)/);
   assert.match(source, /setText\("runtime-session-updated", dateTimeLabel\(detail\.updated_at\)\)/);
-  const recentStart = source.indexOf("function renderRecentSessions");
-  const recentEnd = source.indexOf("function selectRecentSession", recentStart);
-  const recentRender = source.slice(recentStart, recentEnd);
-  assert.match(recentRender, /localizedLivenessPresentation\(session\)/);
+  const recentStart = navigationSource.indexOf("function renderRecentSessionRows");
+  const recentEnd = navigationSource.length;
+  const recentRender = navigationSource.slice(recentStart, recentEnd);
+  assert.match(recentRender, /formatLivenessPresentation\(session/);
   assert.match(recentRender, /attentionLabel\(session\.overview\?\.attention\)/);
   assert.match(recentRender, /updatedLabel\(session\.updated_at\)/);
   const recentSelectStart = source.indexOf("function selectRecentSession");
@@ -478,29 +479,33 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   const renderProjectsStart = source.indexOf("function renderProjectSelectors");
   const renderProjectsEnd = source.indexOf("function switchProject", renderProjectsStart);
   const renderProjects = source.slice(renderProjectsStart, renderProjectsEnd);
-  assert.match(renderProjects, /document\.createElement\("summary"\)/);
   assert.match(renderProjects, /signature === renderedProjectSelectorsSignature/);
-  assert.match(renderProjects, /workspace\.addEventListener\("toggle"/);
-  assert.doesNotMatch(renderProjects, /addEventListener\("keydown"/);
-  assert.match(renderProjects, /all\.textContent = tr\("All Runners"\)/);
-  assert.match(renderProjects, /switchProject\(String\(project\.client_id \|\| ""\), String\(project\.id \|\| ""\)\)/);
-  assert.match(renderProjects, /project-row-signals/);
-  assert.match(renderProjects, /project-row-meta/);
-  assert.match(renderProjects, /scan partial/);
-  assert.match(renderProjects, /row\.title = \[projectName, projectId/);
-  assert.match(renderProjects, /projectsByDevice/);
-  assert.match(renderProjects, /projectDeviceFilter/);
-  assert.match(renderProjects, /workspace\.appendChild\(sessionsPanel\)/);
-  assert.match(renderProjects, /deviceMeta\.textContent = tr\(status\) \+ " · " \+ countLabel\(deviceProjects\.length, "Project"\)/);
+  assert.match(renderProjects, /switchProject\(clientId, projectId\)/);
+
+  const renderProjectsTreeStart = navigationSource.indexOf("function renderProjectSelectorTree");
+  const renderProjectsTreeEnd = navigationSource.indexOf("function renderRunnerFleetRows", renderProjectsTreeStart);
+  const renderProjectsTree = navigationSource.slice(renderProjectsTreeStart, renderProjectsTreeEnd);
+  assert.match(renderProjectsTree, /document\.createElement\("summary"\)/);
+  assert.match(renderProjectsTree, /workspace\.addEventListener\("toggle"/);
+  assert.doesNotMatch(renderProjectsTree, /addEventListener\("keydown"/);
+  assert.match(renderProjectsTree, /all\.textContent = tr\("All Runners"\)/);
+  assert.match(renderProjectsTree, /project-row-signals/);
+  assert.match(renderProjectsTree, /project-row-meta/);
+  assert.match(renderProjectsTree, /scan partial/);
+  assert.match(renderProjectsTree, /row\.title = \[projectName, projectId/);
+  assert.match(renderProjectsTree, /projectsByDevice/);
+  assert.match(renderProjectsTree, /options\.projectDeviceFilter/);
+  assert.match(renderProjectsTree, /workspace\.appendChild\(sessionsPanel\)/);
+  assert.match(renderProjectsTree, /deviceMeta\.textContent = tr\(status\) \+ " · " \+ countLabel\(deviceProjects\.length, "Project"\)/);
   assert.match(source, /appendRichMessage\(bubble, message\?\.message\);\s*content\.appendChild\(bubble\)/);
   assert.match(source, /footer\.appendChild\(actions\);\s*content\.appendChild\(footer\);\s*card\.appendChild\(content\)/);
   assert.doesNotMatch(source, /message-avatar/);
   assert.match(source, /createMessageAction\(tr\("Reply"\), "reply"/);
-  assert.match(source, /projectIcon\.appendChild\(runtimeIcon\("folder"\)\)/);
+  assert.match(navigationSource, /projectIcon\.appendChild\(runtimeIcon\("folder"\)\)/);
   assert.match(source, /icon\.appendChild\(runtimeIcon\("message"\)\)/);
-  const renderRunnersStart = source.indexOf("function renderRunnerFleet");
-  const renderRunnersEnd = source.indexOf("function renderRecentSessions", renderRunnersStart);
-  const renderRunners = source.slice(renderRunnersStart, renderRunnersEnd);
+  const renderRunnersStart = navigationSource.indexOf("function renderRunnerFleetRows");
+  const renderRunnersEnd = navigationSource.indexOf("function renderRecentSessionRows", renderRunnersStart);
+  const renderRunners = navigationSource.slice(renderRunnersStart, renderRunnersEnd);
   assert.match(renderRunners, /projects_scan_partial/);
   assert.match(renderRunners, /Projects scanned/);
   assert.match(renderRunners, /fleet scan partial/);
@@ -520,8 +525,9 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   assert.match(fetchProjects, /if \(query\) \{[\s\S]*renderProjectSelectors\(projectRows, projectRowsTruncated\);[\s\S]*return true;/);
   assert.match(fetchProjects, /currentProject && projectRowsTruncated/);
   assert.match(fetchProjects, /projectRowsTotal = Math\.max\(projectRows\.length, reportedTotal\)/);
-  assert.match(renderProjects, /matching Projects shown/);
-  assert.match(renderProjects, /visible Projects shown/);
+  assert.match(renderProjects, /formatProjectStatusText/);
+  assert.match(navigationSource, /matching Projects shown/);
+  assert.match(navigationSource, /visible Projects shown/);
   const applyRunnerStart = source.indexOf("function applyRunnerFilter");
   const applyRunnerEnd = source.indexOf("function runnerAttentionCount", applyRunnerStart);
   const applyRunner = source.slice(applyRunnerStart, applyRunnerEnd);
@@ -580,10 +586,11 @@ test("runner disclosure honors user collapse over selected project and auto-reve
 });
 
 test("navigation and inspector source contracts maintain disclosure hierarchy and accessibility", async () => {
-  const [html, css, source] = await Promise.all([
+  const [html, css, source, navigationSource] = await Promise.all([
     readFile(new URL("../src/runtime.html", import.meta.url), "utf8"),
     readFile(new URL("../src/runtime.css", import.meta.url), "utf8"),
     readFile(new URL("../src/runtime.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/runtime_navigation.ts", import.meta.url), "utf8"),
   ]);
 
   // P3: Recent Sessions component semantics - clean class, no legacy sidebar-details overrides
@@ -612,5 +619,5 @@ test("navigation and inspector source contracts maintain disclosure hierarchy an
   assert.match(source, /function revealRunner/);
   assert.match(source, /function switchProject[\s\S]*if \(device\) revealRunner\(device\)/);
   assert.match(source, /function selectRecentSession[\s\S]*if \(clientId\) revealRunner\(clientId\)/);
-  assert.match(source, /group\.open = resolveRunnerDisclosure\(storedDisclosure, defaultOpen\)/);
+  assert.match(navigationSource, /group\.open = resolveRunnerDisclosure\(storedDisclosure, defaultOpen\)/);
 });

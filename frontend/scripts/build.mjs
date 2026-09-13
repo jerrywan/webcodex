@@ -35,6 +35,7 @@ const watchedSources = new Set([
   "runtime_overview.ts",
   "runtime_icons.ts",
   "runtime_operations.ts",
+  "runtime_navigation.ts",
   "runtime.css",
   "runtime.html",
   "admin.ts",
@@ -264,6 +265,32 @@ export function createOutputs(
     transpileTypeScript(sourceDirectory, "runtime_icons.ts")
   );
   const runtimeIconsClassic = stripModuleExports(runtimeIconsModule);
+  const runtimeNavigationModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_navigation.ts")
+  );
+  const runtimeNavigationClassic = stripModuleExports(
+    runtimeNavigationModule
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_i18n(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_console_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_overview(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_activity(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_icons(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+  );
   const runtimeModule = transpileTypeScript(sourceDirectory, "runtime.ts");
   const runtimeScript = stripModuleExports(
     runtimeModule
@@ -285,6 +312,10 @@ export function createOutputs(
       )
       .replace(
         /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_console_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_navigation(?:\.js)?["'];?\s*\n/m,
         ""
       )
       .replace(
@@ -359,6 +390,8 @@ export function createOutputs(
       "\n" +
       runtimeIconsClassic +
       "\n" +
+      runtimeNavigationClassic +
+      "\n" +
       runtimeScript
   );
   assertClassicScript(resolve(outputDirectory, "runtime.js"), runtimeInlined);
@@ -427,6 +460,7 @@ export function createOutputs(
     ["runtime_overview.js", runtimeOverviewModule],
     ["runtime_operations.js", runtimeOperationsModule],
     ["runtime_icons.js", runtimeIconsModule],
+    ["runtime_navigation.js", runtimeNavigationModule],
     ["admin_controller.js", adminControllerModule],
     ["admin_mutation_controller.js", adminMutationControllerModule],
     ["admin_mutation_view.js", adminMutationViewModule],
