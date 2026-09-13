@@ -103,6 +103,16 @@ import {
   renderConversationMessages,
   renderInboxDeliveryCards,
 } from "./runtime_communication.js";
+import {
+  formatUpdatedTime,
+  formatSessionDateTime,
+  formatLivenessPresentation,
+  activityKindLabel as formatActivityKind,
+  activityFacts as formatActivityFacts,
+  activityDescription as formatActivityDescription,
+  appendActivityPreview,
+  renderTimelineEvents,
+} from "./runtime_activity.js";
 
 const API_BASE = RUNTIME_API_BASE;
 const apiClient = new RuntimeApiClient(API_BASE);
@@ -1749,23 +1759,15 @@ async function fetchSessions(request: any): Promise<void> {
 }
 
 function updatedLabel(timestamp: any): string {
-  if (typeof timestamp !== "number") return tr("time unavailable");
-  return new Date(timestamp * 1000).toLocaleTimeString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en");
+  return formatUpdatedTime(timestamp, runtimeLanguage);
 }
 
 function dateTimeLabel(timestamp: any): string {
-  if (typeof timestamp !== "number") return tr("time unavailable");
-  return new Date(timestamp * 1000).toLocaleString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en");
+  return formatSessionDateTime(timestamp, runtimeLanguage);
 }
 
 function localizedLivenessPresentation(session: any): any {
-  const presentation = workflowSessionLivenessPresentation(session);
-  if (runtimeLanguage !== "zh-CN") return presentation;
-  let label = tr(String(presentation.label || "idle"));
-  if (presentation.state === "idle" && String(presentation.label || "").startsWith("idle · ")) {
-    label = tr("idle") + " · " + String(presentation.label).slice("idle · ".length);
-  }
-  return { ...presentation, label, tooltip: tr(String(presentation.tooltip || "")) };
+  return formatLivenessPresentation(session, runtimeLanguage);
 }
 
 function localizedWorkflowText(value: unknown): string {
@@ -1773,45 +1775,19 @@ function localizedWorkflowText(value: unknown): string {
 }
 
 function activityKindLabel(activity: any): string {
-  const kind = String(activity && activity.kind || "Activity");
-  if (activity && activity.job_handoff) {
-    if (kind === "Tested") return runtimeLanguage === "zh-CN" ? "测试" : "Test";
-    if (kind === "Ran") return runtimeLanguage === "zh-CN" ? "命令" : "Command";
-  }
-  if (kind === "Explored" && activity && typeof activity.group_count === "number") return (runtimeLanguage === "zh-CN" ? "探索 ×" : "Explored ×") + activity.group_count;
-  if (runtimeLanguage !== "zh-CN") return kind;
-  return ({ Activity: "活动", Progress: "进度", Explored: "探索", Edited: "编辑", Tested: "测试", Ran: "运行", Reviewed: "审查" } as Record<string, string>)[kind] || kind;
+  return formatActivityKind(activity, runtimeLanguage);
 }
 
 function activityFacts(activity: any, includeTiming: boolean): string[] {
-  const facts: string[] = [];
-  if (activity && typeof activity.group_count === "number") {
-    if (Array.isArray(activity.group_kinds) && activity.group_kinds.length) facts.push(activity.group_kinds.map(String).join(" / "));
-    if (Array.isArray(activity.group_tools) && activity.group_tools.length) facts.push(activity.group_tools.map(String).join(", "));
-  } else if (activity && activity.tool) facts.push(String(activity.tool));
-  if (activity && activity.kind === "Progress") facts.push(runtimeLanguage === "zh-CN" ? "仅供参考" : "informational");
-  else if (activity && activity.job_handoff) {
-    facts.push(runtimeLanguage === "zh-CN" ? "已移交" : "handed off");
-    if (activity.execution_state) facts.push((runtimeLanguage === "zh-CN" ? "执行 " : "execution ") + tr(String(activity.execution_state)));
-  } else if (activity && activity.state) facts.push(String(activity.state));
-  if (activity && activity.job_id) facts.push("job " + String(activity.job_id));
-  if (includeTiming && activity && typeof activity.started_at === "number") facts.push(new Date(activity.started_at * 1000).toLocaleTimeString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en"));
-  return facts;
+  return formatActivityFacts(activity, includeTiming, runtimeLanguage);
 }
 
 function activityDescription(activity: any): string {
-  if (!activity) return "";
-  const parts = [activityKindLabel(activity), ...activityFacts(activity, false)];
-  if (activity.summary && !activity.job_handoff) parts.push(String(activity.summary));
-  return parts.join(" · ");
+  return formatActivityDescription(activity, runtimeLanguage);
 }
 
 function appendPreview(parent: HTMLElement, label: string, activity: any): void {
-  if (!activity) return;
-  const row = document.createElement("div"); row.className = "activity-preview muted small";
-  const prefix = document.createElement("span"); prefix.className = "activity-preview-label"; prefix.textContent = label;
-  const text = document.createElement("span"); text.textContent = activityDescription(activity);
-  row.appendChild(prefix); row.appendChild(text); parent.appendChild(row);
+  appendActivityPreview(parent, label, activity, runtimeLanguage);
 }
 
 function renderSessionList(sessions: any[], payload: any): void {
@@ -1921,22 +1897,13 @@ function renderDetail(detail: any, consumeCollaborationNotice = true): void {
   renderCollaboration(undefined, consumeCollaborationNotice);
   syncResponsiveNavigation();
   const activities = Array.isArray(detail.activity) ? detail.activity : [];
-  const node = el("runtime-timeline"); const previousScrollTop = node ? node.scrollTop : 0;
-  clearNode(node); show("runtime-timeline-empty", activities.length === 0);
+  const node = el("runtime-timeline");
+  const previousScrollTop = node ? node.scrollTop : 0;
+  show("runtime-timeline-empty", activities.length === 0);
+  renderTimelineEvents(node, activities, runtimeLanguage);
   if (!node) return syncFollowUi();
-  for (const activity of activities) {
-    const item = document.createElement("li"); item.className = "timeline-event";
-    if (activity && activity.kind === "Progress") item.classList.add("reported-progress");
-    if (activity && ["failed", "timed_out"].includes(String(activity.state || ""))) item.classList.add("failed");
-    const head = document.createElement("div"); head.className = "timeline-head";
-    const kind = document.createElement("span"); kind.className = "timeline-kind"; kind.textContent = activityKindLabel(activity);
-    const meta = document.createElement("span"); meta.className = "muted small"; meta.textContent = activityFacts(activity, true).join(" · ");
-    head.appendChild(kind); head.appendChild(meta); item.appendChild(head);
-    if (activity && activity.summary) { const body = document.createElement("div"); body.className = "timeline-body small"; body.textContent = String(activity.summary); item.appendChild(body); }
-    if (activity && Array.isArray(activity.paths) && activity.paths.length) { const paths = document.createElement("div"); paths.className = "muted small"; paths.textContent = activity.paths.map(String).join(" · "); item.appendChild(paths); }
-    node.appendChild(item);
-  }
-  node.scrollTop = workflowSessionScrollTopAfterRender(state.workflow, previousScrollTop, node.clientHeight, node.scrollHeight); syncFollowUi();
+  node.scrollTop = workflowSessionScrollTopAfterRender(state.workflow, previousScrollTop, node.clientHeight, node.scrollHeight);
+  syncFollowUi();
 }
 
 function collaborationPhaseLabel(): string {

@@ -1980,6 +1980,148 @@ function renderInboxDeliveryCards(container, inbox, agents, options) {
     }
 }
 
+function formatUpdatedTime(timestamp, language) {
+    if (typeof timestamp !== "number")
+        return translateText("time unavailable", language);
+    return new Date(timestamp * 1000).toLocaleTimeString(language === "zh-CN" ? "zh-CN" : "en");
+}
+function formatSessionDateTime(timestamp, language) {
+    if (typeof timestamp !== "number")
+        return translateText("time unavailable", language);
+    return new Date(timestamp * 1000).toLocaleString(language === "zh-CN" ? "zh-CN" : "en");
+}
+function formatLivenessPresentation(session, language) {
+    const presentation = workflowSessionLivenessPresentation(session);
+    if (language !== "zh-CN")
+        return presentation;
+    let label = translateText(String(presentation.label || "idle"), language);
+    if (presentation.state === "idle" && String(presentation.label || "").startsWith("idle · ")) {
+        label = translateText("idle", language) + " · " + String(presentation.label).slice("idle · ".length);
+    }
+    return { ...presentation, label, tooltip: translateText(String(presentation.tooltip || ""), language) };
+}
+function activityKindLabel(activity, language) {
+    const kind = String(activity && activity.kind || "Activity");
+    if (activity && activity.job_handoff) {
+        if (kind === "Tested")
+            return language === "zh-CN" ? "测试" : "Test";
+        if (kind === "Ran")
+            return language === "zh-CN" ? "命令" : "Command";
+    }
+    if (kind === "Explored" && activity && typeof activity.group_count === "number") {
+        return (language === "zh-CN" ? "探索 ×" : "Explored ×") + activity.group_count;
+    }
+    if (language !== "zh-CN")
+        return kind;
+    const labels = {
+        Activity: "活动",
+        Progress: "进度",
+        Explored: "探索",
+        Edited: "编辑",
+        Tested: "测试",
+        Ran: "运行",
+        Reviewed: "审查",
+    };
+    return labels[kind] || kind;
+}
+function activityFacts(activity, includeTiming, language) {
+    const facts = [];
+    if (activity && typeof activity.group_count === "number") {
+        if (Array.isArray(activity.group_kinds) && activity.group_kinds.length) {
+            facts.push(activity.group_kinds.map(String).join(" / "));
+        }
+        if (Array.isArray(activity.group_tools) && activity.group_tools.length) {
+            facts.push(activity.group_tools.map(String).join(", "));
+        }
+    }
+    else if (activity && activity.tool) {
+        facts.push(String(activity.tool));
+    }
+    if (activity && activity.kind === "Progress") {
+        facts.push(language === "zh-CN" ? "仅供参考" : "informational");
+    }
+    else if (activity && activity.job_handoff) {
+        facts.push(language === "zh-CN" ? "已移交" : "handed off");
+        if (activity.execution_state) {
+            facts.push((language === "zh-CN" ? "执行 " : "execution ") + translateText(String(activity.execution_state), language));
+        }
+    }
+    else if (activity && activity.state) {
+        facts.push(String(activity.state));
+    }
+    if (activity && activity.job_id) {
+        facts.push("job " + String(activity.job_id));
+    }
+    if (includeTiming && activity && typeof activity.started_at === "number") {
+        facts.push(new Date(activity.started_at * 1000).toLocaleTimeString(language === "zh-CN" ? "zh-CN" : "en"));
+    }
+    return facts;
+}
+function activityDescription(activity, language) {
+    if (!activity)
+        return "";
+    const parts = [activityKindLabel(activity, language), ...activityFacts(activity, false, language)];
+    if (activity.summary && !activity.job_handoff)
+        parts.push(String(activity.summary));
+    return parts.join(" · ");
+}
+function appendActivityPreview(parent, label, activity, language) {
+    if (!activity)
+        return;
+    const row = document.createElement("div");
+    row.className = "activity-preview muted small";
+    const prefix = document.createElement("span");
+    prefix.className = "activity-preview-label";
+    prefix.textContent = label;
+    const text = document.createElement("span");
+    text.textContent = activityDescription(activity, language);
+    row.appendChild(prefix);
+    row.appendChild(text);
+    parent.appendChild(row);
+}
+function createTimelineEvent(activity, language) {
+    const item = document.createElement("li");
+    item.className = "timeline-event";
+    if (activity && activity.kind === "Progress")
+        item.classList.add("reported-progress");
+    if (activity && ["failed", "timed_out"].includes(String(activity.state || "")))
+        item.classList.add("failed");
+    const head = document.createElement("div");
+    head.className = "timeline-head";
+    const kind = document.createElement("span");
+    kind.className = "timeline-kind";
+    kind.textContent = activityKindLabel(activity, language);
+    const meta = document.createElement("span");
+    meta.className = "muted small";
+    meta.textContent = activityFacts(activity, true, language).join(" · ");
+    head.appendChild(kind);
+    head.appendChild(meta);
+    item.appendChild(head);
+    if (activity && activity.summary) {
+        const body = document.createElement("div");
+        body.className = "timeline-body small";
+        body.textContent = String(activity.summary);
+        item.appendChild(body);
+    }
+    if (activity && Array.isArray(activity.paths) && activity.paths.length) {
+        const paths = document.createElement("div");
+        paths.className = "muted small";
+        paths.textContent = activity.paths.map(String).join(" · ");
+        item.appendChild(paths);
+    }
+    return item;
+}
+function renderTimelineEvents(container, activities, language) {
+    if (!container)
+        return;
+    while (container.firstChild)
+        container.removeChild(container.firstChild);
+    for (const activity of activities) {
+        const item = createTimelineEvent(activity, language);
+        container.appendChild(item);
+    }
+}
+
 const API_BASE = RUNTIME_API_BASE;
 const apiClient = new RuntimeApiClient(API_BASE);
 const REFRESH_MS = 30000;
@@ -3685,88 +3827,28 @@ async function fetchSessions(request) {
     }
 }
 function updatedLabel(timestamp) {
-    if (typeof timestamp !== "number")
-        return tr("time unavailable");
-    return new Date(timestamp * 1000).toLocaleTimeString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en");
+    return formatUpdatedTime(timestamp, runtimeLanguage);
 }
 function dateTimeLabel(timestamp) {
-    if (typeof timestamp !== "number")
-        return tr("time unavailable");
-    return new Date(timestamp * 1000).toLocaleString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en");
+    return formatSessionDateTime(timestamp, runtimeLanguage);
 }
 function localizedLivenessPresentation(session) {
-    const presentation = workflowSessionLivenessPresentation(session);
-    if (runtimeLanguage !== "zh-CN")
-        return presentation;
-    let label = tr(String(presentation.label || "idle"));
-    if (presentation.state === "idle" && String(presentation.label || "").startsWith("idle · ")) {
-        label = tr("idle") + " · " + String(presentation.label).slice("idle · ".length);
-    }
-    return { ...presentation, label, tooltip: tr(String(presentation.tooltip || "")) };
+    return formatLivenessPresentation(session, runtimeLanguage);
 }
 function localizedWorkflowText(value) {
     return translateWorkflowText(value, runtimeLanguage);
 }
 function activityKindLabel(activity) {
-    const kind = String(activity && activity.kind || "Activity");
-    if (activity && activity.job_handoff) {
-        if (kind === "Tested")
-            return runtimeLanguage === "zh-CN" ? "测试" : "Test";
-        if (kind === "Ran")
-            return runtimeLanguage === "zh-CN" ? "命令" : "Command";
-    }
-    if (kind === "Explored" && activity && typeof activity.group_count === "number")
-        return (runtimeLanguage === "zh-CN" ? "探索 ×" : "Explored ×") + activity.group_count;
-    if (runtimeLanguage !== "zh-CN")
-        return kind;
-    return { Activity: "活动", Progress: "进度", Explored: "探索", Edited: "编辑", Tested: "测试", Ran: "运行", Reviewed: "审查" }[kind] || kind;
+    return formatActivityKind(activity, runtimeLanguage);
 }
 function activityFacts(activity, includeTiming) {
-    const facts = [];
-    if (activity && typeof activity.group_count === "number") {
-        if (Array.isArray(activity.group_kinds) && activity.group_kinds.length)
-            facts.push(activity.group_kinds.map(String).join(" / "));
-        if (Array.isArray(activity.group_tools) && activity.group_tools.length)
-            facts.push(activity.group_tools.map(String).join(", "));
-    }
-    else if (activity && activity.tool)
-        facts.push(String(activity.tool));
-    if (activity && activity.kind === "Progress")
-        facts.push(runtimeLanguage === "zh-CN" ? "仅供参考" : "informational");
-    else if (activity && activity.job_handoff) {
-        facts.push(runtimeLanguage === "zh-CN" ? "已移交" : "handed off");
-        if (activity.execution_state)
-            facts.push((runtimeLanguage === "zh-CN" ? "执行 " : "execution ") + tr(String(activity.execution_state)));
-    }
-    else if (activity && activity.state)
-        facts.push(String(activity.state));
-    if (activity && activity.job_id)
-        facts.push("job " + String(activity.job_id));
-    if (includeTiming && activity && typeof activity.started_at === "number")
-        facts.push(new Date(activity.started_at * 1000).toLocaleTimeString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en"));
-    return facts;
+    return formatActivityFacts(activity, includeTiming, runtimeLanguage);
 }
 function activityDescription(activity) {
-    if (!activity)
-        return "";
-    const parts = [activityKindLabel(activity), ...activityFacts(activity, false)];
-    if (activity.summary && !activity.job_handoff)
-        parts.push(String(activity.summary));
-    return parts.join(" · ");
+    return formatActivityDescription(activity, runtimeLanguage);
 }
 function appendPreview(parent, label, activity) {
-    if (!activity)
-        return;
-    const row = document.createElement("div");
-    row.className = "activity-preview muted small";
-    const prefix = document.createElement("span");
-    prefix.className = "activity-preview-label";
-    prefix.textContent = label;
-    const text = document.createElement("span");
-    text.textContent = activityDescription(activity);
-    row.appendChild(prefix);
-    row.appendChild(text);
-    parent.appendChild(row);
+    appendActivityPreview(parent, label, activity, runtimeLanguage);
 }
 function renderSessionList(sessions, payload) {
     const node = el("runtime-session-list");
@@ -3913,42 +3995,10 @@ function renderDetail(detail, consumeCollaborationNotice = true) {
     const activities = Array.isArray(detail.activity) ? detail.activity : [];
     const node = el("runtime-timeline");
     const previousScrollTop = node ? node.scrollTop : 0;
-    clearNode(node);
     show("runtime-timeline-empty", activities.length === 0);
+    renderTimelineEvents(node, activities, runtimeLanguage);
     if (!node)
         return syncFollowUi();
-    for (const activity of activities) {
-        const item = document.createElement("li");
-        item.className = "timeline-event";
-        if (activity && activity.kind === "Progress")
-            item.classList.add("reported-progress");
-        if (activity && ["failed", "timed_out"].includes(String(activity.state || "")))
-            item.classList.add("failed");
-        const head = document.createElement("div");
-        head.className = "timeline-head";
-        const kind = document.createElement("span");
-        kind.className = "timeline-kind";
-        kind.textContent = activityKindLabel(activity);
-        const meta = document.createElement("span");
-        meta.className = "muted small";
-        meta.textContent = activityFacts(activity, true).join(" · ");
-        head.appendChild(kind);
-        head.appendChild(meta);
-        item.appendChild(head);
-        if (activity && activity.summary) {
-            const body = document.createElement("div");
-            body.className = "timeline-body small";
-            body.textContent = String(activity.summary);
-            item.appendChild(body);
-        }
-        if (activity && Array.isArray(activity.paths) && activity.paths.length) {
-            const paths = document.createElement("div");
-            paths.className = "muted small";
-            paths.textContent = activity.paths.map(String).join(" · ");
-            item.appendChild(paths);
-        }
-        node.appendChild(item);
-    }
     node.scrollTop = workflowSessionScrollTopAfterRender(state.workflow, previousScrollTop, node.clientHeight, node.scrollHeight);
     syncFollowUi();
 }
