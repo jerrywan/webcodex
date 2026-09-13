@@ -94,6 +94,15 @@ import {
   renderWindowLinkedSessions,
   renderSessionWindowCorrelationLinks,
 } from "./runtime_window.js";
+import {
+  communicationTimeLabel as formatCommunicationTime,
+  parseAgentIds,
+  deliveryAgentLabel as formatDeliveryAgent,
+  renderAgentRows,
+  renderConversationRows,
+  renderConversationMessages,
+  renderInboxDeliveryCards,
+} from "./runtime_communication.js";
 
 const API_BASE = RUNTIME_API_BASE;
 const apiClient = new RuntimeApiClient(API_BASE);
@@ -2652,16 +2661,7 @@ function operationKey(prefix: string): string {
 }
 
 function communicationTimeLabel(value: any): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return tr("time unavailable");
-  return new Date(value).toLocaleString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en");
-}
-
-function parseAgentIds(value: string): string[] {
-  const ids = value
-    .split(/[\s,]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return Array.from(new Set(ids));
+  return formatCommunicationTime(value, runtimeLanguage);
 }
 
 function communicationAgent(agentId: string): any | null {
@@ -2757,36 +2757,10 @@ function renderCommunicationAvailability(): void {
 function renderCommunicationAgents(): void {
   setText("runtime-communication-count", countLabel(communicationAgents.length, "Agent"));
   const list = el("runtime-agent-list");
-  clearNode(list);
   show("runtime-agent-empty", communicationReadAvailable === true && communicationAgents.length === 0);
-  if (!list) return;
-  for (const agent of communicationAgents) {
-    const agentId = String(agent?.agent_id || "");
-    if (!agentId) continue;
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "communication-row" + (agentId === selectedCommunicationAgentId ? " selected" : "");
-    if (agentId === selectedCommunicationAgentId) row.setAttribute("aria-current", "true");
-    const head = document.createElement("div");
-    head.className = "communication-row-head";
-    const title = document.createElement("span");
-    title.className = "communication-row-title";
-    title.textContent = String(agent?.display_name || agent?.handle || "Agent") + " · @" + String(agent?.handle || "agent");
-    const unread = document.createElement("span");
-    unread.className = "chip" + (Number(agent?.queued_delivery_count || 0) > 0 ? " tone-warn" : "");
-    unread.textContent = countLabel(agent?.queued_delivery_count, "queued delivery");
-    head.appendChild(title);
-    head.appendChild(unread);
-    row.appendChild(head);
-    const meta = document.createElement("span");
-    meta.className = "communication-row-meta";
-    meta.textContent = agentId
-      + (runtimeLanguage === "zh-CN" ? " · 配置版本 r" : " · profile r") + String(agent?.profile_revision || 0)
-      + (runtimeLanguage === "zh-CN" ? " · 控制器 g" : " · controller g") + String(agent?.current_controller_generation || 0)
-      + " · " + countLabel(agent?.active_endpoint_count, "active Endpoint")
-      + " · " + countLabel(agent?.unresolved_wake_count, "unresolved Wake");
-    row.appendChild(meta);
-    row.addEventListener("click", () => {
+  renderAgentRows(list, communicationAgents, selectedCommunicationAgentId, {
+    language: runtimeLanguage,
+    onSelect: (agentId) => {
       selectedCommunicationAgentId = agentId;
       communicationInbox = [];
       const participants = el("runtime-conversation-agent-ids") as HTMLInputElement | null;
@@ -2795,9 +2769,8 @@ function renderCommunicationAgents(): void {
       renderCommunicationAgentCard();
       renderCommunicationInbox();
       if (communicationEndpointId(agentId)) void fetchCommunicationInbox(communicationGeneration);
-    });
-    list.appendChild(row);
-  }
+    },
+  });
 }
 
 function renderCommunicationAgentCard(): void {
@@ -2872,45 +2845,21 @@ function renderCommunicationAgentCard(): void {
 
 function renderCommunicationConversations(): void {
   const list = el("runtime-conversation-list");
-  clearNode(list);
   show("runtime-conversation-empty", communicationReadAvailable === true && communicationConversations.length === 0);
-  if (!list) return;
-  for (const conversation of communicationConversations) {
-    const conversationId = String(conversation?.conversation_id || "");
-    if (!conversationId) continue;
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "communication-row" + (conversationId === selectedCommunicationConversationId ? " selected" : "");
-    if (conversationId === selectedCommunicationConversationId) row.setAttribute("aria-current", "true");
-    const head = document.createElement("div");
-    head.className = "communication-row-head";
-    const title = document.createElement("span");
-    title.className = "communication-row-title";
-    title.textContent = String(conversation?.title || tr("Untitled Conversation"));
-    const count = document.createElement("span");
-    count.className = "chip";
-    count.textContent = countLabel(conversation?.message_count, "message");
-    head.appendChild(title);
-    head.appendChild(count);
-    row.appendChild(head);
-    const meta = document.createElement("span");
-    meta.className = "communication-row-meta";
-    meta.textContent = conversationId + " · " + countLabel(conversation?.participant_count, "participant") + (runtimeLanguage === "zh-CN" ? " · 序号 " : " · seq ") + String(conversation?.last_seq || 0);
-    row.appendChild(meta);
-    row.addEventListener("click", () => {
+  renderConversationRows(list, communicationConversations, selectedCommunicationConversationId, {
+    language: runtimeLanguage,
+    onSelect: (conversationId) => {
       selectedCommunicationConversationId = conversationId;
       communicationDetail = null;
       renderCommunicationConversations();
       renderCommunicationConversation();
       void fetchCommunicationConversation(communicationGeneration);
-    });
-    list.appendChild(row);
-  }
+    },
+  });
 }
 
 function deliveryAgentLabel(agentId: string): string {
-  const agent = communicationAgent(agentId);
-  return agent ? String(agent.display_name || agent.handle || agentId) : agentId;
+  return formatDeliveryAgent(agentId, communicationAgents);
 }
 
 function renderCommunicationConversation(): void {
@@ -2941,59 +2890,23 @@ function renderCommunicationConversation(): void {
   }
   const messages = Array.isArray(detail.messages) ? detail.messages : [];
   show("runtime-conversation-transcript-empty", messages.length === 0);
-  if (!transcript) return;
-  for (const message of messages) {
-    const author = message?.author || {};
-    const agentAuthored = String(author.participant_kind || "") === "agent";
-    const card = document.createElement("article");
-    card.className = "conversation-message" + (agentAuthored ? " agent-authored" : "");
-    const head = document.createElement("div");
-    head.className = "conversation-message-head";
-    const name = document.createElement("span");
-    name.className = "conversation-message-author";
-    name.textContent = agentAuthored
-      ? "Agent · " + String(author.display_name || author.handle || author.agent_id || tr("unknown"))
-      : (runtimeLanguage === "zh-CN" ? "人工 · " : "Human · ") + String(author.principal_kind || (runtimeLanguage === "zh-CN" ? "凭证主体" : "credential principal"));
-    const seq = document.createElement("span");
-    seq.className = "muted small";
-    seq.textContent = "#" + String(message?.seq || 0) + " · " + communicationTimeLabel(message?.created_at_unix_ms);
-    head.appendChild(name);
-    head.appendChild(seq);
-    card.appendChild(head);
-    const meta = document.createElement("div");
-    meta.className = "conversation-message-meta";
-    const metaParts = [String(message?.message_id || "")];
-    if (author.agent_id) metaParts.push(String(author.agent_id));
-    if (message?.reply_to) metaParts.push((runtimeLanguage === "zh-CN" ? "回复 " : "reply to ") + String(message.reply_to));
-    meta.textContent = metaParts.join(" · ");
-    card.appendChild(meta);
-    const body = document.createElement("div");
-    body.className = "conversation-message-body";
-    body.textContent = String(message?.body || "");
-    card.appendChild(body);
-    const deliveries = Array.isArray(message?.deliveries) ? message.deliveries : [];
-    const delivery = document.createElement("div");
-    delivery.className = "conversation-message-deliveries";
-    delivery.textContent = deliveries.length
-      ? (runtimeLanguage === "zh-CN" ? "Agent 收件箱：" : "Agent Inbox: ") + deliveries.map((item: any) => deliveryAgentLabel(String(item?.recipient_agent_id || "")) + " " + tr(String(item?.state || "unknown"))).join(" · ")
-      : (runtimeLanguage === "zh-CN" ? "没有 Agent 收件箱投递 · 仅保留记录 / 人工房间" : "No Agent Inbox delivery · transcript / Human room only");
-    card.appendChild(delivery);
-    transcript.appendChild(card);
-  }
-  transcript.scrollTop = transcript.scrollHeight;
+  renderConversationMessages(transcript, messages, communicationAgents, {
+    language: runtimeLanguage,
+  });
 }
 
 function renderCommunicationInbox(): void {
   const list = el("runtime-inbox-list");
-  clearNode(list);
   const agent = selectedCommunicationAgent();
   const endpointId = communicationEndpointId();
   show("runtime-inbox-consume-all", !!endpointId && communicationInbox.length > 0);
   if (!agent) {
+    clearNode(list);
     setText("runtime-inbox-status", runtimeLanguage === "zh-CN" ? "选择一个 Agent 以查看收件人专属的排队投递。" : "Select an Agent to inspect recipient-specific queued deliveries.");
     return;
   }
   if (!endpointId) {
+    clearNode(list);
     setText("runtime-inbox-status", runtimeLanguage === "zh-CN" ? "将此浏览器附加为端点。离线期间排队投递仍会持久保留。" : "Attach this browser as an Endpoint. Queued deliveries remain durable while offline.");
     return;
   }
@@ -3004,33 +2917,10 @@ function renderCommunicationInbox(): void {
       + (communicationInbox.length < totalQueued ? (runtimeLanguage === "zh-CN" ? " · 当前显示 " : " · showing ") + String(communicationInbox.length) : "")
       + (runtimeLanguage === "zh-CN" ? " · 读取不会消费投递或唤醒模型" : " · reading does not consume or wake a model")
   );
-  if (!list) return;
-  for (const item of communicationInbox) {
-    const row = document.createElement("article");
-    row.className = "communication-row inbox-delivery";
-    const head = document.createElement("div");
-    head.className = "communication-row-head";
-    const title = document.createElement("span");
-    title.className = "communication-row-title";
-    title.textContent = String(item?.conversation_title || tr("Untitled Conversation")) + " · #" + String(item?.message?.seq || 0);
-    const consume = document.createElement("button");
-    consume.type = "button";
-    consume.className = "text-button";
-    consume.textContent = tr("Consume");
-    consume.addEventListener("click", () => void consumeCommunicationDeliveries([String(item?.delivery_id || "")]));
-    head.appendChild(title);
-    head.appendChild(consume);
-    row.appendChild(head);
-    const meta = document.createElement("span");
-    meta.className = "communication-row-meta";
-    meta.textContent = String(item?.delivery_id || "") + (runtimeLanguage === "zh-CN" ? " · 来自 " : " · from ") + (item?.message?.author?.participant_kind === "agent" ? deliveryAgentLabel(String(item.message.author.agent_id || "")) : (runtimeLanguage === "zh-CN" ? "人工" : "Human"));
-    row.appendChild(meta);
-    const body = document.createElement("div");
-    body.className = "inbox-message-preview";
-    body.textContent = String(item?.message?.body || "");
-    row.appendChild(body);
-    list.appendChild(row);
-  }
+  renderInboxDeliveryCards(list, communicationInbox, communicationAgents, {
+    language: runtimeLanguage,
+    onConsume: (deliveryId) => void consumeCommunicationDeliveries([deliveryId]),
+  });
 }
 
 function renderCommunicationSurface(): void {

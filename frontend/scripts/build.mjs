@@ -26,6 +26,7 @@ const watchedSources = new Set([
   "runtime_rich_text.ts",
   "runtime_api.ts",
   "runtime_window.ts",
+  "runtime_communication.ts",
   "runtime.css",
   "runtime.html",
   "admin.ts",
@@ -172,6 +173,16 @@ export function createOutputs(
         ""
       )
   );
+  const runtimeCommunicationModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_communication.ts")
+  );
+  const runtimeCommunicationClassic = stripModuleExports(
+    runtimeCommunicationModule
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_i18n(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+  );
   const runtimeModule = transpileTypeScript(sourceDirectory, "runtime.ts");
   const runtimeScript = stripModuleExports(
     runtimeModule
@@ -199,6 +210,10 @@ export function createOutputs(
         /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_window(?:\.js)?["'];?\s*\n/m,
         ""
       )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_communication(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
   );
   const runtimeInlined = buildJs(
     workflowSessionStateClassic +
@@ -212,6 +227,8 @@ export function createOutputs(
       runtimeApiClassic +
       "\n" +
       runtimeWindowClassic +
+      "\n" +
+      runtimeCommunicationClassic +
       "\n" +
       runtimeScript
   );
@@ -272,6 +289,7 @@ export function createOutputs(
     ["runtime_rich_text.js", runtimeRichTextModule],
     ["runtime_api.js", runtimeApiModule],
     ["runtime_window.js", runtimeWindowModule],
+    ["runtime_communication.js", runtimeCommunicationModule],
     ["admin_controller.js", adminControllerModule],
     ["admin_mutation_controller.js", adminMutationControllerModule],
     ["admin_mutation_view.js", adminMutationViewModule],

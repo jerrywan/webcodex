@@ -1779,6 +1779,207 @@ function renderSessionWindowCorrelationLinks(linkedNode, links, onSelectWindow, 
     }
 }
 
+function communicationTimeLabel(value, language) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return translateText("time unavailable", language);
+    return new Date(value).toLocaleString(language === "zh-CN" ? "zh-CN" : "en");
+}
+function parseAgentIds(value) {
+    const ids = value
+        .split(/[\s,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    return Array.from(new Set(ids));
+}
+function deliveryAgentLabel(agentId, agents = []) {
+    const agent = agents.find((a) => String(a?.agent_id || "") === agentId);
+    return agent ? String(agent.display_name || agent.handle || agentId) : agentId;
+}
+function appendChipElement(parent, text, extraClass = "") {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (extraClass ? " " + extraClass : "");
+    chip.textContent = text;
+    parent.appendChild(chip);
+    return chip;
+}
+function createAgentRow(agent, selectedAgentId, options) {
+    const agentId = String(agent?.agent_id || "");
+    if (!agentId)
+        return null;
+    const language = options.language;
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "communication-row" + (agentId === selectedAgentId ? " selected" : "");
+    if (agentId === selectedAgentId)
+        row.setAttribute("aria-current", "true");
+    const head = document.createElement("div");
+    head.className = "communication-row-head";
+    const title = document.createElement("span");
+    title.className = "communication-row-title";
+    title.textContent = String(agent?.display_name || agent?.handle || "Agent") + " · @" + String(agent?.handle || "agent");
+    const unread = document.createElement("span");
+    unread.className = "chip" + (Number(agent?.queued_delivery_count || 0) > 0 ? " tone-warn" : "");
+    unread.textContent = localizedCountLabel(agent?.queued_delivery_count, "queued delivery", "queued deliveries", language);
+    head.appendChild(title);
+    head.appendChild(unread);
+    row.appendChild(head);
+    const meta = document.createElement("span");
+    meta.className = "communication-row-meta";
+    meta.textContent = agentId
+        + (language === "zh-CN" ? " · 配置版本 r" : " · profile r") + String(agent?.profile_revision || 0)
+        + (language === "zh-CN" ? " · 控制器 g" : " · controller g") + String(agent?.current_controller_generation || 0)
+        + " · " + localizedCountLabel(agent?.active_endpoint_count, "active Endpoint", "active Endpoints", language)
+        + " · " + localizedCountLabel(agent?.unresolved_wake_count, "unresolved Wake", "unresolved Wakes", language);
+    row.appendChild(meta);
+    row.addEventListener("click", () => options.onSelect(agentId));
+    return row;
+}
+function renderAgentRows(list, agents, selectedAgentId, options) {
+    if (!list)
+        return;
+    while (list.firstChild)
+        list.removeChild(list.firstChild);
+    for (const agent of agents) {
+        const row = createAgentRow(agent, selectedAgentId, options);
+        if (row)
+            list.appendChild(row);
+    }
+}
+function createConversationRow(conversation, selectedConversationId, options) {
+    const conversationId = String(conversation?.conversation_id || "");
+    if (!conversationId)
+        return null;
+    const language = options.language;
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "communication-row" + (conversationId === selectedConversationId ? " selected" : "");
+    if (conversationId === selectedConversationId)
+        row.setAttribute("aria-current", "true");
+    const head = document.createElement("div");
+    head.className = "communication-row-head";
+    const title = document.createElement("span");
+    title.className = "communication-row-title";
+    title.textContent = String(conversation?.title || translateText("Untitled Conversation", language));
+    const count = document.createElement("span");
+    count.className = "chip";
+    count.textContent = localizedCountLabel(conversation?.message_count, "message", "messages", language);
+    head.appendChild(title);
+    head.appendChild(count);
+    row.appendChild(head);
+    const meta = document.createElement("span");
+    meta.className = "communication-row-meta";
+    meta.textContent = conversationId
+        + " · " + localizedCountLabel(conversation?.participant_count, "participant", "participants", language)
+        + (language === "zh-CN" ? " · 序号 " : " · seq ") + String(conversation?.last_seq || 0);
+    row.appendChild(meta);
+    row.addEventListener("click", () => options.onSelect(conversationId));
+    return row;
+}
+function renderConversationRows(list, conversations, selectedConversationId, options) {
+    if (!list)
+        return;
+    while (list.firstChild)
+        list.removeChild(list.firstChild);
+    for (const conversation of conversations) {
+        const row = createConversationRow(conversation, selectedConversationId, options);
+        if (row)
+            list.appendChild(row);
+    }
+}
+function createConversationMessageCard(message, agents, options = {}) {
+    const language = options.language;
+    const author = message?.author || {};
+    const agentAuthored = String(author.participant_kind || "") === "agent";
+    const card = document.createElement("article");
+    card.className = "conversation-message" + (agentAuthored ? " agent-authored" : "");
+    const head = document.createElement("div");
+    head.className = "conversation-message-head";
+    const name = document.createElement("span");
+    name.className = "conversation-message-author";
+    name.textContent = agentAuthored
+        ? "Agent · " + String(author.display_name || author.handle || (author.agent_id ? deliveryAgentLabel(String(author.agent_id), agents) : "") || author.agent_id || translateText("unknown", language))
+        : (language === "zh-CN" ? "人工 · " : "Human · ") + String(author.principal_kind || (language === "zh-CN" ? "凭证主体" : "credential principal"));
+    const seq = document.createElement("span");
+    seq.className = "muted small";
+    seq.textContent = "#" + String(message?.seq || 0) + " · " + communicationTimeLabel(message?.created_at_unix_ms, language);
+    head.appendChild(name);
+    head.appendChild(seq);
+    card.appendChild(head);
+    const meta = document.createElement("div");
+    meta.className = "conversation-message-meta";
+    const metaParts = [String(message?.message_id || "")];
+    if (author.agent_id)
+        metaParts.push(String(author.agent_id));
+    if (message?.reply_to)
+        metaParts.push((language === "zh-CN" ? "回复 " : "reply to ") + String(message.reply_to));
+    meta.textContent = metaParts.join(" · ");
+    card.appendChild(meta);
+    const body = document.createElement("div");
+    body.className = "conversation-message-body";
+    body.textContent = String(message?.body || "");
+    card.appendChild(body);
+    const deliveries = Array.isArray(message?.deliveries) ? message.deliveries : [];
+    const delivery = document.createElement("div");
+    delivery.className = "conversation-message-deliveries";
+    delivery.textContent = deliveries.length
+        ? (language === "zh-CN" ? "Agent 收件箱：" : "Agent Inbox: ") + deliveries.map((item) => deliveryAgentLabel(String(item?.recipient_agent_id || ""), agents) + " " + translateText(String(item?.state || "unknown"), language)).join(" · ")
+        : (language === "zh-CN" ? "没有 Agent 收件箱投递 · 仅保留记录 / 人工房间" : "No Agent Inbox delivery · transcript / Human room only");
+    card.appendChild(delivery);
+    return card;
+}
+function renderConversationMessages(transcript, messages, agents, options = {}) {
+    if (!transcript)
+        return;
+    while (transcript.firstChild)
+        transcript.removeChild(transcript.firstChild);
+    for (const message of messages) {
+        const card = createConversationMessageCard(message, agents, options);
+        transcript.appendChild(card);
+    }
+    transcript.scrollTop = transcript.scrollHeight;
+}
+function createInboxDeliveryCard(item, agents, options) {
+    const language = options.language;
+    const row = document.createElement("article");
+    row.className = "communication-row inbox-delivery";
+    const head = document.createElement("div");
+    head.className = "communication-row-head";
+    const title = document.createElement("span");
+    title.className = "communication-row-title";
+    title.textContent = String(item?.conversation_title || translateText("Untitled Conversation", language)) + " · #" + String(item?.message?.seq || 0);
+    const consume = document.createElement("button");
+    consume.type = "button";
+    consume.className = "text-button";
+    consume.textContent = translateText("Consume", language);
+    consume.addEventListener("click", () => options.onConsume(String(item?.delivery_id || "")));
+    head.appendChild(title);
+    head.appendChild(consume);
+    row.appendChild(head);
+    const meta = document.createElement("span");
+    meta.className = "communication-row-meta";
+    meta.textContent = String(item?.delivery_id || "")
+        + (language === "zh-CN" ? " · 来自 " : " · from ")
+        + (item?.message?.author?.participant_kind === "agent"
+            ? deliveryAgentLabel(String(item.message.author.agent_id || ""), agents)
+            : (language === "zh-CN" ? "人工" : "Human"));
+    row.appendChild(meta);
+    const body = document.createElement("div");
+    body.className = "inbox-message-preview";
+    body.textContent = String(item?.message?.body || "");
+    row.appendChild(body);
+    return row;
+}
+function renderInboxDeliveryCards(container, inbox, agents, options) {
+    if (!container)
+        return;
+    while (container.firstChild)
+        container.removeChild(container.firstChild);
+    for (const item of inbox) {
+        const row = createInboxDeliveryCard(item, agents, options);
+        container.appendChild(row);
+    }
+}
+
 const API_BASE = RUNTIME_API_BASE;
 const apiClient = new RuntimeApiClient(API_BASE);
 const REFRESH_MS = 30000;
@@ -4621,16 +4822,7 @@ function operationKey(prefix) {
     return prefix + "-" + random;
 }
 function communicationTimeLabel(value) {
-    if (typeof value !== "number" || !Number.isFinite(value))
-        return tr("time unavailable");
-    return new Date(value).toLocaleString(runtimeLanguage === "zh-CN" ? "zh-CN" : "en");
-}
-function parseAgentIds(value) {
-    const ids = value
-        .split(/[\s,]+/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-    return Array.from(new Set(ids));
+    return formatCommunicationTime(value, runtimeLanguage);
 }
 function communicationAgent(agentId) {
     return communicationAgents.find((agent) => String(agent?.agent_id || "") === agentId) || null;
@@ -4711,39 +4903,10 @@ function renderCommunicationAvailability() {
 function renderCommunicationAgents() {
     setText("runtime-communication-count", countLabel(communicationAgents.length, "Agent"));
     const list = el("runtime-agent-list");
-    clearNode(list);
     show("runtime-agent-empty", communicationReadAvailable === true && communicationAgents.length === 0);
-    if (!list)
-        return;
-    for (const agent of communicationAgents) {
-        const agentId = String(agent?.agent_id || "");
-        if (!agentId)
-            continue;
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "communication-row" + (agentId === selectedCommunicationAgentId ? " selected" : "");
-        if (agentId === selectedCommunicationAgentId)
-            row.setAttribute("aria-current", "true");
-        const head = document.createElement("div");
-        head.className = "communication-row-head";
-        const title = document.createElement("span");
-        title.className = "communication-row-title";
-        title.textContent = String(agent?.display_name || agent?.handle || "Agent") + " · @" + String(agent?.handle || "agent");
-        const unread = document.createElement("span");
-        unread.className = "chip" + (Number(agent?.queued_delivery_count || 0) > 0 ? " tone-warn" : "");
-        unread.textContent = countLabel(agent?.queued_delivery_count, "queued delivery");
-        head.appendChild(title);
-        head.appendChild(unread);
-        row.appendChild(head);
-        const meta = document.createElement("span");
-        meta.className = "communication-row-meta";
-        meta.textContent = agentId
-            + (runtimeLanguage === "zh-CN" ? " · 配置版本 r" : " · profile r") + String(agent?.profile_revision || 0)
-            + (runtimeLanguage === "zh-CN" ? " · 控制器 g" : " · controller g") + String(agent?.current_controller_generation || 0)
-            + " · " + countLabel(agent?.active_endpoint_count, "active Endpoint")
-            + " · " + countLabel(agent?.unresolved_wake_count, "unresolved Wake");
-        row.appendChild(meta);
-        row.addEventListener("click", () => {
+    renderAgentRows(list, communicationAgents, selectedCommunicationAgentId, {
+        language: runtimeLanguage,
+        onSelect: (agentId) => {
             selectedCommunicationAgentId = agentId;
             communicationInbox = [];
             const participants = el("runtime-conversation-agent-ids");
@@ -4754,9 +4917,8 @@ function renderCommunicationAgents() {
             renderCommunicationInbox();
             if (communicationEndpointId(agentId))
                 void fetchCommunicationInbox(communicationGeneration);
-        });
-        list.appendChild(row);
-    }
+        },
+    });
 }
 function renderCommunicationAgentCard() {
     const agent = selectedCommunicationAgent();
@@ -4822,47 +4984,20 @@ function renderCommunicationAgentCard() {
 }
 function renderCommunicationConversations() {
     const list = el("runtime-conversation-list");
-    clearNode(list);
     show("runtime-conversation-empty", communicationReadAvailable === true && communicationConversations.length === 0);
-    if (!list)
-        return;
-    for (const conversation of communicationConversations) {
-        const conversationId = String(conversation?.conversation_id || "");
-        if (!conversationId)
-            continue;
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "communication-row" + (conversationId === selectedCommunicationConversationId ? " selected" : "");
-        if (conversationId === selectedCommunicationConversationId)
-            row.setAttribute("aria-current", "true");
-        const head = document.createElement("div");
-        head.className = "communication-row-head";
-        const title = document.createElement("span");
-        title.className = "communication-row-title";
-        title.textContent = String(conversation?.title || tr("Untitled Conversation"));
-        const count = document.createElement("span");
-        count.className = "chip";
-        count.textContent = countLabel(conversation?.message_count, "message");
-        head.appendChild(title);
-        head.appendChild(count);
-        row.appendChild(head);
-        const meta = document.createElement("span");
-        meta.className = "communication-row-meta";
-        meta.textContent = conversationId + " · " + countLabel(conversation?.participant_count, "participant") + (runtimeLanguage === "zh-CN" ? " · 序号 " : " · seq ") + String(conversation?.last_seq || 0);
-        row.appendChild(meta);
-        row.addEventListener("click", () => {
+    renderConversationRows(list, communicationConversations, selectedCommunicationConversationId, {
+        language: runtimeLanguage,
+        onSelect: (conversationId) => {
             selectedCommunicationConversationId = conversationId;
             communicationDetail = null;
             renderCommunicationConversations();
             renderCommunicationConversation();
             void fetchCommunicationConversation(communicationGeneration);
-        });
-        list.appendChild(row);
-    }
+        },
+    });
 }
 function deliveryAgentLabel(agentId) {
-    const agent = communicationAgent(agentId);
-    return agent ? String(agent.display_name || agent.handle || agentId) : agentId;
+    return formatDeliveryAgent(agentId, communicationAgents);
 }
 function renderCommunicationConversation() {
     const detail = communicationDetail;
@@ -4890,61 +5025,22 @@ function renderCommunicationConversation() {
     }
     const messages = Array.isArray(detail.messages) ? detail.messages : [];
     show("runtime-conversation-transcript-empty", messages.length === 0);
-    if (!transcript)
-        return;
-    for (const message of messages) {
-        const author = message?.author || {};
-        const agentAuthored = String(author.participant_kind || "") === "agent";
-        const card = document.createElement("article");
-        card.className = "conversation-message" + (agentAuthored ? " agent-authored" : "");
-        const head = document.createElement("div");
-        head.className = "conversation-message-head";
-        const name = document.createElement("span");
-        name.className = "conversation-message-author";
-        name.textContent = agentAuthored
-            ? "Agent · " + String(author.display_name || author.handle || author.agent_id || tr("unknown"))
-            : (runtimeLanguage === "zh-CN" ? "人工 · " : "Human · ") + String(author.principal_kind || (runtimeLanguage === "zh-CN" ? "凭证主体" : "credential principal"));
-        const seq = document.createElement("span");
-        seq.className = "muted small";
-        seq.textContent = "#" + String(message?.seq || 0) + " · " + communicationTimeLabel(message?.created_at_unix_ms);
-        head.appendChild(name);
-        head.appendChild(seq);
-        card.appendChild(head);
-        const meta = document.createElement("div");
-        meta.className = "conversation-message-meta";
-        const metaParts = [String(message?.message_id || "")];
-        if (author.agent_id)
-            metaParts.push(String(author.agent_id));
-        if (message?.reply_to)
-            metaParts.push((runtimeLanguage === "zh-CN" ? "回复 " : "reply to ") + String(message.reply_to));
-        meta.textContent = metaParts.join(" · ");
-        card.appendChild(meta);
-        const body = document.createElement("div");
-        body.className = "conversation-message-body";
-        body.textContent = String(message?.body || "");
-        card.appendChild(body);
-        const deliveries = Array.isArray(message?.deliveries) ? message.deliveries : [];
-        const delivery = document.createElement("div");
-        delivery.className = "conversation-message-deliveries";
-        delivery.textContent = deliveries.length
-            ? (runtimeLanguage === "zh-CN" ? "Agent 收件箱：" : "Agent Inbox: ") + deliveries.map((item) => deliveryAgentLabel(String(item?.recipient_agent_id || "")) + " " + tr(String(item?.state || "unknown"))).join(" · ")
-            : (runtimeLanguage === "zh-CN" ? "没有 Agent 收件箱投递 · 仅保留记录 / 人工房间" : "No Agent Inbox delivery · transcript / Human room only");
-        card.appendChild(delivery);
-        transcript.appendChild(card);
-    }
-    transcript.scrollTop = transcript.scrollHeight;
+    renderConversationMessages(transcript, messages, communicationAgents, {
+        language: runtimeLanguage,
+    });
 }
 function renderCommunicationInbox() {
     const list = el("runtime-inbox-list");
-    clearNode(list);
     const agent = selectedCommunicationAgent();
     const endpointId = communicationEndpointId();
     show("runtime-inbox-consume-all", !!endpointId && communicationInbox.length > 0);
     if (!agent) {
+        clearNode(list);
         setText("runtime-inbox-status", runtimeLanguage === "zh-CN" ? "选择一个 Agent 以查看收件人专属的排队投递。" : "Select an Agent to inspect recipient-specific queued deliveries.");
         return;
     }
     if (!endpointId) {
+        clearNode(list);
         setText("runtime-inbox-status", runtimeLanguage === "zh-CN" ? "将此浏览器附加为端点。离线期间排队投递仍会持久保留。" : "Attach this browser as an Endpoint. Queued deliveries remain durable while offline.");
         return;
     }
@@ -4952,34 +5048,10 @@ function renderCommunicationInbox() {
     setText("runtime-inbox-status", countLabel(totalQueued, "queued delivery")
         + (communicationInbox.length < totalQueued ? (runtimeLanguage === "zh-CN" ? " · 当前显示 " : " · showing ") + String(communicationInbox.length) : "")
         + (runtimeLanguage === "zh-CN" ? " · 读取不会消费投递或唤醒模型" : " · reading does not consume or wake a model"));
-    if (!list)
-        return;
-    for (const item of communicationInbox) {
-        const row = document.createElement("article");
-        row.className = "communication-row inbox-delivery";
-        const head = document.createElement("div");
-        head.className = "communication-row-head";
-        const title = document.createElement("span");
-        title.className = "communication-row-title";
-        title.textContent = String(item?.conversation_title || tr("Untitled Conversation")) + " · #" + String(item?.message?.seq || 0);
-        const consume = document.createElement("button");
-        consume.type = "button";
-        consume.className = "text-button";
-        consume.textContent = tr("Consume");
-        consume.addEventListener("click", () => void consumeCommunicationDeliveries([String(item?.delivery_id || "")]));
-        head.appendChild(title);
-        head.appendChild(consume);
-        row.appendChild(head);
-        const meta = document.createElement("span");
-        meta.className = "communication-row-meta";
-        meta.textContent = String(item?.delivery_id || "") + (runtimeLanguage === "zh-CN" ? " · 来自 " : " · from ") + (item?.message?.author?.participant_kind === "agent" ? deliveryAgentLabel(String(item.message.author.agent_id || "")) : (runtimeLanguage === "zh-CN" ? "人工" : "Human"));
-        row.appendChild(meta);
-        const body = document.createElement("div");
-        body.className = "inbox-message-preview";
-        body.textContent = String(item?.message?.body || "");
-        row.appendChild(body);
-        list.appendChild(row);
-    }
+    renderInboxDeliveryCards(list, communicationInbox, communicationAgents, {
+        language: runtimeLanguage,
+        onConsume: (deliveryId) => void consumeCommunicationDeliveries([deliveryId]),
+    });
 }
 function renderCommunicationSurface() {
     renderCommunicationAvailability();
