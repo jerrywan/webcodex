@@ -337,7 +337,7 @@ fn resume_managed_worktree(
                     "managed_worktree_resume_base_mismatch",
                     false,
                     Some(base_ref),
-                    Some(&base_sha),
+                    Some(base_sha),
                     Some(source_dirty),
                 )
             }
@@ -347,7 +347,7 @@ fn resume_managed_worktree(
                     error,
                     false,
                     Some(base_ref),
-                    Some(&base_sha),
+                    Some(base_sha),
                     Some(source_dirty),
                 )
             }
@@ -361,7 +361,7 @@ fn resume_managed_worktree(
                 "managed_worktree_recovery_conflict",
                 false,
                 project.managed_base_ref.as_deref(),
-                Some(&base_sha),
+                Some(base_sha),
                 Some(source_dirty),
             )
         }
@@ -374,7 +374,7 @@ fn resume_managed_worktree(
             "managed_worktree_recovery_conflict",
             false,
             project.managed_base_ref.as_deref(),
-            Some(&base_sha),
+            Some(base_sha),
             Some(source_dirty),
         );
     }
@@ -386,7 +386,7 @@ fn resume_managed_worktree(
                 error,
                 false,
                 project.managed_base_ref.as_deref(),
-                Some(&base_sha),
+                Some(base_sha),
                 Some(source_dirty),
             )
         }
@@ -399,7 +399,7 @@ fn resume_managed_worktree(
                 error,
                 false,
                 project.managed_base_ref.as_deref(),
-                Some(&base_sha),
+                Some(base_sha),
                 Some(source_dirty),
             )
         }
@@ -410,7 +410,7 @@ fn resume_managed_worktree(
             "managed_worktree_recovery_conflict",
             false,
             project.managed_base_ref.as_deref(),
-            Some(&base_sha),
+            Some(base_sha),
             Some(source_dirty),
         );
     }
@@ -424,7 +424,7 @@ fn resume_managed_worktree(
         &project,
         &worktree,
         projected_base_ref,
-        &base_sha,
+        base_sha,
         source_dirty,
         "managed_worktree_recovered",
         false,

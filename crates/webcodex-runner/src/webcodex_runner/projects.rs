@@ -18,10 +18,10 @@ use webcodex_core::runner_operation::RunnerOperation;
 #[cfg(test)]
 use webcodex_core::runner_operation::RunnerProjectOperation;
 
-pub(crate) mod catalog;
-pub(crate) mod lifecycle;
-pub(crate) mod managed_worktree;
-pub(crate) mod registration;
+mod catalog;
+mod lifecycle;
+mod managed_worktree;
+mod registration;
 
 pub(crate) use catalog::{
     find_project_shell_context, find_project_shell_context_by_id,
@@ -129,8 +129,8 @@ pub(crate) struct RunnerProjectFile {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RunnerProjectCache {
-    pub(super) projects: Vec<RunnerProjectSummary>,
-    pub(super) refreshed_at: Option<Instant>,
+    projects: Vec<RunnerProjectSummary>,
+    refreshed_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
