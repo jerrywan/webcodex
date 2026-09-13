@@ -9,6 +9,8 @@ import {
   renderWindowActiveRequests,
   renderWindowLinkedSessions,
   renderSessionWindowCorrelationLinks,
+  formatWindowDetailFields,
+  renderWindowCards,
 } from "../dist/runtime_window.js";
 
 function createMockElement(tag = "div") {
@@ -360,3 +362,61 @@ test("renderSessionWindowCorrelationLinks renders correlated window cards", () =
     assert.equal(selectedKey, "abcdef0123456789abcdef0123456789");
   });
 });
+
+test("formatWindowDetailFields produces populated metrics and fallback texts", () => {
+  assert.equal(formatWindowDetailFields(null), null);
+
+  const detail = {
+    client_window_key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    source: "web",
+    active_count: 2,
+    last_tool_call_at_ms: 9000,
+    last_meaningful_activity_at_ms: 8000,
+    sessions_returned: 3,
+    sessions_truncated: true,
+    activity_returned: 10,
+    activity_truncated: false,
+  };
+
+  const fields = formatWindowDetailFields(detail, "", 10000, "en");
+  assert.ok(fields);
+  assert.equal(fields.title, "Window 01234567…cdef");
+  assert.equal(fields.source, "web");
+  assert.equal(fields.activeCount, "2");
+  assert.equal(fields.activeStatus, "Active request");
+  assert.match(fields.lastCall, /ago|just now/);
+  assert.match(fields.lastMeaningful, /ago|just now/);
+  assert.equal(fields.linkedStatus, "3 Sessions · bounded");
+  assert.equal(fields.activityStatus, "10 events");
+
+  const emptyDetail = {
+    client_window_key: "",
+    active_count: 0,
+  };
+  const emptyFields = formatWindowDetailFields(emptyDetail, "fallback-key");
+  assert.ok(emptyFields);
+  assert.equal(emptyFields.title, "Window fallback-key");
+  assert.equal(emptyFields.lastCall, "No completed tools/call activity");
+  assert.equal(emptyFields.lastMeaningful, "No meaningful WebCodex work recorded");
+  assert.equal(emptyFields.activeStatus, "No active request");
+});
+
+test("renderWindowCards populates container with window cards", () => {
+  withMockDom(() => {
+    const container = document.createElement("div");
+    let clicked = "";
+    const rows = [
+      { client_window_key: "w1", active_count: 1 },
+      { client_window_key: "w2", active_count: 0 },
+    ];
+    renderWindowCards(container, rows, "w1", (k) => {
+      clicked = k;
+    });
+    assert.equal(container.children.length, 2);
+    assert.ok(container.children[0].className.includes("selected"));
+    assert.equal(container.children[0].getAttribute("aria-current"), "true");
+    container.children[1].click();
+    assert.equal(clicked, "w2");
+  });
+});
+

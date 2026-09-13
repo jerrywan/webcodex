@@ -93,6 +93,8 @@ import {
   renderWindowActiveRequests,
   renderWindowLinkedSessions,
   renderSessionWindowCorrelationLinks,
+  formatWindowDetailFields,
+  renderWindowCards,
 } from "./runtime_window.js";
 import {
   communicationTimeLabel as formatCommunicationTime,
@@ -809,18 +811,13 @@ function renderWindowActivityRows(node: HTMLElement | null, activities: any[], c
 
 function renderWindowList(): void {
   const node = el("runtime-window-list");
-  clearNode(node);
   setText("runtime-window-list-count", String(windowRows.length));
   show("runtime-window-list-empty", windowRows.length === 0);
   setText(
     "runtime-window-list-status",
     windowRows.length ? countLabel(windowRows.length, "Window") : tr("No WebCodex activity"),
   );
-  if (!node) return;
-  for (const row of windowRows) {
-    const card = createWindowCard(row, selectedWindowKey, (key) => void selectWindow(key));
-    if (card) node.appendChild(card);
-  }
+  renderWindowCards(node, windowRows, selectedWindowKey, (key) => void selectWindow(key));
 }
 
 function renderWindowDetail(detail: any | null): void {
@@ -829,30 +826,17 @@ function renderWindowDetail(detail: any | null): void {
   show("runtime-window-detail-empty", !present);
   show("runtime-window-detail", present);
   if (!detail) return;
-  const key = String(detail.client_window_key || selectedWindowKey || "");
-  setText("runtime-window-title", "Window " + runtimeWindowShortKey(key));
-  setText("runtime-window-key", key || "—");
-  setText("runtime-window-source", String(detail.source || "—"));
-  setText("runtime-window-active-count", String(Number(detail.active_count || 0)));
-  setText(
-    "runtime-window-last-call",
-    detail.last_tool_call_at_ms ? windowAgeLabel(detail.last_tool_call_at_ms) : "No completed tools/call activity",
-  );
-  setText(
-    "runtime-window-last-meaningful",
-    detail.last_meaningful_activity_at_ms
-      ? windowAgeLabel(detail.last_meaningful_activity_at_ms)
-      : "No meaningful WebCodex work recorded",
-  );
-  setText("runtime-window-active-status", Number(detail.active_count || 0) ? "Active request" : "No active request");
-  setText(
-    "runtime-window-linked-status",
-    countLabel(Number(detail.sessions_returned || 0), "Session") + (detail.sessions_truncated ? " · bounded" : ""),
-  );
-  setText(
-    "runtime-window-activity-status",
-    countLabel(Number(detail.activity_returned || 0), "event") + (detail.activity_truncated ? " · bounded" : ""),
-  );
+  const fields = formatWindowDetailFields(detail, selectedWindowKey, Date.now(), runtimeLanguage);
+  if (!fields) return;
+  setText("runtime-window-title", fields.title);
+  setText("runtime-window-key", fields.key);
+  setText("runtime-window-source", fields.source);
+  setText("runtime-window-active-count", fields.activeCount);
+  setText("runtime-window-last-call", fields.lastCall);
+  setText("runtime-window-last-meaningful", fields.lastMeaningful);
+  setText("runtime-window-active-status", fields.activeStatus);
+  setText("runtime-window-linked-status", fields.linkedStatus);
+  setText("runtime-window-activity-status", fields.activityStatus);
   renderWindowActiveRequests(
     el("runtime-window-active-requests"),
     Array.isArray(detail.active_requests) ? detail.active_requests : [],

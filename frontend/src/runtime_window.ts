@@ -272,3 +272,60 @@ export function renderSessionWindowCorrelationLinks(
     linkedNode.appendChild(empty);
   }
 }
+
+export interface RuntimeWindowDetailFields {
+  title: string;
+  key: string;
+  source: string;
+  activeCount: string;
+  lastCall: string;
+  lastMeaningful: string;
+  activeStatus: string;
+  linkedStatus: string;
+  activityStatus: string;
+}
+
+export function formatWindowDetailFields(
+  detail: any,
+  fallbackKey = "",
+  now: number = Date.now(),
+  language?: RuntimeLanguage,
+): RuntimeWindowDetailFields | null {
+  if (!detail) return null;
+  const key = String(detail.client_window_key || fallbackKey || "");
+  return {
+    title: "Window " + runtimeWindowShortKey(key),
+    key: key || "—",
+    source: String(detail.source || "—"),
+    activeCount: String(Number(detail.active_count || 0)),
+    lastCall: detail.last_tool_call_at_ms
+      ? windowAgeLabel(detail.last_tool_call_at_ms, now)
+      : "No completed tools/call activity",
+    lastMeaningful: detail.last_meaningful_activity_at_ms
+      ? windowAgeLabel(detail.last_meaningful_activity_at_ms, now)
+      : "No meaningful WebCodex work recorded",
+    activeStatus: Number(detail.active_count || 0) ? "Active request" : "No active request",
+    linkedStatus:
+      localizedCountLabel(Number(detail.sessions_returned || 0), "Session", "Sessions", language) +
+      (detail.sessions_truncated ? " · bounded" : ""),
+    activityStatus:
+      localizedCountLabel(Number(detail.activity_returned || 0), "event", "events", language) +
+      (detail.activity_truncated ? " · bounded" : ""),
+  };
+}
+
+export function renderWindowCards(
+  node: HTMLElement | null,
+  windowRows: any[],
+  selectedWindowKey: string,
+  onSelect: (key: string) => void,
+  now: number = Date.now(),
+): void {
+  if (!node) return;
+  while (node.firstChild) node.removeChild(node.firstChild);
+  for (const row of windowRows) {
+    const card = createWindowCard(row, selectedWindowKey, onSelect, now);
+    if (card) node.appendChild(card);
+  }
+}
+
