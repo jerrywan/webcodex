@@ -221,7 +221,7 @@ pub fn output_schema_for_tool(name: &str) -> Option<Value> {
         "heartbeat_agent_task_attempt" => wrapped_output_schema(vec![
             ("task", task_summary_schema()),
             ("attempt", attempt_schema()),
-            ("state_changed", schema_type("boolean", "True when the exact current Attempt lease was renewed.")),
+            ("state_changed", schema_type("boolean", "True only when this call actually advances the exact current Attempt lease expiry.")),
         ]),
         "complete_agent_task_attempt" => wrapped_output_schema(vec![
             ("task", task_summary_schema()),

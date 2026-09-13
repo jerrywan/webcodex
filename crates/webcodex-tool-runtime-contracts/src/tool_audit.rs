@@ -421,6 +421,18 @@ fn typed_agent_task_request_audit(kind: AgentTaskRequestAudit, arguments: &Value
                 "attempt_fence_present".to_string(),
                 Value::Bool(obj.get("attempt_fence").and_then(Value::as_str).is_some()),
             );
+            out.insert(
+                "active_turn_proof_present".to_string(),
+                Value::Bool(
+                    obj.get("active_turn_wake_id")
+                        .and_then(Value::as_str)
+                        .is_some()
+                        && obj
+                            .get("active_turn_consume_token")
+                            .and_then(Value::as_str)
+                            .is_some(),
+                ),
+            );
         }
         AgentTaskRequestAudit::CompleteAttempt => {
             copy_keys(
@@ -1889,6 +1901,54 @@ mod computer_privacy_tests {
         }
         .session_log_arguments();
         assert!(!activation_request.to_string().contains(PRIVATE_KEY));
+    }
+
+    #[test]
+    fn agent_task_active_turn_heartbeat_audit_omits_raw_proof_and_attempt_fence() {
+        const PRIVATE_FENCE: &str = "wc_agent_task_fence_PRIVATE_FENCE_MUST_NOT_PERSIST";
+        const PRIVATE_WAKE: &str = "wc_wake_PRIVATE_WAKE_MUST_NOT_PERSIST";
+        const PRIVATE_TOKEN: &str = "wc_wake_consume_PRIVATE_TOKEN_MUST_NOT_PERSIST";
+        let request = session_log_arguments_for_tool_request(
+            "heartbeat_agent_task_attempt",
+            &json!({
+                "task_id": "wc_agent_task_0123456789abcdef0123456789abcdef",
+                "attempt_id": "wc_agent_task_attempt_0123456789abcdef0123456789abcdef",
+                "assignee_agent_id": "wc_dagent_0123456789abcdef0123456789abcdef",
+                "attempt_fence": PRIVATE_FENCE,
+                "attempt_controller_generation": 9,
+                "active_turn_wake_id": PRIVATE_WAKE,
+                "active_turn_consume_token": PRIVATE_TOKEN,
+            }),
+        );
+        assert_eq!(request["attempt_fence_present"], true);
+        assert_eq!(request["active_turn_proof_present"], true);
+        assert_eq!(request["attempt_controller_generation"], 9);
+        let request_text = request.to_string();
+        for private in [PRIVATE_FENCE, PRIVATE_WAKE, PRIVATE_TOKEN] {
+            assert!(
+                !request_text.contains(private),
+                "heartbeat audit leaked {private}"
+            );
+        }
+
+        let typed = ToolCall::HeartbeatAgentTaskAttempt {
+            task_id: "wc_agent_task_0123456789abcdef0123456789abcdef".to_string(),
+            attempt_id: "wc_agent_task_attempt_0123456789abcdef0123456789abcdef".to_string(),
+            assignee_agent_id: "wc_dagent_0123456789abcdef0123456789abcdef".to_string(),
+            attempt_fence: PRIVATE_FENCE.to_string(),
+            attempt_controller_generation: 9,
+            active_turn_wake_id: Some(PRIVATE_WAKE.to_string()),
+            active_turn_consume_token: Some(PRIVATE_TOKEN.to_string()),
+        }
+        .session_log_arguments();
+        assert_eq!(typed["active_turn_proof_present"], true);
+        let typed_text = typed.to_string();
+        for private in [PRIVATE_FENCE, PRIVATE_WAKE, PRIVATE_TOKEN] {
+            assert!(
+                !typed_text.contains(private),
+                "typed heartbeat audit leaked {private}"
+            );
+        }
     }
 
     #[test]
@@ -3726,6 +3786,8 @@ impl ToolCall {
                 assignee_agent_id,
                 attempt_fence,
                 attempt_controller_generation,
+                active_turn_wake_id,
+                active_turn_consume_token,
             } => typed_agent_task_request_audit(
                 AgentTaskRequestAudit::HeartbeatAttempt,
                 &serde_json::json!({
@@ -3734,6 +3796,8 @@ impl ToolCall {
                     "assignee_agent_id": assignee_agent_id,
                     "attempt_fence": attempt_fence,
                     "attempt_controller_generation": attempt_controller_generation,
+                    "active_turn_wake_id": active_turn_wake_id,
+                    "active_turn_consume_token": active_turn_consume_token,
                 }),
             ),
             Self::CompleteAgentTaskAttempt {

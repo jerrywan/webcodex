@@ -121,6 +121,25 @@ fn agent_continuation_projection_schema_requires_strict_nullable_restart_recover
 }
 
 #[test]
+fn generic_agent_task_read_schema_never_exposes_attempt_fence_or_active_turn_token() {
+    let schema = output_schema_for_tool("read_agent_task");
+    let latest_attempt = &schema["properties"]["output"]["properties"]["task"]["properties"]
+        ["summary"]["properties"]["latest_attempt"]["anyOf"][0];
+    let properties = latest_attempt["properties"].as_object().unwrap();
+    for forbidden in [
+        "attempt_fence",
+        "consume_token",
+        "active_turn_wake_id",
+        "active_turn_consume_token",
+    ] {
+        assert!(
+            !properties.contains_key(forbidden),
+            "generic Task read leaked {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn goal_plan_activity_schema_is_bounded_soft_and_payload_free() {
     let schema = output_schema_for_tool("present_goal_plan");
     let plan = &schema["properties"]["output"]["properties"]["goal_plan"];

@@ -370,7 +370,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Renew only the exact latest unexpired AgentTaskAttempt identified by task, attempt, assignee, opaque fence, and current Attempt-local controller generation. Expired, superseded, wrong-generation, or wrong-fence Attempts remain stale and cannot be revived.",
+            "Renew only the exact latest unexpired AgentTaskAttempt identified by task, attempt, assignee, opaque fence, and current Attempt-local controller generation. Without active-turn proof this is the ordinary Server-owned 60-second heartbeat window. Supplying the paired exact consumed A4b Wake id + consume token proves the same online model-turn lineage and permits only another bounded Server-owned 30-minute reservation; callers cannot choose duration or expiry. The proof grants no authority, and expired, superseded, wrong-generation, wrong-fence, unconsumed, or mismatched proofs fail closed without revival.",
             heartbeat_agent_task_attempt_input_schema,
             ),
             PERMISSION_RISK_WRITE,

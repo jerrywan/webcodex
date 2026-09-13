@@ -755,7 +755,19 @@ impl ToolRuntime {
         assignee_agent_id: String,
         attempt_fence: String,
         attempt_controller_generation: i64,
+        active_turn_wake_id: Option<String>,
+        active_turn_consume_token: Option<String>,
     ) -> ToolResult {
+        if active_turn_wake_id.is_some() != active_turn_consume_token.is_some() {
+            return ToolResult::err_with_output(
+                "active_turn_wake_id and active_turn_consume_token must be provided together",
+                json!({
+                    "error_kind": "invalid_agent_task_active_turn_proof",
+                    "state_changed": false,
+                }),
+            )
+            .with_recovery(RecoveryKind::FixInput, None);
+        }
         let principal = match task_principal(auth) {
             Ok(principal) => principal,
             Err(result) => return result,
@@ -763,13 +775,15 @@ impl ToolRuntime {
         let Some(db) = self.communication_db.as_ref() else {
             return agent_task_store_unavailable();
         };
-        match db.heartbeat_agent_task_attempt(
+        match db.heartbeat_agent_task_attempt_with_active_turn_proof(
             &principal,
             &task_id,
             &attempt_id,
             &assignee_agent_id,
             &attempt_fence,
             attempt_controller_generation,
+            active_turn_wake_id.as_deref(),
+            active_turn_consume_token.as_deref(),
         ) {
             Ok(result) => serialized_task_success(result),
             Err(error) => agent_task_error(error, RecoveryKind::Reconcile),

@@ -594,7 +594,7 @@ Inbox high-watermarks stay null. The Host continuation envelope re-reads durable
 truth and carries the exact current Attempt fence/generation. Wake consumption proves
 one reasoning takeover only; exact AgentTask completion remains a separate mutation.
 
-A4b intentionally has two bounded TaskAttempt lease phases:
+A4b intentionally separates a short pre-takeover lease from renewable bounded active-turn reservations:
 
 ```text
 TaskAttempt start
@@ -602,9 +602,12 @@ TaskAttempt start
 Endpoint carrier claim / prepare / Host dispatch
   -> still short pre-takeover semantics
 exact model turn bootstrap + first exact consume
-  -> bounded 30-minute active-turn takeover lease
+  -> bounded 30-minute active-turn reservation
 ordinary coding work
   -> no periodic 60-second heartbeat ceremony
+exact active-turn proof heartbeat before reservation expiry, when needed
+  -> another bounded 30-minute active-turn reservation
+  -> repeat only while the same exact Attempt/turn proof remains current
 exact TaskAttempt completion
   -> terminal Task -> correlated attention_event Wake when applicable
 abnormal/stalled model turn
@@ -619,8 +622,31 @@ Wake consumption and uses `max(existing_lease, now + 30 minutes)`. Consume repla
 not slide the lease. An expired, terminal, superseded, or carrier-mismatched Attempt is
 never revived; its already-dispatched Wake can still be consumed/ACKed without lease
 promotion. `inbox_changed` and `attention_event` consumption never changes a TaskAttempt
-lease. Existing exact heartbeat remains available when work really may exceed the
-active-turn lease, but ordinary online coding should not heartbeat every 60 seconds.
+lease.
+
+`heartbeat_agent_task_attempt` has two intentionally distinct modes. Without active-turn
+proof it preserves the ordinary A3/pre-takeover behavior: exact current Attempt fencing
+plus `max(existing_lease, now + 60 seconds)`. After actual A4b model takeover, the same
+turn may additionally provide the exact consumed Task-origin `wake_id` and its
+`consume_token`. In the same authoritative transaction the Server still rechecks normal
+Task ownership, latest Attempt identity, assignee, fence, current Attempt controller
+generation, active/unexpired state, the consumed Wake/token hash, and its durable A4b
+Endpoint execution binding. Only then may the heartbeat use
+`max(existing_lease, now + 30 minutes)`. Duration and absolute expiry remain
+Server-authoritative; one renewal never grants a multi-hour lease, but repeated exact
+renewals before expiry can support a multi-hour online turn through successive bounded
+30-minute reservations. The proof is model-turn lineage evidence, not Task, Project,
+Runner, Goal, Session, or Endpoint authority.
+
+This renewal depends only on durable Store truth, so a Server restart does not break an
+otherwise-current proof. Conversely, Endpoint loss/replacement advances the Attempt
+controller generation and clears the old carrier binding, so a stale model turn cannot
+renew even if it still knows the old Wake token. Expired, terminal, or superseded
+Attempts are never revived. Renewal occurs only through this explicit heartbeat
+mutation: consume replay, MCP App polling, Endpoint heartbeat, ClientWindow activity,
+Goal soft liveness, and ordinary model tool traffic never renew a TaskAttempt. The Goal
+/ ClientWindow five-minute liveness signal remains diagnostics/human-attention evidence
+only and is not a correctness lease input.
 
 Claiming a Task-origin Wake atomically installs the actual Endpoint carrier and advances
 `attempt_controller_generation`. Releasing or losing that carrier before the dispatch

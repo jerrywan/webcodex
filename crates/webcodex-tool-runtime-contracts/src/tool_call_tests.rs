@@ -41,6 +41,39 @@ fn from_tool_name_parses_unit_tools_with_empty_object() {
 }
 
 #[test]
+fn heartbeat_agent_task_attempt_parses_optional_active_turn_proof() {
+    let base = json!({
+        "task_id": format!("wc_agent_task_{}", "1".repeat(32)),
+        "attempt_id": format!("wc_agent_task_attempt_{}", "2".repeat(32)),
+        "assignee_agent_id": format!("wc_dagent_{}", "3".repeat(32)),
+        "attempt_fence": format!("wc_agent_task_fence_{}", "4".repeat(32)),
+        "attempt_controller_generation": 7,
+    });
+    let ordinary = ToolCall::from_tool_name("heartbeat_agent_task_attempt", base.clone()).unwrap();
+    assert!(matches!(
+        ordinary,
+        ToolCall::HeartbeatAgentTaskAttempt {
+            active_turn_wake_id: None,
+            active_turn_consume_token: None,
+            ..
+        }
+    ));
+
+    let mut with_proof = base;
+    with_proof["active_turn_wake_id"] = json!(format!("wc_wake_{}", "5".repeat(32)));
+    with_proof["active_turn_consume_token"] = json!(format!("wc_wake_consume_{}", "6".repeat(32)));
+    let renewed = ToolCall::from_tool_name("heartbeat_agent_task_attempt", with_proof).unwrap();
+    assert!(matches!(
+        renewed,
+        ToolCall::HeartbeatAgentTaskAttempt {
+            active_turn_wake_id: Some(ref wake_id),
+            active_turn_consume_token: Some(ref consume_token),
+            ..
+        } if wake_id.starts_with("wc_wake_") && consume_token.starts_with("wc_wake_consume_")
+    ));
+}
+
+#[test]
 fn runner_config_tools_parse_closed_contracts_and_keep_governance_split() {
     use webcodex_tool_contracts::{
         RunnerCapabilityRequirement, ToolApprovalPolicy, ToolEffect, ToolIdempotency, ToolRisk,

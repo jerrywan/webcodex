@@ -7,6 +7,8 @@ const AGENT_ID_PATTERN: &str = "^wc_dagent_[0-9a-f]{32}$";
 const TASK_ID_PATTERN: &str = "^wc_agent_task_[0-9a-f]{32}$";
 const ATTEMPT_ID_PATTERN: &str = "^wc_agent_task_attempt_[0-9a-f]{32}$";
 const ATTEMPT_FENCE_PATTERN: &str = "^wc_agent_task_fence_[0-9a-f]{32}$";
+const WAKE_ID_PATTERN: &str = "^wc_wake_[0-9a-f]{32}$";
+const WAKE_CONSUME_TOKEN_PATTERN: &str = "^wc_wake_consume_[0-9a-f]{32}$";
 const CONVERSATION_ID_PATTERN: &str = "^wc_conv_[0-9a-f]{32}$";
 const MESSAGE_ID_PATTERN: &str = "^wc_cmsg_[0-9a-f]{32}$";
 
@@ -221,13 +223,37 @@ pub fn reconcile_agent_task_coding_run_input_schema() -> Value {
 }
 
 pub fn heartbeat_agent_task_attempt_input_schema() -> Value {
-    let properties = attempt_identity_properties();
+    let mut properties = attempt_identity_properties();
+    properties.insert(
+        "active_turn_wake_id".to_string(),
+        canonical_id(
+            WAKE_ID_PATTERN,
+            "Optional exact consumed A4b agent_task_attempt Wake proving this model-turn lineage. It grants no Task, Project, Runner, Goal, Session, or Endpoint authority and must be paired with active_turn_consume_token.",
+        ),
+    );
+    properties.insert(
+        "active_turn_consume_token".to_string(),
+        canonical_id(
+            WAKE_CONSUME_TOKEN_PATTERN,
+            "Optional opaque consume token for active_turn_wake_id. The Server verifies its durable hash together with normal Task authority and exact Attempt fences; it is never a standalone credential.",
+        ),
+    );
     json!({
         "type": "object",
         "properties": properties,
         "required": [
             "task_id", "attempt_id", "assignee_agent_id", "attempt_fence",
             "attempt_controller_generation"
+        ],
+        "allOf": [
+            {
+                "if": {"required": ["active_turn_wake_id"]},
+                "then": {"required": ["active_turn_consume_token"]}
+            },
+            {
+                "if": {"required": ["active_turn_consume_token"]},
+                "then": {"required": ["active_turn_wake_id"]}
+            }
         ],
         "additionalProperties": false
     })

@@ -1953,6 +1953,8 @@ impl ToolRuntime {
                 assignee_agent_id,
                 attempt_fence,
                 attempt_controller_generation,
+                active_turn_wake_id,
+                active_turn_consume_token,
             } => self.heartbeat_agent_task_attempt(
                 auth,
                 task_id,
@@ -1960,6 +1962,8 @@ impl ToolRuntime {
                 assignee_agent_id,
                 attempt_fence,
                 attempt_controller_generation,
+                active_turn_wake_id,
+                active_turn_consume_token,
             ),
 
             ToolCall::CompleteAgentTaskAttempt {

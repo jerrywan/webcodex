@@ -634,6 +634,80 @@ fn bootstrap_agent_conversation_activation_key_is_inbox_only_contract() {
 }
 
 #[test]
+fn heartbeat_agent_task_attempt_active_turn_proof_is_paired_and_server_timed() {
+    let specs = registered_tool_specs();
+    let heartbeat = spec_named(&specs, "heartbeat_agent_task_attempt");
+    assert_eq!(heartbeat.input_schema["additionalProperties"], false);
+    let required = required_fields(heartbeat);
+    for field in [
+        "task_id",
+        "attempt_id",
+        "assignee_agent_id",
+        "attempt_fence",
+        "attempt_controller_generation",
+    ] {
+        assert!(
+            required.contains(&field.to_string()),
+            "missing required {field}"
+        );
+    }
+    for optional in ["active_turn_wake_id", "active_turn_consume_token"] {
+        assert!(!required.contains(&optional.to_string()));
+    }
+    assert_eq!(
+        heartbeat.input_schema["properties"]["active_turn_wake_id"]["pattern"],
+        "^wc_wake_[0-9a-f]{32}$"
+    );
+    assert_eq!(
+        heartbeat.input_schema["properties"]["active_turn_consume_token"]["pattern"],
+        "^wc_wake_consume_[0-9a-f]{32}$"
+    );
+    assert_eq!(heartbeat.input_schema["allOf"].as_array().unwrap().len(), 2);
+    let properties = heartbeat.input_schema["properties"].as_object().unwrap();
+    for forbidden in [
+        "lease_ms",
+        "lease_duration_ms",
+        "duration",
+        "duration_ms",
+        "lease_expires_at_unix_ms",
+        "expires_at_unix_ms",
+    ] {
+        assert!(
+            !properties.contains_key(forbidden),
+            "caller-controlled lease field {forbidden}"
+        );
+    }
+
+    let base = json!({
+        "task_id": format!("wc_agent_task_{}", "1".repeat(32)),
+        "attempt_id": format!("wc_agent_task_attempt_{}", "2".repeat(32)),
+        "assignee_agent_id": format!("wc_dagent_{}", "3".repeat(32)),
+        "attempt_fence": format!("wc_agent_task_fence_{}", "4".repeat(32)),
+        "attempt_controller_generation": 7,
+    });
+    assert!(test_support::validate_schema_instance(&base, &heartbeat.input_schema).is_ok());
+
+    let mut wake_only = base.clone();
+    wake_only["active_turn_wake_id"] = json!(format!("wc_wake_{}", "5".repeat(32)));
+    assert!(test_support::validate_schema_instance(&wake_only, &heartbeat.input_schema).is_err());
+
+    let mut token_only = base.clone();
+    token_only["active_turn_consume_token"] = json!(format!("wc_wake_consume_{}", "6".repeat(32)));
+    assert!(test_support::validate_schema_instance(&token_only, &heartbeat.input_schema).is_err());
+
+    let mut paired = base.clone();
+    paired["active_turn_wake_id"] = json!(format!("wc_wake_{}", "5".repeat(32)));
+    paired["active_turn_consume_token"] = json!(format!("wc_wake_consume_{}", "6".repeat(32)));
+    assert!(test_support::validate_schema_instance(&paired, &heartbeat.input_schema).is_ok());
+
+    for forbidden in ["lease_ms", "duration_ms", "expires_at_unix_ms"] {
+        let mut invalid = paired.clone();
+        invalid[forbidden] = json!(30 * 60_000);
+        assert!(test_support::validate_schema_instance(&invalid, &heartbeat.input_schema).is_err());
+    }
+}
+
+#[test]
 fn agent_continuation_bind_requires_canonical_view_fence_without_model_exposure() {
     let specs = crate::registry::agent_continuation_app_tool_specs();
     let bind = specs

@@ -1297,6 +1297,10 @@ pub enum ToolCall {
         assignee_agent_id: String,
         attempt_fence: String,
         attempt_controller_generation: i64,
+        #[serde(default)]
+        active_turn_wake_id: Option<String>,
+        #[serde(default)]
+        active_turn_consume_token: Option<String>,
     },
 
     /// Commit exact fenced terminal AgentTaskAttempt truth with independent keyed replay.

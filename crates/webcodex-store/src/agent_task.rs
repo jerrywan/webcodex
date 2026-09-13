@@ -1,5 +1,8 @@
 use super::agent_attention::create_agent_task_terminal_attention_in_transaction;
-use super::agent_wake::{AgentWakeState, AGENT_WAKE_ID_PREFIX, WAKE_TRIGGER_AGENT_TASK_ATTEMPT};
+use super::agent_wake::{
+    AgentWakeState, AGENT_WAKE_CONSUME_TOKEN_PREFIX, AGENT_WAKE_ID_PREFIX,
+    WAKE_TRIGGER_AGENT_TASK_ATTEMPT,
+};
 use super::communication::{
     authorize_conversation_access, digest_text, lookup_idempotent_resource, new_id, now_unix_ms,
     record_idempotent_resource, store_error, validate_communication_principal, validate_id,
@@ -1417,6 +1420,33 @@ impl Database {
             attempt_fence,
             attempt_controller_generation,
             None,
+            None,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn heartbeat_agent_task_attempt_with_active_turn_proof(
+        &self,
+        principal: &CommunicationPrincipal,
+        task_id: &str,
+        attempt_id: &str,
+        assignee_agent_id: &str,
+        attempt_fence: &str,
+        attempt_controller_generation: i64,
+        active_turn_wake_id: Option<&str>,
+        active_turn_consume_token: Option<&str>,
+    ) -> Result<AgentTaskAttemptHeartbeatMutation, CommunicationStoreError> {
+        self.heartbeat_agent_task_attempt_with_now(
+            principal,
+            task_id,
+            attempt_id,
+            assignee_agent_id,
+            attempt_fence,
+            attempt_controller_generation,
+            active_turn_wake_id,
+            active_turn_consume_token,
+            None,
         )
     }
 
@@ -1439,6 +1469,35 @@ impl Database {
             assignee_agent_id,
             attempt_fence,
             attempt_controller_generation,
+            None,
+            None,
+            Some(now),
+        )
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn heartbeat_agent_task_attempt_with_active_turn_proof_at(
+        &self,
+        principal: &CommunicationPrincipal,
+        task_id: &str,
+        attempt_id: &str,
+        assignee_agent_id: &str,
+        attempt_fence: &str,
+        attempt_controller_generation: i64,
+        active_turn_wake_id: Option<&str>,
+        active_turn_consume_token: Option<&str>,
+        now: i64,
+    ) -> Result<AgentTaskAttemptHeartbeatMutation, CommunicationStoreError> {
+        self.heartbeat_agent_task_attempt_with_now(
+            principal,
+            task_id,
+            attempt_id,
+            assignee_agent_id,
+            attempt_fence,
+            attempt_controller_generation,
+            active_turn_wake_id,
+            active_turn_consume_token,
             Some(now),
         )
     }
@@ -1452,6 +1511,8 @@ impl Database {
         assignee_agent_id: &str,
         attempt_fence: &str,
         attempt_controller_generation: i64,
+        active_turn_wake_id: Option<&str>,
+        active_turn_consume_token: Option<&str>,
         now: Option<i64>,
     ) -> Result<AgentTaskAttemptHeartbeatMutation, CommunicationStoreError> {
         validate_attempt_mutation_inputs(
@@ -1462,6 +1523,28 @@ impl Database {
             attempt_fence,
             attempt_controller_generation,
         )?;
+        let active_turn_proof = match (active_turn_wake_id, active_turn_consume_token) {
+            (None, None) => None,
+            (Some(wake_id), Some(consume_token)) => {
+                validate_id(
+                    wake_id,
+                    AGENT_WAKE_ID_PREFIX,
+                    "invalid_agent_task_active_turn_wake_id",
+                )?;
+                validate_id(
+                    consume_token,
+                    AGENT_WAKE_CONSUME_TOKEN_PREFIX,
+                    "invalid_agent_task_active_turn_consume_token",
+                )?;
+                Some((wake_id, consume_token))
+            }
+            _ => {
+                return Err(CommunicationStoreError::new(
+                    "invalid_agent_task_active_turn_proof",
+                    "active-turn wake_id and consume_token must be provided together",
+                ));
+            }
+        };
         let mut conn = self.lock_connection(crate::StoreDomain::AgentTask);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -1477,24 +1560,80 @@ impl Database {
             attempt_controller_generation,
             now,
         )?;
+
+        let renewal_window_ms = if let Some((wake_id, consume_token)) = active_turn_proof {
+            let consume_token_hash =
+                digest_text("webcodex.agent-wake.consume-token.v1", consume_token);
+            let proof_matches: bool = transaction
+                .query_row(
+                    "SELECT EXISTS(
+                         SELECT 1
+                         FROM wc_agent_wakes w
+                         JOIN wc_agent_wake_attempts wa
+                           ON wa.attempt_id = w.claimed_attempt_id
+                          AND wa.wake_id = w.wake_id
+                         JOIN wc_agent_task_endpoint_executions e
+                           ON e.wake_id = w.wake_id
+                          AND e.task_id = w.source_task_id
+                          AND e.attempt_id = w.source_task_attempt_id
+                         WHERE w.wake_id = ?1
+                           AND w.trigger_kind = 'agent_task_attempt'
+                           AND w.source_task_id = ?2
+                           AND w.source_task_attempt_id = ?3
+                           AND w.target_agent_id = ?4
+                           AND w.state = 'consumed'
+                           AND w.consumed_at_unix_ms IS NOT NULL
+                           AND wa.state = 'consumed'
+                           AND wa.consumed_at_unix_ms IS NOT NULL
+                           AND wa.consume_token_hash = ?5
+                           AND wa.endpoint_id = w.consumed_by_endpoint_id
+                           AND wa.controller_generation = w.consumed_controller_generation
+                           AND e.endpoint_id IS NOT NULL
+                           AND e.endpoint_id = w.consumed_by_endpoint_id
+                           AND e.endpoint_controller_generation = w.consumed_controller_generation
+                     )",
+                    params![
+                        wake_id,
+                        task_id,
+                        attempt_id,
+                        assignee_agent_id,
+                        consume_token_hash,
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(store_error)?;
+            if !proof_matches {
+                return Err(CommunicationStoreError::new(
+                    "agent_task_active_turn_proof_invalid",
+                    "active-turn proof does not identify the exact consumed A4b model turn",
+                ));
+            }
+            AGENT_TASK_ENDPOINT_TAKEOVER_LEASE_MS
+        } else {
+            DEFAULT_AGENT_TASK_ATTEMPT_LEASE_MS
+        };
+
         let new_lease_expires_at = attempt
             .lease_expires_at_unix_ms
-            .max(now.saturating_add(DEFAULT_AGENT_TASK_ATTEMPT_LEASE_MS));
-        transaction
-            .execute(
-                "UPDATE wc_agent_task_attempts
-                 SET lease_expires_at_unix_ms = ?2
-                 WHERE attempt_id = ?1",
-                params![attempt_id, new_lease_expires_at],
-            )
-            .map_err(store_error)?;
-        transaction
-            .execute(
-                "UPDATE wc_agent_tasks SET updated_at_unix_ms = MAX(updated_at_unix_ms, ?2)
-                 WHERE task_id = ?1",
-                params![task_id, now],
-            )
-            .map_err(store_error)?;
+            .max(now.saturating_add(renewal_window_ms));
+        let state_changed = new_lease_expires_at > attempt.lease_expires_at_unix_ms;
+        if state_changed {
+            transaction
+                .execute(
+                    "UPDATE wc_agent_task_attempts
+                     SET lease_expires_at_unix_ms = ?2
+                     WHERE attempt_id = ?1",
+                    params![attempt_id, new_lease_expires_at],
+                )
+                .map_err(store_error)?;
+            transaction
+                .execute(
+                    "UPDATE wc_agent_tasks SET updated_at_unix_ms = MAX(updated_at_unix_ms, ?2)
+                     WHERE task_id = ?1",
+                    params![task_id, now],
+                )
+                .map_err(store_error)?;
+        }
         let task = load_owned_task(&transaction, principal, task_id, now)?;
         let attempt =
             load_attempt_for_task(&transaction, task_id, attempt_id, now)?.ok_or_else(|| {
@@ -1507,7 +1646,7 @@ impl Database {
         Ok(AgentTaskAttemptHeartbeatMutation {
             task: task.summary(now),
             attempt: attempt.record(now),
-            state_changed: true,
+            state_changed,
         })
     }
 

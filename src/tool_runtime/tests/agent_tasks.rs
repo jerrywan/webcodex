@@ -550,6 +550,12 @@ fn runtime_surface_exposes_fence_only_for_exact_start_and_never_requires_endpoin
         endpoint_bound_read.output["task"]["summary"]["recovery_kind"],
         "none"
     );
+    assert!(endpoint_bound_read.output["task"]
+        .get("attempt_fence")
+        .is_none());
+    assert!(!endpoint_bound_read.output["task"]
+        .to_string()
+        .contains("consume_token"));
     assert_eq!(
         _db.conn_for_tests()
             .query_row(
@@ -569,6 +575,8 @@ fn runtime_surface_exposes_fence_only_for_exact_start_and_never_requires_endpoin
         assignee.clone(),
         fence.clone(),
         1,
+        None,
+        None,
     );
     assert!(heartbeat.success, "{:?}", heartbeat.output);
     assert_eq!(heartbeat.output["attempt"]["attempt_id"], attempt_id);
