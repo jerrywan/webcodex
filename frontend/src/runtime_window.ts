@@ -328,4 +328,3 @@ export function renderWindowCards(
     if (card) node.appendChild(card);
   }
 }
-

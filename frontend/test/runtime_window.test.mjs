@@ -419,4 +419,3 @@ test("renderWindowCards populates container with window cards", () => {
     assert.equal(clicked, "w2");
   });
 });
-

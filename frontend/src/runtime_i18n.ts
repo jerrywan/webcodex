@@ -454,4 +454,3 @@ export function localizedWorkflowText(value: unknown, language: RuntimeLanguage 
     return String(count) + " " + (nounMap[String(noun)] || noun);
   });
 }
-
