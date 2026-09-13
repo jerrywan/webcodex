@@ -2279,6 +2279,101 @@ function persistDeviceDisclosure(clientId, open) {
     }
 }
 
+function pendingAttentionCount(attention) {
+    return ["open_risks", "open_todos", "open_questions", "open_guidance"].reduce((total, key) => total + (typeof attention?.[key] === "number" ? Math.max(0, Math.floor(attention[key])) : 0), 0);
+}
+function runnerAttentionCount(runner) {
+    return pendingAttentionCount(runner?.sessions?.attention);
+}
+function attentionLabel(attention, language) {
+    const parts = [];
+    for (const [key, singular] of [
+        ["open_risks", "risk"],
+        ["open_todos", "todo"],
+        ["open_questions", "question"],
+        ["open_guidance", "guidance"],
+    ]) {
+        const count = typeof attention?.[key] === "number" ? attention[key] : 0;
+        if (count)
+            parts.push(localizedCountLabel(count, singular, singular + "s", language));
+    }
+    return parts.length ? parts.join(" · ") : translateText("No retained pending attention", language);
+}
+function formatProjectIdentity(project, language) {
+    if (language !== "zh-CN")
+        return runtimeProjectIdentityText(project);
+    if (!project || typeof project.id !== "string" || !project.id) {
+        return translateText("No project selected", language);
+    }
+    const runner = typeof project.client_id === "string" && project.client_id
+        ? project.client_id
+        : translateText("unknown", language);
+    const path = typeof project.path === "string" && project.path ? project.path : "不可用";
+    return "运行器：" + runner + " · 项目：" + project.id + " · 工作空间：" + path;
+}
+function extractProjectSelectorDevices(projects, knownDevices = [], runnerRows = [], selectedDevice = "") {
+    const devices = new Set(knownDevices);
+    for (const device of runtimeDeviceIds(projects))
+        devices.add(device);
+    for (const runner of runnerRows) {
+        const clientId = typeof runner?.client_id === "string" ? runner.client_id : "";
+        if (clientId)
+            devices.add(clientId);
+    }
+    if (selectedDevice)
+        devices.add(selectedDevice);
+    return Array.from(devices).sort((left, right) => left.localeCompare(right));
+}
+function formatRuntimeOverviewMetrics(data, language) {
+    if (!data)
+        return null;
+    const buildGitCommit = data.build_git_commit;
+    const buildText = buildGitCommit
+        ? (language === "zh-CN" ? "构建 " : "build ") +
+            buildGitCommit +
+            (data.build_git_dirty ? (language === "zh-CN" ? " · 有未提交更改" : " · dirty") : "")
+        : translateText("build unavailable", language);
+    const projectsText = data.projects_available
+        ? localizedCountLabel(data.visible_projects, "visible Project", "visible Projects", language) +
+            (data.projects_truncated ? (language === "zh-CN" ? " · 不完整" : " · partial") : "")
+        : translateText("project:read unavailable", language);
+    const jobsText = localizedCountLabel(data.active_jobs, "active Job", "active Jobs", language) +
+        (data.mixed_builds_present ? (language === "zh-CN" ? " · 存在混合构建" : " · mixed builds") : "");
+    const sessionsText = localizedCountLabel(data.workflow_sessions?.active, "active Session", "active Sessions", language) +
+        " · " +
+        localizedCountLabel(data.workflow_sessions?.running, "running Session", "running Sessions", language) +
+        (data.workflow_sessions?.truncated
+            ? language === "zh-CN"
+                ? " · 有界汇总"
+                : " · bounded aggregate"
+            : "");
+    const recentMeta = data.recent_sessions || {};
+    const recentStatusText = localizedCountLabel(recentMeta.returned, "Session", "Sessions", language) +
+        (recentMeta.truncated
+            ? (language === "zh-CN" ? " · 前 " : " · top ") + String(recentMeta.returned || 0)
+            : "") +
+        (recentMeta.scan_truncated
+            ? language === "zh-CN"
+                ? " · 扫描不完整"
+                : " · partial scan"
+            : "");
+    return {
+        identity: [data.service, data.version].filter(Boolean).join(" · "),
+        build: buildText,
+        runners: localizedCountLabel(data.runner_count, "Runner", "Runners", language),
+        alignment: localizedCountLabel(data.runners_online, "online", "online", language) +
+            " · " +
+            localizedCountLabel(data.runners_stale, "stale", "stale", language) +
+            " · " +
+            localizedCountLabel(data.runners_unavailable, "unavailable", "unavailable", language),
+        projects: projectsText,
+        jobs: jobsText,
+        attention: attentionLabel(data.workflow_sessions, language),
+        sessions: sessionsText,
+        recentStatus: recentStatusText,
+    };
+}
+
 const API_BASE = RUNTIME_API_BASE;
 const apiClient = new RuntimeApiClient(API_BASE);
 const REFRESH_MS = 30000;
@@ -3154,35 +3249,24 @@ function countLabel(value, singular, plural = singular + "s") {
     return localizedCountLabel(value, singular, plural, runtimeLanguage);
 }
 function pendingAttentionCount(attention) {
-    return ["open_risks", "open_todos", "open_questions", "open_guidance"]
-        .reduce((total, key) => total + (typeof attention?.[key] === "number" ? Math.max(0, Math.floor(attention[key])) : 0), 0);
+    return countPendingAttention(attention);
 }
 function attentionLabel(attention) {
-    const parts = [];
-    for (const [key, singular] of [["open_risks", "risk"], ["open_todos", "todo"], ["open_questions", "question"], ["open_guidance", "guidance"]]) {
-        const count = typeof attention?.[key] === "number" ? attention[key] : 0;
-        if (count)
-            parts.push(countLabel(count, singular));
-    }
-    return parts.length ? parts.join(" · ") : tr("No retained pending attention");
+    return formatAttentionLabel(attention, runtimeLanguage);
 }
 function renderRuntimeOverviewMetrics(data) {
-    if (!data)
+    const metrics = formatRuntimeOverviewMetrics(data, runtimeLanguage);
+    if (!metrics)
         return;
-    setText("runtime-server-identity", [data.service, data.version].filter(Boolean).join(" · "));
-    setText("runtime-server-build", data.build_git_commit
-        ? (runtimeLanguage === "zh-CN" ? "构建 " : "build ") + data.build_git_commit + (data.build_git_dirty ? (runtimeLanguage === "zh-CN" ? " · 有未提交更改" : " · dirty") : "")
-        : tr("build unavailable"));
-    setText("runtime-server-runners", countLabel(data.runner_count, "Runner"));
-    setText("runtime-server-alignment", countLabel(data.runners_online, "online") + " · " + countLabel(data.runners_stale, "stale") + " · " + countLabel(data.runners_unavailable, "unavailable"));
-    setText("runtime-server-projects", data.projects_available ? countLabel(data.visible_projects, "visible Project") + (data.projects_truncated ? (runtimeLanguage === "zh-CN" ? " · 不完整" : " · partial") : "") : tr("project:read unavailable"));
-    setText("runtime-server-jobs", countLabel(data.active_jobs, "active Job") + (data.mixed_builds_present ? (runtimeLanguage === "zh-CN" ? " · 存在混合构建" : " · mixed builds") : ""));
-    setText("runtime-server-attention", attentionLabel(data.workflow_sessions));
-    setText("runtime-server-sessions", countLabel(data.workflow_sessions?.active, "active Session") + " · " + countLabel(data.workflow_sessions?.running, "running Session") + (data.workflow_sessions?.truncated ? (runtimeLanguage === "zh-CN" ? " · 有界汇总" : " · bounded aggregate") : ""));
-    const recentMeta = data.recent_sessions || {};
-    setText("runtime-recent-status", countLabel(recentMeta.returned, "Session") +
-        (recentMeta.truncated ? (runtimeLanguage === "zh-CN" ? " · 前 " : " · top ") + String(recentMeta.returned || 0) : "") +
-        (recentMeta.scan_truncated ? (runtimeLanguage === "zh-CN" ? " · 扫描不完整" : " · partial scan") : ""));
+    setText("runtime-server-identity", metrics.identity);
+    setText("runtime-server-build", metrics.build);
+    setText("runtime-server-runners", metrics.runners);
+    setText("runtime-server-alignment", metrics.alignment);
+    setText("runtime-server-projects", metrics.projects);
+    setText("runtime-server-jobs", metrics.jobs);
+    setText("runtime-server-attention", metrics.attention);
+    setText("runtime-server-sessions", metrics.sessions);
+    setText("runtime-recent-status", metrics.recentStatus);
 }
 async function fetchOverview(request) {
     abort(overviewAbort);
@@ -3345,18 +3429,7 @@ function effectiveProjects(projects) {
     });
 }
 function projectSelectorDevices(projects) {
-    const devices = new Set(knownProjectDevices);
-    for (const device of runtimeDeviceIds(projects))
-        devices.add(device);
-    for (const runner of runnerRows) {
-        const clientId = typeof runner?.client_id === "string" ? runner.client_id : "";
-        if (clientId)
-            devices.add(clientId);
-    }
-    const selectedDevice = String(state.selectedDevice || "");
-    if (selectedDevice)
-        devices.add(selectedDevice);
-    return Array.from(devices).sort((left, right) => left.localeCompare(right));
+    return extractProjectSelectorDevices(projects, knownProjectDevices, runnerRows, String(state.selectedDevice || ""));
 }
 function selectedProjectRow() {
     const selected = String(state.selectedProject || "");
@@ -3381,25 +3454,11 @@ function renderSelectedProjectIdentity() {
         setText("runtime-selected-project", runtimeProjectIdentityText(project));
         return;
     }
-    if (!project || typeof project.id !== "string" || !project.id) {
-        setText("runtime-selected-project", tr("No project selected"));
-        return;
-    }
-    const runner = typeof project.client_id === "string" && project.client_id ? project.client_id : tr("unknown");
-    const path = typeof project.path === "string" && project.path ? project.path : "不可用";
-    setText("runtime-selected-project", "运行器：" + runner + " · 项目：" + project.id + " · 工作空间：" + path);
+    setText("runtime-selected-project", formatProjectIdentity(project, runtimeLanguage));
 }
 function renderSessionWorkspaceIdentity() {
     const project = selectedProjectRow();
-    if (runtimeLanguage !== "zh-CN")
-        setText("runtime-session-workspace", runtimeProjectIdentityText(project));
-    else if (!project || typeof project.id !== "string" || !project.id)
-        setText("runtime-session-workspace", tr("No project selected"));
-    else {
-        const runner = typeof project.client_id === "string" && project.client_id ? project.client_id : tr("unknown");
-        const path = typeof project.path === "string" && project.path ? project.path : "不可用";
-        setText("runtime-session-workspace", "运行器：" + runner + " · 项目：" + project.id + " · 工作空间：" + path);
-    }
+    setText("runtime-session-workspace", formatProjectIdentity(project, runtimeLanguage));
 }
 function revealWorkflowSessionDetail() {
     const panel = el("runtime-workflow-sessions-panel");
@@ -3658,9 +3717,7 @@ function applyRunnerFilter(device) {
         void fetchProjects(refreshRuntimeProjects(state, projectSearch, projectDeviceFilter));
 }
 function runnerAttentionCount(runner) {
-    const attention = runner?.sessions?.attention;
-    return ["open_guidance", "open_questions", "open_risks", "open_todos"]
-        .reduce((total, key) => total + (typeof attention?.[key] === "number" ? Math.max(0, attention[key]) : 0), 0);
+    return calculateRunnerAttention(runner);
 }
 function renderRunnerFleet(runners) {
     const node = el("runtime-runner-list");

@@ -29,6 +29,7 @@ const watchedSources = new Set([
   "runtime_communication.ts",
   "runtime_activity.ts",
   "runtime_storage.ts",
+  "runtime_overview.ts",
   "runtime.css",
   "runtime.html",
   "admin.ts",
@@ -203,6 +204,20 @@ export function createOutputs(
     transpileTypeScript(sourceDirectory, "runtime_storage.ts")
   );
   const runtimeStorageClassic = stripModuleExports(runtimeStorageModule);
+  const runtimeOverviewModule = buildJs(
+    transpileTypeScript(sourceDirectory, "runtime_overview.ts")
+  );
+  const runtimeOverviewClassic = stripModuleExports(
+    runtimeOverviewModule
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_i18n(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_console_state(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
+  );
   const runtimeModule = transpileTypeScript(sourceDirectory, "runtime.ts");
   const runtimeScript = stripModuleExports(
     runtimeModule
@@ -242,6 +257,10 @@ export function createOutputs(
         /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_storage(?:\.js)?["'];?\s*\n/m,
         ""
       )
+      .replace(
+        /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/runtime_overview(?:\.js)?["'];?\s*\n/m,
+        ""
+      )
   );
   const runtimeInlined = buildJs(
     workflowSessionStateClassic +
@@ -261,6 +280,8 @@ export function createOutputs(
       runtimeActivityClassic +
       "\n" +
       runtimeStorageClassic +
+      "\n" +
+      runtimeOverviewClassic +
       "\n" +
       runtimeScript
   );
@@ -324,6 +345,7 @@ export function createOutputs(
     ["runtime_communication.js", runtimeCommunicationModule],
     ["runtime_activity.js", runtimeActivityModule],
     ["runtime_storage.js", runtimeStorageModule],
+    ["runtime_overview.js", runtimeOverviewModule],
     ["admin_controller.js", adminControllerModule],
     ["admin_mutation_controller.js", adminMutationControllerModule],
     ["admin_mutation_view.js", adminMutationViewModule],
