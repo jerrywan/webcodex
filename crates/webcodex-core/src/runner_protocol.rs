@@ -989,6 +989,21 @@ impl Default for RunnerCapabilities {
     }
 }
 
+pub const PROJECT_ROOT_FINGERPRINT_PREFIX: &str = "wc_projroot_";
+pub const PROJECT_ROOT_IDENTITY_DOMAIN: &str = "webcodex-project-root-identity-v1";
+
+/// Runner-owned Project lineage facts. This is descriptive identity metadata,
+/// never an authorization grant or execution-placement instruction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RunnerProjectLineage {
+    ManagedWorktreeSource {
+        source_project_id: String,
+        source_root_fingerprint: String,
+        base_sha: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerProjectSummary {
     pub id: String,
@@ -1013,6 +1028,14 @@ pub struct RunnerProjectSummary {
     /// Stable SHA-256 revision of the persisted project registration record TOML content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
+    /// Domain-separated identity of the currently observed canonical Project
+    /// root. Missing means the Runner could not prove a current root identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_fingerprint: Option<String>,
+    /// Explicit persisted lineage only. Never inferred from paths, repository
+    /// names, Git remotes, registration provenance, or project kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<RunnerProjectLineage>,
     #[serde(default)]
     pub git_branch: Option<String>,
     #[serde(default)]
@@ -3446,6 +3469,27 @@ where
 #[cfg(test)]
 mod envelope_tests {
     use super::*;
+
+    #[test]
+    fn project_lineage_wire_kind_is_closed_and_explicit() {
+        let lineage = RunnerProjectLineage::ManagedWorktreeSource {
+            source_project_id: "source".to_string(),
+            source_root_fingerprint: format!("wc_projroot_{}", "1".repeat(64)),
+            base_sha: "a".repeat(40),
+        };
+        let encoded = serde_json::to_value(&lineage).unwrap();
+        assert_eq!(encoded["kind"], "managed_worktree_source");
+        assert_eq!(encoded["source_project_id"], "source");
+        assert!(
+            serde_json::from_value::<RunnerProjectLineage>(serde_json::json!({
+                "kind": "git_remote_guess",
+                "source_project_id": "source",
+                "source_root_fingerprint": format!("wc_projroot_{}", "1".repeat(64)),
+                "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }))
+            .is_err()
+        );
+    }
 
     #[test]
     fn runner_config_operation_contract_is_closed_bounded_and_fail_closed_by_default() {

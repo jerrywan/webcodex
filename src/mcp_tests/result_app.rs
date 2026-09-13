@@ -1834,6 +1834,8 @@ async fn register_job_runner(runtime: &ToolRuntime, auth: &crate::auth::AuthCont
             hooks: Vec::new(),
             disabled: false,
             revision: None,
+            root_fingerprint: None,
+            lineage: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

@@ -345,6 +345,14 @@ fn seed_managed_tool_runtime_fixture(source: &Path, worktree: &Path) -> String {
     sha
 }
 
+fn managed_source_root_fingerprint() -> String {
+    format!("wc_projroot_{}", "1".repeat(64))
+}
+
+fn managed_target_root_fingerprint() -> String {
+    format!("wc_projroot_{}", "2".repeat(64))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn dispatch_with_managed_worktree_runner(
     runtime: &ToolRuntime,
@@ -413,6 +421,13 @@ async fn dispatch_with_managed_worktree_runner(
                     "allow_patch": true,
                     "disabled": false,
                     "revision": format!("sha256:{}", "b".repeat(64)),
+                    "root_fingerprint": managed_target_root_fingerprint(),
+                    "lineage": {
+                        "kind": "managed_worktree_source",
+                        "source_project_id": "source",
+                        "source_root_fingerprint": managed_source_root_fingerprint(),
+                        "base_sha": base_sha,
+                    },
                     "source": "managed_worktree",
                     "outcome": outcome,
                     "registered": registered,
@@ -2126,6 +2141,8 @@ async fn managed_worktree_bootstrap_recovers_same_operation_and_binds_session_to
     let source_status_before = managed_fixture_git(&source, &["status", "--porcelain"]);
     let runtime = ToolRuntime::new_for_tests();
     let client_id = "wop-managed";
+    let mut source_project = registered_project("source", &source_path);
+    source_project.root_fingerprint = Some(managed_source_root_fingerprint());
     register_agent_with_projects(
         &runtime,
         client_id,
@@ -2140,7 +2157,7 @@ async fn managed_worktree_bootstrap_recovers_same_operation_and_binds_session_to
             internal_posix_script: true,
             ..Default::default()
         },
-        Vec::new(),
+        vec![source_project],
     )
     .await;
 
@@ -2182,6 +2199,17 @@ async fn managed_worktree_bootstrap_recovers_same_operation_and_binds_session_to
     assert_eq!(first.output["worktree"]["base_sha"], base_sha);
     assert_eq!(first.output["worktree"]["source_dirty"], true);
     assert_eq!(
+        first.output["knowledge_association"]["kind"],
+        "managed_worktree_source"
+    );
+    assert_eq!(first.output["knowledge_association"]["status"], "available");
+    assert_eq!(
+        first.output["knowledge_association"]["source_project"],
+        "agent:wop-managed:source"
+    );
+    assert_eq!(first.output["knowledge_association"]["base_sha"], base_sha);
+    assert_eq!(first.output["knowledge_association"]["read_through"], false);
+    assert_eq!(
         first.output["project_resolution"]["source"],
         "managed_worktree"
     );
@@ -2197,6 +2225,8 @@ async fn managed_worktree_bootstrap_recovers_same_operation_and_binds_session_to
     let compact = first.output.to_string();
     assert!(!compact.contains(&source_path));
     assert!(!compact.contains(&managed_path));
+    assert!(!compact.contains(&managed_source_root_fingerprint()));
+    assert!(!compact.contains("managed_operation_id"));
     let session_id = first.output["session_id"].as_str().unwrap().to_string();
     let session = runtime.sessions.summary(&session_id, Some(50)).unwrap();
     assert_eq!(session.project.as_deref(), Some(project));

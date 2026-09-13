@@ -60,6 +60,8 @@ fn project_summary() -> RunnerProjectSummary {
         hooks: Vec::new(),
         disabled: false,
         revision: None,
+        root_fingerprint: None,
+        lineage: None,
         git_branch: Some("main".to_string()),
         git_head: None,
         git_dirty: None,

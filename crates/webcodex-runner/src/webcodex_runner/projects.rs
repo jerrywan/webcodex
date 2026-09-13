@@ -2,9 +2,12 @@ use super::config::{
     default_true, project_registry_dir, validate_shell_profile_name, RunnerConfig, RunnerPolicy,
 };
 use super::shell::canonicalize_existing;
-use crate::runner_protocol::RunnerProjectSummary;
 #[cfg(test)]
 use crate::runner_protocol::RunnerRequest;
+use crate::runner_protocol::{
+    RunnerProjectLineage, RunnerProjectSummary, PROJECT_ROOT_FINGERPRINT_PREFIX,
+    PROJECT_ROOT_IDENTITY_DOMAIN,
+};
 use crate::{err_cmd, ok_cmd, write_created_file};
 use crate::{CommandResult, CreatedProjectPaths};
 use serde::{Deserialize, Serialize};
@@ -109,6 +112,10 @@ pub(crate) struct RunnerProjectFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) managed_source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) managed_source_project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) managed_source_root_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) managed_base_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) managed_base_sha: Option<String>,
@@ -184,6 +191,39 @@ pub(crate) fn parse_runner_project_toml(content: &str) -> Result<RunnerProjectFi
     project.kind = trim_optional(project.kind);
     project.registration_source = trim_optional(project.registration_source);
     project.description = trim_optional(project.description);
+    project.managed_source = trim_optional(project.managed_source);
+    project.managed_source_project_id = trim_optional(project.managed_source_project_id);
+    project.managed_source_root_fingerprint =
+        trim_optional(project.managed_source_root_fingerprint);
+    project.managed_base_ref = trim_optional(project.managed_base_ref);
+    project.managed_base_sha = trim_optional(project.managed_base_sha);
+    project.managed_operation_id = trim_optional(project.managed_operation_id);
+    match (
+        project.managed_source_project_id.as_deref(),
+        project.managed_source_root_fingerprint.as_deref(),
+    ) {
+        (Some(source_project_id), Some(source_root_fingerprint)) => {
+            if !project.managed_worktree {
+                return Err("managed lineage requires managed_worktree = true".to_string());
+            }
+            validate_project_id(source_project_id)?;
+            if source_project_id == project.id {
+                return Err("managed source project cannot equal target project".to_string());
+            }
+            if !valid_project_root_fingerprint(source_root_fingerprint) {
+                return Err("managed source root fingerprint is invalid".to_string());
+            }
+            if project
+                .managed_base_sha
+                .as_deref()
+                .is_none_or(|sha| !valid_git_sha(sha))
+            {
+                return Err("managed lineage requires a valid managed_base_sha".to_string());
+            }
+        }
+        (None, None) => {}
+        _ => return Err("managed source lineage is incomplete".to_string()),
+    }
     if let Some(shell_profile) = &project.shell_profile {
         validate_shell_profile_name("project.shell_profile", shell_profile)?;
     }
@@ -573,6 +613,36 @@ fn project_wire_kind(project: &RunnerProjectFile) -> Option<String> {
     }
 }
 
+fn valid_git_sha(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_project_root_fingerprint(value: &str) -> bool {
+    value
+        .strip_prefix(PROJECT_ROOT_FINGERPRINT_PREFIX)
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+pub(crate) fn project_root_fingerprint(canonical_root: &Path) -> String {
+    let identity = webcodex_runner_config::paths::normalize_path_identity(canonical_root);
+    let mut hasher = Sha256::new();
+    hasher.update(PROJECT_ROOT_IDENTITY_DOMAIN.as_bytes());
+    hasher.update([0]);
+    hasher.update(identity.as_bytes());
+    format!("{PROJECT_ROOT_FINGERPRINT_PREFIX}{:x}", hasher.finalize())
+}
+
+fn project_lineage(project: &RunnerProjectFile) -> Option<RunnerProjectLineage> {
+    let source_project_id = project.managed_source_project_id.as_ref()?;
+    let source_root_fingerprint = project.managed_source_root_fingerprint.as_ref()?;
+    let base_sha = project.managed_base_sha.as_ref()?;
+    Some(RunnerProjectLineage::ManagedWorktreeSource {
+        source_project_id: source_project_id.clone(),
+        source_root_fingerprint: source_root_fingerprint.clone(),
+        base_sha: base_sha.clone(),
+    })
+}
+
 fn runner_project_summary_with_shutdown(
     project: &RunnerProjectFile,
     updated_at: i64,
@@ -585,11 +655,14 @@ fn runner_project_summary_with_shutdown(
     // identity. Report the actual root, not a mutable symlink alias, so a
     // retargeted project registration cannot inherit another repository's
     // current Workflow Session.
-    let resolved_path = canonicalize_existing(Path::new(&project.path))
+    let canonical_root = canonicalize_existing(Path::new(&project.path))
         .ok()
-        .filter(|path| path.is_dir())
-        .unwrap_or_else(|| PathBuf::from(&project.path));
-    let resolved_path = resolved_path.to_string_lossy().to_string();
+        .filter(|path| path.is_dir());
+    let root_fingerprint = canonical_root.as_deref().map(project_root_fingerprint);
+    let resolved_path = canonical_root
+        .unwrap_or_else(|| PathBuf::from(&project.path))
+        .to_string_lossy()
+        .to_string();
     let (git_branch, git_head, git_dirty) = if include_git {
         let branch = run_git_capture(
             &resolved_path,
@@ -623,6 +696,8 @@ fn runner_project_summary_with_shutdown(
         hooks,
         disabled: project.disabled,
         revision: Some(project_revision(project)),
+        root_fingerprint,
+        lineage: project_lineage(project),
         git_branch,
         git_head,
         git_dirty,
@@ -1136,6 +1211,23 @@ fn projects_matching_canonical_path(
         .collect()
 }
 
+fn resolve_managed_source_project(
+    projects: &[RunnerProjectFile],
+    source_root: &Path,
+) -> Result<(String, String), &'static str> {
+    let matches = projects_matching_canonical_path(projects, source_root);
+    if matches.len() > 1 {
+        return Err("ambiguous_project_path");
+    }
+    let Some(source) = matches.into_iter().next() else {
+        return Err("managed_worktree_source_project_unavailable");
+    };
+    if source.disabled {
+        return Err("managed_worktree_source_project_unavailable");
+    }
+    Ok((source.id, project_root_fingerprint(source_root)))
+}
+
 fn bounded_project_name(canonical_path: &Path) -> String {
     let raw = canonical_path
         .file_name()
@@ -1265,6 +1357,8 @@ fn path_resolution_success(
         "allow_patch": project.allow_patch,
         "disabled": project.disabled,
         "revision": project_revision(project),
+        "root_fingerprint": project_root_fingerprint(canonical_path),
+        "lineage": project_lineage(project),
         "source": "path",
         "outcome": outcome,
         "registered": registered,
@@ -1659,6 +1753,8 @@ fn managed_worktree_project_toml(
     name: &str,
     worktree: &str,
     source: &str,
+    source_project_id: &str,
+    source_root_fingerprint: &str,
     base_ref: &str,
     base_sha: &str,
     operation_id: &str,
@@ -1673,6 +1769,14 @@ fn managed_worktree_project_toml(
     );
     content.push_str("managed_worktree = true\n");
     content.push_str(&format!("managed_source = {}\n", toml_basic_string(source)));
+    content.push_str(&format!(
+        "managed_source_project_id = {}\n",
+        toml_basic_string(source_project_id)
+    ));
+    content.push_str(&format!(
+        "managed_source_root_fingerprint = {}\n",
+        toml_basic_string(source_root_fingerprint)
+    ));
     content.push_str(&format!(
         "managed_base_ref = {}\n",
         toml_basic_string(base_ref)
@@ -1714,6 +1818,8 @@ fn managed_worktree_success(
             "allow_patch": project.allow_patch,
             "disabled": project.disabled,
             "revision": project_revision(project),
+            "root_fingerprint": project_root_fingerprint(worktree),
+            "lineage": project_lineage(project),
             "source": "managed_worktree",
             "outcome": outcome,
             "registered": registered,
@@ -1762,8 +1868,9 @@ fn resume_managed_worktree(
         }
     };
     let Some(project) = projects
-        .into_iter()
+        .iter()
         .find(|project| project.id == resume_project_id)
+        .cloned()
     else {
         return managed_worktree_error(
             start,
@@ -1796,6 +1903,29 @@ fn resume_managed_worktree(
             stored_base_sha,
             Some(source_dirty),
         );
+    }
+    if let (Some(stored_source_project_id), Some(stored_source_root_fingerprint)) = (
+        project.managed_source_project_id.as_deref(),
+        project.managed_source_root_fingerprint.as_deref(),
+    ) {
+        let current_lineage = resolve_managed_source_project(&projects, source_root);
+        if current_lineage.as_ref().is_err()
+            || current_lineage
+                .as_ref()
+                .is_ok_and(|(source_project_id, source_root_fingerprint)| {
+                    source_project_id != stored_source_project_id
+                        || source_root_fingerprint != stored_source_root_fingerprint
+                })
+        {
+            return managed_worktree_error(
+                start,
+                "managed_worktree_resume_mismatch",
+                false,
+                requested_base_ref,
+                stored_base_sha,
+                Some(source_dirty),
+            );
+        }
     }
     let base_sha = stored_base_sha.expect("validated managed base SHA");
     if let Some(base_ref) = requested_base_ref {
@@ -2055,6 +2185,33 @@ pub(crate) fn handle_prepare_managed_worktree_operation(
             resume_project_id,
         );
     }
+    let source_projects = match load_project_files_for_path_resolution(project_registry_dir) {
+        Ok(projects) => projects,
+        Err(error) => {
+            return managed_worktree_error(
+                start,
+                error,
+                false,
+                Some(&base_ref),
+                None,
+                Some(source_dirty),
+            )
+        }
+    };
+    let (source_project_id, source_root_fingerprint) =
+        match resolve_managed_source_project(&source_projects, &source_root) {
+            Ok(lineage) => lineage,
+            Err(error) => {
+                return managed_worktree_error(
+                    start,
+                    error,
+                    false,
+                    Some(&base_ref),
+                    None,
+                    Some(source_dirty),
+                )
+            }
+        };
     let base_sha = match exact_git_commit(&source_root, &base_ref) {
         Ok(sha) => sha,
         Err(error) => {
@@ -2346,7 +2503,10 @@ pub(crate) fn handle_prepare_managed_worktree_operation(
         let same_operation = project.managed_worktree
             && project.managed_operation_id.as_deref() == Some(operation_id)
             && project.managed_base_sha.as_deref() == Some(base_sha.as_str())
-            && project.managed_source.as_deref() == source_root.to_str();
+            && project.managed_source.as_deref() == source_root.to_str()
+            && project.managed_source_project_id.as_deref() == Some(source_project_id.as_str())
+            && project.managed_source_root_fingerprint.as_deref()
+                == Some(source_root_fingerprint.as_str());
         if project.disabled || !same_operation {
             return managed_worktree_error(
                 start,
@@ -2400,6 +2560,8 @@ pub(crate) fn handle_prepare_managed_worktree_operation(
         &bounded_project_name(&canonical_worktree),
         worktree_string,
         source_string,
+        &source_project_id,
+        &source_root_fingerprint,
         &base_ref,
         &base_sha,
         operation_id,
@@ -2600,7 +2762,10 @@ pub(crate) fn handle_project_lifecycle_operation(
                 "name": project.name, "kind": project.kind,
                 "registration_source": effective_registration_source(&project).as_str(),
                 "description": project.description,
-                "allow_patch": project.allow_patch
+                "allow_patch": project.allow_patch,
+                "root_fingerprint": canonicalize_existing(Path::new(&project.path)).ok()
+                    .filter(|path| path.is_dir()).as_deref().map(project_root_fingerprint),
+                "lineage": project_lineage(&project)
             }),
         );
     }
@@ -2662,7 +2827,10 @@ pub(crate) fn handle_project_lifecycle_operation(
             "name": project.name, "kind": project.kind,
             "registration_source": effective_registration_source(&project).as_str(),
             "description": project.description,
-            "allow_patch": project.allow_patch
+            "allow_patch": project.allow_patch,
+            "root_fingerprint": canonicalize_existing(Path::new(&project.path)).ok()
+                .filter(|path| path.is_dir()).as_deref().map(project_root_fingerprint),
+            "lineage": project_lineage(&project)
         }),
     )
 }
@@ -2721,6 +2889,11 @@ fn recovered_project_result(
     template: Option<&str>,
     git_init: bool,
 ) -> serde_json::Value {
+    let root_fingerprint = canonicalize_existing(Path::new(&project.path))
+        .ok()
+        .filter(|path| path.is_dir())
+        .as_deref()
+        .map(project_root_fingerprint);
     serde_json::json!({
         "id": runtime_id, "agent_project_id": project.id, "client_id": client_id,
         "name": project.name, "path": project.path, "kind": project.kind,
@@ -2732,6 +2905,8 @@ fn recovered_project_result(
         "operation": if create { "create" } else { "register" },
         "outcome": if create { "created" } else { "registered" },
         "revision": project_revision(project),
+        "root_fingerprint": root_fingerprint,
+        "lineage": project_lineage(project),
     })
 }
 
@@ -3306,6 +3481,8 @@ mod durability_tests {
             hooks: HashMap::new(),
             managed_worktree: false,
             managed_source: None,
+            managed_source_project_id: None,
+            managed_source_root_fingerprint: None,
             managed_base_ref: None,
             managed_base_sha: None,
             managed_operation_id: None,

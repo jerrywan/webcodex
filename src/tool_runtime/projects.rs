@@ -1030,6 +1030,10 @@ fn parse_project_summary_from_result(
         .get("allow_patch")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
+    let lineage = match result.get("lineage") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(serde_json::from_value(value.clone()).ok()?),
+    };
     Some(RunnerProjectSummary {
         id: agent_project_id.to_string(),
         name: name.or_else(|| Some(agent_project_id.to_string())),
@@ -1056,6 +1060,11 @@ fn parse_project_summary_from_result(
             .get("revision")
             .and_then(Value::as_str)
             .map(str::to_string),
+        root_fingerprint: result
+            .get("root_fingerprint")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        lineage,
         git_branch: None,
         git_head: None,
         git_dirty: None,
@@ -1081,6 +1090,8 @@ mod tests {
             hooks: Vec::new(),
             disabled: false,
             revision: None,
+            root_fingerprint: None,
+            lineage: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,
@@ -1103,6 +1114,8 @@ mod tests {
             hooks: Vec::new(),
             disabled: false,
             revision: None,
+            root_fingerprint: None,
+            lineage: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

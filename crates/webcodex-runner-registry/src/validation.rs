@@ -1,11 +1,11 @@
 use sha2::{Digest, Sha256};
 use webcodex_core::runner_protocol::{
     validate_process_argv, validate_raw_shell_wire_command, validate_script_request,
-    ProviderCallSummary, RunnerConfigReloadStatus, RunnerProjectSummary, ShellFileOpRequest,
-    ShellProcessArgv, ShellRunRequest, ShellScriptPayload, ToolProvidersStatus,
+    ProviderCallSummary, RunnerConfigReloadStatus, RunnerProjectLineage, RunnerProjectSummary,
+    ShellFileOpRequest, ShellProcessArgv, ShellRunRequest, ShellScriptPayload, ToolProvidersStatus,
     PROCESS_CWD_MAX_BYTES, PROCESS_STDIN_MAX_BYTES,
-    PROJECT_INVENTORY_SNAPSHOT_MAX_SERIALIZED_BYTES, RUNNER_CONFIG_RESTART_REQUIRED_FIELDS,
-    STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS,
+    PROJECT_INVENTORY_SNAPSHOT_MAX_SERIALIZED_BYTES, PROJECT_ROOT_FINGERPRINT_PREFIX,
+    RUNNER_CONFIG_RESTART_REQUIRED_FIELDS, STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS,
 };
 
 const MAX_CLIENT_ID_LEN: usize = 80;
@@ -621,6 +621,16 @@ pub(super) fn trim_string(value: Option<String>) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn valid_project_root_fingerprint(value: &str) -> bool {
+    value
+        .strip_prefix(PROJECT_ROOT_FINGERPRINT_PREFIX)
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+fn valid_git_sha(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 pub(super) fn validate_project_summary(project: &RunnerProjectSummary) -> Result<(), &'static str> {
     if project.id.is_empty()
         || project.id.len() > 64
@@ -674,6 +684,31 @@ pub(super) fn validate_project_summary(project: &RunnerProjectSummary) -> Result
             .any(|hook| hook.is_empty() || hook.len() > 120 || hook.contains('\0'))
     {
         return Err("project_summary_invalid_hooks");
+    }
+    if project
+        .root_fingerprint
+        .as_deref()
+        .is_some_and(|fingerprint| !valid_project_root_fingerprint(fingerprint))
+    {
+        return Err("project_summary_invalid_root_fingerprint");
+    }
+    if let Some(RunnerProjectLineage::ManagedWorktreeSource {
+        source_project_id,
+        source_root_fingerprint,
+        base_sha,
+    }) = project.lineage.as_ref()
+    {
+        if source_project_id.is_empty()
+            || source_project_id.len() > 64
+            || source_project_id == &project.id
+            || !source_project_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            || !valid_project_root_fingerprint(source_root_fingerprint)
+            || !valid_git_sha(base_sha)
+        {
+            return Err("project_summary_invalid_lineage");
+        }
     }
     if project.revision.as_deref().is_some_and(|revision| {
         let Some(hex) = revision.strip_prefix("sha256:") else {

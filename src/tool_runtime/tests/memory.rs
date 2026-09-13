@@ -24,6 +24,7 @@ fn resolved(id: &str, client: &str, root: &str) -> ResolvedProject {
             client_id: client.to_string(),
             allow_patch: true,
         },
+        knowledge_association: None,
     }
 }
 

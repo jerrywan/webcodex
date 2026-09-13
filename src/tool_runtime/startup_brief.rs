@@ -290,6 +290,7 @@ pub(crate) struct StartupBriefInput<'a> {
     pub(crate) requested_project: &'a str,
     pub(crate) project_resolution: &'a Value,
     pub(crate) resolved: &'a ResolvedProject,
+    pub(crate) knowledge_association: Option<&'a Value>,
     pub(crate) session: &'a SessionSummary,
     pub(crate) continuation_kind: &'a str,
     pub(crate) reused: bool,
@@ -371,6 +372,9 @@ pub(crate) fn build_startup_brief(input: StartupBriefInput<'_>) -> Value {
         "deterministic": true,
         "llm_summary": false,
     });
+    if let Some(association) = input.knowledge_association {
+        brief["project"]["knowledge_association"] = association.clone();
+    }
     if let Some(extensions) = input.extensions {
         debug_assert!(extensions.serialized_len() <= STARTUP_EXTENSION_CATALOG_HARD_MAX_BYTES);
         brief["extensions"] = serde_json::to_value(extensions).unwrap_or_else(|_| {
@@ -2060,6 +2064,7 @@ mod tests {
                 client_id: "size".to_string(),
                 allow_patch: true,
             },
+            knowledge_association: None,
         };
         let instructions = instruction_snapshot();
         let git = json!({
@@ -2140,6 +2145,7 @@ mod tests {
                 requested_project: "agent:size:demo",
                 project_resolution: &project_resolution,
                 resolved: &resolved,
+                knowledge_association: None,
                 session: &session,
                 continuation_kind: "continued",
                 reused: true,

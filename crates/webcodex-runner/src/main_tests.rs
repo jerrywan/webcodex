@@ -1,5 +1,6 @@
 use super::*;
 use crate::webcodex_runner::config::validate_shell_config;
+use crate::webcodex_runner::projects::{project_root_fingerprint, RunnerProjectFile};
 use crate::webcodex_runner::run_shell_with_profiles;
 use crate::webcodex_runner::{
     handle_prepare_managed_worktree, handle_project_lifecycle_op, handle_project_op,
@@ -1472,6 +1473,35 @@ fn seed_managed_worktree_repo(source: &Path) -> (String, String) {
     (first, second)
 }
 
+fn register_managed_source_project(registry: &Path, source: &Path) {
+    std::fs::create_dir_all(registry).unwrap();
+    let source = source.canonicalize().unwrap();
+    let project = RunnerProjectFile {
+        id: "source".to_string(),
+        path: source.to_string_lossy().into_owned(),
+        shell_profile: None,
+        allow_patch: true,
+        name: Some("Source".to_string()),
+        kind: Some("repo".to_string()),
+        registration_source: None,
+        description: None,
+        disabled: false,
+        hooks: HashMap::new(),
+        managed_worktree: false,
+        managed_source: None,
+        managed_source_project_id: None,
+        managed_source_root_fingerprint: None,
+        managed_base_ref: None,
+        managed_base_sha: None,
+        managed_operation_id: None,
+    };
+    std::fs::write(
+        registry.join("source.toml"),
+        toml::to_string(&project).unwrap(),
+    )
+    .unwrap();
+}
+
 fn managed_worktree_request(
     source: &Path,
     base_ref: serde_json::Value,
@@ -1487,6 +1517,28 @@ fn managed_worktree_request(
             "resume_project_id": resume_project_id,
         }),
     )
+}
+
+#[test]
+fn project_root_fingerprint_uses_platform_path_identity_rules() {
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            project_root_fingerprint(Path::new(r"C:\Foo\Repo")),
+            project_root_fingerprint(Path::new(r"\\?\c:\foo\repo\"))
+        );
+        assert_eq!(
+            project_root_fingerprint(Path::new(r"\\SERVER\Share\Repo")),
+            project_root_fingerprint(Path::new(r"\\?\UNC\server\share\repo"))
+        );
+    }
+    #[cfg(unix)]
+    {
+        assert_ne!(
+            project_root_fingerprint(Path::new("/tmp/Repo")),
+            project_root_fingerprint(Path::new("/tmp/repo"))
+        );
+    }
 }
 
 #[cfg(windows)]
@@ -1518,6 +1570,7 @@ fn managed_worktree_bootstrap_is_detached_registered_and_same_operation_recovers
     let source = tmp.path().join("source");
     let registry = tmp.path().join("project-registry");
     let (_first, head) = seed_managed_worktree_repo(&source);
+    register_managed_source_project(&registry, &source);
     let policy = project_policy(tmp.path());
     let request = managed_worktree_request(
         &source,
@@ -1549,8 +1602,20 @@ fn managed_worktree_bootstrap_is_detached_registered_and_same_operation_recovers
     assert!(!detached.success(), "managed worktree must start detached");
 
     let projects = load_runner_project_summaries_from_dir(&registry);
-    assert_eq!(projects.len(), 1);
-    assert_eq!(Path::new(&projects[0].path), worktree.as_path());
+    assert_eq!(projects.len(), 2);
+    let managed_id = first["agent_project_id"].as_str().unwrap();
+    let managed = projects
+        .iter()
+        .find(|project| project.id == managed_id)
+        .unwrap();
+    assert_eq!(Path::new(&managed.path), worktree.as_path());
+    assert_eq!(first["lineage"]["kind"], "managed_worktree_source");
+    assert_eq!(first["lineage"]["source_project_id"], "source");
+    assert_eq!(first["lineage"]["base_sha"], head);
+    assert!(first["lineage"]["source_root_fingerprint"]
+        .as_str()
+        .unwrap()
+        .starts_with("wc_projroot_"));
 
     let recovered = project_ok(handle_prepare_managed_worktree(
         &policy, &registry, &request,
@@ -1568,6 +1633,7 @@ fn managed_worktree_explicit_ref_preserves_dirty_source_and_resume_survives_sour
     let source = tmp.path().join("source");
     let registry = tmp.path().join("project-registry");
     let (first_sha, _second_sha) = seed_managed_worktree_repo(&source);
+    register_managed_source_project(&registry, &source);
     std::fs::write(source.join("hello.txt"), "dirty source\n").unwrap();
     std::fs::write(source.join("untracked.txt"), "keep me\n").unwrap();
     let status_before = managed_git(&source, &["status", "--porcelain"]);
@@ -1619,7 +1685,77 @@ fn managed_worktree_explicit_ref_preserves_dirty_source_and_resume_survives_sour
     assert_eq!(resumed["base_sha"], first_sha);
     assert_eq!(resumed["outcome"], "managed_worktree_recovered");
     assert_eq!(resumed["registered"], false);
-    assert_eq!(load_runner_project_summaries_from_dir(&registry).len(), 1);
+    assert_eq!(load_runner_project_summaries_from_dir(&registry).len(), 2);
+}
+
+#[test]
+fn managed_worktree_resume_fails_closed_when_persisted_source_lineage_changes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    let registry = tmp.path().join("project-registry");
+    seed_managed_worktree_repo(&source);
+    register_managed_source_project(&registry, &source);
+    let policy = project_policy(tmp.path());
+    let create = managed_worktree_request(
+        &source,
+        serde_json::Value::Null,
+        "12121212-1212-4212-8212-121212121212",
+        None,
+    );
+    let created = project_ok(handle_prepare_managed_worktree(&policy, &registry, &create));
+    let managed_id = created["agent_project_id"].as_str().unwrap();
+    let managed_config_path = registry.join(format!("{managed_id}.toml"));
+    let original_managed = std::fs::read_to_string(&managed_config_path).unwrap();
+    let mut managed_project = parse_runner_project_toml(&original_managed).unwrap();
+    assert_eq!(
+        managed_project.managed_source_project_id.as_deref(),
+        Some("source")
+    );
+    managed_project.managed_source_root_fingerprint =
+        Some(format!("wc_projroot_{}", "f".repeat(64)));
+    std::fs::write(
+        &managed_config_path,
+        toml::to_string(&managed_project).unwrap(),
+    )
+    .unwrap();
+    let resume = managed_worktree_request(
+        &source,
+        serde_json::Value::Null,
+        "13131313-1313-4313-8313-131313131313",
+        Some(managed_id),
+    );
+    assert_eq!(
+        project_err(handle_prepare_managed_worktree(&policy, &registry, &resume)),
+        "managed_worktree_resume_mismatch"
+    );
+
+    std::fs::write(&managed_config_path, original_managed).unwrap();
+    let source_config_path = registry.join("source.toml");
+    let mut source_project =
+        parse_runner_project_toml(&std::fs::read_to_string(&source_config_path).unwrap()).unwrap();
+    source_project.id = "replacement-source".to_string();
+    std::fs::write(
+        &source_config_path,
+        toml::to_string(&source_project).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        project_err(handle_prepare_managed_worktree(&policy, &registry, &resume)),
+        "managed_worktree_resume_mismatch"
+    );
+}
+
+#[test]
+fn managed_project_explicit_lineage_cannot_self_associate() {
+    let root_fingerprint = format!("wc_projroot_{}", "1".repeat(64));
+    let config = format!(
+        "id = \"self\"\npath = \"/tmp/self\"\nmanaged_worktree = true\nmanaged_source = \"/tmp/source\"\nmanaged_source_project_id = \"self\"\nmanaged_source_root_fingerprint = \"{root_fingerprint}\"\nmanaged_base_sha = \"{}\"\nmanaged_operation_id = \"op\"\n",
+        "a".repeat(40)
+    );
+    assert_eq!(
+        parse_runner_project_toml(&config).unwrap_err(),
+        "managed source project cannot equal target project"
+    );
 }
 
 #[test]
@@ -1645,6 +1781,7 @@ fn concurrent_managed_worktree_bootstraps_choose_distinct_runner_paths() {
     let source = tmp.path().join("source");
     let registry = tmp.path().join("project-registry");
     seed_managed_worktree_repo(&source);
+    register_managed_source_project(&registry, &source);
     let policy = project_policy(tmp.path());
     let first_request = managed_worktree_request(
         &source,
@@ -1680,7 +1817,47 @@ fn concurrent_managed_worktree_bootstraps_choose_distinct_runner_paths() {
     let second = second.join().unwrap();
     assert_ne!(first["path"], second["path"]);
     assert_ne!(first["id"], second["id"]);
-    assert_eq!(load_runner_project_summaries_from_dir(&registry).len(), 2);
+    assert_eq!(load_runner_project_summaries_from_dir(&registry).len(), 3);
+}
+
+#[test]
+fn managed_worktree_git_source_without_registered_project_does_not_infer_lineage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    let registry = tmp.path().join("project-registry");
+    seed_managed_worktree_repo(&source);
+    let request = managed_worktree_request(
+        &source,
+        serde_json::Value::Null,
+        "99999999-9999-4999-8999-999999999999",
+        None,
+    );
+    let result = handle_prepare_managed_worktree(&project_policy(tmp.path()), &registry, &request);
+    assert_eq!(
+        project_err(result),
+        "managed_worktree_source_project_unavailable"
+    );
+    assert!(load_runner_project_summaries_from_dir(&registry).is_empty());
+}
+
+#[test]
+fn legacy_managed_project_without_explicit_lineage_stays_unassociated() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    let worktree = tmp.path().join("legacy-worktree");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::create_dir_all(&worktree).unwrap();
+    let legacy = format!(
+        "id = \"legacy\"\npath = {:?}\nmanaged_worktree = true\nmanaged_source = {:?}\nmanaged_base_sha = \"{}\"\nmanaged_operation_id = \"legacy-op\"\n",
+        worktree.to_string_lossy(),
+        source.to_string_lossy(),
+        "a".repeat(40)
+    );
+    let parsed = parse_runner_project_toml(&legacy).unwrap();
+    assert!(parsed.managed_worktree);
+    assert!(parsed.managed_source_project_id.is_none());
+    assert!(parsed.managed_source_root_fingerprint.is_none());
+    assert!(runner_project_summary(&parsed, 1, false).lineage.is_none());
 }
 
 #[test]

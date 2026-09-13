@@ -705,6 +705,14 @@ fn lifecycle_summary(output: &Value, id: &str) -> Option<RunnerProjectSummary> {
             .get("revision")
             .and_then(Value::as_str)
             .map(str::to_string),
+        root_fingerprint: output
+            .get("root_fingerprint")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        lineage: match output.get("lineage") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(serde_json::from_value(value.clone()).ok()?),
+        },
         git_branch: None,
         git_head: None,
         git_dirty: None,

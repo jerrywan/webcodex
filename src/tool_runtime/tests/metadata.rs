@@ -4,12 +4,15 @@ use super::super::*;
 use super::support::*;
 use crate::runner_http::RunnerRegistry;
 use crate::runner_protocol::{
-    RunnerCapabilities, RunnerRegisterRequest, RunnerResultRequest, ShellProjectInventoryPage,
-    RUNNER_PROTOCOL_GENERATION_V2,
+    RunnerCapabilities, RunnerProjectLineage, RunnerRegisterRequest, RunnerResultRequest,
+    ShellProjectInventoryPage, RUNNER_PROTOCOL_GENERATION_V2,
 };
 use crate::tool_runtime::kernel::{
     HostFileImportTrust, ToolCallContext, ToolCallErrorStatus, ToolCallRequest,
     ToolProtocolCapabilities, ToolTransport,
+};
+use crate::tool_runtime::project_resolution::{
+    ProjectKnowledgeSourceResolution, ProjectKnowledgeUnavailableReason,
 };
 use crate::tool_runtime::sessions::{
     TOOL_CALL_EXPECTATION_METADATA_FIELDS, TOOL_CALL_RECORDING_SESSION_ID_FIELD,
@@ -940,6 +943,251 @@ async fn shared_key_list_projects_and_dispatch_are_filtered_by_auth_group() {
         .await;
     assert!(!result.success);
     assert_eq!(result.output["error_kind"], "unknown_project");
+}
+
+#[tokio::test]
+async fn repository_knowledge_association_revalidates_identity_availability_and_authority() {
+    let runtime = test_runtime();
+    let auth = bootstrap_auth();
+    let client_id = "repo-association";
+    let instance_id = format!("inst-{client_id}");
+    let target_path = "/tmp/repo-association-target";
+    let source_path = "/tmp/repo-association-source";
+    let source_fingerprint = format!("wc_projroot_{}", "1".repeat(64));
+    let target_fingerprint = format!("wc_projroot_{}", "2".repeat(64));
+    let base_sha = "a".repeat(40);
+    let caps = RunnerCapabilities {
+        shell: true,
+        file_read: true,
+        file_write: true,
+        ..Default::default()
+    };
+
+    let mut source = registered_project("source", source_path);
+    source.root_fingerprint = Some(source_fingerprint.clone());
+    source.allow_patch = true;
+    let mut target = registered_project("target", target_path);
+    target.root_fingerprint = Some(target_fingerprint);
+    target.allow_patch = false;
+    target.lineage = Some(RunnerProjectLineage::ManagedWorktreeSource {
+        source_project_id: "source".to_string(),
+        source_root_fingerprint: source_fingerprint.clone(),
+        base_sha: base_sha.clone(),
+    });
+    register_agent_projects(
+        &runtime,
+        client_id,
+        None,
+        caps.clone(),
+        vec![source.clone(), target.clone()],
+    )
+    .await;
+
+    let target_id = crate::tool_runtime::runner_project_runtime_id(client_id, "target");
+    let resolved_target = runtime
+        .resolve_project_input_for_auth(&target_id, Some(&auth))
+        .await
+        .unwrap();
+    assert_eq!(resolved_target.config.path, target_path);
+    assert!(
+        !resolved_target.config.allow_patch,
+        "source allow_patch must not elevate target"
+    );
+    let available = runtime
+        .resolve_project_knowledge_source_for_auth(&resolved_target, Some(&auth))
+        .await;
+    let ProjectKnowledgeSourceResolution::Available(available) = available else {
+        panic!("expected available knowledge source");
+    };
+    assert_eq!(
+        available.source.resolved_id,
+        "agent:repo-association:source"
+    );
+    assert_eq!(available.source.config.path, source_path);
+    assert_eq!(available.base_sha, base_sha);
+    let diagnostic = runtime
+        .project_knowledge_association_diagnostic(&resolved_target, Some(&auth))
+        .await
+        .unwrap();
+    assert_eq!(diagnostic["kind"], "managed_worktree_source");
+    assert_eq!(diagnostic["status"], "available");
+    assert_eq!(
+        diagnostic["source_project"],
+        "agent:repo-association:source"
+    );
+    assert_eq!(diagnostic["base_sha"], base_sha);
+    assert_eq!(diagnostic["read_through"], false);
+    let diagnostic_text = serde_json::to_string(&diagnostic).unwrap();
+    assert!(!diagnostic_text.contains(source_path));
+    assert!(!diagnostic_text.contains(&source_fingerprint));
+    assert!(matches!(
+        runtime
+            .resolve_project_knowledge_source_for_auth(&available.source, Some(&auth))
+            .await,
+        ProjectKnowledgeSourceResolution::NotAssociated
+    ));
+    assert!(runtime
+        .project_knowledge_association_diagnostic(&available.source, Some(&auth))
+        .await
+        .is_none());
+
+    crate::test_support::apply_project_inventory_snapshot(
+        &runtime.runner_registry,
+        client_id,
+        &instance_id,
+        vec![target.clone()],
+    )
+    .await;
+    assert!(matches!(
+        runtime
+            .resolve_project_knowledge_source_for_auth(&resolved_target, Some(&auth))
+            .await,
+        ProjectKnowledgeSourceResolution::Unavailable(
+            ProjectKnowledgeUnavailableReason::SourceUnavailable
+        )
+    ));
+    let unavailable_diagnostic = runtime
+        .project_knowledge_association_diagnostic(&resolved_target, Some(&auth))
+        .await
+        .unwrap();
+    assert_eq!(unavailable_diagnostic["status"], "unavailable");
+    assert!(unavailable_diagnostic.get("source_project").is_none());
+    assert!(unavailable_diagnostic.get("base_sha").is_none());
+    let target_still_resolves = runtime
+        .resolve_project_input_for_auth(&target_id, Some(&auth))
+        .await
+        .unwrap();
+    assert_eq!(target_still_resolves.config.path, target_path);
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let auth = auth.clone();
+        let target_id = target_id.clone();
+        async move {
+            runtime
+                .dispatch_with_auth(
+                    ToolCall::RunShell {
+                        project: target_id,
+                        command: "pwd".to_string(),
+                        session_id: None,
+                        timeout_secs: Some(30),
+                        cwd: None,
+                        purpose: None,
+                        shell: None,
+                    },
+                    Some(&auth),
+                )
+                .await
+        }
+    });
+    let request = wait_for_runner_request_for_instance(&runtime, client_id, &instance_id).await;
+    assert_eq!(request.cwd.as_deref(), Some(target_path));
+    complete_patch_agent_request_for_instance(
+        &runtime,
+        client_id,
+        &instance_id,
+        &request.request_id,
+        0,
+        "ok\n",
+        "",
+    )
+    .await;
+    assert!(
+        task.await.unwrap().success,
+        "association failure must not block target execution"
+    );
+
+    source.disabled = true;
+    crate::test_support::apply_project_inventory_snapshot(
+        &runtime.runner_registry,
+        client_id,
+        &instance_id,
+        vec![source.clone(), target.clone()],
+    )
+    .await;
+    assert!(matches!(
+        runtime
+            .resolve_project_knowledge_source_for_auth(&resolved_target, Some(&auth))
+            .await,
+        ProjectKnowledgeSourceResolution::Unavailable(
+            ProjectKnowledgeUnavailableReason::SourceUnavailable
+        )
+    ));
+
+    source.disabled = false;
+    source.root_fingerprint = Some(format!("wc_projroot_{}", "3".repeat(64)));
+    crate::test_support::apply_project_inventory_snapshot(
+        &runtime.runner_registry,
+        client_id,
+        &instance_id,
+        vec![source.clone(), target.clone()],
+    )
+    .await;
+    assert!(matches!(
+        runtime
+            .resolve_project_knowledge_source_for_auth(&resolved_target, Some(&auth))
+            .await,
+        ProjectKnowledgeSourceResolution::Stale
+    ));
+
+    source.root_fingerprint = Some(source_fingerprint);
+    crate::test_support::apply_project_inventory_snapshot(
+        &runtime.runner_registry,
+        client_id,
+        &instance_id,
+        vec![source, target],
+    )
+    .await;
+    let foreign_auth = shared_key_auth("foreign-repo-association-key");
+    assert!(matches!(
+        runtime
+            .resolve_project_knowledge_source_for_auth(&resolved_target, Some(&foreign_auth))
+            .await,
+        ProjectKnowledgeSourceResolution::Unavailable(
+            ProjectKnowledgeUnavailableReason::Unauthorized
+        )
+    ));
+
+    runtime
+        .runner_registry
+        .reconcile_disconnect(client_id, &instance_id)
+        .await;
+    let replacement_instance = "repo-association-replacement";
+    let replacement = runtime
+        .runner_registry
+        .register(RunnerRegisterRequest {
+            process_started_at: None,
+            build: None,
+            job_concurrency_limit: None,
+            job_inventory: None,
+            coding_agent_providers: None,
+            coding_agent_inventory: None,
+            client_id: client_id.to_string(),
+            runner_instance_id: replacement_instance.to_string(),
+            runner_protocol_generation: crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
+            display_name: None,
+            owner: None,
+            hostname: None,
+            host_context: None,
+            capabilities: crate::test_support::current_runner_capabilities(caps),
+            policy: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        replacement
+            .project_inventory
+            .as_ref()
+            .map(|status| status.sync_state.as_str()),
+        Some("pending")
+    );
+    assert!(matches!(
+        runtime
+            .resolve_project_knowledge_source_for_auth(&resolved_target, Some(&auth))
+            .await,
+        ProjectKnowledgeSourceResolution::Unavailable(
+            ProjectKnowledgeUnavailableReason::InventoryIncomplete
+        )
+    ));
 }
 
 #[tokio::test]

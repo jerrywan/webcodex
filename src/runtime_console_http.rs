@@ -3237,6 +3237,8 @@ mod tests {
             hooks: vec!["private-hook".to_string()],
             disabled: false,
             revision: Some(format!("sha256:{}", "1".repeat(64))),
+            root_fingerprint: None,
+            lineage: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

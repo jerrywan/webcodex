@@ -86,6 +86,8 @@ fn project_summary(id: &str, path: &str) -> RunnerProjectSummary {
         hooks: vec!["doctor".to_string(), "precommit".to_string()],
         disabled: false,
         revision: None,
+        root_fingerprint: None,
+        lineage: None,
         git_branch: Some("codex".to_string()),
         git_head: Some("9a7d3ce".to_string()),
         git_dirty: Some(false),

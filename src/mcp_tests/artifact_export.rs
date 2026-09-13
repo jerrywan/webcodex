@@ -51,6 +51,8 @@ async fn mcp_export_runtime_with_surface(
             hooks: Vec::new(),
             disabled: false,
             revision: None,
+            root_fingerprint: None,
+            lineage: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

@@ -1157,6 +1157,9 @@ impl ToolRuntime {
             // A fresh Session starts at the currently resolved canonical root.
             Some(true)
         };
+        let knowledge_association = self
+            .project_knowledge_association_diagnostic(&resolved, auth)
+            .await;
         let project_resolution_value =
             serde_json::to_value(&project_resolution).unwrap_or_else(|_| json!({}));
         let startup_brief = build_startup_brief(StartupBriefInput {
@@ -1164,6 +1167,7 @@ impl ToolRuntime {
             requested_project: &project,
             project_resolution: &project_resolution_value,
             resolved: &resolved,
+            knowledge_association: knowledge_association.as_ref(),
             session: session_summary,
             continuation_kind,
             reused: session_outcome.reused,
@@ -2075,6 +2079,8 @@ struct WorkOnProjectSessionProjection {
 #[derive(Deserialize)]
 struct WorkOnProjectProjectProjection {
     resolved_id: String,
+    #[serde(default)]
+    knowledge_association: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -2448,6 +2454,9 @@ fn project_work_on_project_output_with_workflow_inner(
         "instructions": instructions,
         "semantic_navigation": semantic_navigation,
     }));
+    if let Some(knowledge_association) = projection.project.knowledge_association {
+        result.output["knowledge_association"] = knowledge_association;
+    }
     if let Some(extensions) = projection.extensions {
         result.output["extensions"] = extensions;
     }
@@ -3210,6 +3219,7 @@ mod startup_runner_tests {
                 client_id: client_id.to_string(),
                 allow_patch: true,
             },
+            knowledge_association: None,
         }
     }
 

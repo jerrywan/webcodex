@@ -763,6 +763,7 @@ mod tests {
                     client_id: client.to_string(),
                     allow_patch: true,
                 },
+                knowledge_association: None,
             }
         }
         let a = memory_scope_id(&resolved("runner", "/registered/a"));
