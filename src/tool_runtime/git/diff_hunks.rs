@@ -17,7 +17,9 @@ use super::super::helpers::{
     decode_git_quoted_path, shell_escape_simple, validate_project_relative_path,
 };
 use super::super::tool_result::ToolResult;
-use super::super::ToolRuntime;
+use super::super::{
+    ContinuationCarrier, ContinuationKind, ContinuationSemantics, SuggestedToolCall, ToolRuntime,
+};
 use super::shared::{
     is_git_object_hex, is_lower_hex, parse_fixed_decimal, parse_optional_bool,
     parse_optional_usize, parse_status_result_field, strip_wire_lf,
@@ -504,9 +506,9 @@ fn git_diff_hunks_recovery_value(
         (false, false) => unreachable!(),
     };
     let continuation_call = next_continuation.map(|continuation| {
-        json!({
-            "tool": "git_diff_hunks",
-            "arguments": git_diff_hunks_call_arguments(
+        SuggestedToolCall::new(
+            "git_diff_hunks",
+            git_diff_hunks_call_arguments(
                 project,
                 paths,
                 cached,
@@ -516,7 +518,8 @@ fn git_diff_hunks_recovery_value(
                 max_page_bytes,
                 Some(continuation),
             ),
-        })
+        )
+        .to_value()
     });
 
     let (omitted_line_paths, path_provenance) = if omitted_lines_present {
@@ -567,9 +570,9 @@ fn git_diff_hunks_recovery_value(
         json!("bounded_recovery_unavailable")
     };
     let omitted_lines_call = omitted_lines_recoverable.then(|| {
-        json!({
-            "tool": "git_diff_hunks",
-            "arguments": git_diff_hunks_call_arguments(
+        SuggestedToolCall::new(
+            "git_diff_hunks",
+            git_diff_hunks_call_arguments(
                 project,
                 &omitted_line_paths,
                 cached,
@@ -579,9 +582,18 @@ fn git_diff_hunks_recovery_value(
                 max_page_bytes,
                 None,
             ),
-        })
+        )
+        .to_value()
     });
     let primary_call = omitted_lines_call.as_ref().or(continuation_call.as_ref());
+
+    let page_semantics = continuation_call.as_ref().map(|_| {
+        ContinuationSemantics::new(ContinuationKind::Page, ContinuationCarrier::OpaqueToken)
+            .to_value()
+    });
+    let omitted_lines_semantics = omitted_lines_call.as_ref().map(|_| {
+        ContinuationSemantics::new(ContinuationKind::Refine, ContinuationCarrier::None).to_value()
+    });
 
     Some(json!({
         "kind": kind,
@@ -598,6 +610,7 @@ fn git_diff_hunks_recovery_value(
             "available": continuation_call.is_some(),
             "recovers_later_hunks": continuation_call.is_some(),
             "recovers_omitted_lines": false,
+            "continuation_semantics": page_semantics,
             "next_call": continuation_call,
         },
         "omitted_lines": {
@@ -606,6 +619,7 @@ fn git_diff_hunks_recovery_value(
             "reason_code": omitted_lines_reason,
             "path_provenance": path_provenance,
             "paths": omitted_line_paths,
+            "continuation_semantics": omitted_lines_semantics,
             "next_call": omitted_lines_call,
         },
     }))

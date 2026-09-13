@@ -1,7 +1,10 @@
 //! Bounded multi-file reads built from the canonical single-file read core.
 
 use super::project_resolution::ResolvedProject;
-use super::{ReadFilesItem, ToolCall, ToolResult, ToolRuntime};
+use super::{
+    ContinuationCarrier, ContinuationKind, ContinuationSemantics, ReadFilesItem, SuggestedToolCall,
+    ToolCall, ToolResult, ToolRuntime,
+};
 use futures_util::{stream, StreamExt};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -102,9 +105,13 @@ fn read_range_continuation(
         "safe_cursor": true,
         "source_sha256": source_sha256,
         "snapshot_stable": false,
-        "suggested_call": {
-            "tool": "read_files",
-            "arguments": read_files_suggested_arguments(
+        "continuation_semantics": ContinuationSemantics::new(
+            ContinuationKind::Page,
+            ContinuationCarrier::Position,
+        ).to_value(),
+        "suggested_call": SuggestedToolCall::new(
+            "read_files",
+            read_files_suggested_arguments(
                 project,
                 &[ReadFilesItem {
                     path: path.to_string(),
@@ -114,8 +121,8 @@ fn read_range_continuation(
                 session_id,
                 with_line_numbers,
                 max_result_bytes,
-            )
-        }
+            ),
+        ).to_value()
     }))
 }
 
@@ -232,16 +239,20 @@ fn add_batch_read_continuation(
                     "safe_cursor": false,
                     "next_index": 0,
                     "suggested_max_result_bytes": MAX_SERIALIZED_OUTPUT_BYTES,
-                    "suggested_call": {
-                        "tool": "read_files",
-                        "arguments": read_files_suggested_arguments(
+                    "continuation_semantics": ContinuationSemantics::new(
+                        ContinuationKind::Refine,
+                        ContinuationCarrier::None,
+                    ).to_value(),
+                    "suggested_call": SuggestedToolCall::new(
+                        "read_files",
+                        read_files_suggested_arguments(
                             project,
                             original_items,
                             session_id,
                             with_line_numbers,
                             Some(MAX_SERIALIZED_OUTPUT_BYTES),
-                        )
-                    }
+                        ),
+                    ).to_value()
                 }),
             );
         }
@@ -261,16 +272,20 @@ fn add_batch_read_continuation(
             "safe_cursor": true,
             "next_index": first_unreturned_index,
             "recommended_order": if partial_current { "after_partial_item" } else { "next" },
-            "suggested_call": {
-                "tool": "read_files",
-                "arguments": read_files_suggested_arguments(
+            "continuation_semantics": ContinuationSemantics::new(
+                ContinuationKind::Batch,
+                ContinuationCarrier::Index,
+            ).to_value(),
+            "suggested_call": SuggestedToolCall::new(
+                "read_files",
+                read_files_suggested_arguments(
                     project,
                     remaining,
                     session_id,
                     with_line_numbers,
                     max_result_bytes,
-                )
-            }
+                ),
+            ).to_value()
         }),
     );
 }

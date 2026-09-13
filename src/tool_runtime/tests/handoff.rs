@@ -2393,6 +2393,18 @@ async fn context_recovery_handoff_derives_session_project_for_complete_workspace
     assert_eq!(result.output["workspace"]["git_available"], true);
     assert_eq!(result.output["workspace"]["clean"], true);
     assert_eq!(result.output["session_context_revision"], 0);
+    assert_eq!(
+        result.output["session_context_continuation"]["semantics"]["kind"],
+        "checkpoint"
+    );
+    assert_eq!(
+        result.output["session_context_continuation"]["semantics"]["carrier"],
+        "revision"
+    );
+    assert_eq!(
+        result.output["session_context_continuation"]["ack_field"],
+        "ack_session_context_revision"
+    );
     assert_eq!(result.output["session_continuity"]["status"], "recovered");
 }
 

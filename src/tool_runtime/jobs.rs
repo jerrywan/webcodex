@@ -646,18 +646,27 @@ pub(crate) fn agent_job_summary_value(job: &ShellJobInfo) -> Value {
     })
 }
 
+pub(crate) fn job_observation_continuation_semantics() -> Value {
+    super::ContinuationSemantics::new(
+        super::ContinuationKind::Observe,
+        super::ContinuationCarrier::ObservationToken,
+    )
+    .to_value()
+}
+
 pub(crate) fn observe_job_continuation(job_id: &str, observation_token: Option<&str>) -> Value {
     let mut item = json!({"job_id": job_id});
     if let Some(token) = observation_token.filter(|token| !token.is_empty()) {
         item["after_observation_token"] = json!(token);
     }
-    json!({
-        "tool": "observe_jobs",
-        "arguments": {
+    super::SuggestedToolCall::new(
+        "observe_jobs",
+        json!({
             "items": [item],
             "wait_secs": 30,
-        },
-    })
+        }),
+    )
+    .to_value()
 }
 
 fn invalid_job_observation_result(error_kind: &str, message: String) -> ToolResult {
@@ -1137,6 +1146,7 @@ impl ToolRuntime {
                     "execution_state": "started",
                     "created_at": job.created_at,
                     "observation_token": job.observation_token,
+                    "continuation_semantics": job_observation_continuation_semantics(),
                     "last_update_seq": job.last_update_seq,
                     "stdout_tail": "",
                     "stderr_tail": "",
@@ -1407,6 +1417,7 @@ impl ToolRuntime {
                         job.recovery_reason_code.as_deref(),
                     ),
                     "observation_token": job.observation_token,
+                    "continuation_semantics": job_observation_continuation_semantics(),
                     "log_delta_status": wait.log_delta_status.as_str(),
                     "stdout_delta_reset": wait.stdout_delta_reset,
                     "stderr_delta_reset": wait.stderr_delta_reset,

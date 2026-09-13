@@ -1323,6 +1323,7 @@ impl ToolRuntime {
             "job_id": handoff.job_id,
             "job_status": latest_status,
             "observation_token": observation_token,
+            "continuation_semantics": crate::tool_runtime::jobs::job_observation_continuation_semantics(),
             "activity": observation.job.activity,
             "promoted_to_job": true,
             "command_started": command_started,

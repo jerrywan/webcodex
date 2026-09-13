@@ -1,8 +1,10 @@
 use serde_json::{json, Value};
 
 use super::common::{
-    array_schema, nullable_schema, open_object_schema, schema_type, wrapped_output_schema,
+    array_schema, continuation_semantics_schema, nullable_schema, open_object_schema, schema_type,
+    suggested_tool_call_schema, wrapped_output_schema,
 };
+use webcodex_core::runtime_contract::{ContinuationCarrier, ContinuationKind};
 
 fn git_diff_hunks_recovery_arguments_schema() -> Value {
     json!({
@@ -29,15 +31,11 @@ fn git_diff_hunks_recovery_arguments_schema() -> Value {
 }
 
 fn git_diff_hunks_recovery_call_schema() -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "tool": {"type": "string", "const": "git_diff_hunks"},
-            "arguments": git_diff_hunks_recovery_arguments_schema()
-        },
-        "required": ["tool", "arguments"]
-    })
+    suggested_tool_call_schema(
+        "git_diff_hunks",
+        git_diff_hunks_recovery_arguments_schema(),
+        "Parser-ready advisory git_diff_hunks call for either later-page continuation or proven bounded parameter refinement. It grants no authority and is not the continuation identity itself.",
+    )
 }
 
 fn nullable_git_diff_hunks_recovery_call_schema() -> Value {
@@ -49,6 +47,19 @@ fn nullable_git_diff_hunks_recovery_call_schema() -> Value {
 fn nullable_git_diff_hunks_recovery_arguments_schema() -> Value {
     json!({
         "anyOf": [git_diff_hunks_recovery_arguments_schema(), {"type": "null"}]
+    })
+}
+
+fn nullable_continuation_semantics_schema(
+    kind: ContinuationKind,
+    carrier: ContinuationCarrier,
+    description: &str,
+) -> Value {
+    json!({
+        "anyOf": [
+            continuation_semantics_schema(kind, carrier, description),
+            {"type": "null"}
+        ]
     })
 }
 
@@ -69,9 +80,17 @@ fn git_diff_hunks_recovery_schema() -> Value {
                     "available": {"type": "boolean"},
                     "recovers_later_hunks": {"type": "boolean"},
                     "recovers_omitted_lines": {"type": "boolean", "const": false},
+                    "continuation_semantics": nullable_continuation_semantics_schema(
+                        ContinuationKind::Page,
+                        ContinuationCarrier::OpaqueToken,
+                        "When available, next_continuation is a scope/fence-bound opaque page cursor that recovers later diff records only; it never recovers omitted lines from the current hunk.",
+                    ),
                     "next_call": nullable_git_diff_hunks_recovery_call_schema()
                 },
-                "required": ["available", "recovers_later_hunks", "recovers_omitted_lines", "next_call"]
+                "required": [
+                    "available", "recovers_later_hunks", "recovers_omitted_lines",
+                    "continuation_semantics", "next_call"
+                ]
             },
             "omitted_lines": {
                 "type": "object",
@@ -97,9 +116,17 @@ fn git_diff_hunks_recovery_schema() -> Value {
                     },
                     "path_provenance": {"type": "string", "enum": ["none", "scope", "exact"]},
                     "paths": {"type": "array", "items": {"type": "string"}},
+                    "continuation_semantics": nullable_continuation_semantics_schema(
+                        ContinuationKind::Refine,
+                        ContinuationCarrier::None,
+                        "When recoverable, omitted-line follow-up is bounded parameter refinement such as increasing max_hunk_lines and/or narrowing paths. It is not a cursor and safe_continuation_for_omitted_lines remains false.",
+                    ),
                     "next_call": nullable_git_diff_hunks_recovery_call_schema()
                 },
-                "required": ["present", "recoverable", "reason_code", "path_provenance", "paths", "next_call"]
+                "required": [
+                    "present", "recoverable", "reason_code", "path_provenance", "paths",
+                    "continuation_semantics", "next_call"
+                ]
             }
         },
         "required": [
@@ -264,7 +291,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             (
                 "next_continuation",
-                nullable_schema("string", "Opaque continuation for the next stable diff page."),
+                nullable_schema("string", "Opaque scope/fence-bound continuation for the next stable diff page. It is classified as page + opaque_token by recovery.continuation.continuation_semantics and never restores omitted lines inside the current hunk."),
             ),
             ("recovery", git_diff_hunks_recovery_schema()),
             (

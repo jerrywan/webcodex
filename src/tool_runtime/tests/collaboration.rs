@@ -581,6 +581,11 @@ async fn observe_session_messages_collaboration_recorder_target_scope_fences() {
     assert!(allowed.success, "{:?}", allowed.error);
     assert!(allowed.output["messages"].as_array().unwrap().is_empty());
     assert!(allowed.output["observation_token"].as_str().is_some());
+    assert_eq!(allowed.output["continuation_semantics"]["kind"], "observe");
+    assert_eq!(
+        allowed.output["continuation_semantics"]["carrier"],
+        "observation_token"
+    );
     let baseline_token = allowed.output["observation_token"]
         .as_str()
         .unwrap()
@@ -629,6 +634,7 @@ async fn observe_session_messages_collaboration_recorder_target_scope_fences() {
     assert_eq!(invalid_token.output["recovery_kind"], "fix_input");
     assert!(invalid_token.output.get("recovery_tool").is_none());
     assert!(invalid_token.output.get("observation_token").is_none());
+    assert!(invalid_token.output.get("continuation_semantics").is_none());
 
     let cross_project = call_with_recorder(
         &runtime,

@@ -144,7 +144,30 @@ This vocabulary is selection metadata, not a new execution layer. `lifetime=supe
 
 Structured validation keeps its tool-specific effects and evidence. `cargo_fmt`, `cargo_check`, `cargo_test`, and `go_test` share the selection shape `structured_validation / runner / sync_first / observe_jobs`; this does not imply identical mutation semantics. In particular, `cargo_fmt check=false` remains synchronous ensure-format mutation while `check=true` may use the existing same-execution Job handoff.
 
-T1 also makes filtered recommended-flow projections explicit when only part of a canonical flow is visible: partial projections identify themselves and list omitted canonical members instead of silently pairing complete-flow prose with a truncated tool list. T2 remains a separate future step for recovery/continuation vocabulary such as observation tokens, offsets, ACKs, and recovery envelopes. Composition work must build on these canonical primitive semantics; this stage does not add JavaScript Code Mode, a generic composition runtime, or a universal execution abstraction.
+T1 also makes filtered recommended-flow projections explicit when only part of a canonical flow is visible: partial projections identify themselves and list omitted canonical members instead of silently pairing complete-flow prose with a truncated tool list. Composition work must build on these canonical primitive semantics; T1 does not add JavaScript Code Mode, a generic composition runtime, or a universal execution abstraction.
+
+## Current result follow-up contract (T2)
+
+T2 adds a second, orthogonal vocabulary for **result follow-up**, not tool selection. A small `ContinuationSemantics` descriptor classifies model-facing continuation by `kind` (`page`, `batch`, `observe`, `checkpoint`, `refine`) and `carrier` (`position`, `index`, `opaque_token`, `observation_token`, `revision`, `none`). The descriptor explains what a returned continuation value means; concrete domains still own its encoding, validation, fences, lifecycle, and failure behavior.
+
+The current mappings are intentionally heterogeneous. Ordinary positional pagination such as `next_offset` or the next file range is `page / position`; aggregate `read_files` or `observe_jobs` boundaries expressed by `next_index` are `batch / index`; `git_diff_hunks.next_continuation` is `page / opaque_token`; Job, CodingAgentRun, and Session-message stream cursors are `observe / observation_token`; `session_context_revision` is a separate model-context checkpoint classified as `checkpoint / revision`; and parameter changes such as increasing `max_result_bytes` or `max_hunk_lines` are `refine / none`. The wire fields remain domain-specific because they carry different invariants.
+
+Those similarities do **not** create a shared token runtime. Git continuation keeps its scope/fence/MAC and committed-range identity. Job observation tokens remain exact-Job delta cursors. CodingAgentRun tokens retain their own Run binding, epoch, MAC, stale-epoch and history-loss rules. Session-message observation retains its Session-bound durable cursor. Session context revision remains an ACK watermark and is never an observation cursor. No token implementation parses another domain's token merely because both project the same semantic vocabulary.
+
+T2 also introduces one small shared `SuggestedToolCall { tool, arguments }` result-expression primitive and a matching schema helper. It only represents a bounded parser-ready advisory call already chosen by a domain producer. It does not dispatch, grant authority, carry retry permission, or replace the actual continuation identity. Existing domain envelopes remain intact: for example, `read_files` still reports `safe_cursor`, source SHA and snapshot stability; Git still distinguishes later-record continuation from omitted-current-hunk refinement; Session continuity still reports its own recovery state.
+
+Failure recovery remains a separate lane owned by the existing `RecoveryKind` / `RecoveryTool` vocabulary. `retry_same` continues to mean exact safe replay only, and `outcome_unknown` never becomes retry authority. Successful or partial business continuation does not acquire `recovery_kind` merely because more work remains. Model-context coherence is a third lane: `session_context_revision -> ack_session_context_revision` is projected as `checkpoint / revision`, but ACK grants no authority, resolves no Session message, and does not gate execution.
+
+After T1 and T2 the primitive foundation therefore has four distinct views:
+
+```text
+tool selection          execution form / lifetime / start / continuation primitive
+result follow-up        continuation kind / carrier
+failed invocation       RecoveryKind / RecoveryTool
+model-context coherence session context checkpoint / ACK
+```
+
+These contracts reduce model inference cost without introducing a `NextAction` state machine, universal cursor, generic execution manager, workflow graph, or Code Mode. Any future composition layer must consume these canonical primitive facts while preserving the underlying child tool identities and domain state machines.
 
 ## Proposed shape
 

@@ -1,9 +1,11 @@
 use serde_json::{json, Value};
 
 use super::common::{
-    array_schema, nullable_schema, permission_decision_schema, schema_type, search_match_schema,
-    session_hint_schema, wrapped_output_schema,
+    array_schema, continuation_semantics_schema, nullable_schema, permission_decision_schema,
+    schema_type, search_match_schema, session_hint_schema, suggested_tool_call_schema,
+    wrapped_output_schema,
 };
+use webcodex_core::runtime_contract::{ContinuationCarrier, ContinuationKind};
 
 pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
     match name {
@@ -380,18 +382,6 @@ fn search_project_texts_output_schema() -> Value {
     })
 }
 
-fn read_suggested_call_schema(tool: &'static str, arguments: Value) -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "tool": {"type": "string", "const": tool},
-            "arguments": arguments
-        },
-        "required": ["tool", "arguments"]
-    })
-}
-
 fn read_range_continuation_schema() -> Value {
     json!({
         "type": "object",
@@ -402,13 +392,20 @@ fn read_range_continuation_schema() -> Value {
             "safe_cursor": {"type": "boolean", "const": true},
             "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "snapshot_stable": {"type": "boolean", "const": false},
-            "suggested_call": read_suggested_call_schema(
+            "continuation_semantics": continuation_semantics_schema(
+                ContinuationKind::Page,
+                ContinuationCarrier::Position,
+                "This read continues by positional file range; source_sha256 remains the separate source-consistency fence.",
+            ),
+            "suggested_call": suggested_tool_call_schema(
                 "read_files",
                 suggested_read_files_arguments_schema(),
+                "Parser-ready advisory read_files call for the next positional range. It grants no authority and is not a retry token.",
             )
         },
         "required": [
-            "kind", "safe_cursor", "source_sha256", "snapshot_stable", "suggested_call"
+            "kind", "safe_cursor", "source_sha256", "snapshot_stable",
+            "continuation_semantics", "suggested_call"
         ]
     })
 }
@@ -451,8 +448,11 @@ fn suggested_read_files_arguments_schema() -> Value {
 }
 
 fn read_batch_continuation_schema() -> Value {
-    let suggested_call =
-        read_suggested_call_schema("read_files", suggested_read_files_arguments_schema());
+    let suggested_call = suggested_tool_call_schema(
+        "read_files",
+        suggested_read_files_arguments_schema(),
+        "Parser-ready advisory read_files call. Its arguments are domain-bounded and the call itself grants no authority.",
+    );
     json!({
         "oneOf": [
             {
@@ -467,10 +467,16 @@ fn read_batch_continuation_schema() -> Value {
                         "type": "string",
                         "enum": ["next", "after_partial_item"]
                     },
+                    "continuation_semantics": continuation_semantics_schema(
+                        ContinuationKind::Batch,
+                        ContinuationCarrier::Index,
+                        "next_index identifies the next original batch-item boundary; the suggested_call already slices the remaining items and does not accept next_index as an input cursor.",
+                    ),
                     "suggested_call": suggested_call.clone()
                 },
                 "required": [
-                    "kind", "safe_cursor", "next_index", "recommended_order", "suggested_call"
+                    "kind", "safe_cursor", "next_index", "recommended_order",
+                    "continuation_semantics", "suggested_call"
                 ]
             },
             {
@@ -485,10 +491,16 @@ fn read_batch_continuation_schema() -> Value {
                         "type": "integer",
                         "const": webcodex_core::runtime_contract::MODEL_INSPECTION_MAX_RESULT_BYTES
                     },
+                    "continuation_semantics": continuation_semantics_schema(
+                        ContinuationKind::Refine,
+                        ContinuationCarrier::None,
+                        "This is parameter refinement, not a cursor: increase the bounded result budget and retry the read request shape without claiming positional continuity.",
+                    ),
                     "suggested_call": suggested_call
                 },
                 "required": [
-                    "kind", "safe_cursor", "next_index", "suggested_max_result_bytes", "suggested_call"
+                    "kind", "safe_cursor", "next_index", "suggested_max_result_bytes",
+                    "continuation_semantics", "suggested_call"
                 ]
             }
         ]

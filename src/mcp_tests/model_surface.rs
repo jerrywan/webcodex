@@ -860,6 +860,71 @@ async fn adaptive_runtime_gateway_uses_long_tail_target_checkpoint_policy_once()
 }
 
 #[tokio::test]
+async fn direct_and_gateway_routes_preserve_result_continuation_semantics() {
+    let expected = json!({
+        "kind": "observe",
+        "carrier": "observation_token"
+    });
+
+    let direct_runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let direct_session = direct_runtime
+        .sessions
+        .start_session(None, Some("direct continuation semantics".to_string()));
+    let direct = handle_mcp_request(
+        &direct_runtime,
+        rpc(
+            "tools/call",
+            Some(json!(7222)),
+            mcp_2026_params(json!({
+                "name": "observe_session_messages",
+                "arguments": {"session_id": direct_session.session_id}
+            })),
+        ),
+        None,
+    )
+    .await;
+    let McpOutcome::Ok(direct_value) = direct else {
+        panic!("Full Operator direct observation must succeed");
+    };
+    let direct_structured = &direct_value["result"]["structuredContent"];
+    assert_eq!(direct_structured["success"], true, "{direct_value}");
+    assert_eq!(
+        direct_structured["output"]["continuation_semantics"],
+        expected
+    );
+
+    let gateway_runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
+    let gateway_session = gateway_runtime
+        .sessions
+        .start_session(None, Some("gateway continuation semantics".to_string()));
+    let gateway = handle_mcp_request(
+        &gateway_runtime,
+        rpc(
+            "tools/call",
+            Some(json!(7223)),
+            mcp_2026_params(json!({
+                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "arguments": {
+                    "tool": "observe_session_messages",
+                    "arguments": {"session_id": gateway_session.session_id}
+                }
+            })),
+        ),
+        None,
+    )
+    .await;
+    let McpOutcome::Ok(gateway_value) = gateway else {
+        panic!("Adaptive Runtime gateway observation must succeed");
+    };
+    let gateway_structured = &gateway_value["result"]["structuredContent"];
+    assert_eq!(gateway_structured["success"], true, "{gateway_value}");
+    assert_eq!(
+        gateway_structured["output"]["continuation_semantics"],
+        expected
+    );
+}
+
+#[tokio::test]
 async fn adaptive_runtime_gateway_allows_direct_fallback_and_rejects_unadmitted_targets() {
     let runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
     let fallback = handle_mcp_request(

@@ -149,6 +149,10 @@ fn canonical_observation(
         "recovery_reason_code": null,
         "recovery_reason": null,
         "observation_token": format!("wjob1:a:{job_id}:fixture_epoch:7"),
+        "continuation_semantics": {
+            "kind": "observe",
+            "carrier": "observation_token"
+        },
         "log_delta_status": log_delta_status,
         "stdout_delta_reset": false,
         "stderr_delta_reset": false,
@@ -545,6 +549,12 @@ fn observe_jobs_compact_projection_single_running_unchanged_keeps_actionable_sta
     assert_eq!(item["changed"], false);
     assert_eq!(item["log_delta_status"], "unchanged");
     assert_eq!(item["observation_token"], token);
+    assert_eq!(item["continuation_semantics"]["kind"], "observe");
+    assert_eq!(
+        item["continuation_semantics"]["carrier"],
+        "observation_token"
+    );
+    assert!(projected.output.get("continuation_semantics").is_none());
     assert_eq!(
         item["activity"],
         serde_json::to_value(process_activity()).unwrap()
@@ -811,11 +821,20 @@ fn observe_jobs_compact_projection_preserves_mixed_failure_and_budget_recovery()
     let mut truncated = canonical_batch(vec![success], "immediate", 0);
     truncated.output["output_truncated"] = json!(true);
     truncated.output["next_index"] = json!(1);
+    truncated.output["continuation_semantics"] = json!({
+        "kind": "batch",
+        "carrier": "index"
+    });
     assert_eq!(
         serde_json::to_value(compact_projection(&truncated)).unwrap(),
         serde_json::to_value(&truncated).unwrap()
     );
     assert_eq!(truncated.output["next_index"], 1);
+    assert_eq!(truncated.output["continuation_semantics"]["kind"], "batch");
+    assert_eq!(
+        truncated.output["continuation_semantics"]["carrier"],
+        "index"
+    );
 }
 
 #[test]

@@ -56,6 +56,82 @@ pub const RECOVERY_TOOL_VALUES: [&str; 7] = [
     "read_project_artifact_metadata",
 ];
 
+/// Closed model-facing vocabulary for continuing successful or partial
+/// observations. This is deliberately separate from failure recovery,
+/// authorization, retry/idempotency, execution identity, and resource ownership.
+pub const CONTINUATION_KIND_VALUES: [&str; 5] =
+    ["page", "batch", "observe", "checkpoint", "refine"];
+pub const CONTINUATION_CARRIER_VALUES: [&str; 6] = [
+    "position",
+    "index",
+    "opaque_token",
+    "observation_token",
+    "revision",
+    "none",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuationKind {
+    Page,
+    Batch,
+    Observe,
+    Checkpoint,
+    Refine,
+}
+
+impl ContinuationKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Page => "page",
+            Self::Batch => "batch",
+            Self::Observe => "observe",
+            Self::Checkpoint => "checkpoint",
+            Self::Refine => "refine",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuationCarrier {
+    Position,
+    Index,
+    OpaqueToken,
+    ObservationToken,
+    Revision,
+    None,
+}
+
+impl ContinuationCarrier {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Position => "position",
+            Self::Index => "index",
+            Self::OpaqueToken => "opaque_token",
+            Self::ObservationToken => "observation_token",
+            Self::Revision => "revision",
+            Self::None => "none",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct ContinuationSemantics {
+    pub kind: ContinuationKind,
+    pub carrier: ContinuationCarrier,
+}
+
+impl ContinuationSemantics {
+    pub const fn new(kind: ContinuationKind, carrier: ContinuationCarrier) -> Self {
+        Self { kind, carrier }
+    }
+
+    pub fn to_value(self) -> serde_json::Value {
+        serde_json::to_value(self).expect("ContinuationSemantics serialization is infallible")
+    }
+}
+
 pub const BUILTIN_CODING_WORKFLOW_CONTRACT: &str = "webcodex.coding_workflow";
 pub const BUILTIN_CODING_WORKFLOW_VERSION: u64 = 9;
 pub const BUILTIN_CODING_WORKFLOW_MAX_GUIDANCE_ITEMS: usize = 8;

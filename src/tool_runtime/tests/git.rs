@@ -1664,6 +1664,18 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
     assert!(token.starts_with("wcdh1."));
     let recovery = &first.output["recovery"];
     assert_eq!(recovery["kind"], "page");
+    assert_eq!(
+        recovery["continuation"]["continuation_semantics"]["kind"],
+        "page"
+    );
+    assert_eq!(
+        recovery["continuation"]["continuation_semantics"]["carrier"],
+        "opaque_token"
+    );
+    assert_eq!(
+        recovery["omitted_lines"]["continuation_semantics"],
+        Value::Null
+    );
     assert_eq!(recovery["arguments"]["project"], project);
     assert_eq!(recovery["arguments"]["paths"], json!(["large.txt"]));
     assert_eq!(recovery["arguments"]["base_commit"], base);
@@ -2703,8 +2715,20 @@ async fn git_diff_hunks_hunk_line_limit_does_not_create_fake_continuation() {
     assert_eq!(recovery["safe_continuation_for_omitted_lines"], false);
     assert_eq!(recovery["continuation"]["available"], false);
     assert_eq!(recovery["continuation"]["next_call"], Value::Null);
+    assert_eq!(
+        recovery["continuation"]["continuation_semantics"],
+        Value::Null
+    );
     assert_eq!(recovery["omitted_lines"]["present"], true);
     assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert_eq!(
+        recovery["omitted_lines"]["continuation_semantics"]["kind"],
+        "refine"
+    );
+    assert_eq!(
+        recovery["omitted_lines"]["continuation_semantics"]["carrier"],
+        "none"
+    );
     assert_eq!(
         recovery["omitted_lines"]["reason_code"],
         "larger_max_hunk_lines_available"

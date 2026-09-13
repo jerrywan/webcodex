@@ -351,6 +351,11 @@ async fn read_file_dispatch_partial_success_keeps_full_range_cursor() {
     assert_eq!(continuation["kind"], "read_range");
     assert_eq!(continuation["safe_cursor"], true);
     assert_eq!(continuation["snapshot_stable"], false);
+    assert_eq!(continuation["continuation_semantics"]["kind"], "page");
+    assert_eq!(
+        continuation["continuation_semantics"]["carrier"],
+        "position"
+    );
     assert_eq!(
         continuation["source_sha256"],
         format!("{:x}", Sha256::digest(content.as_bytes()))

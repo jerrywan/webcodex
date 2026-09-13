@@ -439,6 +439,20 @@ fn add_context_projection_to_output_shape(
                     "type": "integer", "minimum": 0,
                     "description": "Safely recovered Session checkpoint watermark; retain for later ACK."
                 }));
+                properties.insert("session_context_continuation".to_string(), json!({
+                    "type": "object",
+                    "description": "Model-context coherence metadata for session_context_revision. This checkpoint lane is independent from business continuation and failure recovery; ACK grants no authority, resolves no message, and does not gate execution.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "semantics": webcodex_tool_contracts::continuation_semantics_schema(
+                            webcodex_core::runtime_contract::ContinuationKind::Checkpoint,
+                            webcodex_core::runtime_contract::ContinuationCarrier::Revision,
+                            "session_context_revision is a context checkpoint watermark returned through ack_session_context_revision, not an observation cursor.",
+                        ),
+                        "ack_field": {"type": "string", "const": "ack_session_context_revision"}
+                    },
+                    "required": ["semantics", "ack_field"]
+                }));
                 properties.insert("session_continuity".to_string(), json!({
                     "type": "object",
                     "properties": {
@@ -446,22 +460,18 @@ fn add_context_projection_to_output_shape(
                         "recovery_required": {"type": "boolean"},
                         "recovery_tool": {"const": "session_handoff_summary"},
                         "recovery_session_id": {"type": "string"},
-                        "suggested_call": {
-                            "type": "object",
-                            "properties": {
-                                "tool": {"const": "session_handoff_summary"},
-                                "arguments": {
-                                    "type": "object",
-                                    "properties": {
-                                        "session_id": {"type": "string", "pattern": "^wc_sess_[A-Za-z0-9_]+$"}
-                                    },
-                                    "required": ["session_id"],
-                                    "additionalProperties": false
-                                }
-                            },
-                            "required": ["tool", "arguments"],
-                            "additionalProperties": false
-                        }
+                        "suggested_call": webcodex_tool_contracts::suggested_tool_call_schema(
+                            "session_handoff_summary",
+                            json!({
+                                "type": "object",
+                                "properties": {
+                                    "session_id": {"type": "string", "pattern": "^wc_sess_[A-Za-z0-9_]+$"}
+                                },
+                                "required": ["session_id"],
+                                "additionalProperties": false
+                            }),
+                            "Parser-ready advisory recovery call for re-observing bounded Session context. It grants no authority and is not an ACK token."
+                        )
                     },
                     "required": ["status"]
                 }));

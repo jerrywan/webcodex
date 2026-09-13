@@ -510,6 +510,7 @@ impl ToolRuntime {
                     "effective_timeout_secs": timeout,
                     "created_at": job.created_at,
                     "observation_token": job.observation_token,
+                    "continuation_semantics": crate::tool_runtime::jobs::job_observation_continuation_semantics(),
                     "last_update_seq": job.last_update_seq,
                     "continuation": continuation,
                 }))
@@ -829,6 +830,7 @@ impl ToolRuntime {
                         "job_id": observation.job.job_id,
                         "job_status": observation.job.status,
                         "observation_token": observation.job.observation_token,
+                        "continuation_semantics": crate::tool_runtime::jobs::job_observation_continuation_semantics(),
                         "activity": observation.job.activity,
                         "effective_timeout_secs": timeout,
                         "sync_wait_secs": budget.sync_wait_secs,

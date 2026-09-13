@@ -1372,6 +1372,12 @@ async fn model_facing_stop_job_stops_agent_job_with_same_session() {
         run.output["continuation"]["arguments"]["items"][0]["after_observation_token"],
         run.output["observation_token"]
     );
+    let continuation = ToolCall::from_tool_name(
+        run.output["continuation"]["tool"].as_str().unwrap(),
+        run.output["continuation"]["arguments"].clone(),
+    )
+    .expect("run_job continuation must remain parser-ready");
+    assert!(matches!(continuation, ToolCall::ObserveJobs { .. }));
 
     let result = runtime
         .dispatch_with_auth(

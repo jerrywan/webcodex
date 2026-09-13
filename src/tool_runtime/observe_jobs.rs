@@ -1,6 +1,9 @@
 //! Bounded multi-Job observation composed from the canonical single-Job path.
 
-use super::{ObserveJobsItem, RecoveryKind, RecoveryTool, ToolResult, ToolRuntime};
+use super::{
+    ContinuationCarrier, ContinuationKind, ContinuationSemantics, ObserveJobsItem, RecoveryKind,
+    RecoveryTool, ToolResult, ToolRuntime,
+};
 use crate::auth::AuthContext;
 use futures_util::{stream, StreamExt};
 use serde_json::{json, Value};
@@ -174,7 +177,7 @@ fn batch_output(
                 && item["output"]["terminal"].as_bool() == Some(true)
         })
         .count();
-    json!({
+    let mut output = json!({
         "requested_count": requested_count,
         "returned_count": returned_count,
         "succeeded_count": succeeded_count,
@@ -188,7 +191,13 @@ fn batch_output(
         "terminal_count": terminal_count,
         "output_truncated": output_truncated,
         "next_index": next_index,
-    })
+    });
+    if next_index.is_some() {
+        output["continuation_semantics"] =
+            ContinuationSemantics::new(ContinuationKind::Batch, ContinuationCarrier::Index)
+                .to_value();
+    }
+    output
 }
 
 fn serialized_batch_fits(output: &Value) -> bool {
@@ -345,6 +354,7 @@ fn sparse_success_item(item: &Value) -> Option<Value> {
     sparse.insert("changed".to_string(), json!(changed));
     sparse.insert("log_delta_status".to_string(), json!(log_delta_status));
     sparse.insert("observation_token".to_string(), json!(observation_token));
+    copy_present(observation, &mut sparse, "continuation_semantics");
 
     for key in [
         "exit_code",

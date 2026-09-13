@@ -148,7 +148,10 @@ pub use tool_inputs::{
     ApplyFileChangeKind, ApplyTextEditInput, ApplyTextEditKind, SessionMode, StartupDetail,
 };
 pub use tool_result::ToolResult;
-pub(crate) use tool_result::{RecoveryKind, RecoveryTool, RECOVERY_KIND_VALUES};
+pub(crate) use tool_result::{
+    ContinuationCarrier, ContinuationKind, ContinuationSemantics, RecoveryKind, RecoveryTool,
+    SuggestedToolCall, RECOVERY_KIND_VALUES,
+};
 pub use tool_spec::ToolSpec;
 
 #[cfg(test)]

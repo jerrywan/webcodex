@@ -1,10 +1,12 @@
 use serde_json::{json, Value};
 
 use super::common::{
-    array_schema, cargo_test_count_assertion_schema, job_activity_schema, nullable_schema,
-    observe_job_continuation_schema, permission_decision_schema, recovery_kind_schema, schema_type,
-    session_hint_schema, wrapped_output_schema,
+    array_schema, cargo_test_count_assertion_schema, continuation_semantics_schema,
+    job_activity_schema, nullable_schema, observe_job_continuation_schema,
+    permission_decision_schema, recovery_kind_schema, schema_type, session_hint_schema,
+    wrapped_output_schema,
 };
+use webcodex_core::runtime_contract::{ContinuationCarrier, ContinuationKind};
 
 fn validation_job_projection_schema() -> Value {
     json!({
@@ -98,7 +100,7 @@ fn structured_execution_lifecycle_constraints(execution_source: &str) -> Value {
                 "properties": {"promoted_to_job": {"const": true}},
                 "required": ["promoted_to_job"]
             },
-            "then": {"required": ["activity", "continuation"]}
+            "then": {"required": ["activity", "continuation", "continuation_semantics"]}
         },
         {
             "if": {"required": ["async_handoff_available"]},
@@ -336,6 +338,14 @@ fn structured_continuation_properties() -> Vec<(&'static str, Value)> {
                 "Current Job observation token when a continuation was exposed.",
             ),
         ),
+        (
+            "continuation_semantics",
+            continuation_semantics_schema(
+                ContinuationKind::Observe,
+                ContinuationCarrier::ObservationToken,
+                "A promoted execution continues by observing the exact Job stream; observation_token is a delta cursor, never execution or retry authority.",
+            ),
+        ),
         ("continuation", observe_job_continuation_schema()),
         ("activity", job_activity_schema()),
         (
@@ -447,6 +457,11 @@ fn observe_jobs_output_schema() -> Value {
                 "maxLength": webcodex_core::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN,
                 "description": "Opaque Job-bound lifecycle/log-delta token for this frozen returned snapshot. Return it unchanged."
             },
+            "continuation_semantics": continuation_semantics_schema(
+                ContinuationKind::Observe,
+                ContinuationCarrier::ObservationToken,
+                "The Job observation token is an exact Job-bound stream cursor copied into after_observation_token on the next observation. It is not a retry token.",
+            ),
             "last_update_seq": nullable_schema("integer", "Agent protocol diagnostic sequence, when available."),
             "cursor": {
                 "type": "object",
@@ -485,7 +500,7 @@ fn observe_jobs_output_schema() -> Value {
             "job_id", "status", "exit_code", "stdout_tail", "stderr_tail",
             "stdout_lines", "stderr_lines", "stdout_truncated", "stderr_truncated",
             "log_delta_status", "stdout_delta_reset", "stderr_delta_reset",
-            "observation_token", "cursor", "changed",
+            "observation_token", "continuation_semantics", "cursor", "changed",
             "terminal", "executor", "cwd", "shell", "purpose", "command_summary",
             "activity", "detected_summary", "validation"
         ]
@@ -509,6 +524,11 @@ fn observe_jobs_output_schema() -> Value {
                 "maxLength": webcodex_core::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN,
                 "description": "Opaque authoritative token copied unchanged from the canonical Job observation for the next after_observation_token."
             },
+            "continuation_semantics": continuation_semantics_schema(
+                ContinuationKind::Observe,
+                ContinuationCarrier::ObservationToken,
+                "Compact Job observation retains the same exact Job-bound observation cursor semantics as the canonical result.",
+            ),
             "exit_code": schema_type("integer", "Terminal process exit code when available and meaningful."),
             "command_execution_state": job_command_execution_state_schema(),
             "activity": job_activity_schema(),
@@ -546,7 +566,10 @@ fn observe_jobs_output_schema() -> Value {
             "detected_summary": {"type": "object", "additionalProperties": true},
             "validation": validation_job_projection_schema()
         },
-        "required": ["job_id", "status", "terminal", "changed", "log_delta_status", "observation_token"]
+        "required": [
+            "job_id", "status", "terminal", "changed", "log_delta_status",
+            "observation_token", "continuation_semantics"
+        ]
     });
     let item = json!({
         "type": "object",
@@ -609,6 +632,11 @@ fn observe_jobs_output_schema() -> Value {
             "terminal_count": {"type": "integer", "minimum": 0, "maximum": 8},
             "output_truncated": {"type": "boolean"},
             "next_index": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 7}, {"type": "null"}]},
+            "continuation_semantics": continuation_semantics_schema(
+                ContinuationKind::Batch,
+                ContinuationCarrier::Index,
+                "Present only when aggregate output packing stops at a later input item. next_index is an aggregate batch boundary, not an observation token.",
+            ),
             "session_hint": session_hint_schema(),
             "permission": permission_decision_schema()
         },
@@ -616,7 +644,14 @@ fn observe_jobs_output_schema() -> Value {
             "requested_count", "returned_count", "succeeded_count", "failed_count",
             "items", "wait", "changed_count", "terminal_count",
             "output_truncated", "next_index"
-        ]
+        ],
+        "allOf": [{
+            "if": {
+                "properties": {"next_index": {"type": "integer"}},
+                "required": ["next_index"]
+            },
+            "then": {"required": ["continuation_semantics"]}
+        }]
     });
     let sparse_success_output = json!({
         "type": "object",
@@ -695,6 +730,11 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 ("effective_timeout_secs", schema_type("integer", "Total detached process runtime budget in seconds.")),
                 ("created_at", schema_type("integer", "Durable Job creation timestamp.")),
                 ("observation_token", nullable_schema("string", "Current Job observation token when available.")),
+                ("continuation_semantics", continuation_semantics_schema(
+                    ContinuationKind::Observe,
+                    ContinuationCarrier::ObservationToken,
+                    "Detached Job follow-up observes the same exact durable Job with its Job-bound observation token; this is not replay authority.",
+                )),
                 ("continuation", observe_job_continuation_schema()),
                 ("last_update_seq", nullable_schema("integer", "Latest agent update sequence when available.")),
                 ("redispatched", schema_type("boolean", "False when bounded replay recovery returns an existing Job.")),
@@ -702,6 +742,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             schema["properties"]["output"]["properties"]["execution_source"]["const"] =
                 json!("run_detached_process");
             require_success_output_field(&mut schema, "continuation");
+            require_success_output_field(&mut schema, "continuation_semantics");
             Some(schema)
         }
         "run_process" => {
@@ -1071,6 +1112,11 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 "observation_token",
                 schema_type("string", "Opaque Job-bound observation token. Return it unchanged as after_observation_token for one bounded wait."),
             ),
+            ("continuation_semantics", continuation_semantics_schema(
+                ContinuationKind::Observe,
+                ContinuationCarrier::ObservationToken,
+                "run_job returns an immediate asynchronous Job whose next observation uses this Job-bound token; the token is not execution identity or retry authority.",
+            )),
             ("continuation", observe_job_continuation_schema()),
             (
                 "last_update_seq",
@@ -1078,6 +1124,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
         ]);
             require_success_output_field(&mut schema, "continuation");
+            require_success_output_field(&mut schema, "continuation_semantics");
             Some(schema)
         }
         "list_jobs" => Some(wrapped_output_schema(vec![
