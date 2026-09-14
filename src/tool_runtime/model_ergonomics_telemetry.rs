@@ -376,7 +376,7 @@ fn edit_facts(tool_name: &str, success: bool, output: &Value) -> EditFacts {
         conflict_kind: None,
     };
     match edit_tool_surface(tool_name) {
-        Some(EditToolSurface::Canonical)
+        Some(EditToolSurface::StructuredOrPatch)
             if matches!(tool_name, "apply_text_edits" | "apply_patch") =>
         {
             facts.conflict_kind = edit_conflict_kind(output);
@@ -405,7 +405,7 @@ fn edit_facts(tool_name: &str, success: bool, output: &Value) -> EditFacts {
                 Some("rejected".to_string())
             };
         }
-        Some(EditToolSurface::Canonical) if tool_name == "apply_unified_diff" => {
+        Some(EditToolSurface::StructuredOrPatch) if tool_name == "apply_unified_diff" => {
             let error_kind = output.get("error_kind").and_then(Value::as_str);
             facts.outcome = match (
                 output.get("applied").and_then(Value::as_bool),
