@@ -3509,6 +3509,8 @@ async fn session_context_noncapable_kernel_results_still_feed_later_delta() {
                 result.output["session_recovery"]["model_facing_events"][0]["context_revision"],
                 1
             );
+            assert_eq!(result.output["session_recovery"]["omitted_count"], 0);
+            assert_eq!(result.output["session_recovery"]["truncated"], false);
         } else {
             for field in [
                 "session_context_revision",
@@ -3708,6 +3710,11 @@ fn session_context_incomplete_delta_requires_explicit_recovery() {
             assert_eq!(result.output["session_recovery"]["history_lost"], true);
         } else {
             assert_eq!(result.output["session_recovery"]["truncated"], true);
+        }
+        if mode != "history_lost" {
+            assert!(result.output["session_recovery"]["omitted_count"]
+                .as_u64()
+                .is_some_and(|count| count > 0));
         }
         assert!(
             serde_json::to_vec(&result.output["session_recovery"]["model_facing_events"])

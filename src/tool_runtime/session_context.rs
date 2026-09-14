@@ -360,18 +360,44 @@ pub(crate) fn add_session_hint(
 }
 
 fn model_facing_recovery_event(event: &sessions::SessionEvent) -> Value {
-    json!({
-        "context_revision": event.context_revision,
-        "tool_name": event.tool_name,
-        "status": event.status,
-        "changed_paths": event.changed_paths,
-        "job_id": event.job_id,
-        "error_kind": event.error_kind,
-        "effect_evidence": event.effect_evidence,
-        "context_result": event.context_result_summary,
-        "execution_summary": event.validation_output_summary,
-    })
+    debug_assert!(
+        event.context_revision.is_some(),
+        "Context recovery events are selected by checkpoint revision"
+    );
+    let mut projected = serde_json::Map::new();
+    if let Some(context_revision) = event.context_revision {
+        projected.insert("context_revision".to_string(), json!(context_revision));
+    }
+    projected.insert(
+        "tool_name".to_string(),
+        Value::String(event.tool_name.clone()),
+    );
+    if let Some(status) = event.status.as_ref() {
+        projected.insert("status".to_string(), Value::String(status.clone()));
+    }
+    if !event.changed_paths.is_empty() {
+        projected.insert("changed_paths".to_string(), json!(event.changed_paths));
+    }
+    if let Some(job_id) = event.job_id.as_ref() {
+        projected.insert("job_id".to_string(), Value::String(job_id.clone()));
+    }
+    if let Some(error_kind) = event.error_kind.as_ref() {
+        projected.insert("error_kind".to_string(), Value::String(error_kind.clone()));
+    }
+    if let Some(effect_evidence) = event.effect_evidence.as_ref() {
+        projected.insert("effect_evidence".to_string(), json!(effect_evidence));
+    }
+    if let Some(context_result) = event.context_result_summary.as_ref() {
+        projected.insert("context_result".to_string(), context_result.clone());
+    }
+    if let Some(execution_summary) = event.validation_output_summary.as_ref() {
+        projected.insert("execution_summary".to_string(), execution_summary.clone());
+    }
+    Value::Object(projected)
 }
+
+#[cfg(test)]
+mod recovery_event_projection_tests;
 
 fn bounded_model_facing_recovery_events(
     recorded: &sessions::RecordedModelFacingToolCall,

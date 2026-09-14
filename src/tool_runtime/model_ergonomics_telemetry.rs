@@ -1174,7 +1174,15 @@ mod tests {
                 }
                 ContextRecoveryKind::Delta => {
                     projection["session_recovery"] = json!({
-                        "model_facing_events": [{"body": private}], "truncated": false, "history_lost": false
+                        "model_facing_events": [{
+                            "context_revision": 7,
+                            "tool_name": "run_process",
+                            "status": "succeeded",
+                            "context_result": {"body": private}
+                        }],
+                        "omitted_count": 0,
+                        "truncated": false,
+                        "history_lost": false
                     })
                 }
                 ContextRecoveryKind::None => unreachable!(),
