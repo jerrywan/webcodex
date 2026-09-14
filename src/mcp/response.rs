@@ -33,11 +33,7 @@ pub(super) fn mcp_stateless_result(mut result: Value, cacheable: bool) -> Value 
     result
 }
 
-fn mcp_tool_text_content(
-    structured: &Value,
-    concise: String,
-    text_json_compat: bool,
-) -> String {
+fn mcp_tool_text_content(structured: &Value, concise: String, text_json_compat: bool) -> String {
     if text_json_compat {
         serde_json::to_string(structured).unwrap_or(concise)
     } else {
@@ -71,10 +67,7 @@ fn connector_call_tool_result_with_compat(
 }
 
 pub(super) fn connector_call_tool_result(outcome: ConnectorCallOutcome) -> Value {
-    connector_call_tool_result_with_compat(
-        outcome,
-        crate::config::mcp_text_json_compat_enabled(),
-    )
+    connector_call_tool_result_with_compat(outcome, crate::config::mcp_text_json_compat_enabled())
 }
 
 fn mcp_runtime_tool_result_fallback_with_compat(
