@@ -105,7 +105,9 @@ The lanes above define test semantics; workflows decide when to run them.
   hand-maintained package list. The split changes scheduling, not process-ownership coverage.
 - Linux tooling runs in parallel with the Rust shards and retains
   release-verification tooling, Markdown-link validation, and npm package-smoke
-  tooling on every PR. The complete `cargo check --workspace --all-targets` pass is
+  tooling on every PR. It also runs the dependency-free MCP App DOM/message-order
+  tests with its existing Node installation, independently of frontend path
+  classification. The complete `cargo check --workspace --all-targets` pass is
   reserved for pushes to `main`, external-contributor PRs, and explicit `run-ci` PRs;
   ordinary owner PRs already pay for the package-sharded Rust test compilation and do
   not repeat that broad compile-only pass. macOS and Windows native jobs compile Runner,

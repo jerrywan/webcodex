@@ -84,8 +84,35 @@ for (const outcome of ["success", "error", "timeout"]) {
       await Promise.resolve();
       if (!early) view.result(cleanGit);
       assert.equal(view.nodes.state.textContent, "Clean");
-      assert.equal(view.nodes.summary.textContent, "main · 0 changed files · upstream: absent");
+      assert.equal(view.nodes.title.textContent, "No changes");
+      assert.equal(view.nodes.summary.textContent, "main");
+      assert.equal(view.nodes.cards.children.length, 0);
+    });
+  }
+}
+
+for (const outcome of ["success", "error", "timeout"]) {
+  for (const early of [true, false]) {
+    test(`Job recovery remains advisory after initialize ${outcome}, result ${early ? "before" : "after"}`, async () => {
+      const presentation = {
+        version: 1, kind: "job_observation",
+        items: [{
+          job_id: "job-missing", error_kind: "unknown_job", recovery_kind: "reobserve",
+          suggested_call: { tool: "list_jobs", arguments: {} },
+        }],
+      };
+      const view = app();
+      if (early) view.result(presentation);
+      view.initialize(outcome);
+      await Promise.resolve();
+      if (!early) view.result(presentation);
+      assert.equal(view.nodes.state.textContent, "Unavailable");
       assert.equal(view.nodes.cards.children.length, 1);
+      const text = node => [node.textContent, ...node.children.map(text)].join(" ");
+      assert.match(text(view.nodes.cards), /Suggested call list_jobs/);
+      assert.match(text(view.nodes.cards), /Recovery action reobserve/);
+      assert.deepEqual(view.sent.map(message => message.method), outcome === "success"
+        ? ["ui/initialize", "ui/notifications/initialized"] : ["ui/initialize"]);
     });
   }
 }

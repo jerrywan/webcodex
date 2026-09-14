@@ -244,6 +244,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check MCP App DOM and message-order contracts
+        run: node --test src/mcp_tests/*.test.mjs
       - name: Ensure Python tooling test dependencies
         run: |
           if ! command -v rg >/dev/null 2>&1; then
