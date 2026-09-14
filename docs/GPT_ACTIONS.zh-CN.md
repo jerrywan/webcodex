@@ -59,6 +59,10 @@ MCP-only presentation 不会伪装成 Action 能力。例如 Goal Plan / Agent c
 
 Custom GPT Actions 对 operation/tool description 有 300 characters 硬上限。WebCodex 保持 canonical MCP description 的更大预算不变：canonical description 不超过 300 时直接复用；超过时只在同一个 `ToolDefinition` 上提供简短 Action presentation override。Schema/property description 使用 presentation-only bounded projector，只改变 description 文本，不改变 JSON Schema 的 type、required、enum、oneOf/anyOf、约束或对象形状。
 
+### OpenAPI 导入体积
+
+Custom GPT importer 还会拒绝达到 1 MB 的 OpenAPI schema。WebCodex 因此为 generic Action document 保留内部 800,000-byte JSON 预算，并在 CI 中同时检查 compact 与 pretty-printed serialization。Direct Action request schema 继续完整使用 canonical `ToolSpec.input_schema`；response schema 只描述真实的 compact `ToolResult` envelope，并把 `output` 保持为 generic，而不再为每个 operation 内联可能很大的 canonical output schema。这只改变 OpenAPI presentation contract；实际 runtime JSON result 以及 canonical/MCP output schema 都不变。
+
 ### 对话文件导入
 
 `import_conversation_files_to_project` 在它属于 Adaptive Direct 时仍是 direct generic Action。ChatGPT 提供 `openaiFileIdRefs`；HTTP adapter 把 Action host file-reference shape 转为 canonical 内部 shape，并附加私有 GPT Action host provenance。模型 JSON 自己不能设置这个 provenance。

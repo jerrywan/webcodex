@@ -59,6 +59,10 @@ All authorization still runs through the normal ToolRuntime kernel. The Action a
 
 Custom GPT Actions reject operation/tool descriptions above 300 characters. WebCodex keeps the canonical MCP description budget independent and larger. An Action reuses the canonical description when it fits; only over-limit tools carry a short presentation override on their canonical `ToolDefinition`. Generated schema/property descriptions are bounded by a presentation-only projector that changes description text, not JSON-schema shape.
 
+### OpenAPI import size
+
+The Custom GPT importer also rejects OpenAPI schemas at 1 MB. WebCodex therefore keeps the generated generic Action document below an internal 800,000-byte JSON budget with CI coverage for compact and pretty-printed serialization. Direct Action request schemas remain the canonical `ToolSpec.input_schema`; response schemas use the real compact `ToolResult` envelope with a generic `output` field instead of inlining each potentially large canonical output schema. This changes only the OpenAPI presentation contract: actual runtime JSON results and canonical/MCP output schemas are unchanged.
+
 ### Conversation file import
 
 `import_conversation_files_to_project` remains a direct generic Action when it is Adaptive Direct. ChatGPT supplies `openaiFileIdRefs`; the HTTP adapter converts the host's Action file-reference shape to the canonical internal shape and attaches private GPT Action host provenance. The model cannot set that provenance itself.

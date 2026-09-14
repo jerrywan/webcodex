@@ -12,6 +12,8 @@ use webcodex_tool_contracts::{
 };
 
 const GPT_ACTION_OPERATION_LIMIT: usize = 30;
+#[cfg(test)]
+const GPT_ACTION_OPENAPI_IMPORT_BUDGET_BYTES: usize = 800_000;
 const GPT_ACTION_PATH_PREFIX: &str = "/api/actions/";
 
 pub(crate) fn public_url() -> String {
@@ -88,7 +90,7 @@ pub(crate) fn build_openapi_spec() -> Value {
 fn direct_operation(definition: &ToolDefinition, spec: &ToolSpec) -> Value {
     let description = action_operation_description(definition, spec);
     let request_schema = action_request_schema(definition.name, spec.input_schema.clone());
-    let response_schema = project_action_tool_result_schema(spec.output_schema.clone());
+    let response_schema = action_tool_result_schema(json!({}));
     json!({
         "operationId": definition.name,
         "description": description,
@@ -141,27 +143,6 @@ fn gateway_operation() -> Value {
         },
         "responses": standard_responses(response_schema)
     })
-}
-
-fn project_action_tool_result_schema(canonical_schema: Value) -> Value {
-    let mut schema = project_schema_descriptions(canonical_schema);
-    let object = schema
-        .as_object_mut()
-        .expect("canonical ToolSpec output schema must be an object");
-    object.insert("type".to_string(), json!("object"));
-    object.insert("additionalProperties".to_string(), json!(false));
-    let properties = object
-        .get_mut("properties")
-        .and_then(Value::as_object_mut)
-        .expect("canonical ToolSpec output schema must expose ToolResult properties");
-    assert!(
-        properties.contains_key("output"),
-        "canonical ToolSpec output schema must expose ToolResult.output"
-    );
-    properties.insert("success".to_string(), json!({"type": "boolean"}));
-    properties.insert("error".to_string(), json!({"type": "string"}));
-    object.insert("required".to_string(), json!(["success", "output"]));
-    schema
 }
 
 fn action_tool_result_schema(output_schema: Value) -> Value {
@@ -479,18 +460,12 @@ mod tests {
     }
 
     #[test]
-    fn direct_response_schemas_project_one_canonical_tool_result_envelope() {
+    fn direct_response_schemas_use_compact_tool_result_envelope() {
         let generated = build_openapi_spec();
-        let specs = registered_tool_specs()
-            .into_iter()
-            .map(|spec| (spec.name.clone(), spec))
-            .collect::<BTreeMap<_, _>>();
         for definition in gpt_action_direct_tool_definitions() {
             let schema = &generated["paths"]
                 [format!("{GPT_ACTION_PATH_PREFIX}{}", definition.name)]["post"]["responses"]
                 ["200"]["content"]["application/json"]["schema"];
-            let canonical =
-                project_schema_descriptions(specs[definition.name].output_schema.clone());
             assert_eq!(schema["type"], "object", "{}", definition.name);
             assert_eq!(schema["additionalProperties"], false, "{}", definition.name);
             assert_eq!(
@@ -505,14 +480,14 @@ mod tests {
                 definition.name
             );
             assert_eq!(
-                schema["properties"]["error"]["type"], "string",
-                "{}",
+                schema["properties"]["output"],
+                json!({}),
+                "{} Action response output stays intentionally generic so large canonical output schemas do not inflate the host OpenAPI document",
                 definition.name
             );
             assert_eq!(
-                schema["properties"]["output"],
-                canonical["properties"]["output"],
-                "{} Action response must preserve canonical ToolSpec.output without a second ToolResult envelope",
+                schema["properties"]["error"]["type"], "string",
+                "{}",
                 definition.name
             );
         }
@@ -567,6 +542,20 @@ mod tests {
         );
         assert_eq!(failure_variants[0]["properties"]["error"]["type"], "string");
         assert_eq!(failure_variants[1]["required"], json!(["status", "error"]));
+    }
+
+    #[test]
+    fn generic_openapi_stays_below_import_size_budget() {
+        let spec = build_openapi_spec();
+        let compact = serde_json::to_vec(&spec).unwrap();
+        let pretty = serde_json::to_vec_pretty(&spec).unwrap();
+        for (format, bytes) in [("compact", compact.len()), ("pretty", pretty.len())] {
+            assert!(
+                bytes < GPT_ACTION_OPENAPI_IMPORT_BUDGET_BYTES,
+                "GPT Action OpenAPI {format} JSON is {bytes} bytes; keep it below the internal {}-byte budget so the host has headroom under its 1 MB importer limit",
+                GPT_ACTION_OPENAPI_IMPORT_BUDGET_BYTES
+            );
+        }
     }
 
     #[test]

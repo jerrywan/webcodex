@@ -78,6 +78,8 @@ Generic GPT Actions must stay below the host's 30-operation limit. The generated
 
 Do not silently truncate operations. CI must fail if the derived projection reaches the limit so the developer explicitly decides whether a protocol-supported direct tool should move out of Adaptive Direct or whether a real GPT Action protocol exception exists.
 
+The Custom GPT importer also rejects OpenAPI schemas at 1 MB. Keep the generic Action document comfortably below that host ceiling: CI checks both compact and pretty-printed JSON against an internal 800,000-byte budget. Direct request schemas remain canonical, but response schemas intentionally expose only the real `ToolResult { success, output, error? }` envelope with generic `output`; complete canonical output schemas stay in `ToolSpec`/MCP rather than being duplicated into every Action response.
+
 ## 6. HTTP adapter and authority
 
 The generic runtime exposes one shared authenticated adapter:
@@ -144,6 +146,7 @@ At minimum, keep focused invariants for:
 - unsupported protocol-only tools are neither direct nor gateway-callable;
 - operation IDs are canonical snake_case names and old camelCase IDs are absent;
 - generated operation count is < 30 with no truncation;
+- compact and pretty-printed generic OpenAPI JSON remain below the internal 800,000-byte import budget;
 - direct request schemas equal canonical ToolSpec input schemas except declared presentation/host overlays;
 - every generated OpenAPI `description` is <= 300 characters while canonical/MCP descriptions retain their independent budget;
 - canonical descriptions over 300 require an explicit Action presentation override;
