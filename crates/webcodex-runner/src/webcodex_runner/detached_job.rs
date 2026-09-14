@@ -307,6 +307,7 @@ impl DetachedJobStore {
         self.root.join(digest)
     }
 
+    #[cfg(test)]
     fn state_path_for_job(&self, job_id: &str) -> PathBuf {
         self.job_dir(job_id).join(STATE_FILE)
     }

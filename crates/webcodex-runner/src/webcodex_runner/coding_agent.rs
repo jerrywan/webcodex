@@ -258,7 +258,7 @@ impl DurableRunStore {
             if self
                 .test_control
                 .fail_next_terminal_writes
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
                     (remaining > 0).then(|| remaining - 1)
                 })
                 .is_ok()
