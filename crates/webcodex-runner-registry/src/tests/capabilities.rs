@@ -85,6 +85,7 @@ fn capability_classification_keeps_environment_dependent_features_registration_r
         RunnerFeature::Shell,
         RunnerFeature::Git,
         RunnerFeature::StructuredCargoTestExecutionPolicy,
+        RunnerFeature::StructuredCargoTestLib,
         RunnerFeature::StructuredScriptJavascript,
         RunnerFeature::StructuredScriptTypescript,
         RunnerFeature::ApplyTextEditLineScope,
@@ -258,6 +259,7 @@ fn v2_registration_required_features_are_never_inferred_from_generation() {
         RunnerFeature::CodingAgentRuns,
         RunnerFeature::ManagedSshResources,
         RunnerFeature::StructuredCargoTestExecutionPolicy,
+        RunnerFeature::StructuredCargoTestLib,
         RunnerFeature::StructuredScriptJavascript,
         RunnerFeature::StructuredScriptTypescript,
     ] {
@@ -300,6 +302,7 @@ async fn current_protocol_generation_never_infers_registration_required_host_fea
         RunnerFeature::CodingAgentRuns,
         RunnerFeature::StructuredScriptJavascript,
         RunnerFeature::StructuredScriptTypescript,
+        RunnerFeature::StructuredCargoTestLib,
     ] {
         assert!(
             !registry
@@ -557,6 +560,7 @@ async fn registration_required_sticky_features_reject_same_instance_downgrade() 
         RunnerFeature::JobStateReconciliation,
         RunnerFeature::CodingAgentRuns,
         RunnerFeature::StructuredCargoTestExecutionPolicy,
+        RunnerFeature::StructuredCargoTestLib,
         RunnerFeature::StructuredScriptJavascript,
         RunnerFeature::StructuredScriptTypescript,
     ] {

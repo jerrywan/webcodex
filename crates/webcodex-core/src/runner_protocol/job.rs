@@ -267,7 +267,8 @@ fn is_canonical_cargo_check_args(args: &[&str]) -> bool {
 
 /// Canonical `cargo test` argv: the `test` subcommand, an optional libtest
 /// filter (never a Cargo option), then zero or more distinct read-only flags
-/// and `--features <value>` / `-p <value>` pairs, optionally `--no-run`.
+/// and `--features <value>` / `-p <value>` pairs, optionally including the
+/// Cargo test-only `--lib` and `--no-run` selectors.
 ///
 /// The flat argv boundary has inherent information loss: `["test",
 /// "--all-features"]` is a legal `cargo test --all-features` whether the
@@ -409,15 +410,15 @@ fn is_canonical_go_test_json_args(args: &[&str]) -> bool {
 /// appears at most once. A value-taking flag's value must already satisfy the
 /// shared [`normalize_cargo_value`] contract: non-empty after trimming, not a
 /// `-`-prefixed option, NUL/control-free, bounded to `CARGO_VALUE_MAX_BYTES`,
-/// and already normalized (no leading/trailing whitespace). `--no-run` is
-/// accepted only for `cargo test`.
-fn is_canonical_cargo_flags(args: &[&str], allow_no_run: bool) -> bool {
+/// and already normalized (no leading/trailing whitespace). `--lib` and
+/// `--no-run` are accepted only for `cargo test`.
+fn is_canonical_cargo_flags(args: &[&str], cargo_test: bool) -> bool {
     let mut seen = HashSet::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         let key = match *arg {
             "--all-targets" | "--all-features" | "--no-default-features" => *arg,
-            "--no-run" if allow_no_run => "--no-run",
+            "--lib" | "--no-run" if cargo_test => *arg,
             "--features" | "-p" => {
                 if !seen.insert(*arg) {
                     return false;

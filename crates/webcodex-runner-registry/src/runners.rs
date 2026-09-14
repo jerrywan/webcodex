@@ -432,6 +432,12 @@ impl RunnerRegistry {
             inner.runners.get(&client_id),
             &runner_instance_id,
             &runner_features,
+            RunnerFeature::StructuredCargoTestLib,
+        )?;
+        reject_same_instance_feature_downgrade(
+            inner.runners.get(&client_id),
+            &runner_instance_id,
+            &runner_features,
             RunnerFeature::StructuredScriptJavascript,
         )?;
         reject_same_instance_feature_downgrade(

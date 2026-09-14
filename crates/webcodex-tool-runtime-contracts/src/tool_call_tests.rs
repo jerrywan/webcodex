@@ -363,6 +363,72 @@ fn from_tool_name_records_public_result_expectations_before_parsing() {
 }
 
 #[test]
+fn cargo_test_lib_false_canonicalizes_to_omission_and_true_is_preserved() {
+    for arguments in [
+        json!({"project": "demo"}),
+        json!({"project": "demo", "lib": false}),
+    ] {
+        let call = ToolCall::from_tool_name("cargo_test", arguments).unwrap();
+        assert!(matches!(call, ToolCall::CargoTest { lib: None, .. }));
+    }
+
+    let call =
+        ToolCall::from_tool_name("cargo_test", json!({"project": "demo", "lib": true})).unwrap();
+    assert!(matches!(
+        call,
+        ToolCall::CargoTest {
+            lib: Some(true),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn tool_manifest_default_flows_follow_discovery_shape() {
+    for arguments in [
+        json!({"tool_name": "cargo_test"}),
+        json!({"tool_name": "cargo_test", "include_recommended_flows": false}),
+    ] {
+        let call = ToolCall::from_tool_name("tool_manifest", arguments).unwrap();
+        assert!(matches!(
+            call,
+            ToolCall::ToolManifest {
+                include_recommended_flows: false,
+                ..
+            }
+        ));
+    }
+
+    let exact_opt_in = ToolCall::from_tool_name(
+        "tool_manifest",
+        json!({"tool_name": "cargo_test", "include_recommended_flows": true}),
+    )
+    .unwrap();
+    assert!(matches!(
+        exact_opt_in,
+        ToolCall::ToolManifest {
+            include_recommended_flows: true,
+            ..
+        }
+    ));
+
+    for arguments in [
+        json!({}),
+        json!({"category": "validation"}),
+        json!({"intent": "coding"}),
+    ] {
+        let call = ToolCall::from_tool_name("tool_manifest", arguments).unwrap();
+        assert!(matches!(
+            call,
+            ToolCall::ToolManifest {
+                include_recommended_flows: true,
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
 fn from_tool_name_rejects_unsafe_result_expectation_combinations() {
     let invalid = [
         (

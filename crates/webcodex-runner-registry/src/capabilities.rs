@@ -30,6 +30,7 @@ pub enum RunnerFeature {
     StructuredValidationArgv,
     StructuredCargoTestCountAssertion,
     StructuredCargoTestExecutionPolicy,
+    StructuredCargoTestLib,
     StructuredGoTestJson,
     StructuredGoTestTool,
     StructuredGoTestPackages,
@@ -92,6 +93,7 @@ const ALL_RUNNER_FEATURES: &[RunnerFeature] = &[
     RunnerFeature::StructuredValidationArgv,
     RunnerFeature::StructuredCargoTestCountAssertion,
     RunnerFeature::StructuredCargoTestExecutionPolicy,
+    RunnerFeature::StructuredCargoTestLib,
     RunnerFeature::StructuredGoTestJson,
     RunnerFeature::StructuredGoTestTool,
     RunnerFeature::StructuredGoTestPackages,
@@ -178,6 +180,7 @@ impl RunnerFeature {
             Self::StructuredCargoTestExecutionPolicy => {
                 wire::RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_EXECUTION_POLICY
             }
+            Self::StructuredCargoTestLib => wire::RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_LIB,
             Self::StructuredGoTestJson => wire::RUNNER_CAPABILITY_STRUCTURED_GO_TEST_JSON,
             Self::StructuredGoTestTool => wire::RUNNER_CAPABILITY_STRUCTURED_GO_TEST_TOOL,
             Self::StructuredGoTestPackages => wire::RUNNER_CAPABILITY_STRUCTURED_GO_TEST_PACKAGES,
@@ -256,6 +259,7 @@ impl RunnerFeature {
             wire::RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_EXECUTION_POLICY => {
                 Self::StructuredCargoTestExecutionPolicy
             }
+            wire::RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_LIB => Self::StructuredCargoTestLib,
             wire::RUNNER_CAPABILITY_STRUCTURED_GO_TEST_JSON => Self::StructuredGoTestJson,
             wire::RUNNER_CAPABILITY_STRUCTURED_GO_TEST_TOOL => Self::StructuredGoTestTool,
             wire::RUNNER_CAPABILITY_STRUCTURED_GO_TEST_PACKAGES => Self::StructuredGoTestPackages,
@@ -334,6 +338,7 @@ impl RunnerFeature {
             | Self::StructuredScriptJavascript
             | Self::StructuredScriptTypescript
             | Self::StructuredCargoTestExecutionPolicy
+            | Self::StructuredCargoTestLib
             | Self::ApplyTextEditLineScope
             | Self::ApplyPatch
             | Self::ApplyPatchMatchMetadata
@@ -399,6 +404,7 @@ impl RunnerFeature {
             Self::StructuredCargoTestExecutionPolicy => {
                 capabilities.structured_cargo_test_execution_policy
             }
+            Self::StructuredCargoTestLib => capabilities.structured_cargo_test_lib,
             Self::StructuredGoTestJson => capabilities.structured_go_test_json,
             Self::StructuredGoTestTool => capabilities.structured_go_test_tool,
             Self::StructuredGoTestPackages => capabilities.structured_go_test_packages,

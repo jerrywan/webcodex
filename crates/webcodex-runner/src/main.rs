@@ -1992,6 +1992,9 @@ fn runner_register_capabilities(cfg: &RunnerConfig) -> RunnerCapabilities {
     // so advertise durable preservation independently from the older count
     // assertion capability for rolling upgrades.
     capabilities.structured_cargo_test_execution_policy = true;
+    // `--lib` expands the older structured Cargo test argv vocabulary, so
+    // advertise it separately for mixed Server/Runner rolling upgrades.
+    capabilities.structured_cargo_test_lib = true;
     // This binary accepts both legacy Go validation argv from old Servers and
     // the current machine-readable JSON argv. Do not trust static config or
     // infer this from generic structured validation support.

@@ -1132,7 +1132,7 @@ async fn adaptive_runtime_tool_manifest_exact_projection_is_sparse_and_routes_ex
             tool_name: Some("read_files".to_string()),
             category: None,
             intent: None,
-            include_recommended_flows: true,
+            include_recommended_flows: false,
             include_risk_summary: true,
         })
         .await;
@@ -1164,6 +1164,11 @@ async fn adaptive_runtime_tool_manifest_exact_projection_is_sparse_and_routes_ex
     assert_eq!(output["input_schema"]["type"], "object");
     assert!(output["input_schema"]["properties"]["items"].is_object());
     assert_eq!(output["effect"], "observe");
+    assert!(output.get("recommended_flows").is_none());
+    assert!(output["risk"].is_string());
+    assert!(output["approval"].is_string());
+    assert!(output["idempotency"].is_string());
+
     assert!(output["authority"]["scopes"].is_array());
     assert!(output["annotations"].is_object());
     for redundant in [
@@ -1191,6 +1196,54 @@ async fn adaptive_runtime_tool_manifest_exact_projection_is_sparse_and_routes_ex
         sparse_bytes < canonical_bytes,
         "{canonical_bytes} -> {sparse_bytes}"
     );
+
+    let exact_flow_opt_in = handle_mcp_request(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(7240)),
+            mcp_2026_params(json!({
+                "name": "tool_manifest",
+                "arguments": {
+                    "tool_name": "cargo_test",
+                    "include_recommended_flows": true
+                }
+            })),
+        ),
+        None,
+    )
+    .await;
+    let McpOutcome::Ok(value) = exact_flow_opt_in else {
+        panic!("adaptive tool_manifest exact flow opt-in must succeed");
+    };
+    let flow_output = &value["result"]["structuredContent"]["output"];
+    assert_eq!(flow_output["name"], "cargo_test");
+    assert!(flow_output["recommended_flows"]
+        .as_array()
+        .is_some_and(|flows| !flows.is_empty()));
+
+    let exact_flow_opt_out = handle_mcp_request(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(72401)),
+            mcp_2026_params(json!({
+                "name": "tool_manifest",
+                "arguments": {
+                    "tool_name": "cargo_test",
+                    "include_recommended_flows": false
+                }
+            })),
+        ),
+        None,
+    )
+    .await;
+    let McpOutcome::Ok(value) = exact_flow_opt_out else {
+        panic!("adaptive tool_manifest exact flow opt-out must succeed");
+    };
+    assert!(value["result"]["structuredContent"]["output"]
+        .get("recommended_flows")
+        .is_none());
 
     let gateway = handle_mcp_request(
         &runtime,

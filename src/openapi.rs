@@ -520,7 +520,7 @@ fn schemas() -> Value {
                 },
                 "include_recommended_flows": {
                     "type": "boolean",
-                    "description": "Flattened tool_manifest flag. Defaults to true and controls recommended_flows in compact discovery output. Used only when `params` is absent or null."
+                    "description": "Flattened tool_manifest flag controlling recommended_flows. Omission defaults to false for exact tool_name lookup and true for category, intent, or broad discovery. Used only when `params` is absent or null."
                 },
                 "include_risk_summary": {
                     "type": "boolean",

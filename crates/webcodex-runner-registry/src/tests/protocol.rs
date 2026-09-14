@@ -141,6 +141,7 @@ fn registration_wire_requires_generation_capabilities_and_explicit_shell() {
     assert!(!capabilities.async_jobs);
     assert!(!capabilities.async_shell_jobs);
     assert!(!capabilities.structured_validation_argv);
+    assert!(!capabilities.structured_cargo_test_lib);
     assert!(!capabilities.structured_go_test_json);
     assert!(!capabilities.structured_go_test_tool);
     assert!(!capabilities.structured_go_test_packages);
@@ -189,6 +190,7 @@ async fn runner_supports_reflects_registered_capabilities() {
         structured_go_test_json: true,
         structured_go_test_tool: true,
         structured_go_test_packages: true,
+        structured_cargo_test_lib: true,
         ..Default::default()
     });
     registry
@@ -228,6 +230,10 @@ async fn runner_supports_reflects_registered_capabilities() {
         .await
         .unwrap());
     assert!(registry
+        .runner_supports("oe", RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_LIB)
+        .await
+        .unwrap());
+    assert!(registry
         .runner_supports("oe", RUNNER_CAPABILITY_STRUCTURED_GO_TEST_JSON)
         .await
         .unwrap());
@@ -243,6 +249,7 @@ async fn runner_supports_reflects_registered_capabilities() {
     assert!(view.capabilities.structured_go_test_json);
     assert!(view.capabilities.structured_go_test_tool);
     assert!(view.capabilities.structured_go_test_packages);
+    assert!(view.capabilities.structured_cargo_test_lib);
     assert!(!registry
         .runner_supports("oe", RUNNER_CAPABILITY_GIT)
         .await
@@ -467,6 +474,7 @@ async fn runner_supports_recognizes_all_protocol_capability_names() {
                 structured_validation_argv: true,
                 structured_cargo_test_count_assertion: true,
                 structured_cargo_test_execution_policy: true,
+                structured_cargo_test_lib: true,
                 structured_go_test_json: true,
                 structured_go_test_tool: true,
                 structured_go_test_packages: true,

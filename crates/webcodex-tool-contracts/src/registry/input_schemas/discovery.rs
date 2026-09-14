@@ -52,7 +52,7 @@ pub fn tool_manifest_input_schema() -> Value {
             },
             "include_recommended_flows": {
                 "type": "boolean",
-                "description": "Include recommended_flows in the output (default true)."
+                "description": "Include recommended_flows in the output. Omission defaults to false for exact tool_name lookup and true for category, intent, or broad discovery."
             },
             "include_risk_summary": {
                 "type": "boolean",

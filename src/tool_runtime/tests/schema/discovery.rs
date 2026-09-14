@@ -1271,6 +1271,65 @@ fn assert_recommended_flows_subset_of_manifest_tools(manifest: &Value, context: 
 }
 
 #[tokio::test]
+async fn tool_manifest_default_flows_follow_exact_vs_discovery_shape_end_to_end() {
+    let runtime = test_runtime();
+
+    let exact = runtime
+        .dispatch(
+            ToolCall::from_tool_name("tool_manifest", json!({"tool_name": "cargo_test"})).unwrap(),
+        )
+        .await;
+    assert!(exact.success, "{:?}", exact.error);
+    assert!(exact.output.get("recommended_flows").is_none());
+
+    let exact_true = runtime
+        .dispatch(
+            ToolCall::from_tool_name(
+                "tool_manifest",
+                json!({
+                    "tool_name": "cargo_test",
+                    "include_recommended_flows": true
+                }),
+            )
+            .unwrap(),
+        )
+        .await;
+    assert!(exact_true.success, "{:?}", exact_true.error);
+    assert!(exact_true.output["recommended_flows"]
+        .as_array()
+        .is_some_and(|flows| !flows.is_empty()));
+
+    let exact_false = runtime
+        .dispatch(
+            ToolCall::from_tool_name(
+                "tool_manifest",
+                json!({
+                    "tool_name": "cargo_test",
+                    "include_recommended_flows": false
+                }),
+            )
+            .unwrap(),
+        )
+        .await;
+    assert!(exact_false.success, "{:?}", exact_false.error);
+    assert!(exact_false.output.get("recommended_flows").is_none());
+
+    for arguments in [
+        json!({}),
+        json!({"category": "validation"}),
+        json!({"intent": "coding"}),
+    ] {
+        let result = runtime
+            .dispatch(ToolCall::from_tool_name("tool_manifest", arguments).unwrap())
+            .await;
+        assert!(result.success, "{:?}", result.error);
+        assert!(result.output["recommended_flows"]
+            .as_array()
+            .is_some_and(|flows| !flows.is_empty()));
+    }
+}
+
+#[tokio::test]
 async fn filtered_tool_manifest_recommended_flows_only_reference_returned_tools() {
     let runtime = test_runtime();
 

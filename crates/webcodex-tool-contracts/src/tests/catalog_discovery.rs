@@ -87,6 +87,14 @@ fn tool_manifest_schema_exposes_compact_discovery_fields() {
         "tool_manifest input schema",
         present: ["category", "intent", "include_recommended_flows", "include_risk_summary"]
     );
+    let flow_description = props["include_recommended_flows"]["description"]
+        .as_str()
+        .expect("include_recommended_flows description");
+    assert!(flow_description.contains("exact tool_name"));
+    assert!(flow_description.contains("false"));
+    assert!(flow_description.contains("category"));
+    assert!(flow_description.contains("intent"));
+    assert!(flow_description.contains("true"));
     let risk_summary_description = props["include_risk_summary"]["description"]
         .as_str()
         .expect("include_risk_summary description");

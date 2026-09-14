@@ -214,6 +214,10 @@ pub const RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_COUNT_ASSERTION: &str =
 /// never inferred from protocol generation or other structured validation bits.
 pub const RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_EXECUTION_POLICY: &str =
     "structured_cargo_test_execution_policy";
+/// The Runner accepts Cargo test validation argv containing the first-class
+/// `--lib` selector. Older Runners may already support structured Cargo argv
+/// without this additive selector, so newer Servers must fence it explicitly.
+pub const RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_LIB: &str = "structured_cargo_test_lib";
 /// The Runner accepts the canonical machine-readable `go test -json` validation
 /// shape. Older implementations may support only the historical fixed `./...`
 /// scope; expanded caller-selected packages are fenced separately.
@@ -439,6 +443,7 @@ pub const RUNNER_CAPABILITY_NAMES: &[&str] = &[
     RUNNER_CAPABILITY_STRUCTURED_VALIDATION_ARGV,
     RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_COUNT_ASSERTION,
     RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_EXECUTION_POLICY,
+    RUNNER_CAPABILITY_STRUCTURED_CARGO_TEST_LIB,
     RUNNER_CAPABILITY_STRUCTURED_GO_TEST_JSON,
     RUNNER_CAPABILITY_STRUCTURED_GO_TEST_TOOL,
     RUNNER_CAPABILITY_STRUCTURED_GO_TEST_PACKAGES,
@@ -573,6 +578,10 @@ pub struct RunnerCapabilities {
     /// assertion capability, structured validation argv, or protocol generation.
     #[serde(default, skip_serializing_if = "is_false")]
     pub structured_cargo_test_execution_policy: bool,
+    /// Additive canonical Cargo test `--lib` argv support. Missing on older
+    /// Runners is false and is never inferred from generic structured argv.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub structured_cargo_test_lib: bool,
     /// Machine-readable canonical `go test -json` validation. Older Runners may
     /// support only the historical fixed `./...` scope; focused package argv is
     /// an independent additive capability.
@@ -930,6 +939,7 @@ impl Default for RunnerCapabilities {
             structured_validation_argv: false,
             structured_cargo_test_count_assertion: false,
             structured_cargo_test_execution_policy: false,
+            structured_cargo_test_lib: false,
             structured_go_test_json: false,
             structured_go_test_tool: false,
             structured_go_test_packages: false,
@@ -2433,6 +2443,7 @@ mod envelope_tests {
                 structured_validation_argv: true,
                 structured_cargo_test_count_assertion: true,
                 structured_cargo_test_execution_policy: true,
+                structured_cargo_test_lib: true,
                 structured_go_test_json: true,
                 structured_go_test_tool: true,
                 structured_go_test_packages: true,
@@ -3653,6 +3664,7 @@ mod envelope_tests {
                 "structured_validation_argv",
                 "structured_cargo_test_count_assertion",
                 "structured_cargo_test_execution_policy",
+                "structured_cargo_test_lib",
                 "structured_go_test_json",
                 "structured_go_test_tool",
                 "structured_go_test_packages",
@@ -4158,6 +4170,7 @@ mod filter_canonical_tests {
         let rejected = [
             vec!["check", "--all-targets", "--all-targets"],
             vec!["check", "--no-run"],
+            vec!["check", "--lib"],
             vec!["check", "--features"],
             vec!["check", "--features", ""],
             vec!["check", "--features", "--no-run"],
@@ -4203,6 +4216,8 @@ mod filter_canonical_tests {
             vec!["test"],
             vec!["test", "focused"],
             vec!["test", "--all-targets"],
+            vec!["test", "--lib"],
+            vec!["test", "--lib", "--all-targets", "--no-run"],
             vec!["test", "--no-run"],
             vec!["test", "focused", "--all-features"],
             vec!["test", "--features", "serde", "--no-run"],
@@ -4216,6 +4231,7 @@ mod filter_canonical_tests {
         }
         let rejected = [
             vec!["test", "--no-run", "--no-run"],
+            vec!["test", "--lib", "--lib"],
             vec!["test", "--no-run", "--all-targets", "--all-targets"],
             vec!["test", "--no-default-features", "--no-default-features"],
             vec!["test", "--all-features", "--all-features"],

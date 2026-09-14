@@ -186,6 +186,9 @@ fn cargo_test_command(options: ValidationCommandOptions) -> Result<String, Strin
     if let Some(filter) = filter {
         args.push(shell_escape_simple(&filter));
     }
+    if options.lib.unwrap_or(false) {
+        args.push("--lib".to_string());
+    }
     if options.all_targets.unwrap_or(false) {
         args.push("--all-targets".to_string());
     }

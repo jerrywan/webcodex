@@ -354,6 +354,7 @@ async fn dispatched_shared_capture_wait_timeout_reports_outcome_unknown_without_
                         session_id: Some(session_id),
                         cwd: None,
                         filter: None,
+                        lib: None,
                         all_targets: None,
                         all_features: None,
                         no_default_features: None,

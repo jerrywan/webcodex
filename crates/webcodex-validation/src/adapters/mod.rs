@@ -9,6 +9,7 @@ use webcodex_core::validation_evidence::ValidationDiagnostics;
 pub struct ValidationCommandOptions {
     pub check: bool,
     pub filter: Option<String>,
+    pub lib: Option<bool>,
     pub all_targets: Option<bool>,
     pub all_features: Option<bool>,
     pub no_default_features: Option<bool>,

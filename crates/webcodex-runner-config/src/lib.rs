@@ -256,6 +256,9 @@ pub fn generated_runner_config_toml(opts: &RunnerInitOptions) -> Result<String, 
             // rolling-upgrade capability and is never inferred from the older
             // count-assertion bit or protocol generation.
             structured_cargo_test_execution_policy: false,
+            // Cargo test --lib argv is accepted only by the running binary that
+            // advertises the additive structured Cargo selector capability.
+            structured_cargo_test_lib: false,
             // The running binary advertises this process-lifetime protocol
             // capability after installing its exact Go argv boundary.
             structured_go_test_json: false,

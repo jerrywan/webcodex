@@ -38,6 +38,7 @@ async fn fast_cargo_test_require_tests_rejects_ignored_only_and_records_failed_s
                         session_id: Some(session_id),
                         cwd: None,
                         filter: Some("focused".to_string()),
+                        lib: None,
                         all_targets: None,
                         all_features: None,
                         no_default_features: None,
@@ -138,6 +139,7 @@ async fn handoff_cargo_test_count_gap_preserves_completed_job_and_inconclusive_s
             structured_validation_argv: true,
             structured_cargo_test_count_assertion: true,
             structured_cargo_test_execution_policy: true,
+            structured_cargo_test_lib: true,
             ..Default::default()
         },
     )
@@ -159,6 +161,7 @@ async fn handoff_cargo_test_count_gap_preserves_completed_job_and_inconclusive_s
                         session_id: Some(session_id),
                         cwd: None,
                         filter: Some("focused".to_string()),
+                        lib: Some(true),
                         all_targets: None,
                         all_features: None,
                         no_default_features: None,
@@ -176,6 +179,11 @@ async fn handoff_cargo_test_count_gap_preserves_completed_job_and_inconclusive_s
         }
     });
     let (request, job_id) = poll_start_validation_job(&runtime, client_id).await;
+    let steps: Vec<crate::runner_protocol::ShellJobValidationStep> =
+        serde_json::from_str(&request.command).expect("validation Job steps");
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].program, "cargo");
+    assert!(steps[0].args.iter().any(|arg| arg == "--lib"));
     let validation = request
         .job_context
         .as_ref()
@@ -300,6 +308,7 @@ async fn cargo_test_minimum_misassertion_then_sufficient_same_target_is_non_bloc
                             session_id: Some(session_id),
                             cwd: None,
                             filter: Some("focused".to_string()),
+                            lib: None,
                             all_targets: None,
                             all_features: None,
                             no_default_features: None,
@@ -486,6 +495,7 @@ async fn durable_cargo_test_explicit_zero_opt_out_survives_job_reconciliation() 
                         session_id: Some(session_id),
                         cwd: None,
                         filter: Some("focused".to_string()),
+                        lib: None,
                         all_targets: None,
                         all_features: None,
                         no_default_features: None,

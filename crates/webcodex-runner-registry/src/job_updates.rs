@@ -1038,6 +1038,19 @@ impl RunnerRegistry {
                 client_id
             ));
         }
+        if validation_steps.iter().any(|step| {
+            step.program == "cargo"
+                && step.args.first().is_some_and(|arg| arg == "test")
+                && step.args.iter().any(|arg| arg == "--lib")
+        }) && !runner
+            .runner_features
+            .supports(RunnerFeature::StructuredCargoTestLib)
+        {
+            return Err(format!(
+                "structured_cargo_test_lib_unavailable: runner {} does not support Cargo test --lib validation argv",
+                client_id
+            ));
+        }
         if validation_steps
             .iter()
             .any(webcodex_core::runner_protocol::ShellJobValidationStep::is_structured_go_test_json)

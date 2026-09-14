@@ -396,6 +396,7 @@ async fn finish_coding_task_validation_available_when_ledger_has_validation_even
                         session_id: Some(session_id),
                         cwd: None,
                         filter: None,
+                        lib: None,
                         all_targets: None,
                         all_features: None,
                         no_default_features: None,

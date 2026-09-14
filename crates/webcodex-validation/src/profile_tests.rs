@@ -62,12 +62,71 @@ fn rust_profile_selects_cargo_test_adapter_and_preserves_command() {
             .unwrap(),
         "cargo test 'tool_runtime'"
     );
+    assert_eq!(
+        adapter
+            .build_command(ValidationCommandOptions {
+                lib: Some(true),
+                ..ValidationCommandOptions::default()
+            })
+            .unwrap(),
+        "cargo test --lib"
+    );
+    assert_eq!(
+        adapter
+            .build_command(ValidationCommandOptions {
+                lib: Some(false),
+                ..ValidationCommandOptions::default()
+            })
+            .unwrap(),
+        adapter
+            .build_command(ValidationCommandOptions::default())
+            .unwrap()
+    );
+    assert_eq!(
+        adapter
+            .build_command(ValidationCommandOptions {
+                lib: Some(true),
+                all_targets: Some(true),
+                no_run: Some(true),
+                ..ValidationCommandOptions::default()
+            })
+            .unwrap(),
+        "cargo test --lib --all-targets --no-run"
+    );
     assert!(adapter
         .build_command(ValidationCommandOptions {
             go_packages: Some(vec!["./pkg".to_string()]),
             ..ValidationCommandOptions::default()
         })
         .is_err());
+}
+
+#[test]
+fn cargo_test_lib_audit_and_identity_canonicalize_false_to_omission() {
+    let omitted = session_log_arguments_for_tool_request(
+        "cargo_test",
+        &serde_json::json!({"project": "agent:test:demo"}),
+    );
+    let explicit_false = session_log_arguments_for_tool_request(
+        "cargo_test",
+        &serde_json::json!({"project": "agent:test:demo", "lib": false}),
+    );
+    let explicit_true = session_log_arguments_for_tool_request(
+        "cargo_test",
+        &serde_json::json!({"project": "agent:test:demo", "lib": true}),
+    );
+
+    assert_eq!(
+        omitted["validation_target_id"],
+        explicit_false["validation_target_id"]
+    );
+    assert!(omitted.get("lib").is_none());
+    assert!(explicit_false.get("lib").is_none());
+    assert_eq!(explicit_true["lib"], true);
+    assert_ne!(
+        omitted["validation_target_id"],
+        explicit_true["validation_target_id"]
+    );
 }
 
 #[test]

@@ -332,6 +332,12 @@ fn cargo_test_schema_explains_execution_proof_policy() {
     assert!(filter.contains("cargo test FILTER"), "{filter}");
     assert!(filter.contains("--exact"), "{filter}");
     assert!(filter.contains("full qualified name"), "{filter}");
+    let lib = &properties["lib"];
+    assert_eq!(lib["type"], "boolean");
+    let lib_description = lib["description"].as_str().unwrap_or_default();
+    assert!(lib_description.contains("--lib"), "{lib_description}");
+    assert!(lib_description.contains("Omission"), "{lib_description}");
+    assert!(lib_description.contains("false"), "{lib_description}");
     let require_tests = properties["require_tests"]["description"]
         .as_str()
         .unwrap_or_default();
@@ -361,6 +367,8 @@ fn cargo_test_schema_explains_execution_proof_policy() {
     assert!(spec.description.contains("no_run=true is compile-only"));
     assert!(spec.description.contains("Rust substring"));
     assert!(spec.description.contains("--exact"));
+    assert!(spec.description.contains("lib=true"));
+    assert!(spec.description.contains("--lib"));
     assert!(spec
         .description
         .contains("zero-test results are not validation proof"));

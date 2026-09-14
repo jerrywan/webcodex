@@ -1042,6 +1042,8 @@ pub enum ToolCall {
         #[serde(default)]
         filter: Option<String>,
         #[serde(default)]
+        lib: Option<bool>,
+        #[serde(default)]
         all_targets: Option<bool>,
         #[serde(default)]
         all_features: Option<bool>,
@@ -2741,7 +2743,25 @@ impl ToolCall {
             );
         }
         let recorder_metadata = ToolCallRecorderMetadata::from_business_arguments(&arguments);
-        let arguments = strip_tool_call_expectation_metadata(arguments);
+        let mut arguments = strip_tool_call_expectation_metadata(arguments);
+        if name == "tool_manifest" {
+            if let Some(object) = arguments.as_object_mut() {
+                if !object.contains_key("include_recommended_flows") {
+                    let exact_lookup = object.contains_key("tool_name");
+                    object.insert(
+                        "include_recommended_flows".to_string(),
+                        Value::Bool(!exact_lookup),
+                    );
+                }
+            }
+        }
+        if name == "cargo_test" {
+            if let Some(object) = arguments.as_object_mut() {
+                if object.get("lib").and_then(Value::as_bool) == Some(false) {
+                    object.remove("lib");
+                }
+            }
+        }
         if name == "read_project_artifact"
             && arguments
                 .as_object()

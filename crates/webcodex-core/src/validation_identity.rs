@@ -134,7 +134,7 @@ pub fn structured_validation_target_identity(
             let filter = normalized_rust_test_target_filter(obj.get("filter"))?;
             let features = normalized_cargo_target_value(obj.get("features"))?;
             let package = normalized_cargo_target_value(obj.get("package"))?;
-            serde_json::json!({
+            let mut semantic = serde_json::json!({
                 "tool": tool_name,
                 "kind": "test",
                 "cwd": cwd,
@@ -145,7 +145,11 @@ pub fn structured_validation_target_identity(
                 "all_features": obj.get("all_features").and_then(Value::as_bool).unwrap_or(false),
                 "no_default_features": obj.get("no_default_features").and_then(Value::as_bool).unwrap_or(false),
                 "no_run": obj.get("no_run").and_then(Value::as_bool).unwrap_or(false),
-            })
+            });
+            if obj.get("lib").and_then(Value::as_bool) == Some(true) {
+                semantic["lib"] = Value::Bool(true);
+            }
+            semantic
         }
         ToolValidationIdentityKind::GoTest => {
             if obj.get("packages_present").and_then(Value::as_bool) == Some(true)

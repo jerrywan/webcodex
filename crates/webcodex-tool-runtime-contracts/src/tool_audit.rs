@@ -143,6 +143,9 @@ fn typed_structured_validation_request_audit(
                     "timeout_secs",
                 ],
             );
+            if obj.get("lib").and_then(Value::as_bool) == Some(true) {
+                out.insert("lib".to_string(), Value::Bool(true));
+            }
             out.insert(
                 "filter_present".to_string(),
                 Value::Bool(
@@ -1200,6 +1203,7 @@ fn canonical_cargo_validation_target(
             let mut all_features = false;
             let mut no_default_features = false;
             let mut no_run = false;
+            let mut lib = false;
             let mut index = 0;
             while index < rest.len() {
                 let arg = &rest[index];
@@ -1218,6 +1222,7 @@ fn canonical_cargo_validation_target(
                         continue;
                     }
                     "--all-targets" if !all_targets => all_targets = true,
+                    "--lib" if is_test && !lib => lib = true,
                     "--all-features" if !all_features => all_features = true,
                     "--no-default-features" if !no_default_features => no_default_features = true,
                     "--no-run" if is_test && !no_run => no_run = true,
@@ -1256,6 +1261,9 @@ fn canonical_cargo_validation_target(
                     None => None,
                 };
                 input.insert("filter".to_string(), serde_json::json!(filter));
+                if lib {
+                    input.insert("lib".to_string(), Value::Bool(true));
+                }
                 input.insert("no_run".to_string(), Value::Bool(no_run));
                 "cargo_test"
             } else {
@@ -3540,6 +3548,7 @@ impl ToolCall {
                 project,
                 cwd,
                 filter,
+                lib,
                 all_targets,
                 all_features,
                 no_default_features,
@@ -3557,6 +3566,7 @@ impl ToolCall {
                     "project": project,
                     "cwd": cwd,
                     "filter": filter,
+                    "lib": lib,
                     "all_targets": all_targets,
                     "all_features": all_features,
                     "no_default_features": no_default_features,

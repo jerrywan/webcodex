@@ -577,6 +577,7 @@ impl ToolRuntime {
                     cwd,
                     check: true,
                     filter: None,
+                    lib: None,
                     all_targets: None,
                     all_features: None,
                     no_default_features: None,
@@ -683,6 +684,7 @@ impl ToolRuntime {
                 cwd,
                 check: false,
                 filter: None,
+                lib: None,
                 all_targets,
                 all_features,
                 no_default_features,
@@ -721,6 +723,7 @@ impl ToolRuntime {
             project,
             cwd,
             filter,
+            None,
             all_targets,
             all_features,
             no_default_features,
@@ -744,6 +747,7 @@ impl ToolRuntime {
         project: String,
         cwd: Option<String>,
         filter: Option<String>,
+        lib: Option<bool>,
         all_targets: Option<bool>,
         all_features: Option<bool>,
         no_default_features: Option<bool>,
@@ -762,6 +766,7 @@ impl ToolRuntime {
             project,
             cwd,
             filter,
+            lib,
             all_targets,
             all_features,
             no_default_features,
@@ -785,6 +790,7 @@ impl ToolRuntime {
         project: String,
         cwd: Option<String>,
         filter: Option<String>,
+        lib: Option<bool>,
         all_targets: Option<bool>,
         all_features: Option<bool>,
         no_default_features: Option<bool>,
@@ -810,6 +816,7 @@ impl ToolRuntime {
                 cwd,
                 check: false,
                 filter,
+                lib,
                 all_targets,
                 all_features,
                 no_default_features,
@@ -858,6 +865,7 @@ impl ToolRuntime {
                 cwd,
                 check: false,
                 filter: None,
+                lib: None,
                 all_targets: None,
                 all_features: None,
                 no_default_features: None,
@@ -920,6 +928,7 @@ impl ToolRuntime {
                 "cwd": cwd.as_deref(),
                 "check": request.check,
                 "filter": request.filter.as_deref(),
+                "lib": request.lib,
                 "all_targets": request.all_targets,
                 "all_features": request.all_features,
                 "no_default_features": request.no_default_features,
@@ -934,6 +943,7 @@ impl ToolRuntime {
         let options = ValidationCommandOptions {
             check: request.check,
             filter: request.filter,
+            lib: request.lib,
             all_targets: request.all_targets,
             all_features: request.all_features,
             no_default_features: request.no_default_features,
@@ -1627,6 +1637,7 @@ struct ValidationRunRequest<'a> {
     cwd: Option<String>,
     check: bool,
     filter: Option<String>,
+    lib: Option<bool>,
     all_targets: Option<bool>,
     all_features: Option<bool>,
     no_default_features: Option<bool>,
@@ -1702,6 +1713,9 @@ fn validation_step(
                 {
                     args.push(normalized);
                 }
+            }
+            if options.lib.unwrap_or(false) {
+                args.push("--lib".to_string());
             }
             if options.all_targets.unwrap_or(false) {
                 args.push("--all-targets".to_string());
@@ -1939,6 +1953,7 @@ mod structured_cargo_arg_parity_tests {
                 "cargo_test",
                 ValidationCommandOptions {
                     filter: Some("  module::nested::test  ".to_string()),
+                    lib: Some(true),
                     all_targets: Some(true),
                     all_features: Some(true),
                     no_default_features: Some(true),
@@ -1966,6 +1981,14 @@ mod structured_cargo_arg_parity_tests {
                     sync.contains("module::nested::test"),
                     "cargo_test sync missing normalized filter: {sync}"
                 );
+                assert!(
+                    sync.contains("--lib"),
+                    "cargo_test sync missing --lib: {sync}"
+                );
+                assert!(
+                    sync.contains("--all-targets") && sync.contains("--no-run"),
+                    "cargo_test sync must preserve native lib/all-targets/no-run composition: {sync}"
+                );
             }
 
             // Job path: validation_step writes normalized values into the
@@ -1990,9 +2013,31 @@ mod structured_cargo_arg_parity_tests {
                     step.args.iter().any(|arg| arg == "module::nested::test"),
                     "cargo_test job argv must contain the normalized filter: {joined:?}"
                 );
+                assert!(step.args.iter().any(|arg| arg == "--lib"));
+                assert!(step.args.iter().any(|arg| arg == "--all-targets"));
+                assert!(step.args.iter().any(|arg| arg == "--no-run"));
             }
             assert!(step.is_canonical(), "{tool_name} step must be canonical");
         }
+    }
+
+    #[test]
+    fn cargo_test_lib_false_and_omission_are_command_equivalent() {
+        let adapter = validation_adapter_for_tool("cargo_test").unwrap();
+        let omitted = ValidationCommandOptions::default();
+        let explicit_false = ValidationCommandOptions {
+            lib: Some(false),
+            ..ValidationCommandOptions::default()
+        };
+
+        assert_eq!(
+            adapter.build_command(omitted.clone()).unwrap(),
+            adapter.build_command(explicit_false.clone()).unwrap()
+        );
+        let omitted_step = validation_step("cargo_test", &omitted).unwrap();
+        let false_step = validation_step("cargo_test", &explicit_false).unwrap();
+        assert_eq!(omitted_step.args, false_step.args);
+        assert!(!omitted_step.args.iter().any(|arg| arg == "--lib"));
     }
 
     #[test]
