@@ -1275,7 +1275,7 @@ fn persist_payload(
     )
 }
 
-fn capture_payload_for_trace(trace_id: &str, phase: &str, value: &Value) {
+fn capture_owned_payload_for_trace(trace_id: &str, phase: &str, value: Value) {
     if !full_trace_enabled() {
         return;
     }
@@ -1283,13 +1283,20 @@ fn capture_payload_for_trace(trace_id: &str, phase: &str, value: &Value) {
         TraceWrite::Payload {
             trace_id: trace_id.to_string(),
             phase: phase.to_string(),
-            value: value.clone(),
+            value,
             event: base_event(trace_id, "tool_trace_payload_captured"),
             config: trace_store_config(),
         },
         trace_id,
         phase,
     );
+}
+
+fn capture_payload_for_trace(trace_id: &str, phase: &str, value: &Value) {
+    if !full_trace_enabled() {
+        return;
+    }
+    capture_owned_payload_for_trace(trace_id, phase, value.clone());
 }
 
 fn correlations() -> &'static Mutex<TraceCorrelations> {
@@ -1351,7 +1358,7 @@ pub(crate) fn record_runner_request_enqueued<T: Serialize>(
     };
     if full_trace_enabled() {
         match serde_json::to_value(request_payload) {
-            Ok(value) => capture_payload_for_trace(&trace_id, "runner_request", &value),
+            Ok(value) => capture_owned_payload_for_trace(&trace_id, "runner_request", value),
             Err(error) => tracing::warn!(
                 event = "tool_trace_capture_failed",
                 server_trace_id = %trace_id,
@@ -1457,8 +1464,8 @@ pub(crate) fn capture_runner_result<T: Serialize>(request_id: &str, payload: &T)
     }
     match serde_json::to_value(payload) {
         Ok(value) => {
-            let value = runner_result_trace_payload(&correlation.runner_kind, &value);
-            capture_payload_for_trace(&correlation.trace_id, "runner_result", &value)
+            let value = runner_result_trace_payload(&correlation.runner_kind, value);
+            capture_owned_payload_for_trace(&correlation.trace_id, "runner_result", value)
         }
         Err(error) => tracing::warn!(
             event = "tool_trace_capture_failed",
@@ -1470,9 +1477,9 @@ pub(crate) fn capture_runner_result<T: Serialize>(request_id: &str, payload: &T)
     }
 }
 
-fn runner_result_trace_payload(kind: &str, payload: &Value) -> Value {
+fn runner_result_trace_payload(kind: &str, payload: Value) -> Value {
     if kind != "ssh_resource" {
-        return payload.clone();
+        return payload;
     }
     let result = payload.get("result");
     json!({
@@ -1525,7 +1532,9 @@ pub(crate) fn capture_runner_job_update<T: Serialize>(
         return;
     }
     match serde_json::to_value(payload) {
-        Ok(value) => capture_payload_for_trace(&correlation.trace_id, "runner_job_update", &value),
+        Ok(value) => {
+            capture_owned_payload_for_trace(&correlation.trace_id, "runner_job_update", value)
+        }
         Err(error) => tracing::warn!(
             event = "tool_trace_capture_failed",
             server_trace_id = %correlation.trace_id,
@@ -1645,8 +1654,7 @@ impl ToolRequestLifecycle {
         F: FnOnce() -> Value,
     {
         if self.full_enabled() && !self.suppress_payload_capture {
-            let value = build();
-            capture_payload_for_trace(&self.trace_id, phase, &value);
+            capture_owned_payload_for_trace(&self.trace_id, phase, build());
         }
     }
 
@@ -3038,7 +3046,7 @@ mod tests {
             },
             "command_execution_state": "completed"
         });
-        let sanitized = runner_result_trace_payload("ssh_resource", &payload);
+        let sanitized = runner_result_trace_payload("ssh_resource", payload.clone());
         let serialized = serde_json::to_string(&sanitized).unwrap();
         assert!(!serialized.contains(target));
         assert_eq!(sanitized["kind"], "ssh_resource");
@@ -3048,7 +3056,7 @@ mod tests {
         assert_eq!(sanitized["exit_code"], 0);
 
         assert_eq!(
-            runner_result_trace_payload("run_process", &payload),
+            runner_result_trace_payload("run_process", payload.clone()),
             payload
         );
     }
