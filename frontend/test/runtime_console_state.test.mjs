@@ -667,6 +667,9 @@ test("project-scoped window activity contracts maintain separation, fencing, and
   assert.match(fetchProjWindows, /isCurrentRuntimeProjectWindowsRequest\(state, request\)/);
   assert.match(fetchProjWindows, /response\.status === 403[\s\S]*projectWindowAvailability = "unavailable"/);
   assert.doesNotMatch(fetchProjWindows, /response\.status === 403[\s\S]*lock\(/);
+  assert.match(fetchProjWindows, /!response[\s\S]*projectWindowAvailability = "stale"/);
+  assert.match(fetchProjWindows, /!response\.ok \|\| !response\.data[\s\S]*projectWindowAvailability = "stale"/);
+  assert.match(source, /function projectWindowActiveCount\(\)[\s\S]*projectWindowAvailability !== "available"[\s\S]*return 0/);
 
   // Global windows fetch contract remains decoupled (limit 100, no project scope)
   const refreshWindowsStart = source.indexOf("async function refreshWindows");

@@ -230,7 +230,7 @@ let selectedWindowDetail: any | null = null;
 const PROJECT_WINDOW_LIMIT = 10;
 let projectWindowsAbort: AbortController | null = null;
 let projectWindowRows: any[] = [];
-let projectWindowAvailability: "idle" | "loading" | "available" | "unavailable" = "idle";
+let projectWindowAvailability: "idle" | "available" | "stale" | "unavailable" = "idle";
 let projectWindowTruncated = false;
 let projectWindowTotal = 0;
 let projectWindowProjectId = "";
@@ -937,6 +937,7 @@ function renderSessionWindowCorrelation(detail: any): void {
 }
 
 function projectWindowActiveCount(): number {
+  if (projectWindowAvailability !== "available") return 0;
   return projectWindowRows.reduce((sum, w) => sum + Math.max(0, Number(w?.active_count || 0)), 0);
 }
 
@@ -968,7 +969,9 @@ function renderProjectWindows(): void {
   setText("runtime-project-windows-count", String(count));
   setText(
     "runtime-project-windows-status",
-    formatProjectWindowStatusText(count, projectWindowTotal, projectWindowTruncated, runtimeLanguage)
+    projectWindowAvailability === "stale"
+      ? tr(count > 0 ? "Refresh failed · showing previous data" : "refresh unavailable")
+      : formatProjectWindowStatusText(count, projectWindowTotal, projectWindowTruncated, runtimeLanguage)
   );
   show("runtime-project-windows-empty", count === 0 && projectWindowAvailability === "available");
 
@@ -998,7 +1001,14 @@ async function fetchProjectWindows(request: any): Promise<boolean> {
   projectWindowsAbort = controller;
   const response = await api("windows", { project: request.project, limit: PROJECT_WINDOW_LIMIT }, controller.signal);
   if (projectWindowsAbort === controller) projectWindowsAbort = null;
-  if (!response || !isCurrentRuntimeProjectWindowsRequest(state, request)) return false;
+  if (!isCurrentRuntimeProjectWindowsRequest(state, request)) return false;
+  if (!response) {
+    projectWindowAvailability = "stale";
+    projectWindowProjectId = request.project;
+    renderProjectWindows();
+    renderProjectSelectors(projectRows, projectRowsTruncated);
+    return false;
+  }
   if (response.status === 401) {
     lock("Credential rejected.");
     return false;
@@ -1014,6 +1024,10 @@ async function fetchProjectWindows(request: any): Promise<boolean> {
     return false;
   }
   if (!response.ok || !response.data) {
+    projectWindowAvailability = "stale";
+    projectWindowProjectId = request.project;
+    renderProjectWindows();
+    renderProjectSelectors(projectRows, projectRowsTruncated);
     return false;
   }
   projectWindowRows = Array.isArray(response.data.windows) ? response.data.windows : [];

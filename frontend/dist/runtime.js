@@ -4009,6 +4009,8 @@ function renderSessionWindowCorrelation(detail) {
     renderWindowActivities(el("runtime-recorder-gap-activity"), gaps, true);
 }
 function projectWindowActiveCount() {
+    if (projectWindowAvailability !== "available")
+        return 0;
     return projectWindowRows.reduce((sum, w) => sum + Math.max(0, Number(w?.active_count || 0)), 0);
 }
 function clearProjectWindows() {
@@ -4035,7 +4037,9 @@ function renderProjectWindows() {
     show("runtime-project-windows-unavailable", false);
     const count = projectWindowRows.length;
     setText("runtime-project-windows-count", String(count));
-    setText("runtime-project-windows-status", formatProjectWindowStatusText(count, projectWindowTotal, projectWindowTruncated, runtimeLanguage));
+    setText("runtime-project-windows-status", projectWindowAvailability === "stale"
+        ? tr(count > 0 ? "Refresh failed · showing previous data" : "refresh unavailable")
+        : formatProjectWindowStatusText(count, projectWindowTotal, projectWindowTruncated, runtimeLanguage));
     show("runtime-project-windows-empty", count === 0 && projectWindowAvailability === "available");
     const signature = renderFingerprint([
         runtimeLanguage,
@@ -4057,8 +4061,15 @@ async function fetchProjectWindows(request) {
     const response = await api("windows", { project: request.project, limit: PROJECT_WINDOW_LIMIT }, controller.signal);
     if (projectWindowsAbort === controller)
         projectWindowsAbort = null;
-    if (!response || !isCurrentRuntimeProjectWindowsRequest(state, request))
+    if (!isCurrentRuntimeProjectWindowsRequest(state, request))
         return false;
+    if (!response) {
+        projectWindowAvailability = "stale";
+        projectWindowProjectId = request.project;
+        renderProjectWindows();
+        renderProjectSelectors(projectRows, projectRowsTruncated);
+        return false;
+    }
     if (response.status === 401) {
         lock("Credential rejected.");
         return false;
@@ -4074,6 +4085,10 @@ async function fetchProjectWindows(request) {
         return false;
     }
     if (!response.ok || !response.data) {
+        projectWindowAvailability = "stale";
+        projectWindowProjectId = request.project;
+        renderProjectWindows();
+        renderProjectSelectors(projectRows, projectRowsTruncated);
         return false;
     }
     projectWindowRows = Array.isArray(response.data.windows) ? response.data.windows : [];
