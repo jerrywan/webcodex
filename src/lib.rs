@@ -27,6 +27,7 @@ mod db;
 mod host_console_http;
 mod job_observation;
 mod job_receipts;
+mod json_measurement;
 mod mcp;
 mod mcp_gateway;
 mod model_surface;

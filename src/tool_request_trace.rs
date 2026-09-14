@@ -249,11 +249,11 @@ pub fn jsonrpc_id_safe(id: Option<&serde_json::Value>) -> String {
 ///
 /// Returns `None` when tracing is disabled so callers never pay for a size-only
 /// serialization of the response body.
-pub fn estimate_json_bytes(value: &serde_json::Value) -> Option<usize> {
+pub fn estimate_json_bytes<T: serde::Serialize + ?Sized>(value: &T) -> Option<usize> {
     if !tool_request_trace_enabled() {
         return None;
     }
-    serde_json::to_vec(value).ok().map(|bytes| bytes.len())
+    crate::json_measurement::serialized_json_len(value).ok()
 }
 
 fn now_ts() -> i64 {
@@ -1994,10 +1994,22 @@ mod tests {
     #[test]
     fn estimate_json_bytes_is_none_when_trace_disabled() {
         let mut env = crate::test_support::TestEnvGuard::new();
+        let calls = AtomicUsize::new(0);
+        let measured = CountingSerialize {
+            calls: &calls,
+            value: json!({"escaped": "line\n\"quoted\"", "unicode": "你好"}),
+        };
+
         env.remove("WEBCODEX_TOOL_REQUEST_TRACE");
-        assert!(estimate_json_bytes(&json!({"a": 1})).is_none());
+        assert!(estimate_json_bytes(&measured).is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
         env.set("WEBCODEX_TOOL_REQUEST_TRACE", "true");
-        assert!(estimate_json_bytes(&json!({"a": 1})).is_some());
+        assert_eq!(
+            estimate_json_bytes(&measured),
+            Some(serde_json::to_vec(&measured.value).unwrap().len())
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
         env.remove("WEBCODEX_TOOL_REQUEST_TRACE");
     }
 
