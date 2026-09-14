@@ -865,6 +865,20 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                     "execution_state",
                     process_execution_state_schema(),
                 ),
+                (
+                    "execution_success",
+                    schema_type(
+                        "boolean",
+                        "Present only for an explicit public result expectation. True only when the process reached a completed known exit-0 result; independent from outer ToolResult success and from expectation_satisfied.",
+                    ),
+                ),
+                (
+                    "expectation_satisfied",
+                    schema_type(
+                        "boolean",
+                        "Present only for an explicit accepted_exit_codes/result_expectation declaration. Uses the canonical Workflow Session expectation classifier; true means the declared observation expectation matched without changing outer ToolResult success or command_ok.",
+                    ),
+                ),
             ];
             properties.extend(structured_continuation_properties());
             let mut schema = wrapped_output_schema(properties);

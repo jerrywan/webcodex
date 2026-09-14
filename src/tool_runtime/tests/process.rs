@@ -238,6 +238,202 @@ async fn dispatch_process_until_request(
     (task, request)
 }
 
+async fn dispatch_typed_process_until_request(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    arguments: serde_json::Value,
+    auth: crate::auth::AuthContext,
+) -> (
+    tokio::task::JoinHandle<ToolResult>,
+    crate::runner_protocol::RunnerRequest,
+) {
+    let (call, metadata) =
+        ToolCall::from_tool_name_with_recorder_metadata("run_process", arguments).unwrap();
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .dispatch_with_auth_transport_options_and_metadata(
+                    call,
+                    Some(&auth),
+                    crate::tool_runtime::sessions::SessionTransport::Mcp,
+                    metadata,
+                )
+                .await
+        }
+    });
+    let request = wait_for_patch_agent_request(runtime, client_id).await;
+    (task, request)
+}
+
+fn typed_process_arguments(project: &str) -> serde_json::Value {
+    json!({
+        "project": project,
+        "executable": "argv-helper",
+        "args": ["probe"],
+        "timeout_secs": 30,
+        "sync_wait_secs": 30,
+        "purpose": "diagnostic"
+    })
+}
+
+#[tokio::test]
+async fn run_process_projects_explicit_expectation_truth_without_changing_execution_truth() {
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = test_runtime();
+    let client_id = "process-expectation-presentation";
+    let project = register_process_agent(&runtime, client_id, temp.path(), true).await;
+    let auth = auth_context(None, true);
+
+    for (label, expectation, exit_code, expected_success, expected_satisfied) in [
+        (
+            "accepted nonzero",
+            json!({"accepted_exit_codes": [0, 1]}),
+            1,
+            false,
+            true,
+        ),
+        (
+            "accepted mismatch",
+            json!({"accepted_exit_codes": [0, 1]}),
+            2,
+            false,
+            false,
+        ),
+        (
+            "accepted zero",
+            json!({"accepted_exit_codes": [0, 1]}),
+            0,
+            true,
+            true,
+        ),
+        (
+            "observe nonzero",
+            json!({"result_expectation": "observe"}),
+            1,
+            false,
+            true,
+        ),
+    ] {
+        let mut arguments = typed_process_arguments(&project);
+        arguments
+            .as_object_mut()
+            .unwrap()
+            .extend(expectation.as_object().unwrap().clone());
+        let (task, request) =
+            dispatch_typed_process_until_request(&runtime, client_id, arguments, auth.clone())
+                .await;
+        complete_process_lifecycle(
+            &runtime,
+            client_id,
+            request.request_id,
+            ShellCommandExecutionState::Completed,
+            Some(exit_code),
+            "",
+            "",
+            None,
+        )
+        .await;
+        let result = task.await.unwrap();
+        assert_eq!(result.success, expected_success, "{label}");
+        assert_eq!(
+            result.output["execution_success"],
+            exit_code == 0,
+            "{label}: {}",
+            result.output
+        );
+        assert_eq!(
+            result.output["expectation_satisfied"], expected_satisfied,
+            "{label}: {}",
+            result.output
+        );
+        let schema = crate::tool_runtime::registry::output_schema_for_tool("run_process");
+        let instance = json!({
+            "success": result.success,
+            "output": result.output.clone(),
+            "error": result.error.clone(),
+        });
+        crate::tool_runtime::startup_brief::validate_schema_instance_for_test(&instance, &schema)
+            .unwrap_or_else(|error| panic!("{label} immediate result schema mismatch: {error}"));
+        if exit_code != 0 {
+            assert_eq!(result.output["command_ok"], false, "{label}");
+            assert_eq!(
+                result.output["failure_kind"], "command_exit_nonzero",
+                "{label}"
+            );
+        }
+        let serialized = serde_json::to_string(&result).unwrap();
+        assert!(!serialized.contains("accepted_exit_codes"), "{label}");
+        assert!(!serialized.contains("result_expectation"), "{label}");
+    }
+
+    let (task, request) = dispatch_typed_process_until_request(
+        &runtime,
+        client_id,
+        typed_process_arguments(&project),
+        auth.clone(),
+    )
+    .await;
+    complete_process_lifecycle(
+        &runtime,
+        client_id,
+        request.request_id,
+        ShellCommandExecutionState::Completed,
+        Some(1),
+        "",
+        "",
+        None,
+    )
+    .await;
+    let ordinary = task.await.unwrap();
+    assert!(!ordinary.success);
+    assert!(ordinary.output.get("execution_success").is_none());
+    assert!(ordinary.output.get("expectation_satisfied").is_none());
+}
+
+#[tokio::test]
+async fn run_process_expectation_projection_fails_closed_for_unknown_and_timeout() {
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = test_runtime();
+    let client_id = "process-expectation-fail-closed";
+    let project = register_process_agent(&runtime, client_id, temp.path(), true).await;
+    let auth = auth_context(None, true);
+
+    for (label, state, error) in [
+        (
+            "outcome unknown",
+            ShellCommandExecutionState::OutcomeUnknown,
+            "process result lost after spawn",
+        ),
+        (
+            "timeout",
+            ShellCommandExecutionState::TimedOut,
+            "process timed out",
+        ),
+    ] {
+        let mut arguments = typed_process_arguments(&project);
+        arguments["accepted_exit_codes"] = json!([0, 1]);
+        let (task, request) =
+            dispatch_typed_process_until_request(&runtime, client_id, arguments, auth.clone())
+                .await;
+        complete_process_lifecycle(
+            &runtime,
+            client_id,
+            request.request_id,
+            state,
+            None,
+            "",
+            "",
+            Some(error),
+        )
+        .await;
+        let result = task.await.unwrap();
+        assert!(!result.success, "{label}");
+        assert_eq!(result.output["execution_success"], false, "{label}");
+        assert_eq!(result.output["expectation_satisfied"], false, "{label}");
+    }
+}
+
 #[tokio::test]
 async fn run_process_enqueues_only_typed_argv_and_reports_completed_exit_codes() {
     let temp = tempfile::tempdir().unwrap();

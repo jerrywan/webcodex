@@ -485,6 +485,45 @@ pub(super) fn actual_failure_kind_for_tool_result(
         .or_else(|| error_kind.map(bound_summary_string))
 }
 
+fn known_business_result(actual_failure_kind: Option<&str>, output: &Value) -> bool {
+    let completed = output.get("command_completed").and_then(Value::as_bool) == Some(true)
+        || output.get("execution_state").and_then(Value::as_str) == Some("completed");
+    completed
+        && output.get("tool_failure").and_then(Value::as_bool) != Some(true)
+        && !matches!(
+            actual_failure_kind,
+            Some("outcome_unknown" | "timeout" | "timed_out" | "cancelled" | "execution_lost")
+        )
+}
+
+/// Project one explicit public result expectation onto a terminal ToolResult
+/// without changing its raw success/failure semantics. The durable Session
+/// classifier remains the single source of expectation matching truth.
+pub fn public_result_expectation_satisfied(
+    success: bool,
+    expectation: &ToolCallExpectation,
+    output: &Value,
+    error: Option<&str>,
+    error_kind: Option<&str>,
+) -> Option<bool> {
+    if expectation.result_expectation.is_none() && expectation.accepted_exit_codes.is_empty() {
+        return None;
+    }
+    let actual_failure_kind = actual_failure_kind_for_tool_result(output, error, error_kind);
+    let classification =
+        classify_failure_expectation(success, expectation, actual_failure_kind.as_deref(), output);
+    match classification {
+        TOOL_EXPECTATION_RESULT_MATCHED | TOOL_EXPECTATION_RESULT_MATCHED_RESULT => Some(true),
+        TOOL_EXPECTATION_RESULT_NONE
+            if success && known_business_result(actual_failure_kind.as_deref(), output) =>
+        {
+            Some(true)
+        }
+        TOOL_EXPECTATION_RESULT_NONE => None,
+        _ => Some(false),
+    }
+}
+
 pub(super) fn classify_failure_expectation(
     success: bool,
     expectation: &ToolCallExpectation,
@@ -500,17 +539,10 @@ pub(super) fn classify_failure_expectation(
     if pending_job {
         return TOOL_EXPECTATION_RESULT_NONE;
     }
-    let completed = output.get("command_completed").and_then(Value::as_bool) == Some(true)
-        || output.get("execution_state").and_then(Value::as_str) == Some("completed");
     // A completed nonzero command is an authoritative business result. Explicit
     // tool/control failures remain fail-closed even if malformed output also
     // claims completion.
-    let known_business_result = completed
-        && output.get("tool_failure").and_then(Value::as_bool) != Some(true)
-        && !matches!(
-            actual_failure_kind,
-            Some("outcome_unknown" | "timeout" | "timed_out" | "cancelled" | "execution_lost")
-        );
+    let known_business_result = known_business_result(actual_failure_kind, output);
 
     if !expectation.accepted_exit_codes.is_empty() {
         let Some(exit_code) = output.get("exit_code").and_then(Value::as_i64) else {
@@ -1380,6 +1412,119 @@ mod result_expectation_tests {
             &json!({"accepted_exit_codes": [0, 1]}),
         )
         .is_err());
+    }
+
+    #[test]
+    fn public_result_expectation_projection_reuses_canonical_classifier() {
+        let accepted = ToolCallExpectation {
+            accepted_exit_codes: vec![0, 1],
+            ..Default::default()
+        };
+        for (success, exit_code, expected) in [(true, 0, true), (false, 1, true), (false, 2, false)]
+        {
+            let output = json!({
+                "command_completed": true,
+                "command_ok": exit_code == 0,
+                "execution_state": "completed",
+                "exit_code": exit_code,
+                "tool_failure": false,
+                "failure_kind": (exit_code != 0).then_some("command_exit_nonzero"),
+            });
+            assert_eq!(
+                public_result_expectation_satisfied(
+                    success,
+                    &accepted,
+                    &output,
+                    (!success).then_some("process exited nonzero"),
+                    None,
+                ),
+                Some(expected)
+            );
+        }
+
+        let observe = ToolCallExpectation {
+            result_expectation: Some("observe".to_string()),
+            ..Default::default()
+        };
+        let completed_nonzero = json!({
+            "command_completed": true,
+            "command_ok": false,
+            "execution_state": "completed",
+            "exit_code": 1,
+            "tool_failure": false,
+            "failure_kind": "command_exit_nonzero",
+        });
+        assert_eq!(
+            public_result_expectation_satisfied(
+                false,
+                &observe,
+                &completed_nonzero,
+                Some("process exited 1"),
+                None,
+            ),
+            Some(true)
+        );
+
+        for output in [
+            json!({
+                "command_completed": false,
+                "command_ok": false,
+                "execution_state": "outcome_unknown",
+                "exit_code": null,
+                "tool_failure": true,
+                "failure_kind": "outcome_unknown",
+            }),
+            json!({
+                "command_completed": false,
+                "command_ok": false,
+                "execution_state": "timed_out",
+                "exit_code": null,
+                "tool_failure": true,
+                "failure_kind": "timeout",
+            }),
+            json!({
+                "command_completed": false,
+                "command_ok": false,
+                "execution_state": "not_started",
+                "exit_code": null,
+                "tool_failure": true,
+                "failure_kind": "permission_denied",
+            }),
+        ] {
+            assert_eq!(
+                public_result_expectation_satisfied(
+                    false,
+                    &accepted,
+                    &output,
+                    Some("not a completed business result"),
+                    None,
+                ),
+                Some(false)
+            );
+        }
+        let pending = json!({
+            "job_id": "job_pending",
+            "command_completed": false,
+            "command_ok": false,
+            "execution_state": "running",
+            "exit_code": null,
+            "tool_failure": false,
+        });
+        assert_eq!(
+            public_result_expectation_satisfied(true, &accepted, &pending, None, None,),
+            None,
+            "pending work must keep expectation satisfaction unknown"
+        );
+        assert_eq!(
+            public_result_expectation_satisfied(
+                true,
+                &ToolCallExpectation::default(),
+                &completed_nonzero,
+                None,
+                None,
+            ),
+            None
+        );
     }
 
     #[test]
