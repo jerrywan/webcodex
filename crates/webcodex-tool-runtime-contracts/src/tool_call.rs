@@ -2756,6 +2756,17 @@ impl ToolCall {
                 }
             }
         }
+        if name == "cargo_fmt" {
+            if let Some(object) = arguments.as_object_mut() {
+                // Positive sync_wait_secs is a recognized caller-shape hint in
+                // ensure-format mode, but that mode is intentionally synchronous.
+                // Canonicalize the inert hint away before concrete ToolCall serde
+                // so execution/audit truth has one representation: omission.
+                if object.get("check").and_then(Value::as_bool) != Some(true) {
+                    object.remove("sync_wait_secs");
+                }
+            }
+        }
         if name == "read_project_artifact"
             && arguments
                 .as_object()

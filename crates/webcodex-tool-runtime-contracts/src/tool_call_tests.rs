@@ -677,6 +677,33 @@ fn structured_validation_sync_wait_parser_enforces_lifecycle_bounds() {
             .unwrap_or_else(|error| panic!("{name} valid sync wait should parse: {error}"));
     }
 
+    let check = ToolCall::from_tool_name(
+        "cargo_fmt",
+        json!({"project": "demo", "check": true, "timeout_secs": 60, "sync_wait_secs": 60}),
+    )
+    .unwrap();
+    assert!(matches!(
+        check,
+        ToolCall::CargoFmt {
+            check: Some(true),
+            sync_wait_secs: Some(60),
+            ..
+        }
+    ));
+    for arguments in [
+        json!({"project": "demo", "check": false, "timeout_secs": 60, "sync_wait_secs": 1}),
+        json!({"project": "demo", "timeout_secs": 60, "sync_wait_secs": 60}),
+    ] {
+        let ensure = ToolCall::from_tool_name("cargo_fmt", arguments).unwrap();
+        assert!(matches!(
+            ensure,
+            ToolCall::CargoFmt {
+                sync_wait_secs: None,
+                ..
+            }
+        ));
+    }
+
     for (name, arguments) in [
         (
             "cargo_check",
