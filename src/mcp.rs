@@ -242,6 +242,30 @@ fn log_mcp_computer_app_resource_outcome(
     );
 }
 
+struct JsonByteCounter(usize);
+
+impl std::io::Write for JsonByteCounter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.checked_add(buf.len()).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::OutOfMemory,
+                "serialized JSON length overflow",
+            )
+        })?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+pub(crate) fn serialized_json_len<T: serde::Serialize + ?Sized>(value: &T) -> Option<usize> {
+    let mut counter = JsonByteCounter(0);
+    serde_json::to_writer(&mut counter, value).ok()?;
+    Some(counter.0)
+}
+
 fn mcp_tools_list_audit_summary(
     result: &Value,
     protocol_era: McpProtocolEra,
@@ -249,8 +273,8 @@ fn mcp_tools_list_audit_summary(
     compact_schemas: bool,
 ) -> Option<Value> {
     let tools = result.get("tools")?.as_array()?;
-    let serialized_tools_bytes = serde_json::to_vec(&result["tools"]).ok()?.len() as u64;
-    let serialized_result_bytes = serde_json::to_vec(result).ok()?.len() as u64;
+    let serialized_tools_bytes = serialized_json_len(&result["tools"])? as u64;
+    let serialized_result_bytes = serialized_json_len(result)? as u64;
     let gateway_tool_included = tools.iter().any(|tool| {
         tool.get("name").and_then(Value::as_str) == Some(crate::mcp_gateway::MCP_TOOL_NAME)
     });

@@ -3,6 +3,26 @@ use super::*;
 // Durable model-ergonomics and MCP tool-surface measurement integration tests.
 // Keep these separate from the general HTTP transport lifecycle coverage.
 
+#[test]
+fn serialized_json_len_matches_buffered_json_for_exact_utf8_shapes() {
+    let cases = [
+        json!("quote=\" slash=\\ newline=\n tab=\t"),
+        json!("Unicode: 你好 🦀 café"),
+        json!({
+            "nested": [null, true, 42, {"escaped": "line\n\"quoted\""}],
+            "unicode": ["日本語", "🌍"]
+        }),
+        crate::mcp::tools::mcp_tools_list_payload_with_compact(ModelSurface::AdaptiveRuntime, true),
+    ];
+
+    for value in cases {
+        assert_eq!(
+            crate::mcp::serialized_json_len(&value),
+            Some(serde_json::to_vec(&value).unwrap().len())
+        );
+    }
+}
+
 // Local Coding is a fixed compatibility surface, so unset compact-schema config
 // retains the historical full outputSchema projection. Keep the env serialized
 // against other compact-schema tests for the whole HTTP request.
