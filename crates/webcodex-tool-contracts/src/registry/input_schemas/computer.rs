@@ -214,8 +214,8 @@ pub fn computer_snapshot_input_schema() -> Value {
                 },
                 "required": ["x", "y", "width", "height"]
             },
-            "max_width": {"type": "integer", "minimum": 1, "maximum": 4096, "description": "Optional upper bound on encoded output width. Never upscales."},
-            "max_height": {"type": "integer", "minimum": 1, "maximum": 4096, "description": "Optional upper bound on encoded output height. Never upscales."}
+            "max_width": {"type": "integer", "minimum": 1, "description": "Optional upper bound on encoded output width. Values above 4096 are clamped to 4096. Never upscales."},
+            "max_height": {"type": "integer", "minimum": 1, "description": "Optional upper bound on encoded output height. Values above 4096 are clamped to 4096. Never upscales."}
         },
         "required": ["client_id", "surface_id"]
     })
@@ -228,8 +228,8 @@ pub fn computer_snapshot_display_input_schema() -> Value {
         "properties": {
             "client_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Exact Runner client_id that produced the display_id."},
             "display_id": {"type": "string", "pattern": "^display_[0-9a-f]{32}$", "maxLength": 128, "description": "Fresh opaque process-local display_id returned by computer_list_displays."},
-            "max_width": {"type": "integer", "minimum": 1, "maximum": 4096, "description": "Optional upper bound on encoded output width. Never upscales."},
-            "max_height": {"type": "integer", "minimum": 1, "maximum": 4096, "description": "Optional upper bound on encoded output height. Never upscales."}
+            "max_width": {"type": "integer", "minimum": 1, "description": "Optional upper bound on encoded output width. Values above 4096 are clamped to 4096. Never upscales."},
+            "max_height": {"type": "integer", "minimum": 1, "description": "Optional upper bound on encoded output height. Values above 4096 are clamped to 4096. Never upscales."}
         },
         "required": ["client_id", "display_id"]
     })
@@ -271,8 +271,8 @@ pub fn computer_save_snapshot_input_schema() -> Value {
                 },
                 "required": ["x", "y", "width", "height"]
             },
-            "max_width": {"type": "integer", "minimum": 1, "maximum": 4096, "description": "Optional upper bound on encoded output width. Never upscales."},
-            "max_height": {"type": "integer", "minimum": 1, "maximum": 4096, "description": "Optional upper bound on encoded output height. Never upscales."},
+            "max_width": {"type": "integer", "minimum": 1, "description": "Optional upper bound on encoded output width. Values above 4096 are clamped to 4096. Never upscales."},
+            "max_height": {"type": "integer", "minimum": 1, "description": "Optional upper bound on encoded output height. Values above 4096 are clamped to 4096. Never upscales."},
             "session_id": {"type": "string", "minLength": 1, "description": OPTIONAL_EXPLICIT_SESSION_ID_DESCRIPTION}
         },
         "required": ["project", "path", "client_id", "surface_id"]

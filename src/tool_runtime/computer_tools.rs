@@ -29,6 +29,24 @@ const DEFAULT_ACCESSIBILITY_DEPTH: usize = 6;
 const DEFAULT_ACCESSIBILITY_NODES: usize = 128;
 const MAX_ACCESSIBILITY_CHILD_COUNT: u64 = 1_000_000;
 const MAX_IMAGE_DIMENSION: u64 = 4096;
+
+fn effective_snapshot_dimension_bound(value: Option<u32>) -> Result<Option<u32>, ()> {
+    match value {
+        None => Ok(None),
+        Some(0) => Err(()),
+        Some(value) => Ok(Some(value.min(MAX_IMAGE_DIMENSION as u32))),
+    }
+}
+
+fn effective_snapshot_dimension_bounds(
+    max_width: Option<u32>,
+    max_height: Option<u32>,
+) -> Result<(Option<u32>, Option<u32>), ()> {
+    Ok((
+        effective_snapshot_dimension_bound(max_width)?,
+        effective_snapshot_dimension_bound(max_height)?,
+    ))
+}
 const COMPUTER_WAIT_SECS: u64 = 30;
 const MAX_COMPUTER_TARGETS: usize = 64;
 const DEFAULT_FIND_ELEMENTS_LIMIT: usize = 8;
@@ -592,15 +610,16 @@ impl ToolRuntime {
                 if !valid_display_id(&display_id) {
                     return computer_error("invalid_display", "display_id is invalid");
                 }
-                if max_width.is_some_and(|value| value == 0 || value > MAX_IMAGE_DIMENSION as u32)
-                    || max_height
-                        .is_some_and(|value| value == 0 || value > MAX_IMAGE_DIMENSION as u32)
-                {
-                    return computer_error(
-                        "invalid_request",
-                        "display snapshot output dimension bound is invalid",
-                    );
-                }
+                let (max_width, max_height) =
+                    match effective_snapshot_dimension_bounds(max_width, max_height) {
+                        Ok(bounds) => bounds,
+                        Err(()) => {
+                            return computer_error(
+                                "invalid_request",
+                                "display snapshot output dimension bound is invalid",
+                            )
+                        }
+                    };
                 self.dispatch_computer_request(
                     &client_id,
                     "computer_snapshot_display",
@@ -656,14 +675,16 @@ impl ToolRuntime {
                 return computer_error("invalid_request", "snapshot region is invalid");
             }
         }
-        if max_width.is_some_and(|value| value == 0 || value > MAX_IMAGE_DIMENSION as u32)
-            || max_height.is_some_and(|value| value == 0 || value > MAX_IMAGE_DIMENSION as u32)
-        {
-            return computer_error(
-                "invalid_request",
-                "snapshot output dimension bound is invalid",
-            );
-        }
+        let (max_width, max_height) =
+            match effective_snapshot_dimension_bounds(max_width, max_height) {
+                Ok(bounds) => bounds,
+                Err(()) => {
+                    return computer_error(
+                        "invalid_request",
+                        "snapshot output dimension bound is invalid",
+                    )
+                }
+            };
         let advanced = region.is_some() || max_width.is_some() || max_height.is_some();
         let (kind, payload) = if advanced {
             (

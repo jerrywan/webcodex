@@ -511,6 +511,24 @@ fn computer_pointer_public_shape_and_effect_lifecycle_are_closed() {
 }
 
 #[test]
+fn computer_snapshot_dimension_budgets_clamp_only_oversized_positive_values() {
+    assert_eq!(effective_snapshot_dimension_bound(None), Ok(None));
+    assert_eq!(
+        effective_snapshot_dimension_bound(Some(1024)),
+        Ok(Some(1024))
+    );
+    assert_eq!(
+        effective_snapshot_dimension_bound(Some(10_000)),
+        Ok(Some(MAX_IMAGE_DIMENSION as u32))
+    );
+    assert_eq!(
+        effective_snapshot_dimension_bound(Some(u32::MAX)),
+        Ok(Some(MAX_IMAGE_DIMENSION as u32))
+    );
+    assert_eq!(effective_snapshot_dimension_bound(Some(0)), Err(()));
+}
+
+#[test]
 fn computer_display_public_shape_and_read_only_semantics_are_closed() {
     assert!(valid_display_id(DISPLAY_ID));
     assert!(!computer_request_is_effect("computer_list_displays"));
@@ -611,6 +629,44 @@ fn computer_display_snapshot_validator_enforces_identity_geometry_and_privacy() 
     let valid = validate_display_snapshot(output.clone(), DISPLAY_ID, "msi", Some(960), None);
     assert!(valid.success, "{:?}", valid.output);
     assert_eq!(valid.output["client_id"], "msi");
+
+    // The model-facing request may be larger, but response correlation is against
+    // the single effective bound sent to the Runner. 5000x4000 stays under the
+    // raw-capture byte ceiling and downscales to 4096x3276 at the hard limit.
+    let effective = effective_snapshot_dimension_bound(Some(10_000)).unwrap();
+    assert_eq!(effective, Some(MAX_IMAGE_DIMENSION as u32));
+    let bounded_source = json!({
+        "display_id": DISPLAY_ID,
+        "snapshot_generation": 8,
+        "source_width": 5000,
+        "source_height": 4000,
+        "width": 4096,
+        "height": 3276,
+        "mime_type": "image/jpeg",
+        "file_bytes": image.len(),
+        "sha256": sha256_hex(&image),
+        "captured_at_unix_ms": 1_700_000_000_001u64,
+        "content_base64": general_purpose::STANDARD.encode(image)
+    });
+    let bounded = validate_display_snapshot(
+        bounded_source.clone(),
+        DISPLAY_ID,
+        "msi",
+        effective.map(u64::from),
+        None,
+    );
+    assert!(bounded.success, "{:?}", bounded.output);
+    let mut over_effective = bounded_source;
+    over_effective["width"] = json!(4097);
+    let rejected = validate_display_snapshot(
+        over_effective,
+        DISPLAY_ID,
+        "msi",
+        effective.map(u64::from),
+        None,
+    );
+    assert!(!rejected.success);
+    assert_eq!(rejected.output["error_kind"], "invalid_runner_response");
 
     for (field, value) in [
         ("native_identity", json!("PRIVATE")),
