@@ -439,20 +439,6 @@ fn add_context_projection_to_output_shape(
                     "type": "integer", "minimum": 0,
                     "description": "Safely recovered Session checkpoint watermark; retain for later ACK."
                 }));
-                properties.insert("session_context_continuation".to_string(), json!({
-                    "type": "object",
-                    "description": "Model-context coherence metadata for session_context_revision. This checkpoint lane is independent from business continuation and failure recovery; ACK grants no authority, resolves no message, and does not gate execution.",
-                    "additionalProperties": false,
-                    "properties": {
-                        "semantics": webcodex_tool_contracts::continuation_semantics_schema(
-                            webcodex_core::runtime_contract::ContinuationKind::Checkpoint,
-                            webcodex_core::runtime_contract::ContinuationCarrier::Revision,
-                            "session_context_revision is a context checkpoint watermark returned through ack_session_context_revision, not an observation cursor.",
-                        ),
-                        "ack_field": {"type": "string", "const": "ack_session_context_revision"}
-                    },
-                    "required": ["semantics", "ack_field"]
-                }));
                 properties.insert("session_continuity".to_string(), json!({
                     "type": "object",
                     "properties": {

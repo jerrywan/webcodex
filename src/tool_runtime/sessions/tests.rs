@@ -3497,6 +3497,7 @@ async fn session_context_noncapable_kernel_results_still_feed_later_delta() {
         );
         if capable {
             assert_eq!(result.output["session_context_revision"], 2);
+            assert!(result.output.get("session_context_continuation").is_none());
             assert_eq!(result.output["session_continuity"]["status"], "behind");
             assert!(result.output["session_continuity"]
                 .get("suggested_call")
@@ -3571,6 +3572,10 @@ fn session_context_unknown_ack_is_compact_and_never_certifies_latest() {
         );
         assert_eq!(response.output["state_changed"], true);
         assert!(response.output.get("session_context_revision").is_none());
+        assert!(response
+            .output
+            .get("session_context_continuation")
+            .is_none());
         assert!(response.output.get("session_recovery").is_none());
         assert_eq!(
             response.output["session_continuity"],
@@ -3695,6 +3700,7 @@ fn session_context_incomplete_delta_requires_explicit_recovery() {
         )
         .expect("context recovery suggested_call must parse");
         assert!(result.output.get("session_context_revision").is_none());
+        assert!(result.output.get("session_context_continuation").is_none());
         assert!(result.output["session_recovery"]
             .get("current_handoff")
             .is_none());
@@ -3722,6 +3728,8 @@ fn session_context_handoff_baseline_fences_concurrent_completions_and_recorder()
     let mut result = super::super::ToolResult::ok(json!({"session_id": session.session_id}));
     establish_handoff_context_baseline(&mut result, &session.session_id, Some(0), Some(0));
     assert_eq!(result.output["session_continuity"]["status"], "recovered");
+    assert_eq!(result.output["session_context_revision"], 0);
+    assert!(result.output.get("session_context_continuation").is_none());
     assert!(result.output["session_continuity"]
         .get("suggested_call")
         .is_none());

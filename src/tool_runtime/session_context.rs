@@ -400,26 +400,12 @@ fn context_recovery_suggested_call(session_id: &str) -> Value {
         .to_value()
 }
 
-fn context_checkpoint_continuation() -> Value {
-    json!({
-        "semantics": super::ContinuationSemantics::new(
-            super::ContinuationKind::Checkpoint,
-            super::ContinuationCarrier::Revision,
-        ).to_value(),
-        "ack_field": "ack_session_context_revision",
-    })
-}
-
 /// A hint is sufficient to request recovery, never to certify model knowledge.
 fn require_context_recovery(output: &mut Value, status: &str, session_id: &str) {
     output
         .as_object_mut()
         .unwrap()
         .remove("session_context_revision");
-    output
-        .as_object_mut()
-        .unwrap()
-        .remove("session_context_continuation");
     output["session_continuity"] = json!({
         "status": status,
         "suggested_call": context_recovery_suggested_call(session_id),
@@ -437,7 +423,6 @@ pub(crate) fn establish_handoff_context_baseline(
 ) {
     if result.success && observed_revision.is_some() && observed_revision == current_revision {
         result.output["session_context_revision"] = json!(observed_revision.unwrap());
-        result.output["session_context_continuation"] = context_checkpoint_continuation();
         result.output["session_continuity"] = json!({"status": "recovered"});
     } else {
         require_context_recovery(&mut result.output, "unacknowledged", session_id);
@@ -527,10 +512,6 @@ pub(crate) fn add_session_context_continuity(
         "session_context_revision".to_string(),
         Value::from(recorded.context_revision),
     );
-    output.insert(
-        "session_context_continuation".to_string(),
-        context_checkpoint_continuation(),
-    );
     if !needs_recovery {
         result.output = Value::Object(output);
         return false;
@@ -566,7 +547,6 @@ pub(crate) fn add_session_context_continuity(
     );
     if recorded.history_lost || omitted_count > 0 {
         output.remove("session_context_revision");
-        output.remove("session_context_continuation");
         let continuity = output.get_mut("session_continuity").unwrap();
         continuity["suggested_call"] = context_recovery_suggested_call(&recorded.session_id);
     }
