@@ -116,6 +116,121 @@ fn t2_continuation_output_schemas_distinguish_cursor_kinds_and_carriers() {
         ["continuation_semantics"]["anyOf"][0]["properties"];
     assert_eq!(refine_semantics["kind"]["const"], "refine");
     assert_eq!(refine_semantics["carrier"]["const"], "none");
+    let fragment_semantics = &recovery["properties"]["omitted_lines"]["properties"]
+        ["continuation_semantics"]["anyOf"][1]["properties"];
+    assert_eq!(fragment_semantics["kind"]["const"], "page");
+    assert_eq!(fragment_semantics["carrier"]["const"], "opaque_token");
+}
+
+#[test]
+fn git_diff_hunks_omitted_line_recovery_schema_accepts_only_canonical_refine_or_fragment_shapes() {
+    let specs = registered_tool_specs();
+    let git = spec_named(&specs, "git_diff_hunks");
+    let recovery_schema = &git.output_schema["properties"]["output"]["properties"]["recovery"];
+    let continuation_lane = json!({
+        "available": false,
+        "recovers_later_hunks": false,
+        "recovers_omitted_lines": false,
+        "continuation_semantics": null,
+        "next_call": null
+    });
+    let refine_arguments = json!({
+        "project": "agent:special:webcodex",
+        "paths": ["a.txt"],
+        "max_hunks": 10,
+        "max_hunk_lines": 400,
+        "max_page_bytes": 65536,
+        "cached": false
+    });
+    let fragment_arguments = json!({
+        "project": "agent:special:webcodex",
+        "paths": ["a.txt"],
+        "max_hunks": 10,
+        "max_hunk_lines": 400,
+        "max_page_bytes": 65536,
+        "cached": false,
+        "continuation": "wcdh1.fragment"
+    });
+    let refine = json!({
+        "kind": "hunk_lines",
+        "tool": "git_diff_hunks",
+        "arguments": refine_arguments.clone(),
+        "safe_continuation_for_omitted_lines": false,
+        "continuation": continuation_lane.clone(),
+        "omitted_lines": {
+            "present": true,
+            "recoverable": true,
+            "reason_code": "larger_max_hunk_lines_available",
+            "path_provenance": "exact",
+            "paths": ["a.txt"],
+            "continuation_semantics": {"kind": "refine", "carrier": "none"},
+            "next_call": {"tool": "git_diff_hunks", "arguments": refine_arguments}
+        }
+    });
+    test_support::validate_schema_instance(&refine, recovery_schema).unwrap();
+
+    let fragment = json!({
+        "kind": "hunk_lines",
+        "tool": "git_diff_hunks",
+        "arguments": fragment_arguments.clone(),
+        "safe_continuation_for_omitted_lines": true,
+        "continuation": continuation_lane,
+        "omitted_lines": {
+            "present": true,
+            "recoverable": true,
+            "reason_code": "hunk_fragment_continuation_available",
+            "path_provenance": "exact",
+            "paths": ["a.txt"],
+            "continuation_semantics": {"kind": "page", "carrier": "opaque_token"},
+            "next_call": {"tool": "git_diff_hunks", "arguments": fragment_arguments}
+        }
+    });
+    test_support::validate_schema_instance(&fragment, recovery_schema).unwrap();
+
+    let mut fragment_with_refine_semantics = fragment.clone();
+    fragment_with_refine_semantics["omitted_lines"]["continuation_semantics"] =
+        json!({"kind": "refine", "carrier": "none"});
+    assert!(test_support::validate_schema_instance(
+        &fragment_with_refine_semantics,
+        recovery_schema,
+    )
+    .is_err());
+
+    let mut fragment_without_safe_cursor = fragment.clone();
+    fragment_without_safe_cursor["safe_continuation_for_omitted_lines"] = json!(false);
+    assert!(
+        test_support::validate_schema_instance(&fragment_without_safe_cursor, recovery_schema,)
+            .is_err()
+    );
+
+    let mut fragment_without_call = fragment.clone();
+    fragment_without_call["omitted_lines"]["next_call"] = Value::Null;
+    assert!(
+        test_support::validate_schema_instance(&fragment_without_call, recovery_schema).is_err()
+    );
+
+    let mut refine_with_fragment_semantics = refine.clone();
+    refine_with_fragment_semantics["omitted_lines"]["continuation_semantics"] =
+        json!({"kind": "page", "carrier": "opaque_token"});
+    assert!(test_support::validate_schema_instance(
+        &refine_with_fragment_semantics,
+        recovery_schema,
+    )
+    .is_err());
+
+    let mut unrecoverable = fragment;
+    unrecoverable["arguments"] = Value::Null;
+    unrecoverable["safe_continuation_for_omitted_lines"] = json!(false);
+    unrecoverable["omitted_lines"]["recoverable"] = json!(false);
+    unrecoverable["omitted_lines"]["reason_code"] =
+        json!("page_byte_budget_prevents_proven_recovery");
+    unrecoverable["omitted_lines"]["continuation_semantics"] = Value::Null;
+    unrecoverable["omitted_lines"]["next_call"] = Value::Null;
+    test_support::validate_schema_instance(&unrecoverable, recovery_schema).unwrap();
+
+    unrecoverable["omitted_lines"]["continuation_semantics"] =
+        json!({"kind": "page", "carrier": "opaque_token"});
+    assert!(test_support::validate_schema_instance(&unrecoverable, recovery_schema).is_err());
 }
 
 #[test]

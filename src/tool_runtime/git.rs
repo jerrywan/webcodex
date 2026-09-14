@@ -9,6 +9,7 @@ mod show_changes;
 #[cfg(test)]
 pub(crate) use self::diff_hunks::{
     git_diff_hunks_command, parse_git_diff_hunks, GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES,
+    MAX_MAX_HUNK_LINES,
 };
 #[cfg(test)]
 pub(crate) use self::log::{

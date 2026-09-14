@@ -2210,7 +2210,7 @@ fn set_show_changes_verdict(output: &mut Value) {
         if hunk_line_truncated {
             push_unique_action(
                 &mut actions,
-                "increase git_diff_hunks.max_hunk_lines and/or narrow paths; continuation alone does not recover omitted lines from the same hunk",
+                "follow git_diff_hunks recovery.omitted_lines.next_call; after the fresh handoff observation it may use bounded refinement or an exact hunk-fragment continuation",
             );
         }
     } else if let Some(object) = output.as_object_mut() {

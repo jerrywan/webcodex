@@ -2007,6 +2007,233 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
 }
 
 #[tokio::test]
+async fn git_diff_hunks_committed_hunk_fragment_continuation_is_mac_bound_and_mode_isolated() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let original = (0..600)
+        .map(|line| format!("old-{line:04}\n"))
+        .collect::<String>();
+    write_git_review_fixture_file(repo.path(), "fragment.txt", &original);
+    write_git_review_fixture_file(repo.path(), "other.txt", "same\n");
+    let base = commit_git_review_fixture(repo.path(), "fragment base");
+    let changed = (0..600)
+        .map(|line| format!("new-{line:04}\n"))
+        .collect::<String>();
+    write_git_review_fixture_file(repo.path(), "fragment.txt", &changed);
+    let head = commit_git_review_fixture(repo.path(), "fragment head");
+    let (raw_exit, raw_diff, raw_stderr) = run_command_full_capture(
+        &format!("git diff --unified=80 {base} {head} -- fragment.txt"),
+        repo.path(),
+        30,
+    );
+    assert_eq!(raw_exit, 0, "raw committed diff failed: {raw_stderr}");
+    let hunk_start = raw_diff.find("@@ ").expect("committed hunk header");
+    let authoritative_hunk = raw_diff[hunk_start..].trim_end_matches('\n').to_string();
+
+    let runtime = test_runtime();
+    let client_id = "committed-fragment-continuation";
+    let project =
+        register_structured_git_agent_at_path(&runtime, client_id, "repo", repo.path()).await;
+    let paths = Some(vec!["fragment.txt".to_string()]);
+    let (first, _, first_scripts) = run_runner_git_diff_hunks_committed_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        paths.clone(),
+        10,
+        400,
+        base.clone(),
+        head.clone(),
+        None,
+    )
+    .await;
+    assert!(first.success, "{:?}", first.error);
+    assert_eq!(
+        first.output["recovery"]["safe_continuation_for_omitted_lines"],
+        true
+    );
+    assert_eq!(
+        first.output["recovery"]["omitted_lines"]["reason_code"],
+        "hunk_fragment_continuation_available"
+    );
+    let fragment_token = first.output["recovery"]["omitted_lines"]["next_call"]["arguments"]
+        ["continuation"]
+        .as_str()
+        .expect("committed fragment token")
+        .to_string();
+    assert!(fragment_token.len() <= GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES);
+    assert!(first_scripts
+        .iter()
+        .all(|script| !script.contains(&fragment_token)));
+
+    let (path_mismatch, _, _) = run_runner_git_diff_hunks_committed_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        Some(vec!["other.txt".to_string()]),
+        10,
+        400,
+        base.clone(),
+        head.clone(),
+        Some(fragment_token.clone()),
+    )
+    .await;
+    assert!(!path_mismatch.success);
+    assert_eq!(path_mismatch.output["reason_code"], "continuation_mismatch");
+
+    let (range_mismatch, _, _) = run_runner_git_diff_hunks_committed_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        paths.clone(),
+        10,
+        400,
+        head.clone(),
+        head.clone(),
+        Some(fragment_token.clone()),
+    )
+    .await;
+    assert!(!range_mismatch.success);
+    assert_eq!(
+        range_mismatch.output["reason_code"],
+        "continuation_mismatch"
+    );
+
+    {
+        use base64::{engine::general_purpose, Engine as _};
+        let encoded = fragment_token.strip_prefix("wcdh1.").unwrap();
+        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(encoded).unwrap();
+        let mut state: Value = serde_json::from_slice(&decoded).unwrap();
+        state["line"] = json!(state["line"].as_u64().unwrap() + 1);
+        let tampered = format!(
+            "wcdh1.{}",
+            general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&state).unwrap())
+        );
+        let (tampered_result, _, _) = run_runner_git_diff_hunks_committed_page(
+            &runtime,
+            client_id,
+            &project,
+            repo.path(),
+            paths.clone(),
+            10,
+            400,
+            base.clone(),
+            head.clone(),
+            Some(tampered),
+        )
+        .await;
+        assert!(!tampered_result.success);
+        assert_eq!(
+            tampered_result.output["reason_code"],
+            "invalid_continuation"
+        );
+    }
+
+    let committed_as_worktree = runtime
+        .git_diff_hunks_continued(
+            project.clone(),
+            paths.clone(),
+            Some(10),
+            Some(400),
+            Some(false),
+            Some(fragment_token.clone()),
+        )
+        .await;
+    assert!(!committed_as_worktree.success);
+    assert_eq!(
+        committed_as_worktree.output["reason_code"],
+        "continuation_mismatch"
+    );
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
+
+    let mut reconstructed = first.output["files"][0]["hunks"][0]["diff"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut next_fragment = Some(fragment_token.clone());
+    let mut fragment_steps = 0usize;
+    while let Some(token) = next_fragment.take() {
+        let (page, _, scripts) = run_runner_git_diff_hunks_committed_page(
+            &runtime,
+            client_id,
+            &project,
+            repo.path(),
+            paths.clone(),
+            10,
+            400,
+            base.clone(),
+            head.clone(),
+            Some(token.clone()),
+        )
+        .await;
+        assert!(page.success, "{:?}", page.error);
+        assert!(scripts.iter().all(|script| !script.contains(&token)));
+        let hunk = &page.output["files"][0]["hunks"][0];
+        assert_eq!(hunk["continued"], true);
+        reconstructed.push('\n');
+        reconstructed.push_str(hunk["diff"].as_str().unwrap());
+        fragment_steps += 1;
+        next_fragment = page
+            .output
+            .get("recovery")
+            .and_then(|recovery| recovery.get("omitted_lines"))
+            .and_then(|omitted| omitted.get("next_call"))
+            .and_then(|call| call.get("arguments"))
+            .and_then(|arguments| arguments.get("continuation"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+    }
+    assert!(fragment_steps >= 2);
+    assert_eq!(reconstructed, authoritative_hunk);
+
+    let dirty = (0..600)
+        .map(|line| format!("dirty-{line:04}\n"))
+        .collect::<String>();
+    fs::write(repo.path().join("fragment.txt"), dirty).unwrap();
+    let (worktree_first, _, _) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        paths.clone(),
+        10,
+        400,
+        false,
+        None,
+    )
+    .await;
+    assert!(worktree_first.success, "{:?}", worktree_first.error);
+    let worktree_fragment = worktree_first.output["recovery"]["omitted_lines"]["next_call"]
+        ["arguments"]["continuation"]
+        .as_str()
+        .expect("worktree fragment token")
+        .to_string();
+    let (worktree_as_committed, _, _) = run_runner_git_diff_hunks_committed_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        paths,
+        10,
+        400,
+        base,
+        head,
+        Some(worktree_fragment),
+    )
+    .await;
+    assert!(!worktree_as_committed.success);
+    assert_eq!(
+        worktree_as_committed.output["reason_code"],
+        "continuation_mismatch"
+    );
+}
+
+#[tokio::test]
 async fn git_diff_hunks_committed_drains_bounded_consumer_and_preserves_producer_failure() {
     let tmp = tempfile::tempdir().unwrap();
     init_git_repo(tmp.path());
@@ -2295,25 +2522,29 @@ async fn git_diff_hunks_large_raw_diff_is_bounded_before_runner_result_retention
     assert_eq!(result.output["has_more"], true);
     assert!(result.output["next_continuation"].as_str().is_some());
     let reasons = result.output["truncation_reasons"].as_array().unwrap();
-    assert!(reasons.iter().any(|reason| reason == "page_hunk_limit"));
+    assert!(!reasons.iter().any(|reason| reason == "page_hunk_limit"));
     assert!(reasons.iter().any(|reason| reason == "hunk_line_limit"));
     assert!(!reasons.iter().any(|reason| reason == "page_byte_budget"));
     let recovery = &result.output["recovery"];
     assert_eq!(recovery["kind"], "mixed");
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], false);
+    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
     assert_eq!(recovery["omitted_lines"]["present"], true);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], false);
+    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
     assert_eq!(
         recovery["omitted_lines"]["reason_code"],
-        "max_hunk_lines_ceiling_insufficient"
+        "hunk_fragment_continuation_available"
     );
     assert_eq!(recovery["omitted_lines"]["path_provenance"], "exact");
     assert_eq!(recovery["omitted_lines"]["paths"], json!(["large-0.txt"]));
-    assert_eq!(recovery["omitted_lines"]["next_call"], Value::Null);
+    assert!(recovery["omitted_lines"]["next_call"].is_object());
     assert_eq!(recovery["continuation"]["available"], true);
     assert_eq!(
         recovery["arguments"],
-        recovery["continuation"]["next_call"]["arguments"]
+        recovery["omitted_lines"]["next_call"]["arguments"]
+    );
+    assert_ne!(
+        recovery["arguments"]["continuation"],
+        recovery["continuation"]["next_call"]["arguments"]["continuation"]
     );
     assert_eq!(recovery["arguments"]["paths"], json!([]));
     assert_eq!(recovery["arguments"]["max_hunk_lines"], 12);
@@ -2641,6 +2872,171 @@ async fn git_diff_hunks_scoped_fence_ignores_outside_change_and_rejects_scope_mi
 }
 
 #[tokio::test]
+async fn git_diff_hunks_worktree_hunk_fragment_continuation_fails_stale_after_scoped_change() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let original = (0..600)
+        .map(|line| format!("old-{line:04}\n"))
+        .collect::<String>();
+    commit_file(repo.path(), "a.txt", &original, "fragment baseline");
+    let changed = (0..600)
+        .map(|line| format!("new-{line:04}\n"))
+        .collect::<String>();
+    fs::write(repo.path().join("a.txt"), &changed).unwrap();
+
+    let runtime = test_runtime();
+    let client_id = "diff-hunks-fragment-worktree-stale";
+    let project = register_runner_project_at_path(&runtime, client_id, "repo", repo.path()).await;
+    let scope = Some(vec!["a.txt".to_string()]);
+    let (first, _, _) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        scope.clone(),
+        10,
+        400,
+        false,
+        None,
+    )
+    .await;
+    assert!(first.success, "{:?}", first.error);
+    let token = first.output["recovery"]["omitted_lines"]["next_call"]["arguments"]["continuation"]
+        .as_str()
+        .expect("fragment continuation")
+        .to_string();
+    fs::write(repo.path().join("a.txt"), format!("{changed}new-tail\n")).unwrap();
+
+    let (stale, _, script) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        scope,
+        10,
+        400,
+        false,
+        Some(token.clone()),
+    )
+    .await;
+    assert!(!stale.success);
+    assert_eq!(stale.output["reason_code"], "stale_continuation");
+    assert_eq!(stale.output["files"], json!([]));
+    assert_eq!(stale.output["next_continuation"], Value::Null);
+    assert!(!script.contains(&token));
+}
+
+#[tokio::test]
+async fn git_diff_hunks_cached_hunk_fragment_continuation_fails_stale_after_index_change() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let original = (0..600)
+        .map(|line| format!("old-{line:04}\n"))
+        .collect::<String>();
+    commit_file(repo.path(), "a.txt", &original, "fragment baseline");
+    let changed = (0..600)
+        .map(|line| format!("new-{line:04}\n"))
+        .collect::<String>();
+    fs::write(repo.path().join("a.txt"), &changed).unwrap();
+    git_test_command_ok(repo.path(), "git add -- a.txt");
+
+    let runtime = test_runtime();
+    let client_id = "diff-hunks-fragment-cached-stale";
+    let project = register_runner_project_at_path(&runtime, client_id, "repo", repo.path()).await;
+    let scope = Some(vec!["a.txt".to_string()]);
+    let (first, _, _) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        scope.clone(),
+        10,
+        400,
+        true,
+        None,
+    )
+    .await;
+    assert!(first.success, "{:?}", first.error);
+    let token = first.output["recovery"]["omitted_lines"]["next_call"]["arguments"]["continuation"]
+        .as_str()
+        .expect("cached fragment continuation")
+        .to_string();
+    fs::write(repo.path().join("a.txt"), format!("{changed}new-tail\n")).unwrap();
+    git_test_command_ok(repo.path(), "git add -- a.txt");
+
+    let (stale, _, _) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        scope,
+        10,
+        400,
+        true,
+        Some(token),
+    )
+    .await;
+    assert!(!stale.success);
+    assert_eq!(stale.output["reason_code"], "stale_continuation");
+    assert_eq!(stale.output["files"], json!([]));
+}
+
+#[tokio::test]
+async fn git_diff_hunks_scoped_hunk_fragment_continuation_ignores_outside_change() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let original = (0..600)
+        .map(|line| format!("old-{line:04}\n"))
+        .collect::<String>();
+    commit_file(repo.path(), "a.txt", &original, "fragment baseline");
+    commit_file(repo.path(), "outside.txt", "outside0\n", "outside baseline");
+    let changed = (0..600)
+        .map(|line| format!("new-{line:04}\n"))
+        .collect::<String>();
+    fs::write(repo.path().join("a.txt"), changed).unwrap();
+
+    let runtime = test_runtime();
+    let client_id = "diff-hunks-fragment-scoped-outside";
+    let project = register_runner_project_at_path(&runtime, client_id, "repo", repo.path()).await;
+    let scope = Some(vec!["a.txt".to_string()]);
+    let (first, _, _) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        scope.clone(),
+        10,
+        400,
+        false,
+        None,
+    )
+    .await;
+    assert!(first.success, "{:?}", first.error);
+    let token = first.output["recovery"]["omitted_lines"]["next_call"]["arguments"]["continuation"]
+        .as_str()
+        .expect("scoped fragment continuation")
+        .to_string();
+    fs::write(repo.path().join("outside.txt"), "outside1\n").unwrap();
+
+    let (continued, _, script) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        scope,
+        10,
+        400,
+        false,
+        Some(token.clone()),
+    )
+    .await;
+    assert!(continued.success, "{:?}", continued.error);
+    assert_eq!(continued.output["files"][0]["path"], "a.txt");
+    assert_eq!(continued.output["files"][0]["hunks"][0]["continued"], true);
+    assert!(!script.contains(&token));
+}
+
+#[tokio::test]
 async fn git_diff_hunks_binary_records_advance_across_byte_bounded_pages() {
     let repo = tempfile::tempdir().unwrap();
     init_git_repo(repo.path());
@@ -2819,6 +3215,152 @@ async fn git_diff_hunks_hunk_line_limit_does_not_create_fake_continuation() {
 }
 
 #[tokio::test]
+async fn git_diff_hunks_hunk_fragment_continuation_reconstructs_over_400_line_hunk() {
+    assert_eq!(MAX_MAX_HUNK_LINES, 400, "hard hunk-line ceiling changed");
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let original = (0..600)
+        .map(|line| format!("old-{line:04}\n"))
+        .collect::<String>();
+    commit_file(repo.path(), "fragment.txt", &original, "fragment baseline");
+    let changed = (0..600)
+        .map(|line| format!("new-{line:04}\n"))
+        .collect::<String>();
+    fs::write(repo.path().join("fragment.txt"), changed).unwrap();
+    let (raw_exit, raw_diff, raw_stderr) =
+        run_command_full_capture("git diff --unified=80 -- fragment.txt", repo.path(), 30);
+    assert_eq!(raw_exit, 0, "raw diff failed: {raw_stderr}");
+    let hunk_start = raw_diff.find("@@ ").expect("authoritative hunk header");
+    let authoritative_hunk = raw_diff[hunk_start..].trim_end_matches('\n').to_string();
+    assert!(authoritative_hunk.lines().count() > 400);
+
+    let runtime = test_runtime();
+    let client_id = "diff-hunks-fragment-reconstruct";
+    let project = register_runner_project_at_path(&runtime, client_id, "repo", repo.path()).await;
+    let scope = Some(vec!["fragment.txt".to_string()]);
+    let (first, _, _) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        scope.clone(),
+        10,
+        400,
+        false,
+        None,
+    )
+    .await;
+    assert!(first.success, "{:?}", first.error);
+    assert_eq!(first.output["hunk_count"], 1);
+    assert_eq!(first.output["files"][0]["hunks"][0]["truncated"], true);
+    assert!(
+        first.output["files"][0]["hunks"][0]["diff"]
+            .as_str()
+            .unwrap()
+            .lines()
+            .count()
+            <= MAX_MAX_HUNK_LINES
+    );
+    let recovery = &first.output["recovery"];
+    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
+    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert_eq!(
+        recovery["omitted_lines"]["reason_code"],
+        "hunk_fragment_continuation_available"
+    );
+    assert_eq!(
+        recovery["omitted_lines"]["continuation_semantics"],
+        json!({"kind":"page","carrier":"opaque_token"})
+    );
+    assert_eq!(
+        recovery["omitted_lines"]["next_call"]["tool"],
+        "git_diff_hunks"
+    );
+    assert_eq!(
+        recovery["arguments"],
+        recovery["omitted_lines"]["next_call"]["arguments"]
+    );
+    assert_eq!(recovery["arguments"]["paths"], json!(["fragment.txt"]));
+    assert_eq!(recovery["arguments"]["max_hunk_lines"], 400);
+    assert_git_diff_hunks_recovery_call_parses(recovery);
+
+    let header = first.output["files"][0]["hunks"][0]["header"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut reconstructed = first.output["files"][0]["hunks"][0]["diff"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut current = first;
+    let mut fragment_count = 0usize;
+    for _ in 0..10 {
+        let Some(current_recovery) = current.output.get("recovery") else {
+            break;
+        };
+        if current_recovery["omitted_lines"]["present"] != true {
+            break;
+        }
+        assert_eq!(current_recovery["omitted_lines"]["recoverable"], true);
+        assert_eq!(
+            current_recovery["omitted_lines"]["reason_code"],
+            "hunk_fragment_continuation_available"
+        );
+        let next_call = &current_recovery["omitted_lines"]["next_call"];
+        let parsed = ToolCall::from_tool_name(
+            next_call["tool"].as_str().unwrap(),
+            next_call["arguments"].clone(),
+        )
+        .expect("fragment next_call must be parser-ready");
+        assert!(matches!(parsed, ToolCall::GitDiffHunks { .. }));
+        let token = next_call["arguments"]["continuation"]
+            .as_str()
+            .expect("fragment token")
+            .to_string();
+        assert!(token.len() <= GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES);
+        let (next, _, script) = run_runner_git_diff_hunks_page(
+            &runtime,
+            client_id,
+            &project,
+            repo.path(),
+            scope.clone(),
+            10,
+            400,
+            false,
+            Some(token.clone()),
+        )
+        .await;
+        assert!(next.success, "{:?}", next.error);
+        assert!(
+            !script.contains(&token),
+            "opaque fragment token reached the producer shell"
+        );
+        let hunk = &next.output["files"][0]["hunks"][0];
+        assert_eq!(hunk["continued"], true);
+        assert_eq!(hunk["header"], header);
+        let body = hunk["diff"].as_str().expect("continued hunk body");
+        assert!(!body.is_empty());
+        assert!(
+            !body.starts_with("@@ "),
+            "continued body replayed hunk header"
+        );
+        assert!(body.lines().count() < MAX_MAX_HUNK_LINES);
+        reconstructed.push('\n');
+        reconstructed.push_str(body);
+        fragment_count += 1;
+        current = next;
+    }
+    assert!(
+        fragment_count >= 2,
+        "fixture did not require multiple fragments"
+    );
+    assert_eq!(reconstructed, authoritative_hunk);
+    assert_eq!(current.output["has_more"], false);
+    assert_eq!(current.output["next_continuation"], Value::Null);
+    assert!(current.output.get("recovery").is_none());
+}
+
+#[tokio::test]
 async fn git_diff_hunks_complete_model_projection_keeps_scope_and_drops_derived_metadata() {
     let repo = tempfile::tempdir().unwrap();
     init_git_repo(repo.path());
@@ -2991,7 +3533,7 @@ async fn git_diff_hunks_byte_truncated_final_hunk_is_omitted_evidence_without_fa
 }
 
 #[tokio::test]
-async fn git_diff_hunks_line_recovery_requires_proven_future_byte_fit() {
+async fn git_diff_hunks_fragment_recovery_requires_only_next_bounded_window_to_fit() {
     let repo = tempfile::tempdir().unwrap();
     init_git_repo(repo.path());
     let original = (0..60)
@@ -3031,18 +3573,23 @@ async fn git_diff_hunks_line_recovery_requires_proven_future_byte_fit() {
     let recovery = &page.output["recovery"];
     assert_eq!(recovery["kind"], "hunk_lines");
     assert_eq!(recovery["omitted_lines"]["present"], true);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], false);
+    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
     assert_eq!(
         recovery["omitted_lines"]["reason_code"],
-        "page_byte_budget_prevents_proven_recovery"
+        "hunk_fragment_continuation_available"
     );
+    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
     assert_eq!(recovery["omitted_lines"]["path_provenance"], "exact");
-    assert_eq!(recovery["omitted_lines"]["next_call"], Value::Null);
-    assert_eq!(recovery["arguments"], Value::Null);
+    assert!(recovery["omitted_lines"]["next_call"].is_object());
+    assert_eq!(
+        recovery["arguments"],
+        recovery["omitted_lines"]["next_call"]["arguments"]
+    );
+    assert_git_diff_hunks_recovery_call_parses(recovery);
 }
 
 #[tokio::test]
-async fn git_diff_hunks_line_ceiling_does_not_advertise_impossible_recovery() {
+async fn git_diff_hunks_line_ceiling_uses_fragment_pagination_without_raising_ceiling() {
     let repo = tempfile::tempdir().unwrap();
     init_git_repo(repo.path());
     let original = (0..250)
@@ -3078,13 +3625,16 @@ async fn git_diff_hunks_line_ceiling_does_not_advertise_impossible_recovery() {
         .any(|reason| reason == "hunk_line_limit"));
     let recovery = &bounded.output["recovery"];
     assert_eq!(recovery["kind"], "hunk_lines");
-    assert_eq!(recovery["omitted_lines"]["recoverable"], false);
+    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
     assert_eq!(
         recovery["omitted_lines"]["reason_code"],
-        "max_hunk_lines_ceiling_insufficient"
+        "hunk_fragment_continuation_available"
     );
-    assert_eq!(recovery["omitted_lines"]["next_call"], Value::Null);
-    assert_eq!(recovery["arguments"], Value::Null);
+    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
+    assert_eq!(
+        recovery["omitted_lines"]["next_call"]["arguments"]["max_hunk_lines"],
+        5
+    );
 
     let (at_ceiling, _, _) = run_runner_git_diff_hunks_page(
         &runtime,
@@ -3100,13 +3650,184 @@ async fn git_diff_hunks_line_ceiling_does_not_advertise_impossible_recovery() {
     .await;
     assert!(at_ceiling.success, "{:?}", at_ceiling.error);
     let recovery = &at_ceiling.output["recovery"];
+    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert_eq!(
+        recovery["omitted_lines"]["reason_code"],
+        "hunk_fragment_continuation_available"
+    );
+    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
+    assert_eq!(
+        recovery["omitted_lines"]["next_call"]["arguments"]["max_hunk_lines"],
+        MAX_MAX_HUNK_LINES
+    );
+    assert!(
+        recovery["omitted_lines"]["next_call"]["arguments"]["continuation"]
+            .as_str()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn git_diff_hunks_fragment_recovery_fails_closed_when_next_complete_line_cannot_fit() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let huge_old = format!("old-huge-{}", "x".repeat(96 * 1024));
+    let original = format!("old-small\n{huge_old}\nold-tail\n");
+    commit_file(
+        repo.path(),
+        "huge-line.txt",
+        &original,
+        "huge line baseline",
+    );
+    let huge_new = format!("new-huge-{}", "y".repeat(96 * 1024));
+    let changed = format!("new-small\n{huge_new}\nnew-tail\n");
+    fs::write(repo.path().join("huge-line.txt"), changed).unwrap();
+
+    let runtime = test_runtime();
+    let client_id = "diff-hunks-fragment-byte-impossible";
+    let project = register_runner_project_at_path(&runtime, client_id, "repo", repo.path()).await;
+    let (page, _, _) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        Some(vec!["huge-line.txt".to_string()]),
+        10,
+        2,
+        false,
+        None,
+    )
+    .await;
+    assert!(page.success, "{:?}", page.error);
+    assert!(page.output["truncation_reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason == "hunk_line_limit"));
+    let recovery = &page.output["recovery"];
+    assert_eq!(recovery["safe_continuation_for_omitted_lines"], false);
     assert_eq!(recovery["omitted_lines"]["recoverable"], false);
     assert_eq!(
         recovery["omitted_lines"]["reason_code"],
-        "max_hunk_lines_ceiling_reached"
+        "page_byte_budget_prevents_proven_recovery"
     );
     assert_eq!(recovery["omitted_lines"]["next_call"], Value::Null);
     assert_eq!(recovery["arguments"], Value::Null);
+}
+
+#[tokio::test]
+async fn git_diff_hunks_mixed_hunk_fragment_and_later_record_continuations_remain_distinct() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let original = (0..600)
+        .map(|line| format!("old-{line:04}\n"))
+        .collect::<String>();
+    commit_file(repo.path(), "a-huge.txt", &original, "huge baseline");
+    commit_file(repo.path(), "z-later.txt", "before\n", "later baseline");
+    let changed = (0..600)
+        .map(|line| format!("new-{line:04}\n"))
+        .collect::<String>();
+    fs::write(repo.path().join("a-huge.txt"), changed).unwrap();
+    fs::write(repo.path().join("z-later.txt"), "after\n").unwrap();
+
+    let runtime = test_runtime();
+    let client_id = "diff-hunks-mixed-fragment-page";
+    let project = register_runner_project_at_path(&runtime, client_id, "repo", repo.path()).await;
+    let (first, _, _) = run_runner_git_diff_hunks_page(
+        &runtime,
+        client_id,
+        &project,
+        repo.path(),
+        None,
+        10,
+        400,
+        false,
+        None,
+    )
+    .await;
+    assert!(first.success, "{:?}", first.error);
+    assert_eq!(first.output["files"][0]["path"], "a-huge.txt");
+    assert_eq!(first.output["has_more"], true);
+    let recovery = &first.output["recovery"];
+    assert_eq!(recovery["kind"], "mixed");
+    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
+    assert_eq!(recovery["continuation"]["available"], true);
+    assert_eq!(recovery["continuation"]["recovers_later_hunks"], true);
+    assert_eq!(recovery["continuation"]["recovers_omitted_lines"], false);
+    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert_eq!(
+        recovery["omitted_lines"]["reason_code"],
+        "hunk_fragment_continuation_available"
+    );
+    let fragment_call = recovery["omitted_lines"]["next_call"].clone();
+    let later_call = recovery["continuation"]["next_call"].clone();
+    assert_eq!(recovery["arguments"], fragment_call["arguments"]);
+    assert_eq!(
+        later_call["arguments"]["continuation"],
+        first.output["next_continuation"]
+    );
+    assert_ne!(
+        fragment_call["arguments"]["continuation"],
+        later_call["arguments"]["continuation"]
+    );
+    ToolCall::from_tool_name(
+        fragment_call["tool"].as_str().unwrap(),
+        fragment_call["arguments"].clone(),
+    )
+    .expect("fragment call parses");
+    ToolCall::from_tool_name(
+        later_call["tool"].as_str().unwrap(),
+        later_call["arguments"].clone(),
+    )
+    .expect("later-record call parses");
+
+    let mut current_call = fragment_call;
+    let mut fragment_steps = 0usize;
+    loop {
+        let page = run_parser_ready_worktree_git_diff_hunks_call(
+            &runtime,
+            client_id,
+            repo.path(),
+            &current_call,
+        )
+        .await;
+        assert!(page.success, "{:?}", page.error);
+        assert_eq!(page.output["files"][0]["path"], "a-huge.txt");
+        assert_eq!(page.output["files"][0]["hunks"][0]["continued"], true);
+        fragment_steps += 1;
+        let Some(next_call) = page
+            .output
+            .get("recovery")
+            .and_then(|value| value.get("omitted_lines"))
+            .and_then(|value| value.get("next_call"))
+            .filter(|value| !value.is_null())
+            .cloned()
+        else {
+            break;
+        };
+        current_call = next_call;
+    }
+    assert!(fragment_steps >= 2);
+
+    let later = run_parser_ready_worktree_git_diff_hunks_call(
+        &runtime,
+        client_id,
+        repo.path(),
+        &later_call,
+    )
+    .await;
+    assert!(later.success, "{:?}", later.error);
+    assert!(later.output["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|file| file["path"] == "z-later.txt"));
+    assert!(!later.output["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|file| file["hunks"].as_array().into_iter().flatten())
+        .any(|hunk| hunk.get("continued").and_then(Value::as_bool) == Some(true)));
 }
 
 #[tokio::test]
@@ -4048,7 +4769,7 @@ fn show_changes_diff_respects_max_hunks() {
         .any(|action| action == "follow git_diff_hunks.next_continuation while has_more=true"));
     assert!(!actions.iter().any(|action| action
         .as_str()
-        .is_some_and(|action| action.contains("continuation alone does not recover"))));
+        .is_some_and(|action| action.contains("recovery.omitted_lines.next_call"))));
     assert_show_changes_envelope_value_matches_schema(&output, "hunk count handoff");
 }
 
@@ -4102,7 +4823,7 @@ fn show_changes_diff_respects_max_hunk_lines() {
     assert_git_diff_hunks_recovery_call_parses(recovery);
     let actions = output["suggested_next_actions"].as_array().unwrap();
     assert!(actions.iter().any(|action| action
-        == "increase git_diff_hunks.max_hunk_lines and/or narrow paths; continuation alone does not recover omitted lines from the same hunk"));
+        == "follow git_diff_hunks recovery.omitted_lines.next_call; after the fresh handoff observation it may use bounded refinement or an exact hunk-fragment continuation"));
     assert!(!actions
         .iter()
         .any(|action| action == "follow git_diff_hunks.next_continuation while has_more=true"));
@@ -4163,7 +4884,7 @@ fn show_changes_combined_hunk_count_and_line_truncation_keeps_both_guidance_path
         .any(|action| action == "follow git_diff_hunks.next_continuation while has_more=true"));
     assert!(actions.iter().any(|action| action
         .as_str()
-        .is_some_and(|action| action.contains("continuation alone does not recover"))));
+        .is_some_and(|action| action.contains("recovery.omitted_lines.next_call"))));
     assert_show_changes_envelope_value_matches_schema(&output, "combined diff handoff");
 }
 

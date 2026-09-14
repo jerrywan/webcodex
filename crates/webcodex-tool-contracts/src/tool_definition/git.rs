@@ -182,7 +182,7 @@ pub(super) const DETAIL_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE.review(super::ToolReviewEvidence::DiffReview).diff_review(super::ToolDiffReviewEvidence::Always),
             ),
-            "Targeted/paged diff review for worktree/cached or exact base/head ranges, with paths and scope-bound opaque continuation. max_page_bytes controls the raw producer page (64 KiB default, bounded below ordinary Runner result retention); it is separate from the 512 KiB final model-facing result ceiling. Replay scope and paging inputs unchanged for later records. Continuation only recovers later records; it never reconstructs lines omitted inside the current hunk. When the truncation reason is hunk_line_limit, use larger max_hunk_lines and/or narrower paths when recovery metadata proves that safe. Fixed byte/line ceilings never advertise fake recovery. Read-only.",
+            "Targeted/paged diff review for worktree/cached or exact base/head ranges, with paths and scope/fence-bound opaque continuation. max_page_bytes controls the raw producer page (64 KiB default, bounded below ordinary Runner result retention); it is separate from the 512 KiB final model-facing result ceiling. An opaque continuation may identify either later logical diff records or the next complete-line fragment of one exact hunk; follow the returned parser-ready suggested_call without interpreting the token. next_continuation and recovery.continuation remain later-record only, while recovery.omitted_lines may use bounded refinement or a distinct exact hunk-fragment token. Fixed byte/line ceilings never advertise fake recovery. Read-only.",
             git_diff_hunks_input_schema,
         )))),
         125,
