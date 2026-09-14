@@ -56,13 +56,19 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
     assert_eq!(output["properties"]["direct_retry_safe"]["type"], "boolean");
     assert_eq!(output["properties"]["reread_required"]["type"], "boolean");
     assert_eq!(
-        output["properties"]["expected_sha256"]["pattern"],
-        "^[a-f0-9]{64}$"
+        output["properties"]["expected_read_revision"]["type"],
+        "integer"
     );
     assert_eq!(
-        output["properties"]["current_sha256"]["pattern"],
-        "^[a-f0-9]{64}$"
+        output["properties"]["expected_read_revision"]["maximum"],
+        9_007_199_254_740_991_u64
     );
+    assert_eq!(
+        output["properties"]["positional_retry_requires_read_revision"]["type"],
+        "boolean"
+    );
+    assert!(output["properties"].get("expected_sha256").is_none());
+    assert!(output["properties"].get("current_sha256").is_none());
     let output_properties = &spec.output_schema["properties"]["output"]["properties"];
     assert!(output_properties["change_index"]["anyOf"].is_array());
     assert!(output_properties["edit_index"]["anyOf"].is_array());
@@ -78,33 +84,40 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
         .unwrap()
         .contains(&serde_json::json!("multiple_matches")));
 
-    let sha_conflict = serde_json::json!({
+    let stale_revision = serde_json::json!({
         "success": false,
         "output": {
             "state_changed": false,
-            "error_kind": "sha256_conflict",
+            "error_kind": "stale_file_revision",
             "change_index": 0,
             "kind": "edit",
             "path": "src/lib.rs",
-            "retry_guidance": "reread the file",
+            "expected_read_revision": 3817291045227_u64,
+            "reread_required": true,
+            "suggested_call": {
+                "tool": "read_files",
+                "arguments": {"project": "agent:r:p", "items": [{"path": "src/lib.rs"}]}
+            },
+            "retry_guidance": "reread the file and use its current read_revision",
             "conflict_recovery": {
                 "schema_version": 1,
-                "conflict_kind": "sha256_mismatch",
+                "conflict_kind": "stale_file_revision",
                 "occurrence_selector_supported": false,
                 "direct_retry_safe": false,
                 "reread_required": true,
-                "expected_sha256": "a".repeat(64),
-                "current_sha256": "b".repeat(64),
+                "expected_read_revision": 3817291045227_u64,
                 "recovery_action": "reread_file"
             }
         },
-        "error": "sha256 mismatch"
+        "error": "guarded read revision is stale"
     });
     crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
-        &sha_conflict,
+        &stale_revision,
         &spec.output_schema,
     )
-    .unwrap_or_else(|error| panic!("sha conflict recovery must match output schema: {error}"));
+    .unwrap_or_else(|error| {
+        panic!("stale read-revision recovery must match output schema: {error}")
+    });
 
     let scoped_conflict = serde_json::json!({
         "success": false,
@@ -154,8 +167,9 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
     assert!(spec.description.contains("occurrence"));
     assert!(spec.description.contains("line_scope"));
     assert!(spec.description.contains("global source order"));
-    assert!(spec.description.contains("direct_retry_safe"));
-    assert!(spec.description.contains("reread_required"));
+    assert!(spec.description.contains("expected_read_revision"));
+    assert!(spec.description.contains("preflighted transactionally"));
+    assert!(spec.description.contains("conflicts fail closed"));
     assert!(
         spec.description.chars().count() <= crate::tool_runtime::MODEL_TOOL_DESCRIPTION_MAX_CHARS
     );
@@ -623,11 +637,11 @@ async fn assert_no_apply_text_edits_runner_request(runtime: &ToolRuntime, client
 }
 
 #[tokio::test]
-async fn apply_text_edits_conflict_then_same_sha_occurrence_retry_needs_no_hidden_read() {
-    let runtime = runtime_with_agent_project("ate-recovery");
+async fn apply_text_edits_translates_strong_read_revisions_to_existing_wire_sha_guards() {
+    let runtime = runtime_with_agent_project("ate-revision-translation");
     register_agent(
         &runtime,
-        "ate-recovery",
+        "ate-revision-translation",
         None,
         RunnerCapabilities {
             file_write: true,
@@ -636,20 +650,182 @@ async fn apply_text_edits_conflict_then_same_sha_occurrence_retry_needs_no_hidde
         },
     )
     .await;
+    let project = agent_test_project_id("ate-revision-translation");
+    let edit_sha = "a".repeat(64);
+    let delete_sha = "b".repeat(64);
+    let rename_sha = "c".repeat(64);
+    let edit_revision = seed_read_revision(&runtime, &project, "src/lib.rs", &edit_sha).await;
+    let delete_revision = seed_read_revision(&runtime, &project, "delete.txt", &delete_sha).await;
+    let rename_revision = seed_read_revision(&runtime, &project, "rename.txt", &rename_sha).await;
+
+    let mut positional = text_edit(
+        ApplyTextEditKind::ReplaceExact,
+        Some("dup"),
+        Some("SECOND"),
+        None,
+    );
+    positional.occurrence = Some(2);
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let project = project.clone();
+        async move {
+            runtime
+                .apply_text_edits(
+                    project,
+                    vec![
+                        ApplyFileChangeInput {
+                            kind: ApplyFileChangeKind::Edit,
+                            path: "src/lib.rs".to_string(),
+                            to_path: None,
+                            content: None,
+                            edits: vec![positional],
+                            expected_read_revision: Some(edit_revision),
+                        },
+                        ApplyFileChangeInput {
+                            kind: ApplyFileChangeKind::Delete,
+                            path: "delete.txt".to_string(),
+                            to_path: None,
+                            content: None,
+                            edits: Vec::new(),
+                            expected_read_revision: Some(delete_revision),
+                        },
+                        ApplyFileChangeInput {
+                            kind: ApplyFileChangeKind::Rename,
+                            path: "rename.txt".to_string(),
+                            to_path: Some("moved.txt".to_string()),
+                            content: None,
+                            edits: Vec::new(),
+                            expected_read_revision: Some(rename_revision),
+                        },
+                    ],
+                    None,
+                )
+                .await
+        }
+    });
+
+    let request = wait_for_patch_agent_request(&runtime, "ate-revision-translation").await;
+    assert_eq!(request.kind, "file_apply_text_edits");
+    let payload: Value = serde_json::from_str(request.content.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["changes"][0]["expected_sha256"], edit_sha);
+    assert_eq!(payload["changes"][1]["expected_sha256"], delete_sha);
+    assert_eq!(payload["changes"][2]["expected_sha256"], rename_sha);
+    assert_eq!(payload["changes"][0]["edits"][0]["occurrence"], 2);
+    for change in payload["changes"].as_array().unwrap() {
+        assert!(change.get("expected_read_revision").is_none());
+    }
+
+    runtime
+        .runner_registry
+        .complete(RunnerResultRequest {
+            client_id: "ate-revision-translation".to_string(),
+            runner_instance_id: "inst".to_string(),
+            request_id: request.request_id,
+            exit_code: Some(0),
+            stdout: Some(
+                serde_json::json!({
+                    "dry_run": false,
+                    "applied_count": 3,
+                    "changed": true,
+                    "would_change": true,
+                    "files": [],
+                    "changed_paths": ["src/lib.rs", "delete.txt", "rename.txt", "moved.txt"]
+                })
+                .to_string(),
+            ),
+            stderr: Some(String::new()),
+            duration_ms: Some(1),
+            error: None,
+        })
+        .await
+        .unwrap();
+    let result = task.await.unwrap();
+    assert!(result.success, "{:?}", result.error);
+}
+
+#[tokio::test]
+async fn apply_text_edits_mixed_batch_rejects_mismatched_strong_revision_before_dispatch() {
+    let runtime = runtime_with_agent_project("ate-revision-mixed");
+    register_agent(
+        &runtime,
+        "ate-revision-mixed",
+        None,
+        RunnerCapabilities {
+            file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let project = agent_test_project_id("ate-revision-mixed");
+    let revision = seed_read_revision(&runtime, &project, "guarded.txt", &"d".repeat(64)).await;
+
+    let result = runtime
+        .apply_text_edits(
+            project,
+            vec![
+                edit_change(
+                    "src/lib.rs",
+                    &"a".repeat(64),
+                    vec![text_edit(
+                        ApplyTextEditKind::ReplaceExact,
+                        Some("target"),
+                        Some("replacement"),
+                        None,
+                    )],
+                ),
+                ApplyFileChangeInput {
+                    kind: ApplyFileChangeKind::Delete,
+                    path: "other.txt".to_string(),
+                    to_path: None,
+                    content: None,
+                    edits: Vec::new(),
+                    expected_read_revision: Some(revision),
+                },
+            ],
+            None,
+        )
+        .await;
+
+    assert!(!result.success);
+    assert_eq!(result.output["error_kind"], "read_revision_path_mismatch");
+    assert_eq!(result.output["state_changed"], false);
+    assert_eq!(result.output["expected_read_revision"], revision);
+    assert_eq!(result.output["suggested_call"]["tool"], "read_files");
+    assert_eq!(
+        result.output["suggested_call"]["arguments"]["items"][0]["path"],
+        "other.txt"
+    );
+    assert_no_apply_text_edits_runner_request(&runtime, "ate-revision-mixed").await;
+}
+
+#[tokio::test]
+async fn apply_text_edits_ambiguous_unguarded_requires_read_before_positional_retry() {
+    let runtime = runtime_with_agent_project("ate-recovery");
+    register_agent(
+        &runtime,
+        "ate-recovery",
+        None,
+        RunnerCapabilities {
+            file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
+            apply_text_edit_occurrence: true,
+            ..Default::default()
+        },
+    )
+    .await;
     let project = agent_test_project_id("ate-recovery");
-    let sha = "a".repeat(64);
 
     let first = tokio::spawn({
         let runtime = runtime.clone();
         let project = project.clone();
-        let sha = sha.clone();
         async move {
             runtime
                 .apply_text_edits(
                     project,
                     vec![edit_change(
                         "src/lib.rs",
-                        &sha,
+                        &"a".repeat(64),
                         vec![text_edit(
                             ApplyTextEditKind::ReplaceExact,
                             Some("dup"),
@@ -666,6 +842,7 @@ async fn apply_text_edits_conflict_then_same_sha_occurrence_retry_needs_no_hidde
     let first_payload: Value =
         serde_json::from_str(first_request.content.as_deref().unwrap()).unwrap();
     assert_eq!(first_payload["recovery_metadata_version"], 1);
+    assert!(first_payload["changes"][0]["expected_sha256"].is_null());
     assert!(first_payload["changes"][0]["edits"][0]["occurrence"].is_null());
     runtime.runner_registry.complete(RunnerResultRequest {
         client_id: "ate-recovery".to_string(),
@@ -694,7 +871,7 @@ async fn apply_text_edits_conflict_then_same_sha_occurrence_retry_needs_no_hidde
                 "candidates_truncated": false,
                 "recovery_action": "select_occurrence_or_refine_match"
             },
-            "error": "Rejected transactional file batch: exact match is ambiguous. No files were modified. Retry guidance: choose an advertised occurrence or refine the exact match; reuse the same expected_sha256 unless you reread or observe a changed file."
+            "error": "legacy Runner recovery text mentioning expected_sha256 must not escape model projection"
         }).to_string()),
         stderr: Some(String::new()),
         stdout_truncated: false,
@@ -707,80 +884,50 @@ async fn apply_text_edits_conflict_then_same_sha_occurrence_retry_needs_no_hidde
     assert_eq!(conflict.output["conflict_recovery"]["match_count"], 2);
     assert_eq!(
         conflict.output["conflict_recovery"]["direct_retry_safe"],
-        true
-    );
-    assert_eq!(
-        conflict.output["conflict_recovery"]["reread_required"],
         false
     );
+    assert_eq!(
+        conflict.output["conflict_recovery"]["positional_retry_requires_read_revision"],
+        true
+    );
+    assert!(conflict.output["retry_guidance"]
+        .as_str()
+        .unwrap()
+        .contains("expected_read_revision"));
     let conflict_error = conflict
         .error
         .as_deref()
         .expect("model-facing conflict error");
-    assert!(conflict_error.contains("choose an advertised occurrence"));
-    assert!(conflict_error.contains("refine the exact match"));
-    assert!(conflict_error.contains("same expected_sha256"));
-    assert!(!conflict_error.contains("read the file again"));
-    assert!(!conflict_error.contains("read this file again"));
-    let output_schema = crate::tool_runtime::registry::output_schema_for_tool("apply_text_edits");
-    let serialized_conflict = serde_json::to_value(&conflict).unwrap();
-    crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
-        &serialized_conflict,
-        &output_schema,
-    )
-    .unwrap_or_else(|error| panic!("structured conflict must match output schema: {error}"));
+    assert!(
+        !conflict_error.contains("expected_sha256"),
+        "{conflict_error}"
+    );
+    assert!(
+        conflict_error.contains("expected_read_revision"),
+        "{conflict_error}"
+    );
     assert_no_apply_text_edits_runner_request(&runtime, "ate-recovery").await;
 
-    let second = tokio::spawn({
-        let runtime = runtime.clone();
-        let project = project.clone();
-        let sha = sha.clone();
-        async move {
-            let mut edit = text_edit(
-                ApplyTextEditKind::ReplaceExact,
-                Some("dup"),
-                Some("SECOND"),
-                None,
-            );
-            edit.occurrence = Some(2);
-            runtime
-                .apply_text_edits(
-                    project,
-                    vec![edit_change("src/lib.rs", &sha, vec![edit])],
-                    None,
-                )
-                .await
-        }
-    });
-    let second_request = wait_for_patch_agent_request(&runtime, "ate-recovery").await;
-    let second_payload: Value =
-        serde_json::from_str(second_request.content.as_deref().unwrap()).unwrap();
-    assert_eq!(second_payload["changes"][0]["expected_sha256"], sha);
-    assert_eq!(second_payload["changes"][0]["edits"][0]["occurrence"], 2);
-    runtime
-        .runner_registry
-        .complete(RunnerResultRequest {
-            client_id: "ate-recovery".to_string(),
-            runner_instance_id: "inst".to_string(),
-            request_id: second_request.request_id,
-            exit_code: Some(0),
-            stdout: Some(
-                serde_json::json!({
-                    "dry_run": false, "applied_count": 1, "changed": true,
-                    "would_change": true, "files": [], "changed_paths": ["src/lib.rs"]
-                })
-                .to_string(),
-            ),
-            stderr: Some(String::new()),
-            stdout_truncated: false,
-            stderr_truncated: false,
-            duration_ms: Some(1),
-            error: None,
-        })
-        .await
-        .unwrap();
-    let success = second.await.unwrap();
-    assert!(success.success, "{:?}", success.error);
+    let mut edit = text_edit(
+        ApplyTextEditKind::ReplaceExact,
+        Some("dup"),
+        Some("SECOND"),
+        None,
+    );
+    edit.occurrence = Some(2);
+    let retry = runtime
+        .apply_text_edits(
+            project,
+            vec![edit_change("src/lib.rs", &"a".repeat(64), vec![edit])],
+            None,
+        )
+        .await;
+    assert!(!retry.success);
+    assert_eq!(retry.output["state_changed"], false);
+    assert!(retry
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("expected_read_revision is required")));
     assert_no_apply_text_edits_runner_request(&runtime, "ate-recovery").await;
 }
 
@@ -793,6 +940,7 @@ async fn apply_text_edits_without_occurrence_unique_match_queues_and_succeeds() 
         None,
         RunnerCapabilities {
             file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
             ..Default::default()
         },
     )
@@ -856,6 +1004,7 @@ async fn apply_text_edits_without_occurrence_ambiguous_match_fails_closed() {
         None,
         RunnerCapabilities {
             file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
             ..Default::default()
         },
     )
@@ -998,6 +1147,7 @@ async fn apply_text_edits_dry_run_does_not_write() {
         None,
         RunnerCapabilities {
             file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
             ..Default::default()
         },
     )
@@ -1073,6 +1223,7 @@ async fn apply_text_edits_scoped_request_fails_closed_before_enqueue_without_cap
         None,
         RunnerCapabilities {
             file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
             apply_text_edit_occurrence: true,
             apply_text_edit_line_scope: false,
             ..Default::default()
@@ -1174,6 +1325,7 @@ async fn apply_text_edits_session_event_summary() {
         None,
         RunnerCapabilities {
             file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
             ..Default::default()
         },
     )
@@ -1315,6 +1467,7 @@ async fn apply_text_edits_effect_runtime(client_id: &str) -> (ToolRuntime, Strin
         None,
         RunnerCapabilities {
             file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
             ..Default::default()
         },
     )

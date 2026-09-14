@@ -215,7 +215,7 @@ fn edit_conflict_recovery_schema() -> Value {
             "schema_version": {"type": "integer", "const": 1},
             "conflict_kind": {"type": "string", "enum": [
                 "multiple_matches", "match_not_found", "occurrence_out_of_range",
-                "occurrence_outside_line_scope", "overlapping_edits", "sha256_mismatch"
+                "occurrence_outside_line_scope", "overlapping_edits", "stale_file_revision"
             ]},
             "recovery_action": {"type": "string", "enum": [
                 "select_occurrence_or_refine_match", "reread_or_refine_match",
@@ -226,21 +226,21 @@ fn edit_conflict_recovery_schema() -> Value {
             "occurrence_selector_supported": {"type": "boolean"},
             "direct_retry_safe": {
                 "type": "boolean",
-                "description": "True only when a corrected request may be retried against the same observed expected_sha256 without rereading. It never authorizes automatic replay of the rejected payload."
+                "description": "True only when a corrected request can safely reuse the same model-facing snapshot identity. Positional occurrence/line_scope recovery without expected_read_revision is never direct-retry safe."
             },
             "reread_required": {
                 "type": "boolean",
                 "description": "True when the caller must reread the affected file before another write attempt."
             },
-            "expected_sha256": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$",
-                "description": "Caller-provided expected sha256 on a sha256 mismatch; hash only, never file content."
+            "expected_read_revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991_u64,
+                "description": "Model-facing read revision that became stale. Runner SHA diagnostics are not projected here."
             },
-            "current_sha256": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$",
-                "description": "Current observed file sha256 on a sha256 mismatch; hash only, never file content."
+            "positional_retry_requires_read_revision": {
+                "type": "boolean",
+                "description": "True when occurrence or line_scope would become positional authority and therefore requires a fresh read revision before retry."
             },
             "match_count": {"type": "integer", "minimum": 0},
             "requested_occurrence": {"type": "integer", "minimum": 1},
@@ -276,6 +276,36 @@ fn edit_conflict_recovery_schema() -> Value {
     })
 }
 
+fn read_revision_recovery_call_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "tool": {"type": "string", "const": "read_files"},
+            "arguments": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "project": {"type": "string", "minLength": 1},
+                    "items": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {"path": {"type": "string", "minLength": 1}},
+                            "required": ["path"]
+                        }
+                    }
+                },
+                "required": ["project", "items"]
+            }
+        },
+        "required": ["tool", "arguments"]
+    })
+}
+
 pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
     match name {
         "apply_unified_diff" => Some(wrapped_output_schema(vec![
@@ -305,7 +335,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             (
                 "overwritten",
-                schema_type("boolean", "True when the request successfully targeted an existing file with its exact sha256 guard."),
+                schema_type("boolean", "True when the request successfully targeted an existing file with expected_read_revision resolved to the Runner's exact SHA guard."),
             ),
             (
                 "bytes_written",
@@ -313,7 +343,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             (
                 "sha256",
-                nullable_schema("string", "sha256 of the final file, current file on sha guard mismatch, or null when unavailable."),
+                nullable_schema("string", "Informational sha256 of the final file when available; stale guarded-write conflicts are projected through read revisions instead of exposing Runner SHA recovery truth."),
             ),
             (
                 "changed",
@@ -342,6 +372,18 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             (
                 "retry_guidance",
                 schema_type("string", "Bounded correction guidance for a deterministic preflight rejection."),
+            ),
+            (
+                "expected_read_revision",
+                nullable_schema("integer", "Model-facing read revision used by the rejected whole-file replacement, when applicable."),
+            ),
+            (
+                "reread_required",
+                schema_type("boolean", "True when a stale/unknown read revision requires read_files before retry."),
+            ),
+            (
+                "suggested_call",
+                read_revision_recovery_call_schema(),
             ),
             (
                 "error",
@@ -447,6 +489,18 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             (
                 "retry_guidance",
                 schema_type("string", "Bounded recovery guidance for a deterministic no-mutation rejection."),
+            ),
+            (
+                "expected_read_revision",
+                nullable_schema("integer", "Model-facing read revision associated with a stale guarded change, when applicable."),
+            ),
+            (
+                "reread_required",
+                schema_type("boolean", "True when the caller must obtain a new read_revision before retry."),
+            ),
+            (
+                "suggested_call",
+                read_revision_recovery_call_schema(),
             ),
             (
                 "conflict_recovery",

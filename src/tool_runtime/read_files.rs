@@ -1,6 +1,7 @@
 //! Bounded multi-file reads built from the canonical single-file read core.
 
 use super::project_resolution::ResolvedProject;
+use super::read_revisions::ReadRevisionTarget;
 use super::{
     ContinuationCarrier, ContinuationKind, ContinuationSemantics, ReadFilesItem, SuggestedToolCall,
     ToolCall, ToolResult, ToolRuntime,
@@ -88,7 +89,7 @@ fn read_range_continuation(
         return None;
     }
     let next_start_line = output.get("next_start_line")?.as_u64()? as usize;
-    let source_sha256 = output.get("sha256")?.as_str()?;
+    let source_read_revision = output.get("read_revision")?.as_u64()?;
     let total_lines = output.get("total_lines")?.as_u64()? as usize;
     let remaining_lines = total_lines
         .saturating_sub(next_start_line)
@@ -105,7 +106,7 @@ fn read_range_continuation(
     Some(json!({
         "kind": "read_range",
         "safe_cursor": true,
-        "source_sha256": source_sha256,
+        "source_read_revision": source_read_revision,
         "snapshot_stable": false,
         "continuation_semantics": ContinuationSemantics::new(
             ContinuationKind::Page,
@@ -293,10 +294,10 @@ fn add_batch_read_continuation(
 }
 
 /// Add actionable model-only continuation metadata to successful reads. The
-/// source cursor remains positional: `source_sha256` identifies the file that
-/// produced the current range, while `snapshot_stable=false` makes explicit
-/// that a later positional read must compare its newly returned full-file hash
-/// before the model treats both ranges as one unchanged snapshot.
+/// source cursor remains positional: `source_read_revision` identifies the
+/// full-file snapshot that produced the current range, while
+/// `snapshot_stable=false` makes explicit that a later positional read must
+/// compare its returned read revision before joining both ranges as one snapshot.
 pub(crate) fn add_actionable_read_continuations(
     projection: &ReadModelProjection,
     result: &mut ToolResult,
@@ -832,6 +833,27 @@ impl ToolRuntime {
         let requested_count = items.len();
         let with_line_numbers = with_line_numbers.unwrap_or(false);
         let deadline = Instant::now() + self.read_files_deadline;
+        // Capture the active Runner process before dispatch. A replacement that
+        // races this batch therefore makes these handles unusable rather than
+        // silently retargeting them to the replacement Runner.
+        let runner_instance_id = match self
+            .runner_registry
+            .get_runner_view(&resolved.config.client_id)
+            .await
+        {
+            Some(view) => view.runner_instance_id,
+            None => {
+                return ToolResult::err_with_output(
+                    "read_files could not bind the read snapshot to an active Runner process; retry after the Runner is available",
+                    json!({
+                        "project": runtime_project_id,
+                        "state_changed": false,
+                        "error_kind": "runner_unavailable",
+                        "retry_guidance": "retry read_files after the owning Runner is available"
+                    }),
+                )
+            }
+        };
 
         // The concurrency slot covers validation, enqueue, and response wait.
         // No request can reach the Runner until its future is polled by
@@ -840,6 +862,9 @@ impl ToolRuntime {
         let mut completed: Vec<Value> =
             stream::iter(items.into_iter().enumerate().map(|(index, item)| {
                 let project = &resolved.config;
+                let project_id = runtime_project_id.clone();
+                let runner_instance_id = runner_instance_id.clone();
+                let root_fingerprint = resolved.root_fingerprint.clone();
                 async move {
                     let path = item.path;
                     let result = self
@@ -852,12 +877,37 @@ impl ToolRuntime {
                             deadline,
                         )
                         .await;
+                    let success = result.success;
+                    let error = result.error;
+                    let mut output = result.output;
+                    if success {
+                        if let Some(sha256) = output
+                            .get("sha256")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                        {
+                            let read_revision = self.read_revisions.observe(
+                                ReadRevisionTarget {
+                                    project_id,
+                                    path: path.clone(),
+                                    client_id: project.client_id.clone(),
+                                    runner_instance_id,
+                                    project_root: project.path.clone(),
+                                    root_fingerprint,
+                                },
+                                sha256,
+                            );
+                            if let Some(output) = output.as_object_mut() {
+                                output.insert("read_revision".to_string(), json!(read_revision));
+                            }
+                        }
+                    }
                     json!({
                         "index": index,
                         "path": path,
-                        "success": result.success,
-                        "output": result.output,
-                        "error": result.error,
+                        "success": success,
+                        "output": output,
+                        "error": error,
                     })
                 }
             }))

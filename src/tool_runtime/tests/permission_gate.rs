@@ -21,7 +21,7 @@ fn write_tool_call(
         content: content.to_string(),
         session_id,
         overwrite: None,
-        expected_sha256: None,
+        expected_read_revision: None,
     }
 }
 

@@ -733,7 +733,7 @@ async fn closed_session_blocks_write_tools_and_message_post() {
             content: "blocked".to_string(),
             session_id: Some(session.session_id.clone()),
             overwrite: None,
-            expected_sha256: None,
+            expected_read_revision: None,
         })
         .await;
     assert!(!write.success);

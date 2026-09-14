@@ -525,6 +525,17 @@ impl RunnerRegistry {
                     pending.expected_project_cwd.as_deref(),
                 ) {
                     (Some(project_id), Some(project_cwd)) => match inner.runners.get(&body.client_id) {
+                        Some(runner)
+                            if pending
+                                .expected_project_runner_instance_id
+                                .as_deref()
+                                .is_some_and(|expected| runner.runner_instance_id != expected) =>
+                        {
+                            Some(
+                                "stale_runner: target Runner changed before file mutation dispatch"
+                                    .to_string(),
+                            )
+                        }
                         Some(runner) if runner.owner != pending.expected_runner_owner => Some(
                             "stale_authority: target Runner owner changed before dispatch".to_string(),
                         ),

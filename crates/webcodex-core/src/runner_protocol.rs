@@ -159,6 +159,12 @@ pub const RUNNER_CAPABILITY_STRUCTURED_FILE_DELETE: &str = "structured_file_dele
 /// selector in ApplyTextEditInput. Missing on older Runners is false and is
 /// never inferred from other file capabilities, protocol, build, transport, or OS.
 pub const RUNNER_CAPABILITY_APPLY_TEXT_EDIT_OCCURRENCE: &str = "apply_text_edit_occurrence";
+/// The Runner can prove globally unique exact local edit targets against its
+/// current file content without requiring a historical whole-file SHA guard.
+/// Missing on older Runners is false and is never inferred from file_write,
+/// occurrence/line_scope support, protocol generation, build, transport, or OS.
+pub const RUNNER_CAPABILITY_APPLY_TEXT_EDIT_LOCAL_GUARD_WITHOUT_SHA: &str =
+    "apply_text_edit_local_guard_without_sha";
 /// The Runner understands and enforces ApplyTextEditInput.line_scope as a
 /// 1-based inclusive full-match containment fence. Missing on older Runners is
 /// false and is never inferred from occurrence, protocol generation, file_write,
@@ -428,6 +434,7 @@ pub const RUNNER_CAPABILITY_NAMES: &[&str] = &[
     RUNNER_CAPABILITY_ARTIFACT_EXPORT_STREAMING_METADATA,
     RUNNER_CAPABILITY_STRUCTURED_FILE_DELETE,
     RUNNER_CAPABILITY_APPLY_TEXT_EDIT_OCCURRENCE,
+    RUNNER_CAPABILITY_APPLY_TEXT_EDIT_LOCAL_GUARD_WITHOUT_SHA,
     RUNNER_CAPABILITY_APPLY_TEXT_EDIT_LINE_SCOPE,
     RUNNER_CAPABILITY_APPLY_PATCH,
     RUNNER_CAPABILITY_APPLY_PATCH_MATCH_METADATA,
@@ -524,6 +531,10 @@ pub struct RunnerCapabilities {
     /// Runners is false and is never inferred from another capability.
     #[serde(default, skip_serializing_if = "is_false")]
     pub apply_text_edit_occurrence: bool,
+    /// Globally unique exact local edits may omit expected_sha256. The Runner
+    /// still fences preflight-to-mutation races with the planned source SHA.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub apply_text_edit_local_guard_without_sha: bool,
     /// Correct enforcement of ApplyTextEditInput.line_scope. Missing on older
     /// Runners is false and is never inferred from occurrence or generation.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -924,6 +935,7 @@ impl Default for RunnerCapabilities {
             artifact_export_streaming_metadata: false,
             structured_file_delete: false,
             apply_text_edit_occurrence: false,
+            apply_text_edit_local_guard_without_sha: false,
             apply_text_edit_line_scope: false,
             apply_patch: false,
             apply_patch_match_metadata: false,
@@ -2436,6 +2448,7 @@ mod envelope_tests {
                 artifact_export_streaming_metadata: false,
                 structured_file_delete: false,
                 apply_text_edit_occurrence: false,
+                apply_text_edit_local_guard_without_sha: false,
                 apply_text_edit_line_scope: false,
                 apply_patch: false,
                 apply_patch_match_metadata: false,

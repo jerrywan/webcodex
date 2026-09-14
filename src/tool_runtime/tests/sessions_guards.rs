@@ -67,7 +67,7 @@ async fn unknown_session_id_fails_before_execution_or_mutation() {
             content: "nope".to_string(),
             session_id: Some("wc_sess_missing".to_string()),
             overwrite: None,
-            expected_sha256: None,
+            expected_read_revision: None,
         })
         .await;
     assert!(!write.success);
@@ -198,7 +198,7 @@ async fn mutation_cross_project_session_fails_before_write() {
                 content: "nope\n".to_string(),
                 session_id: Some(session.session_id.clone()),
                 overwrite: None,
-                expected_sha256: None,
+                expected_read_revision: None,
             },
             Some(&auth),
         )
@@ -597,7 +597,7 @@ async fn read_only_session_rejects_write_project_file_before_mutation() {
             content: "nope".to_string(),
             session_id: Some(session.session_id.clone()),
             overwrite: None,
-            expected_sha256: None,
+            expected_read_revision: None,
         })
         .await;
 
@@ -863,7 +863,7 @@ async fn deny_write_only_allows_read_and_shell_tools() {
                 content: "x".to_string(),
                 session_id: Some(session.session_id.clone()),
                 overwrite: None,
-                expected_sha256: None,
+                expected_read_revision: None,
             },
             Some(&bootstrap),
         )
@@ -991,7 +991,7 @@ async fn deny_shell_only_allows_write_tools() {
                         content: "x".to_string(),
                         session_id: Some(session_id),
                         overwrite: None,
-                        expected_sha256: None,
+                        expected_read_revision: None,
                     },
                     Some(&bootstrap),
                 )

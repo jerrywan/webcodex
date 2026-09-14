@@ -169,6 +169,89 @@ fn write_project_file_preflight_rejection(
     .with_recovery(crate::tool_runtime::RecoveryKind::FixInput)
 }
 
+fn read_revision_rejection(
+    project: &str,
+    path: &str,
+    revision: u64,
+    error: ReadRevisionLookupError,
+) -> ToolResult {
+    let (error_kind, detail) = match error {
+        ReadRevisionLookupError::Unknown => (
+            "unknown_read_revision",
+            "the read revision is unknown, expired, evicted, or belongs to a prior Server runtime",
+        ),
+        ReadRevisionLookupError::ProjectMismatch => (
+            "read_revision_project_mismatch",
+            "the read revision belongs to a different Project",
+        ),
+        ReadRevisionLookupError::PathMismatch => (
+            "read_revision_path_mismatch",
+            "the read revision belongs to a different project-relative path",
+        ),
+        ReadRevisionLookupError::OwnerMismatch => (
+            "read_revision_owner_mismatch",
+            "the read revision belongs to a different Runner process or Project placement",
+        ),
+    };
+    ToolResult::err_with_output(
+        format!(
+            "Rejected before write: {detail}. No files were modified. Reread '{path}' and retry with its current read_revision."
+        ),
+        json!({
+            "changed": false,
+            "state_changed": false,
+            "execution_state": "not_started",
+            "error_kind": error_kind,
+            "expected_read_revision": revision,
+            "reread_required": true,
+            "suggested_call": {
+                "tool": "read_files",
+                "arguments": {
+                    "project": project,
+                    "items": [{"path": path}],
+                }
+            },
+            "retry_guidance": "reread the exact file and retry with its current read_revision",
+        }),
+    )
+    .with_recovery(crate::tool_runtime::RecoveryKind::FixInput)
+}
+
+fn read_revision_target(
+    resolved: &ResolvedProject,
+    path: &str,
+    runner_instance_id: &str,
+) -> ReadRevisionTarget {
+    ReadRevisionTarget {
+        project_id: resolved.resolved_id.clone(),
+        path: path.to_string(),
+        client_id: resolved.config.client_id.clone(),
+        runner_instance_id: runner_instance_id.to_string(),
+        project_root: resolved.config.path.clone(),
+        root_fingerprint: resolved.root_fingerprint.clone(),
+    }
+}
+
+fn apply_text_edit_local_guard_capability_rejection(reason: impl AsRef<str>) -> ToolResult {
+    let reason = reason.as_ref();
+    ToolResult::err_with_output(
+        format!(
+            "Rejected before write: {reason}. No files were modified. Retry guidance: this Runner generation requires a read revision for local guarded edits; reread the current file and retry with expected_read_revision."
+        ),
+        json!({
+            "changed": false,
+            "state_changed": false,
+            "execution_state": "not_started",
+            "error_kind": "agent_capability_unavailable",
+            "failure_kind": "capability_unavailable",
+            "capability": crate::runner_protocol::RUNNER_CAPABILITY_APPLY_TEXT_EDIT_LOCAL_GUARD_WITHOUT_SHA,
+            "reread_required": true,
+            "retry_guidance": "this Runner generation requires expected_read_revision for local guarded edits; reread and retry"
+        }),
+    )
+    .with_recovery(crate::tool_runtime::RecoveryKind::FixInput)
+}
+
 fn apply_text_edit_occurrence_capability_rejection(reason: impl AsRef<str>) -> ToolResult {
     let reason = reason.as_ref();
     ToolResult::err_with_output(
@@ -384,19 +467,29 @@ fn validate_apply_file_change(
     index: usize,
     change: &ApplyFileChangeInput,
 ) -> Result<(), ApplyTextEditsPreflightValidationError> {
-    let expected_hash = || -> Result<(), ApplyTextEditsPreflightValidationError> {
-        match change.expected_sha256.as_deref() {
-            Some(hash) if is_hex_sha256(hash) => Ok(()),
-            _ => Err(format!(
-                "change {index} ({}): expected_sha256 is required and must be 64 lowercase hexadecimal characters",
+    let valid_revision = |required: bool| -> Result<(), ApplyTextEditsPreflightValidationError> {
+        match change.expected_read_revision {
+            Some(revision) if (1..=MAX_JSON_SAFE_INTEGER).contains(&revision) => Ok(()),
+            Some(_) => Err(format!(
+                "change {index} ({}): expected_read_revision must be a positive JSON-safe integer",
                 change.kind.as_str()
             )
             .into()),
+            None if required => Err(format!(
+                "change {index} ({}): expected_read_revision is required",
+                change.kind.as_str()
+            )
+            .into()),
+            None => Ok(()),
         }
     };
     match change.kind {
         ApplyFileChangeKind::Edit => {
-            expected_hash()?;
+            let positional = change
+                .edits
+                .iter()
+                .any(|edit| edit.occurrence.is_some() || edit.line_scope.is_some());
+            valid_revision(positional)?;
             if change.to_path.is_some() || change.content.is_some() {
                 return Err(
                     format!("change {index} (edit): to_path and content are not allowed").into(),
@@ -419,11 +512,11 @@ fn validate_apply_file_change(
         }
         ApplyFileChangeKind::Create => {
             if change.to_path.is_some()
-                || change.expected_sha256.is_some()
+                || change.expected_read_revision.is_some()
                 || !change.edits.is_empty()
             {
                 return Err(format!(
-                    "change {index} (create): to_path, expected_sha256, and edits are not allowed"
+                    "change {index} (create): to_path, expected_read_revision, and edits are not allowed"
                 )
                 .into());
             }
@@ -438,7 +531,7 @@ fn validate_apply_file_change(
             }
         }
         ApplyFileChangeKind::Delete => {
-            expected_hash()?;
+            valid_revision(true)?;
             if change.to_path.is_some() || change.content.is_some() || !change.edits.is_empty() {
                 return Err(format!(
                     "change {index} (delete): to_path, content, and edits are not allowed"
@@ -447,7 +540,7 @@ fn validate_apply_file_change(
             }
         }
         ApplyFileChangeKind::Rename => {
-            expected_hash()?;
+            valid_revision(true)?;
             let to_path = change
                 .to_path
                 .as_deref()
@@ -1513,16 +1606,157 @@ fn apply_patch_agent_stdout_result(
     )
 }
 
+fn sanitize_apply_text_edits_model_recovery(
+    mut result: ToolResult,
+    project: &str,
+    changes: &[ApplyFileChangeInput],
+) -> ToolResult {
+    if result.success {
+        return result;
+    }
+    let change_index = result
+        .output
+        .get("change_index")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok());
+    let change = change_index.and_then(|index| changes.get(index));
+    let error_kind = result
+        .output
+        .get("error_kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    if error_kind == "sha256_conflict" {
+        if let Some(change) = change {
+            if let Some(revision) = change.expected_read_revision {
+                result.output["error_kind"] = json!("stale_file_revision");
+                result.output["expected_read_revision"] = json!(revision);
+                result.output["reread_required"] = json!(true);
+                result.output["suggested_call"] = json!({
+                    "tool": "read_files",
+                    "arguments": {
+                        "project": project,
+                        "items": [{"path": change.path}],
+                    }
+                });
+                result.output["retry_guidance"] = json!(
+                    "reread the exact file and retry the whole batch with its current read_revision"
+                );
+                if let Some(recovery) = result
+                    .output
+                    .get_mut("conflict_recovery")
+                    .and_then(Value::as_object_mut)
+                {
+                    recovery.remove("expected_sha256");
+                    recovery.remove("current_sha256");
+                    recovery.insert("conflict_kind".to_string(), json!("stale_file_revision"));
+                    recovery.insert("expected_read_revision".to_string(), json!(revision));
+                    recovery.insert("direct_retry_safe".to_string(), json!(false));
+                    recovery.insert("reread_required".to_string(), json!(true));
+                }
+                result.error = Some(format!(
+                    "Rejected transactional file batch: the guarded read revision for '{}' is stale. No files were modified. Reread the file and retry with its current read_revision.",
+                    change.path
+                ));
+            }
+        }
+        return result;
+    }
+
+    if error_kind == "edit_conflict" {
+        let recovery_action = result
+            .output
+            .get("conflict_recovery")
+            .and_then(|value| value.get("recovery_action"))
+            .and_then(Value::as_str);
+        let positional_recovery = matches!(
+            recovery_action,
+            Some("select_occurrence_or_refine_match")
+                | Some("choose_valid_occurrence_or_refine_match")
+                | Some("narrow_line_scope_or_select_occurrence")
+                | Some("adjust_line_scope_or_refine_match")
+                | Some("align_occurrence_with_line_scope")
+        );
+        if positional_recovery
+            && change.is_some_and(|change| change.expected_read_revision.is_none())
+        {
+            if let Some(recovery) = result
+                .output
+                .get_mut("conflict_recovery")
+                .and_then(Value::as_object_mut)
+            {
+                recovery.insert("direct_retry_safe".to_string(), json!(false));
+                recovery.insert(
+                    "positional_retry_requires_read_revision".to_string(),
+                    json!(true),
+                );
+            }
+            let guidance = "refine the target so it is globally unique; if positional occurrence/line_scope is still needed, reread the file first and retry with expected_read_revision. For repetitive or programmatic rewrites, a bounded deterministic transformation may be clearer.";
+            result.output["retry_guidance"] = json!(guidance);
+            result.error = Some(format!(
+                "Rejected transactional file batch: the exact target is not globally unique for an unguarded local edit. No files were modified. Retry guidance: {guidance}"
+            ));
+        }
+    }
+    result
+}
+
+fn sanitize_write_project_file_model_recovery(
+    mut result: ToolResult,
+    project: &str,
+    path: &str,
+    expected_read_revision: Option<u64>,
+) -> ToolResult {
+    if result.success {
+        return result;
+    }
+    let sha_mismatch = result
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("expected_sha256 mismatch"));
+    if !sha_mismatch {
+        return result;
+    }
+    result
+        .output
+        .as_object_mut()
+        .map(|output| output.remove("sha256"));
+    result.output["error_kind"] = json!("stale_file_revision");
+    result.output["reread_required"] = json!(true);
+    result.output["suggested_call"] = json!({
+        "tool": "read_files",
+        "arguments": {
+            "project": project,
+            "items": [{"path": path}],
+        }
+    });
+    result.output["retry_guidance"] =
+        json!("reread the exact file and retry with its current read_revision");
+    if let Some(revision) = expected_read_revision {
+        result.output["expected_read_revision"] = json!(revision);
+    }
+    result.error = Some(format!(
+        "Rejected whole-file replacement: the guarded read revision for '{path}' is stale. No file was overwritten. Reread the file and retry with its current read_revision."
+    ));
+    result
+}
+
 fn apply_text_edits_agent_stdout_result(
     stdout: &str,
     expected_change_count: usize,
     expected_dry_run: bool,
+    project: &str,
+    changes: &[ApplyFileChangeInput],
 ) -> ToolResult {
-    transactional_edit_agent_stdout_result(
-        "apply_text_edits",
-        stdout,
-        expected_change_count,
-        expected_dry_run,
+    sanitize_apply_text_edits_model_recovery(
+        transactional_edit_agent_stdout_result(
+            "apply_text_edits",
+            stdout,
+            expected_change_count,
+            expected_dry_run,
+        ),
+        project,
+        changes,
     )
 }
 
@@ -2101,9 +2335,8 @@ impl ToolRuntime {
         path: String,
         content: String,
         overwrite: Option<bool>,
-        expected_sha256: Option<String>,
+        expected_read_revision: Option<u64>,
     ) -> ToolResult {
-        // ---- Input validation (before project resolution) ----
         if let Err(e) = validate_edit_file_path(&path) {
             return super::permissions::edit_path_policy_rejected_result(&path, e);
         }
@@ -2118,43 +2351,76 @@ impl ToolRuntime {
             return write_project_file_preflight_rejection(
                 format!("content exceeds {MAX_WRITE_CONTENT_BYTES} bytes"),
                 "content_too_large",
-                "use apply_text_edits for a smaller local change or reduce the full rewrite",
+                "use a smaller local edit or reduce the intentional full rewrite",
             );
         }
         let overwrite = overwrite.unwrap_or(false);
-        if let Some(hash) = expected_sha256.as_deref() {
-            if !is_hex_sha256(hash) {
-                return write_project_file_preflight_rejection(
-                    "expected_sha256 must be a lowercase 64-character hex digest",
-                    "invalid_expected_sha256",
-                    "reread the file and provide its exact current sha256",
-                );
-            }
+        if expected_read_revision
+            .is_some_and(|revision| !(1..=MAX_JSON_SAFE_INTEGER).contains(&revision))
+        {
+            return write_project_file_preflight_rejection(
+                "expected_read_revision must be a positive JSON-safe integer",
+                "invalid_expected_read_revision",
+                "reread the existing file and use its current read_revision",
+            );
         }
-        match (overwrite, expected_sha256.is_some()) {
+        match (overwrite, expected_read_revision.is_some()) {
             (true, false) => {
                 return write_project_file_preflight_rejection(
-                    "overwrite=true requires expected_sha256",
-                    "missing_expected_sha256",
-                    "reread the existing file and retry with its exact current sha256",
+                    "overwrite=true requires expected_read_revision",
+                    "missing_expected_read_revision",
+                    "reread the existing file and retry with its current read_revision",
                 )
             }
             (false, true) => {
                 return write_project_file_preflight_rejection(
-                    "expected_sha256 is allowed only when overwrite=true",
-                    "unexpected_expected_sha256",
-                    "omit expected_sha256 for a new-file create, or set overwrite=true for an existing-file rewrite",
+                    "expected_read_revision is allowed only when overwrite=true",
+                    "unexpected_expected_read_revision",
+                    "omit expected_read_revision for a new-file create, or set overwrite=true for an intentional whole-file replacement",
                 )
             }
             _ => {}
         }
 
-        // ---- Project resolution (Runner-registered only) ----
-        let proj = match self.resolve_project(&project).await {
-            Ok(p) => p,
-            Err(e) => return ToolResult::err(e),
+        let resolved = match self.resolve_project_input(&project).await {
+            Ok(resolved) => resolved,
+            Err(error) => return ToolResult::err(error),
         };
-        let client_id = proj.client_id.clone();
+        let Some(runner) = self
+            .runner_registry
+            .get_runner_view(&resolved.config.client_id)
+            .await
+        else {
+            return structured_edit_not_started_result(
+                "write_project_file",
+                "the resolved Runner became unavailable before mutation admission",
+            );
+        };
+        let Some(runner_project_id) =
+            crate::tool_runtime::runner_local_project_id(&resolved.resolved_id)
+        else {
+            return structured_edit_not_started_result(
+                "write_project_file",
+                "the resolved Project identity could not be bound to a Runner-local project id",
+            );
+        };
+        let expected_sha256 = match expected_read_revision {
+            Some(revision) => {
+                let target = read_revision_target(&resolved, &path, &runner.runner_instance_id);
+                match self.read_revisions.resolve(revision, &target) {
+                    Ok(sha256) => Some(sha256),
+                    Err(error) => {
+                        return read_revision_rejection(
+                            &resolved.resolved_id,
+                            &path,
+                            revision,
+                            error,
+                        )
+                    }
+                }
+            }
+            None => None,
+        };
 
         let payload = json!({
             "path": path.clone(),
@@ -2163,31 +2429,49 @@ impl ToolRuntime {
             "expected_sha256": expected_sha256,
         });
         let wait_timeout = 60_u64;
+        let request = ShellFileOpRequest {
+            op: "write_project_file".to_string(),
+            client_id: resolved.config.client_id.clone(),
+            path: path.clone(),
+            cwd: Some(resolved.config.path.clone()),
+            content: Some(payload.to_string()),
+            max_bytes: None,
+            old_text: None,
+            pattern: None,
+            expected_sha256: None,
+            expected_prefix: None,
+            start_line: None,
+            end_line: None,
+            line: None,
+            create_dirs: false,
+            wait_timeout_secs: wait_timeout,
+        };
         let (request_id, rx) = match self
             .runner_registry
-            .enqueue_file_op(
-                ShellFileOpRequest {
-                    op: "write_project_file".to_string(),
-                    client_id,
-                    path: path.clone(),
-                    cwd: Some(proj.path.clone()),
-                    content: Some(payload.to_string()),
-                    max_bytes: None,
-                    old_text: None,
-                    pattern: None,
-                    expected_sha256: None,
-                    expected_prefix: None,
-                    start_line: None,
-                    end_line: None,
-                    line: None,
-                    create_dirs: false,
-                    wait_timeout_secs: wait_timeout,
-                },
+            .enqueue_project_file_mutation(
+                request,
+                runner_project_id,
+                &resolved.config.path,
+                &runner.runner_instance_id,
                 "tool_runtime".to_string(),
             )
             .await
         {
             Ok(request) => request,
+            Err(error) if error.starts_with("stale_runner:") => {
+                if let Some(revision) = expected_read_revision {
+                    return read_revision_rejection(
+                        &resolved.resolved_id,
+                        &path,
+                        revision,
+                        ReadRevisionLookupError::OwnerMismatch,
+                    );
+                }
+                return structured_edit_not_started_result(
+                    "write_project_file",
+                    "the exact Runner changed before the new-file create could be dispatched; retry after resolving the current Project owner",
+                );
+            }
             Err(_) => {
                 return structured_edit_not_started_result(
                     "write_project_file",
@@ -2207,7 +2491,12 @@ impl ToolRuntime {
             Ok(response) => response,
             Err(result) => return result,
         };
-        write_project_file_agent_stdout_result(&response.stdout.unwrap_or_default())
+        sanitize_write_project_file_model_recovery(
+            write_project_file_agent_stdout_result(&response.stdout.unwrap_or_default()),
+            &resolved.resolved_id,
+            &path,
+            expected_read_revision,
+        )
     }
 
     pub(crate) async fn apply_patch(
@@ -2494,19 +2783,67 @@ impl ToolRuntime {
                 );
             }
         }
-        let requires_occurrence_capability = changes
-            .iter()
-            .flat_map(|change| change.edits.iter())
-            .any(|edit| edit.occurrence.is_some());
-        let requires_line_scope_capability = changes
-            .iter()
-            .flat_map(|change| change.edits.iter())
-            .any(|edit| edit.line_scope.is_some());
+
+        let resolved = match self.resolve_project_input(&project).await {
+            Ok(resolved) => resolved,
+            Err(error) => return ToolResult::err(error),
+        };
+        let Some(runner) = self
+            .runner_registry
+            .get_runner_view(&resolved.config.client_id)
+            .await
+        else {
+            return structured_edit_not_started_result(
+                "apply_text_edits",
+                "the resolved Runner became unavailable before mutation admission",
+            );
+        };
+        let Some(runner_project_id) =
+            crate::tool_runtime::runner_local_project_id(&resolved.resolved_id)
+        else {
+            return structured_edit_not_started_result(
+                "apply_text_edits",
+                "the resolved Project identity could not be bound to a Runner-local project id",
+            );
+        };
+
+        // Resolve every strong model-facing guard before request construction.
+        // Any invalid/stale/mismatched revision rejects the entire batch without
+        // dispatch, preserving transactionality across mixed guarded/unguarded changes.
+        let mut wire_changes = Vec::with_capacity(changes.len());
+        for change in &changes {
+            let expected_sha256 = match change.expected_read_revision {
+                Some(revision) => {
+                    let target =
+                        read_revision_target(&resolved, &change.path, &runner.runner_instance_id);
+                    match self.read_revisions.resolve(revision, &target) {
+                        Ok(sha256) => Some(sha256),
+                        Err(error) => {
+                            return read_revision_rejection(
+                                &resolved.resolved_id,
+                                &change.path,
+                                revision,
+                                error,
+                            )
+                        }
+                    }
+                }
+                None => None,
+            };
+            wire_changes.push(crate::apply_edits_shared::ApplyFileChangeInput {
+                kind: change.kind,
+                path: change.path.clone(),
+                to_path: change.to_path.clone(),
+                content: change.content.clone(),
+                edits: change.edits.clone(),
+                expected_sha256,
+            });
+        }
 
         let expected_change_count = changes.len();
         let expected_dry_run = dry_run.unwrap_or(false);
         let payload = json!({
-            "changes": changes,
+            "changes": wire_changes,
             "dry_run": expected_dry_run,
             "recovery_metadata_version": 1,
         });
@@ -2539,12 +2876,6 @@ impl ToolRuntime {
             }
         };
 
-        let proj = match self.resolve_project(&project).await {
-            Ok(p) => p,
-            Err(e) => return ToolResult::err(e),
-        };
-        let client_id = proj.client_id.clone();
-
         let wait_timeout = 60_u64;
         let routing_path = changes
             .first()
@@ -2552,9 +2883,9 @@ impl ToolRuntime {
             .expect("non-empty changes validated above");
         let request = ShellFileOpRequest {
             op: "apply_text_edits".to_string(),
-            client_id,
+            client_id: resolved.config.client_id.clone(),
             path: routing_path,
-            cwd: Some(proj.path.clone()),
+            cwd: Some(resolved.config.path.clone()),
             content: Some(serialized),
             max_bytes: None,
             old_text: None,
@@ -2567,40 +2898,59 @@ impl ToolRuntime {
             create_dirs: false,
             wait_timeout_secs: wait_timeout,
         };
-        let enqueue_result = if requires_line_scope_capability {
-            self.runner_registry
-                .enqueue_apply_text_edits_with_line_scope(
-                    request,
-                    "tool_runtime".to_string(),
-                    requires_occurrence_capability,
-                )
-                .await
-        } else if requires_occurrence_capability {
-            self.runner_registry
-                .enqueue_apply_text_edits_with_occurrence(request, "tool_runtime".to_string())
-                .await
-        } else {
-            self.runner_registry
-                .enqueue_file_op(request, "tool_runtime".to_string())
-                .await
-        };
+        let enqueue_result = self
+            .runner_registry
+            .enqueue_project_file_mutation(
+                request,
+                runner_project_id,
+                &resolved.config.path,
+                &runner.runner_instance_id,
+                "tool_runtime".to_string(),
+            )
+            .await;
         let (request_id, rx) = match enqueue_result {
-            Ok(r) => r,
-            Err(e)
-                if e.starts_with("capability_unavailable:")
-                    && e.contains(
+            Ok(request) => request,
+            Err(error)
+                if error.starts_with("capability_unavailable:")
+                    && error.contains(
+                        crate::runner_protocol::RUNNER_CAPABILITY_APPLY_TEXT_EDIT_LOCAL_GUARD_WITHOUT_SHA,
+                    ) =>
+            {
+                return apply_text_edit_local_guard_capability_rejection(error)
+            }
+            Err(error)
+                if error.starts_with("capability_unavailable:")
+                    && error.contains(
                         crate::runner_protocol::RUNNER_CAPABILITY_APPLY_TEXT_EDIT_LINE_SCOPE,
                     ) =>
             {
-                return apply_text_edit_line_scope_capability_rejection(e)
+                return apply_text_edit_line_scope_capability_rejection(error)
             }
-            Err(e)
-                if e.starts_with("capability_unavailable:")
-                    && e.contains(
+            Err(error)
+                if error.starts_with("capability_unavailable:")
+                    && error.contains(
                         crate::runner_protocol::RUNNER_CAPABILITY_APPLY_TEXT_EDIT_OCCURRENCE,
                     ) =>
             {
-                return apply_text_edit_occurrence_capability_rejection(e)
+                return apply_text_edit_occurrence_capability_rejection(error)
+            }
+            Err(error) if error.starts_with("stale_runner:") => {
+                if let Some((path, revision)) = changes.iter().find_map(|change| {
+                    change
+                        .expected_read_revision
+                        .map(|revision| (change.path.as_str(), revision))
+                }) {
+                    return read_revision_rejection(
+                        &resolved.resolved_id,
+                        path,
+                        revision,
+                        ReadRevisionLookupError::OwnerMismatch,
+                    );
+                }
+                return structured_edit_not_started_result(
+                    "apply_text_edits",
+                    "the exact Runner changed before the local edit could be dispatched; reread before retrying",
+                );
             }
             Err(_) => {
                 return structured_edit_not_started_result(
@@ -2625,6 +2975,8 @@ impl ToolRuntime {
             &response.stdout.unwrap_or_default(),
             expected_change_count,
             expected_dry_run,
+            &resolved.resolved_id,
+            &changes,
         )
     }
 }
@@ -3725,6 +4077,8 @@ mod tests {
             r#"{"changed":true,"state_changed":false,"rollback_complete":false,"retry_guidance":"retry directly","conflict_recovery":{"schema_version":1,"conflict_kind":"multiple_matches","occurrence_selector_supported":true,"direct_retry_safe":true,"reread_required":false,"recovery_action":"select_occurrence_or_refine_match"},"error":"rollback failed"}"#,
             1,
             false,
+            "agent:test:demo",
+            &[],
         );
 
         assert!(!result.success);

@@ -281,7 +281,7 @@ async fn write_project_file_with_session_id_records_changed_path_without_content
                         content: "do-not-log-this-content\n".to_string(),
                         session_id: Some(session_id),
                         overwrite: None,
-                        expected_sha256: None,
+                        expected_read_revision: None,
                     },
                     Some(&bootstrap),
                 )
@@ -4597,18 +4597,18 @@ async fn write_project_file_rejects_invalid_input_before_agent_dispatch() {
         .await;
     assert!(!result.success);
     assert!(result.error.unwrap().contains("sensitive"));
-    // bad expected_sha256 format
+    // invalid model-facing read revision
     let result = runtime
         .write_project_file(
             "agent:c:p".to_string(),
             "EDIT_PROBE.txt".to_string(),
             "x".to_string(),
             Some(true),
-            Some("not-a-hash".to_string()),
+            Some(0),
         )
         .await;
     assert!(!result.success);
-    assert!(result.error.unwrap().contains("expected_sha256"));
+    assert!(result.error.unwrap().contains("expected_read_revision"));
 }
 
 #[test]

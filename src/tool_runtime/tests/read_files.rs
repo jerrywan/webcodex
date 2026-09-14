@@ -208,6 +208,61 @@ async fn read_files_returns_ordered_normalized_successes_after_out_of_order_comp
 }
 
 #[tokio::test]
+async fn read_files_reuses_read_revision_for_same_full_file_snapshot_across_ranges() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = ToolRuntime::new_for_tests();
+    let client_id = "read-revision-reuse";
+    register_runner_project_at_path(&runtime, client_id, "demo", root.path()).await;
+    let content = "one\ntwo\nthree\nfour\n";
+
+    let first = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .read_files(
+                    "demo".to_string(),
+                    vec![item("src/lib.rs", Some(1), Some(2))],
+                    Some(false),
+                )
+                .await
+        }
+    });
+    let first_request = next_read_request(&runtime, client_id).await;
+    complete_read(&runtime, client_id, &first_request, content).await;
+    let first = first.await.unwrap();
+    assert!(first.success, "{:?}", first.error);
+    let first_revision = first.output["items"][0]["output"]["read_revision"]
+        .as_u64()
+        .expect("first read revision");
+
+    let second = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .read_files(
+                    "demo".to_string(),
+                    vec![item("src/lib.rs", Some(3), Some(2))],
+                    Some(false),
+                )
+                .await
+        }
+    });
+    let second_request = next_read_request(&runtime, client_id).await;
+    complete_read(&runtime, client_id, &second_request, content).await;
+    let second = second.await.unwrap();
+    assert!(second.success, "{:?}", second.error);
+    let second_revision = second.output["items"][0]["output"]["read_revision"]
+        .as_u64()
+        .expect("second read revision");
+
+    assert_eq!(first_revision, second_revision);
+    assert_eq!(
+        first.output["items"][0]["output"]["sha256"],
+        second.output["items"][0]["output"]["sha256"]
+    );
+}
+
+#[tokio::test]
 async fn read_file_dispatch_complete_success_is_sparse_after_session_recording() {
     let root = tempfile::tempdir().unwrap();
     let runtime = ToolRuntime::new_for_tests();
@@ -369,10 +424,11 @@ async fn read_file_dispatch_partial_success_keeps_full_range_cursor() {
         continuation["continuation_semantics"]["carrier"],
         "position"
     );
-    assert_eq!(
-        continuation["source_sha256"],
-        format!("{:x}", Sha256::digest(content.as_bytes()))
-    );
+    let read_revision = item["output"]["read_revision"]
+        .as_u64()
+        .expect("successful read must expose read_revision");
+    assert!((1..=9_007_199_254_740_991).contains(&read_revision));
+    assert_eq!(continuation["source_read_revision"], read_revision);
     assert_eq!(continuation["suggested_call"]["tool"], "read_files");
     assert_eq!(
         continuation["suggested_call"]["arguments"]["session_id"],
@@ -443,7 +499,9 @@ async fn read_files_continuation_is_positional_not_snapshot_stable() {
     complete_read(&runtime, client_id, &request, first_content).await;
     let first = first.await.unwrap();
     let first_item = &first.output["items"][0];
-    let first_sha = first_item["output"]["sha256"].as_str().unwrap().to_string();
+    let first_revision = first_item["output"]["read_revision"]
+        .as_u64()
+        .expect("first read revision");
     let suggested = &first_item["continuation"]["suggested_call"];
     let next_call = ToolCall::from_tool_name(
         suggested["tool"].as_str().unwrap(),
@@ -467,8 +525,14 @@ async fn read_files_continuation_is_positional_not_snapshot_stable() {
     assert!(second.success, "{:?}", second.error);
     let second_item = &second.output["items"][0];
     assert_eq!(second_item["output"]["text"], "one");
-    assert_ne!(second_item["output"]["sha256"], first_sha);
-    assert_eq!(first_item["continuation"]["source_sha256"], first_sha);
+    let second_revision = second_item["output"]["read_revision"]
+        .as_u64()
+        .expect("second read revision");
+    assert_ne!(second_revision, first_revision);
+    assert_eq!(
+        first_item["continuation"]["source_read_revision"],
+        first_revision
+    );
     assert_eq!(first_item["continuation"]["snapshot_stable"], false);
 }
 

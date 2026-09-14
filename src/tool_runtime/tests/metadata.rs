@@ -354,6 +354,7 @@ async fn register_agent_projects_for_auth(
                         structured_file_delete: false,
                         apply_text_edit_occurrence: false,
                         apply_text_edit_line_scope: false,
+                        apply_text_edit_local_guard_without_sha: false,
                         apply_patch: false,
                         apply_patch_match_metadata: false,
                         apply_patch_matching_mode: false,
@@ -1289,7 +1290,7 @@ async fn replacement_runner_pending_inventory_has_zero_project_routing_authority
             content: "must not dispatch".to_string(),
             session_id: None,
             overwrite: None,
-            expected_sha256: None,
+            expected_read_revision: None,
         },
         ToolCall::RunJob {
             project: project_id.clone(),
