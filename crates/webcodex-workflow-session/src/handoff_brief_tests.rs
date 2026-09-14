@@ -14,6 +14,24 @@ use webcodex_core::workflow_session_contract::SessionMode;
 
 const PROJECT: &str = "test-project";
 
+#[test]
+fn handoff_brief_size_matches_buffered_json_bytes() {
+    for value in [
+        json!("plain ASCII"),
+        json!("quote=\" slash=\\ control=\n\t"),
+        json!("Unicode 你好 🦀 日本語"),
+        json!({
+            "nested": [null, true, 42, {"escaped": "line\nnext", "unicode": "界"}],
+            "object": {"path": "src/quoted_\\\".rs"}
+        }),
+    ] {
+        assert_eq!(
+            handoff_brief_size(&value),
+            serde_json::to_vec(&value).unwrap().len()
+        );
+    }
+}
+
 fn store_with_limit(max_events: usize) -> SessionStore {
     SessionStore::new(16, max_events)
 }

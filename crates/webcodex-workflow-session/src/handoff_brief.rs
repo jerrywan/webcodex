@@ -7,6 +7,7 @@
 
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+use std::io::{self, Write};
 
 use crate::{
     normalize_observed_project_path, redact_and_bound_instruction, SessionSummary,
@@ -247,10 +248,35 @@ pub fn build_handoff_brief(input: HandoffBriefInput<'_>) -> Value {
     brief
 }
 
+#[derive(Default)]
+struct JsonByteCounter(usize);
+
+impl Write for JsonByteCounter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0 = self.0.checked_add(buf.len()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::OutOfMemory,
+                "serialized JSON length overflow",
+            )
+        })?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn serialized_json_len<T: serde::Serialize + ?Sized>(
+    value: &T,
+) -> Result<usize, serde_json::Error> {
+    let mut counter = JsonByteCounter::default();
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.0)
+}
+
 pub fn handoff_brief_size(value: &Value) -> usize {
-    serde_json::to_vec(value)
-        .map(|bytes| bytes.len())
-        .unwrap_or(usize::MAX)
+    serialized_json_len(value).unwrap_or(usize::MAX)
 }
 
 fn instruction_projection(instruction: Option<&str>) -> Value {
