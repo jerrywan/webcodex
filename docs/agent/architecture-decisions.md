@@ -170,13 +170,14 @@ closed (see §6). Full contract: [`permission-model.md`](permission-model.md).
 
 ---
 
-## 2. Internal API evolution (background)
+## 2. Runtime/tool contract evolution (background)
 
 WebCodex is an **internal / self-use** project. There are no supported external
-API consumers, public SDKs, or third-party stable clients of the runtime tool
-surface today.
+API consumers, public SDKs, or third-party stable clients of the model-facing
+runtime tool surface today.
 
-Standing executable rules (also summarized in `AGENTS.md`):
+Standing executable rules (also summarized in `AGENTS.md` and expanded in
+[`tool-contract-guidelines.md`](tool-contract-guidelines.md)):
 
 1. Do not retain compatibility fields for hypothetical consumers.
 2. Do not emit both a canonical field and an alias field for the same concept.
@@ -185,10 +186,19 @@ Standing executable rules (also summarized in `AGENTS.md`):
 4. When duplicate representations are found, choose one canonical structured
    representation and delete the others from outputs, schemas, tests, and docs
    in the same change.
+5. Do not reject a recognized semantically inert parameter merely to enforce a
+   presentation/resource bound that can be safely normalized or clamped. Strict
+   rejection belongs to semantic ambiguity, authority, identity/fence, effect,
+   privacy, and retry-safety boundaries.
+6. Optimize for model-turn economy only after preserving truth: server-known
+   mechanical repair may continue in the same call; unknown intent, uncertain
+   effects, or missing authority must never be guessed to save a turn.
 
 Before keeping any compatibility layer, name a **specific consumer** or a
-**specific public contract**. A `version` (or parser version) field may identify
-protocol shape; it is not a reason to keep duplicate or alias fields.
+**specific public/durable contract**. A `version` (or parser version) field may
+identify protocol shape; it is not a reason to keep duplicate or alias fields.
+Historical persisted truth is a separate concern from current model-facing tool
+shape and must not be rewritten merely because the current tool contract changes.
 
 When external stable consumers genuinely exist later, revise this decision
 explicitly and define a bounded migration window for that concrete contract.
@@ -320,7 +330,7 @@ it never infers readiness from configuration.
 | Explicit Workflow targeting | Full-runtime Workflow Sessions have no process-local or durable window binding. `runtime_status` exposes no Workflow binding layer. Ordinary project tools without an explicit business Session or authorized wrapper recorder execute unlinked to Workflow Session state. This remains separate from Connector-owned window/project/task continuity |
 | Full-runtime start/continue | `work_on_project(session_id=<id>)` continues exactly that authorized Active same-project Session; omission creates a fresh Workflow Session. Stable window or credential identity never selects a Workflow Session. `work_on_project` calls the shared coding workflow engine directly; there is no second internal ToolCall identity |
 | Canonical model coding bootstrap | `work_on_project` is the external runtime coding bootstrap. `registered_tool_specs` defines the canonical model-visible runtime universe used by discovery and generic ToolCall admission. A startup-selected model surface may project that universe more narrowly: `local_coding` lists its focused typed set, `adaptive_runtime` lists a smaller typed core plus one generic gateway for long-tail targets and fallback dispatch of otherwise-admitted direct targets, and `full_operator_runtime` expands the runtime universe. Retired wire names such as `start_coding_task` fail closed before dispatch and never contribute selector names or flattened model fields |
-| Runtime exposure selection | The Server owns one top-level `RuntimeExposure`. Complete `WEBCODEX_CONNECTOR_SURFACE=task-v1` configuration selects `ProjectConnector`, exposed publicly as `project_connector`; ProjectConnector is a project-bound ConnectorTask capability contract, not a `ModelSurface`. Without Connector configuration, exposure is `Runtime(ModelSurface)`: an unset `WEBCODEX_MCP_MODEL_SURFACE` selects `adaptive_runtime`, while `local-coding-v1`, `adaptive-runtime-v1`, and `full-operator-v1` select `local_coding`, `adaptive_runtime`, and `full_operator_runtime` explicitly. `local-coding-v1` remains the fixed typed compatibility surface; fresh/default model exposure uses Adaptive discovery rather than deleting those runtime capabilities. `adaptive_runtime` direct admission/order is statically declared by canonical `ToolDefinition`s; ordinary model-visible runtime tools default to the bounded long-tail gateway unless explicitly promoted to direct. Direct availability is preferred exposure rather than exclusive execution authority: an otherwise-admitted direct target may fall back through the same generic gateway. Gateway dispatch preserves the target tool's existing scope, authority, permission, argument, capability, effect, and Session/ACK semantics. MCP `tools/list` schema projection is exposure-aware: unset `WEBCODEX_MCP_COMPACT_SCHEMAS` defaults Adaptive Runtime to compact discovery (omitting only `outputSchema`), while Local Coding, Full Operator, and ProjectConnector retain full-schema compatibility defaults; explicit true/false always overrides that projection without changing ToolSpec ownership or invocation/result semantics. A Connector + `WEBCODEX_MCP_MODEL_SURFACE` conflict, an unsupported value, or partial Connector configuration fails startup. MCP GET/initialize/discovery, `runtime_status.runtime_exposure`, and the startup log report the same flattened exposure name |
+| Runtime exposure selection | The Server owns one top-level `RuntimeExposure`. Complete `WEBCODEX_CONNECTOR_SURFACE=task-v1` configuration selects `ProjectConnector`, exposed publicly as `project_connector`; ProjectConnector is a project-bound ConnectorTask capability contract, not a `ModelSurface`. Without Connector configuration, exposure is `Runtime(ModelSurface)`: an unset `WEBCODEX_MCP_MODEL_SURFACE` selects `adaptive_runtime`, while `local-coding-v1`, `adaptive-runtime-v1`, and `full-operator-v1` select `local_coding`, `adaptive_runtime`, and `full_operator_runtime` explicitly. `local-coding-v1` remains an explicit fixed typed exposure preset for hosts that select it; that preset does not freeze individual tool schemas, legacy aliases, or retired names. Fresh/default model exposure uses Adaptive discovery. `adaptive_runtime` direct admission/order is statically declared by canonical `ToolDefinition`s; ordinary model-visible runtime tools default to the bounded long-tail gateway unless explicitly promoted to direct. Direct availability is preferred exposure rather than exclusive execution authority: an otherwise-admitted direct target may fall back through the same generic gateway. Gateway dispatch preserves the target tool's existing scope, authority, permission, argument, capability, effect, and Session/ACK semantics. MCP `tools/list` schema projection is exposure-aware: unset `WEBCODEX_MCP_COMPACT_SCHEMAS` defaults Adaptive Runtime to compact discovery (omitting only `outputSchema`), while Local Coding, Full Operator, and ProjectConnector retain full-schema projection defaults; explicit true/false always overrides that projection without changing ToolSpec ownership or invocation/result semantics. A Connector + `WEBCODEX_MCP_MODEL_SURFACE` conflict, an unsupported value, or partial Connector configuration fails startup. MCP GET/initialize/discovery, `runtime_status.runtime_exposure`, and the startup log report the same flattened exposure name |
 | Meaningful-activity rule | `last_successful_tool_call` records only successful meaningful calls, scoped by principal/project/surface/session/tool. `runtime_status`, `list_tools`, `list_runners`, `list_projects`, and `tool_manifest` never refresh it. Bounded in-memory store; no arguments, outputs, or secrets |
 | Independence | Layers degrade independently; `not_observed` on one layer must not be collapsed into a global offline verdict |
 
@@ -411,22 +421,27 @@ unless the user task explicitly requires that scope.
 
 ## 11. 0.4 compatibility floor
 
-`v0.4.0` is the new compatibility floor. The `0.3.x -> 0.4.0` boundary is an
-intentional pre-release cleanup boundary: release upgrade notes may require a
-coordinated change for the Runner generation cleanup, retired CLI aliases,
-pre-0.4 persisted-state cleanup, Tool/runtime surface cleanup, and authority or
-configuration cleanup. That pre-0.4 freedom does not continue through the
-`0.4.x` patch series.
+`v0.4.0` is the compatibility floor for **concrete compatibility domains** such
+as durable persisted state, mixed-version Server/Runner operation, shipped
+operator/install workflows, and named external/public contracts. The
+`0.3.x -> 0.4.0` boundary remains an intentional cleanup point for Runner
+generation, retired CLI aliases, pre-0.4 persisted state, authority, and
+configuration.
 
-The `v0.4.0` tag is a compatibility reference point, not a blanket promise to
-retain every spelling that appeared in that release. During active development,
-compatibility code is retained when it has a concrete consumer: accepted
+The floor does **not** freeze every model-facing ToolSpec argument, result field,
+projection, or historical spelling through the `0.4.x` patch series. There is no
+supported third-party stable runtime-tool SDK today. During active development,
+a model-facing tool shape may therefore be simplified or broken when that removes
+duplicate truth, misleading semantics, or avoidable turn friction and no named
+consumer requires the old shape.
+
+Compatibility code is retained only when it has a concrete consumer: accepted
 persisted state, mixed-version Server/Runner operation, a current external
-workflow or installer, or a required fail-closed security/privacy migration
-boundary. An implementation plus tests that only assert that implementation
-exists is not by itself a consumer. Published-but-unused CLI/API aliases and
-duplicate machine-readable fields may therefore be removed after an exact
-consumer search.
+workflow or installer, a published artifact contract, or a required fail-closed
+security/privacy migration boundary. An implementation plus tests that only
+assert that implementation exists is not by itself a consumer. Published-but-
+unused CLI/API aliases and duplicate machine-readable fields may therefore be
+removed after an exact consumer search.
 
 Where a concrete consumer does exist, compatibility remains narrow and
 fail-closed. Protocol generation 2 remains the 0.4 Server/Runner rolling

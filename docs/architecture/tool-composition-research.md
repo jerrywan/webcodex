@@ -1,9 +1,14 @@
 # Tool composition research and development plan
 
-Status: exploratory design note. This document records current research findings
-and a staged direction for reducing model/tool round trips. It is not a current
-runtime contract and does not authorize implementation shortcuts around existing
-tool, Session, Job, permission, audit, or Project boundaries.
+Status: deferred exploratory design note. This document records research findings
+and a staged direction for reducing model/tool round trips. It is intentionally
+**downstream** of the current tool-contract friction/style work in
+[`../agent/tool-contract-guidelines.md`](../agent/tool-contract-guidelines.md):
+first make primitive tools consistent and low-friction, then evaluate surface
+pruning, and only then decide whether composition still removes meaningful outer
+turns. It is not a current runtime contract and does not authorize implementation
+shortcuts around existing tool, Session, Job, permission, audit, or Project
+boundaries.
 
 ## Motivation
 
@@ -101,6 +106,20 @@ Mode invocation is also excluded.
 That shape is more attractive for WebCodex than a large user-facing JSON DAG:
 code can express dependencies and parallel branches compactly, while the Server
 can keep a small outer MCP schema and a closed nested-tool boundary.
+
+## Prerequisite: remove primitive contract friction first
+
+Composition must not be used to hide avoidable friction in the underlying tools.
+Before implementing this plan, ordinary primitives should follow the standing
+contract style: harmless bounded parameters normalize instead of wasting a turn,
+failures expose actionable typed reasons, successful results stay sparse, and
+follow-up calls have one parser-ready representation.
+
+Only after that baseline is stable should telemetry decide whether a repeated
+sequence represents real independent work, a pruning candidate, or a composition
+opportunity. A sequence caused mainly by schema correction, duplicate recovery,
+or discovery noise is a primitive-contract bug, not evidence for a composition
+runtime.
 
 ## Combined design principles
 

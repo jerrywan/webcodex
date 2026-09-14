@@ -138,3 +138,11 @@ failures. `policy_rejected` means policy blocked the request before a write.
 - Add/update tests that fail when flattened Action fields are missing.
 - Do **not** loosen `additionalProperties` to `true` as a workaround — list the
   needed flattened fields explicitly.
+
+Closed schemas and low-friction normalization are complementary. Keep unknown
+fields rejected so typos cannot silently change intent, but make declared
+non-semantic bounds tolerant when the runtime can safely normalize them. For
+example, a presentation/result budget may accept an oversized value and clamp it
+inside the documented bound instead of forcing a second model turn; authority,
+identity/fence, destructive, and effect-selecting fields remain exact. See
+[`tool-contract-guidelines.md`](tool-contract-guidelines.md).
