@@ -211,7 +211,7 @@ jobs:
           - shard: server
             packages: "-p webcodex"
           - shard: runner
-            packages: "-p webcodex-runner"
+            packages: "-p webcodex-runner --features runner-real-process-tests"
           - shard: workspace-crates
             packages: >-
               --workspace
@@ -385,7 +385,7 @@ jobs:
       - name: Check macOS workspace production surfaces
         run: cargo check --locked --workspace
       - name: Run native macOS Runner and Computer tests
-        run: cargo test --locked -p webcodex-runner -p webcodex-computer
+        run: cargo test --locked -p webcodex-runner -p webcodex-computer --features runner-real-process-tests
 
   test-macos-desktop:
     needs: changes
@@ -588,7 +588,7 @@ jobs:
         # Even two concurrent test functions can starve bounded startup/timeout windows
         # on loaded Windows hosts. Serialize test functions; concurrency exercised
         # inside each individual test remains unchanged.
-        run: cargo test --locked -p webcodex-runner -p webcodex-computer -- --test-threads=1
+        run: cargo test --locked -p webcodex-runner -p webcodex-computer --features runner-real-process-tests -- --test-threads=1
 
   test-windows-package:
     needs: changes

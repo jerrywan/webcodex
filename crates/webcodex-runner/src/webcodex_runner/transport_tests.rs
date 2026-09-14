@@ -1,7 +1,7 @@
 use super::super::config::{RunnerPolicy, ShellConfig};
 use super::*;
 use crate::runner_protocol::{RunnerCapabilities, RunnerRequest, RUNNER_PROTOCOL_GENERATION_V2};
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 use crate::POLLING_DISPATCH_MAX_IN_FLIGHT;
 use futures_util::{SinkExt, StreamExt};
 use std::io::{Read, Write};
@@ -122,6 +122,7 @@ fn test_runtime(cfg: &RunnerConfig) -> RunnerRuntimeState {
     RunnerRuntimeState::new(cfg, PathBuf::new())
 }
 
+#[cfg(feature = "runner-real-process-tests")]
 fn wait_for_path(path: &Path, deadline: Instant, context: &str) {
     while !path.exists() {
         assert!(
@@ -630,6 +631,7 @@ struct PollingRunnerHandle {
 }
 
 impl PollingRunnerHandle {
+    #[cfg(feature = "runner-real-process-tests")]
     fn assert_pending(&self, context: &str) {
         match self.result_rx.try_recv() {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -795,7 +797,7 @@ fn polling_shell_request(request_id: &str, cwd: &Path, command: String) -> Runne
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 fn polling_job_request(
     request_id: &str,
     job_id: &str,
@@ -809,7 +811,7 @@ fn polling_job_request(
     request
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 fn polling_persistent_shell_request(
     request_id: &str,
     action: &str,
@@ -839,7 +841,7 @@ fn posix_quote(value: &Path) -> String {
     super::super::shell::shell_quote(&value.to_string_lossy())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 fn gated_marker_command(started: &Path, release: &Path, marker: &Path, value: &str) -> String {
     format!(
         "printf '%s\\n' '{}' >> {}; : > {}; while [ ! -f {} ]; do sleep 0.01; done; printf '%s\\n' '{}'",
@@ -851,6 +853,7 @@ fn gated_marker_command(started: &Path, release: &Path, marker: &Path, value: &s
     )
 }
 
+#[cfg(feature = "runner-real-process-tests")]
 fn poll_delivery_response(request: Option<&RunnerRequest>) -> ConcurrentHttpResponse {
     let request = request
         .map(serde_json::to_value)
@@ -862,6 +865,7 @@ fn poll_delivery_response(request: Option<&RunnerRequest>) -> ConcurrentHttpResp
     )
 }
 
+#[cfg(feature = "runner-real-process-tests")]
 fn register_success_response() -> ConcurrentHttpResponse {
     register_inventory_support_response()
 }
@@ -980,6 +984,7 @@ fn accept_business_poll(listener: &StdTcpListener) -> TcpStream {
     }
 }
 
+#[cfg(feature = "runner-real-process-tests")]
 fn result_success_response() -> ConcurrentHttpResponse {
     ConcurrentHttpResponse::json(r#"{"success":true}"#)
 }
@@ -988,7 +993,7 @@ fn polling_offline_success_response() -> ConcurrentHttpResponse {
     ConcurrentHttpResponse::json(r#"{"success":true,"error":null}"#)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 fn job_update_success_response() -> ConcurrentHttpResponse {
     ConcurrentHttpResponse::json(r#"{"success":true,"job":null,"error":null}"#)
 }
@@ -1233,7 +1238,7 @@ fn recorded_path_count(requests: &Mutex<Vec<(String, String)>>, expected: &str) 
         .count()
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "manual real-process timing: coordinates concurrent shell dispatch completion"]
 fn runner_real_process_polling_long_ordinary_dispatch_does_not_pin_and_results_stay_correlated_exactly_once(
@@ -1348,7 +1353,7 @@ fn runner_real_process_polling_long_ordinary_dispatch_does_not_pin_and_results_s
     assert_eq!(runtime.background_threads.pending(), 0);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "manual real-process timing: coordinates multiple gated shell workers"]
 fn runner_real_process_polling_dispatch_bound_backpressures_without_a_local_pending_queue() {
@@ -1464,7 +1469,7 @@ fn runner_real_process_polling_dispatch_bound_backpressures_without_a_local_pend
     assert_eq!(runtime.background_threads.pending(), 0);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "manual real-process timing: compares Job and ordinary shell scheduling"]
 fn runner_real_process_polling_job_start_dispatches_behind_one_long_ordinary_request() {
@@ -1565,7 +1570,7 @@ fn runner_real_process_polling_job_start_dispatches_behind_one_long_ordinary_req
     assert_eq!(runtime.background_threads.pending(), 0);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "manual real-process lifecycle: waits for a gated --once shell dispatch"]
 fn runner_real_process_polling_once_waits_for_its_tracked_ordinary_dispatch() {
@@ -1638,7 +1643,7 @@ fn runner_real_process_polling_once_waits_for_its_tracked_ordinary_dispatch() {
     assert_eq!(runtime.background_threads.pending(), 0);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "manual real-process lifecycle: waits for a gated --once Job drain"]
 fn runner_real_process_polling_once_preserves_job_manager_drain_before_exit() {
@@ -1709,7 +1714,7 @@ fn runner_real_process_polling_once_preserves_job_manager_drain_before_exit() {
     runtime.shutdown();
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "manual real-process timing: validates shutdown against an active shell dispatch"]
 fn runner_real_process_polling_shutdown_with_active_background_dispatch_is_bounded_and_non_replaying(
@@ -1798,6 +1803,7 @@ fn runner_real_process_polling_shutdown_with_active_background_dispatch_is_bound
 }
 
 #[test]
+#[cfg(feature = "runner-real-process-tests")]
 #[ignore = "manual real-process timing: project registration may spawn Git and uses long readiness fences"]
 fn runner_real_process_polling_background_project_operation_invalidates_the_project_cache() {
     let temp = tempfile::tempdir().unwrap();
@@ -1895,7 +1901,7 @@ fn runner_real_process_polling_background_project_operation_invalidates_the_proj
     assert!(refreshed_seen.load(Ordering::SeqCst));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "manual real-process lifecycle: coordinates a real persistent shell with close"]
 fn runner_real_process_polling_persistent_shell_exec_remains_responsive_to_close() {

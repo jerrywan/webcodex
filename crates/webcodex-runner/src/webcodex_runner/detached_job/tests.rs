@@ -517,7 +517,7 @@ fn stale_watchdog_invocation_fails_before_tree_lock_creation() {
     assert!(!job_dir.join(TREE_LOCK_FILE).exists());
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 fn process_alive(pid: u32) -> bool {
     // SAFETY: kill(pid, 0) performs a liveness/permission probe only.
     let rc = unsafe { libc::kill(pid as i32, 0) };
@@ -668,7 +668,7 @@ fn handoff_and_wait_running(
     wait_for_running_record(store, &request.job_id)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 fn run_accept_then_exit_owner(temp: &Path, state_root: &Path, request: &DetachedStartRequest) {
     let instruction = temp.join("accept-exit-owner.json");
     fs::write(
@@ -688,7 +688,10 @@ fn run_accept_then_exit_owner(temp: &Path, state_root: &Path, request: &Detached
     assert!(owner.spawn().unwrap().wait().unwrap().success());
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "macos"),
+    feature = "runner-real-process-tests"
+))]
 fn tree_payload_request(temp: &Path) -> (DetachedStartRequest, PathBuf, PathBuf) {
     let parent_marker = temp.join("parent.pid");
     let child_marker = temp.join("child.pid");
@@ -708,7 +711,7 @@ fn tree_payload_request(temp: &Path) -> (DetachedStartRequest, PathBuf, PathBuf)
     (request, parent_marker, child_marker)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: detached supervisor outlives its owner process"]
 fn runner_real_process_accepted_handoff_keeps_payload_alive_after_owner_process_exits() {
@@ -761,7 +764,7 @@ fn owner_subprocess_entrypoint() {
     fs::write(result_path, format!("{outcome:?}")).unwrap();
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: detached handoff survives owner loss after accept"]
 fn runner_real_process_accepted_handoff_survives_owner_exit_before_ack() {
@@ -840,7 +843,7 @@ fn accept_then_exit_owner_subprocess_entrypoint() {
     std::process::exit(0);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: detached handoff owns a real payload process"]
 fn runner_real_process_duplicate_handoff_never_spawns_a_second_payload() {
@@ -870,7 +873,7 @@ fn runner_real_process_duplicate_handoff_never_spawns_a_second_payload() {
     assert_eq!(runs.lines().count(), 1);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: detached update sequencing observes a live payload"]
 fn runner_real_process_durable_update_sequence_advances_and_duplicate_handoff_does_not() {
@@ -897,7 +900,10 @@ fn runner_real_process_durable_update_sequence_advances_and_duplicate_handoff_do
     assert!(terminal.update_seq > stopped.update_seq);
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "macos"),
+    feature = "runner-real-process-tests"
+))]
 #[test]
 #[ignore = "runner real-process lane: restart reconciliation observes a live detached supervisor"]
 fn runner_real_process_restart_scan_reconciles_live_detached_execution_without_respawn() {
@@ -932,7 +938,10 @@ fn runner_real_process_restart_scan_reconciles_live_detached_execution_without_r
     assert_eq!(fs::read_to_string(marker).unwrap().lines().count(), 1);
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "macos"),
+    feature = "runner-real-process-tests"
+))]
 #[test]
 #[ignore = "runner real-process lane: durable stop terminates a detached process tree"]
 fn runner_real_process_durable_stop_request_terminates_exact_supervisor_owned_tree() {
@@ -968,12 +977,12 @@ fn runner_real_process_durable_stop_request_terminates_exact_supervisor_owned_tr
     );
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "runner-real-process-tests"))]
 fn stale_native_start_identity() -> &'static str {
     "linux_start_0"
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "runner-real-process-tests"))]
 fn stale_native_start_identity() -> &'static str {
     "macos_start_0_0"
 }
@@ -988,7 +997,10 @@ fn macos_native_process_start_identity_is_stable() {
     assert_eq!(first, second);
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "macos"),
+    feature = "runner-real-process-tests"
+))]
 #[test]
 #[ignore = "runner real-process lane: stale supervisor identity is checked against a live process"]
 fn runner_real_process_stale_native_supervisor_identity_reconciles_to_lost_without_respawn() {
@@ -1028,7 +1040,7 @@ fn runner_real_process_stale_native_supervisor_identity_reconciles_to_lost_witho
     )));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: detached supervisor drains a real child process"]
 fn runner_real_process_supervisor_continuously_drains_and_bounds_both_output_streams() {
@@ -1048,7 +1060,7 @@ fn runner_real_process_supervisor_continuously_drains_and_bounds_both_output_str
     assert!(terminal.stderr.tail.contains("STDERR_END"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: terminal persistence races a real detached child"]
 fn runner_real_process_terminal_state_is_atomically_rereadable() {
@@ -1083,7 +1095,7 @@ fn runner_real_process_terminal_state_is_atomically_rereadable() {
     assert_eq!(reread.phase, DetachedJobPhase::Terminal);
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "runner-real-process-tests"))]
 fn linux_child_pids(pid: u32) -> Vec<u32> {
     let mut children = Vec::new();
     let tasks = match fs::read_dir(format!("/proc/{pid}/task")) {
@@ -1104,7 +1116,7 @@ fn linux_child_pids(pid: u32) -> Vec<u32> {
     children
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: pre-accept disconnect controls a real supervisor process"]
 fn runner_real_process_pre_accept_owner_disconnect_is_terminal_and_replay_never_spawns() {
@@ -1173,7 +1185,7 @@ fn runner_real_process_pre_accept_owner_disconnect_is_terminal_and_replay_never_
     assert!(!marker.exists());
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: pre-accept supervisor death exercises real process cleanup"]
 fn runner_real_process_pre_accept_supervisor_death_leaves_no_internal_or_payload_orphan() {
@@ -1228,7 +1240,10 @@ fn runner_real_process_pre_accept_supervisor_death_leaves_no_internal_or_payload
     assert!(record.tree_leader.is_none());
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(
+    any(target_os = "linux", target_os = "macos"),
+    feature = "runner-real-process-tests"
+))]
 #[test]
 #[ignore = "runner real-process lane: supervisor death terminates a real detached process tree"]
 fn runner_real_process_supervisor_death_terminates_payload_process_tree() {
@@ -1290,7 +1305,7 @@ fn runner_real_process_supervisor_death_terminates_payload_process_tree() {
     }));
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: detached batch shim with an empty supervisor environment"]
 fn runner_real_process_windows_detached_batch_works_without_inherited_environment() {

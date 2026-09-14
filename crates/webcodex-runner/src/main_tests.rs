@@ -821,14 +821,17 @@ fn assert_descendant_reaped(pid_file: &Path) {
 /// Compiled copy of the `validation_tree_helper` fixture, kept alive for the
 /// whole test process so its binary path never disappears under a running
 /// descendant (same pattern as the validation lifecycle tests).
+#[cfg(any(windows, feature = "runner-real-process-tests"))]
 struct ShellTreeHelper {
     _temp: tempfile::TempDir,
     path: PathBuf,
 }
 
+#[cfg(any(windows, feature = "runner-real-process-tests"))]
 static SHELL_TREE_HELPER: std::sync::OnceLock<std::sync::Arc<ShellTreeHelper>> =
     std::sync::OnceLock::new();
 
+#[cfg(any(windows, feature = "runner-real-process-tests"))]
 fn shell_tree_helper() -> PathBuf {
     SHELL_TREE_HELPER
         .get_or_init(|| {
@@ -879,6 +882,7 @@ fn shell_tree_quote(value: &str) -> String {
 /// cmd.exe quote-parsing pitfalls) and appends `exit $LASTEXITCODE` so the
 /// helper's exit status becomes the shell's exit status. Unix uses the POSIX
 /// shell directly.
+#[cfg(any(windows, feature = "runner-real-process-tests"))]
 fn shell_tree_command(helper: &Path, args: &[String]) -> String {
     let mut parts: Vec<String> = vec![shell_tree_quote(&helper.to_string_lossy())];
     parts.extend(args.iter().map(|arg| shell_tree_quote(arg)));
@@ -896,6 +900,7 @@ fn shell_tree_command(helper: &Path, args: &[String]) -> String {
 /// Test shell that can actually run on this platform: PowerShell on Windows
 /// (cmd.exe quote parsing and missing `sleep` make POSIX-style commands
 /// unusable), the default `sh -c` on Unix.
+#[cfg(any(windows, feature = "runner-real-process-tests"))]
 #[cfg(windows)]
 fn shell_tree_test_shell() -> ShellConfig {
     ShellConfig {
@@ -905,6 +910,7 @@ fn shell_tree_test_shell() -> ShellConfig {
     }
 }
 
+#[cfg(any(windows, feature = "runner-real-process-tests"))]
 #[cfg(not(windows))]
 fn shell_tree_test_shell() -> ShellConfig {
     ShellConfig::default()
@@ -912,6 +918,7 @@ fn shell_tree_test_shell() -> ShellConfig {
 
 /// Shell timeout used by the tree tests: Windows needs headroom for
 /// PowerShell startup, Unix shells start instantly.
+#[cfg(feature = "runner-real-process-tests")]
 fn shell_tree_test_timeout_secs() -> u64 {
     if cfg!(windows) {
         5
@@ -987,6 +994,7 @@ fn wait_until_process_dead(pid: u32, timeout: Duration, tag: &str) -> bool {
 }
 
 /// Parse `KEY=<pid>` from a marker file written by the fixture helper.
+#[cfg(feature = "runner-real-process-tests")]
 fn read_marker_pid(marker: &Path, key: &str) -> u32 {
     let text = std::fs::read_to_string(marker).expect("read pid marker");
     text.lines()
@@ -1000,11 +1008,13 @@ fn read_marker_pid(marker: &Path, key: &str) -> u32 {
 
 /// Marker paths and the keepalive command for the two-argument
 /// `spawn-descendant-keepalive` / `spawn-descendant` fixtures.
+#[cfg(any(windows, feature = "runner-real-process-tests"))]
 struct ShellTreeMarkers {
     parent: PathBuf,
     alive: PathBuf,
 }
 
+#[cfg(any(windows, feature = "runner-real-process-tests"))]
 impl ShellTreeMarkers {
     fn in_dir(tmp: &std::path::Path, tag: &str) -> Self {
         Self {
@@ -1027,6 +1037,7 @@ impl ShellTreeMarkers {
 
     /// Both pids must be dead after cancellation; `PARENT_PID` and
     /// `DESCENDANT_PID` are both written to the parent marker.
+    #[cfg(feature = "runner-real-process-tests")]
     fn assert_tree_dead(&self, tag: &str) {
         let parent = read_marker_pid(&self.parent, "PARENT_PID");
         let descendant = read_marker_pid(&self.parent, "DESCENDANT_PID");

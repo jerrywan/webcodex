@@ -312,6 +312,7 @@ fn initialize_eof_keeps_raw_stderr_runner_local() {
 }
 
 #[test]
+#[cfg(feature = "runner-real-process-tests")]
 #[ignore = "runner real-process lane: disposable plugin checks clean up failed candidate process trees"]
 fn runner_real_process_plugin_check_failures_are_structured_diagnostic_results_and_cleanup_process_trees(
 ) {
@@ -572,6 +573,7 @@ fn candidate_gate_serializes_check_and_reload_without_blocking_current_providers
 }
 
 #[test]
+#[cfg(feature = "runner-real-process-tests")]
 #[ignore = "runner real-process lane: plugin shutdown interrupts blocked candidate and reaps its tree"]
 fn runner_real_process_plugin_shutdown_interrupts_blocked_check_candidate_and_reaps_tree() {
     let fixture = CheckFixture::new("candidate_block_list_tree", 10);

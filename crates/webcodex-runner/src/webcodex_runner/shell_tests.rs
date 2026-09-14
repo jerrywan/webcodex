@@ -1555,6 +1555,7 @@ fn typescript_temp_file_uses_mts_and_exact_script_bytes() {
 }
 
 #[test]
+#[cfg(feature = "runner-real-process-tests")]
 #[ignore = "manual real-process smoke: requires compatible Node.js on PATH"]
 fn runner_real_process_node_script_runtime_preserves_argv_stdin_and_cwd() {
     let cwd = tempfile::tempdir().unwrap();
@@ -1609,7 +1610,7 @@ const payload: Payload = identity<Payload>({ value: process.argv[2] ?? '' });
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "real-process stdin isolation: runs an isolated test process with a fake Node runtime"]
 fn runner_real_process_typescript_probe_receives_eof_instead_of_runner_stdin() {

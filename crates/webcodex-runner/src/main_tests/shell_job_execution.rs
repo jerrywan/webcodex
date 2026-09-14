@@ -261,6 +261,7 @@ fn shell_job_rejects_cwd_symlink_escape() {
         .is_some_and(|error| error.contains("outside allowed_roots")));
 }
 
+#[cfg(feature = "runner-real-process-tests")]
 #[test]
 #[ignore = "runner real-process lane: waits on a real shell timeout"]
 fn runner_real_process_shell_job_timeout_returns_timeout_error() {
@@ -294,7 +295,7 @@ fn long_lived_descendant_command(pid_file: &Path) -> String {
     )
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: waits on a real shell timeout"]
 fn runner_real_process_shell_job_timeout_reaps_descendant_process_group() {
@@ -330,7 +331,7 @@ fn runner_real_process_shell_job_timeout_reaps_descendant_process_group() {
     assert_descendant_reaped(&pid_file);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runner-real-process-tests"))]
 #[test]
 #[ignore = "runner real-process lane: waits on a real shell timeout"]
 fn runner_real_process_shell_job_timeout_profile_reaps_descendant_process_group() {

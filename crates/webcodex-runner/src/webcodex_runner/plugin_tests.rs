@@ -5,9 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex, OnceLock, Weak};
 use tempfile::TempDir;
+#[cfg(feature = "runner-real-process-tests")]
+use webcodex_core::plugin::PLUGIN_MAX_ARGUMENT_BYTES;
 use webcodex_core::plugin::{
     PluginContent, PluginGatewayResponsePayload, PluginProviderView, PluginSchemaObservation,
-    PLUGIN_MAX_ARGUMENT_BYTES, PLUGIN_MAX_MESSAGE_BYTES, PLUGIN_MAX_RESULT_BYTES,
+    PLUGIN_MAX_MESSAGE_BYTES, PLUGIN_MAX_RESULT_BYTES,
 };
 
 static FAKE_PLUGIN: OnceLock<Mutex<Weak<FakeBinary>>> = OnceLock::new();
@@ -127,6 +129,7 @@ impl Fixture {
             .count()
     }
 
+    #[cfg(feature = "runner-real-process-tests")]
     fn marker_pid(&self, prefix: &str) -> Option<u32> {
         fs::read_to_string(&self.marker)
             .ok()?
@@ -154,6 +157,7 @@ fn current_tools(manager: &PluginManager, provider: &PluginProviderView) -> Vec<
     tools
 }
 
+#[cfg(feature = "runner-real-process-tests")]
 fn maximum_bounded_arguments() -> Value {
     let empty = json!({"value":""});
     let overhead = serde_json::to_vec(&empty).unwrap().len();
@@ -594,6 +598,7 @@ fn output_schema_violation_is_completed_and_retires_provider() {
 }
 
 #[test]
+#[cfg(feature = "runner-real-process-tests")]
 #[ignore = "runner real-process lane: plugin blocked-stdin deadline and provider-tree retirement"]
 fn runner_real_process_plugin_blocking_stdin_write_respects_total_deadline_and_retires_provider_tree(
 ) {
@@ -634,6 +639,7 @@ fn runner_real_process_plugin_blocking_stdin_write_respects_total_deadline_and_r
 }
 
 #[test]
+#[cfg(feature = "runner-real-process-tests")]
 #[ignore = "runner real-process lane: plugin shutdown terminates blocked provider process tree"]
 fn runner_real_process_plugin_shutdown_terminates_process_tree_while_effectful_stdin_write_is_blocked(
 ) {
@@ -876,6 +882,7 @@ fn prepared_environment_reuses_shell_env_default_profile_and_clears_sensitive_va
 }
 
 #[test]
+#[cfg(feature = "runner-real-process-tests")]
 #[ignore = "manual real-process startup: provider readiness depends on host scheduling"]
 fn runner_real_process_bare_plugin_command_resolves_from_prepared_path_with_explicit_profile() {
     use super::super::config::ShellProfileConfig;
