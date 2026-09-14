@@ -56,6 +56,7 @@ pub use super::tool_policy::{
     adaptive_runtime_direct_tool_definitions, exploration_tool_names,
     is_adaptive_runtime_direct_tool, is_model_visible_tool_name, lookup_tool_definition,
     model_visible_tool_definitions, model_visible_tool_names_csv, runtime_tool_accepts_context_ack,
+    runtime_tool_activity_interaction, runtime_tool_activity_semantics,
     runtime_tool_advances_context_checkpoint, runtime_tool_approval_policy,
     runtime_tool_captures_validation_output, runtime_tool_category,
     runtime_tool_effect_annotations, runtime_tool_execution_contract,
@@ -810,6 +811,91 @@ pub enum ToolOperatorExtensionFamily {
     TraceDiagnostics,
 }
 
+/// User-facing Activity presentation. This is observability metadata only: it
+/// grants no authority and must not be used as a Project-visibility shortcut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolActivityPresentation {
+    Work,
+    Support,
+    Transport,
+}
+
+impl ToolActivityPresentation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Work => "work",
+            Self::Support => "support",
+            Self::Transport => "transport",
+        }
+    }
+}
+
+/// Whether one tool call is a meaningful model/environment interaction for
+/// Window cadence, runtime freshness, recorder-gap, and Goal liveness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolActivityInteraction {
+    Meaningful,
+    NonMeaningful,
+}
+
+impl ToolActivityInteraction {
+    pub const fn is_meaningful(self) -> bool {
+        matches!(self, Self::Meaningful)
+    }
+}
+
+/// Canonical semantic kind projected into human-facing Activity surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolActivityKind {
+    Read,
+    Search,
+    Navigate,
+    Edit,
+    Run,
+    Test,
+    Review,
+    None,
+}
+
+impl ToolActivityKind {
+    pub const fn as_str(self) -> Option<&'static str> {
+        match self {
+            Self::Read => Some("read"),
+            Self::Search => Some("search"),
+            Self::Navigate => Some("navigate"),
+            Self::Edit => Some("edit"),
+            Self::Run => Some("run"),
+            Self::Test => Some("test"),
+            Self::Review => Some("review"),
+            Self::None => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolActivityPolicy {
+    pub presentation: ToolActivityPresentation,
+    pub interaction: ToolActivityInteraction,
+    /// Narrow escape hatch for a pre-existing display fact that cannot be
+    /// recovered from the other canonical ToolDefinition evidence.
+    pub kind_override: Option<ToolActivityKind>,
+}
+
+impl ToolActivityPolicy {
+    const DEFAULT: Self = Self {
+        presentation: ToolActivityPresentation::Work,
+        interaction: ToolActivityInteraction::Meaningful,
+        kind_override: None,
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolActivitySemantics {
+    pub presentation: ToolActivityPresentation,
+    pub interaction: ToolActivityInteraction,
+    pub kind: ToolActivityKind,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ToolDefinition {
     pub name: &'static str,
@@ -823,6 +909,7 @@ pub struct ToolDefinition {
     pub category: &'static str,
     pub metadata: ToolMetadata,
     pub policy: ToolDefinitionPolicy,
+    pub activity: ToolActivityPolicy,
     pub session_evidence: ToolSessionEvidencePolicy,
     /// Runner capability/owner requirement before dispatch reaches a Runner-backed
     /// Project. `None` means the tool is not Runner-dispatched or enforces its
@@ -841,6 +928,21 @@ impl ToolDefinition {
 
     pub const fn with_execution(mut self, execution: ToolExecutionContract) -> Self {
         self.execution = Some(execution);
+        self
+    }
+
+    pub const fn with_activity(
+        mut self,
+        presentation: ToolActivityPresentation,
+        interaction: ToolActivityInteraction,
+    ) -> Self {
+        self.activity.presentation = presentation;
+        self.activity.interaction = interaction;
+        self
+    }
+
+    pub const fn with_activity_kind(mut self, kind: ToolActivityKind) -> Self {
+        self.activity.kind_override = Some(kind);
         self
     }
 }
@@ -1001,6 +1103,7 @@ const fn def(
             shell_like,
         ),
         policy: ToolDefinitionPolicy::DEFAULT,
+        activity: ToolActivityPolicy::DEFAULT,
         session_evidence,
         runner_capability,
     }
@@ -1184,6 +1287,10 @@ const TOOL_DEFINITION_HEAD: &[ToolDefinition] = &[context_reobservable(model_spe
         false,
         false,
         ToolSessionEvidencePolicy::NONE,
+    )
+    .with_activity(
+        ToolActivityPresentation::Support,
+        ToolActivityInteraction::NonMeaningful,
     ),
     "List runtime tools. Full output includes schemas and may be large; use summary_only with category, features, or limit for bounded GPT Action discovery.",
     list_tools_input_schema,

@@ -1460,7 +1460,9 @@ impl ToolRuntime {
                 scope: super::activity::activity_scope_from_auth(auth),
             });
         }
-        if result.success && super::observations::is_meaningful_activity_tool(tool_name) {
+        if result.success
+            && webcodex_tool_contracts::runtime_tool_activity_interaction(tool_name).is_meaningful()
+        {
             if let Ok((principal_kind, principal_id)) =
                 super::session_context::runtime_observation_principal(auth)
             {

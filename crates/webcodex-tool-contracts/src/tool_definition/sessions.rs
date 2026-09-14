@@ -61,6 +61,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
+            )
+            .with_activity(
+                super::ToolActivityPresentation::Support,
+                super::ToolActivityInteraction::Meaningful,
             ),
             "Canonical bootstrap for ordinary coding/review. Use project or client_id+path. Omit session_id for a fresh Workflow Session; supply it for exact resume of an active accessible Session; never guesses prior Session. Defaults return bounded project instructions, workflow guidance, and Skills/Plugin selection metadata, which grants no authority. Skill bodies require skill_read_file; Plugin calls require plugin_tool describe. Set include_* false only when the current model context retains that material; Session/window/transport/credential/Server identity never proves retention. Fresh contexts keep defaults true on resume; include_extension_catalog=false skips discovery. Checkout accepts Project or Runner path and does not require Git; mode=worktree resolves an exact Git base and manages an isolated worktree without bypassing Project authority.",
             work_on_project_input_schema,
@@ -88,7 +92,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
-            ),
+            )
+            .with_activity_kind(super::ToolActivityKind::Review),
             "Return an optional deterministic evidence snapshot for model review, including workspace, validation, jobs, and recorded tool events. The result is advisory: it does not decide task completion, replace direct diff or test review, or generate the user-facing final report.",
             finish_coding_task_input_schema,
         )),
@@ -150,6 +155,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         false,
         false,
         super::ToolSessionEvidencePolicy::NONE,
+    )
+    .with_activity(
+        super::ToolActivityPresentation::Transport,
+        super::ToolActivityInteraction::NonMeaningful,
     ),
     requires_explicit_business_session(context_reobservable(model_spec(
         def(
@@ -249,6 +258,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             false,
             super::ToolSessionEvidencePolicy::NONE,
+        )
+        .with_activity(
+            super::ToolActivityPresentation::Support,
+            super::ToolActivityInteraction::Meaningful,
         ),
         "Read bounded structured validation evidence already recorded in an explicit project-scoped session ledger. Does not run Cargo or shell commands, enqueue a Runner request, read project files, mutate the workspace, or replace finish_coding_task.",
         validation_summary_input_schema,
@@ -509,6 +522,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             false,
             super::ToolSessionEvidencePolicy::NONE,
+        )
+        .with_activity(
+            super::ToolActivityPresentation::Support,
+            super::ToolActivityInteraction::Meaningful,
         ),
             "Read-only handoff for multi-step tasks, explicit session_id. Reads session ledger collaboration and ledger-derived validation. Diagnostics use bounded tails or safe result metadata; validation.parser.available is false if absent. Use the default full view to recover unknown context; summary_only, limit below 20, or disabled include_* components cannot establish a new ACK baseline. No checkpoint allocation; grants no authority.",
             session_handoff_summary_input_schema,

@@ -168,6 +168,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             false,
             super::ToolSessionEvidencePolicy::NONE,
+        )
+        .with_activity(
+            super::ToolActivityPresentation::Transport,
+            super::ToolActivityInteraction::NonMeaningful,
         ),
         COMMUNICATION_READ_SCOPES,
     ),

@@ -503,6 +503,10 @@ struct RuntimeConsoleWindowActivity {
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    activity_presentation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    activity_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     project: Option<String>,
     status: String,
     meaningful: bool,
@@ -1672,6 +1676,10 @@ async fn project_visible_window_activity(
             relation: link.relation,
         });
     }
+    let activity_semantics = event
+        .operation
+        .as_deref()
+        .map(webcodex_tool_contracts::runtime_tool_activity_semantics);
     RuntimeConsoleWindowActivity {
         started_at_ms: event.started_at_ms,
         ended_at_ms: event.ended_at_ms,
@@ -1687,8 +1695,14 @@ async fn project_visible_window_activity(
             other => other.to_string(),
         },
         tool_name: event.operation,
+        activity_presentation: activity_semantics
+            .map(|semantics| semantics.presentation.as_str().to_string()),
+        activity_kind: activity_semantics
+            .and_then(|semantics| semantics.kind.as_str().map(str::to_string)),
         project: event.project,
         status: event.status,
+        // Persisted event-time truth: never recompute historical meaningfulness
+        // from the current ToolDefinition activity policy.
         meaningful: event.meaningful,
         recorder_gap_session_id: event.recorder_gap_session_id,
         server_trace_id: event.server_trace_id,
@@ -3321,6 +3335,28 @@ mod tests {
         workflow_link: Option<(&str, &str)>,
         at_ms: i64,
     ) {
+        record_window_event_with_activity(
+            db,
+            auth,
+            window_key,
+            project,
+            workflow_link,
+            at_ms,
+            "workspace_hygiene_check",
+            true,
+        );
+    }
+
+    fn record_window_event_with_activity(
+        db: &Arc<crate::Database>,
+        auth: &AuthContext,
+        window_key: &str,
+        project: Option<&str>,
+        workflow_link: Option<(&str, &str)>,
+        at_ms: i64,
+        operation: &str,
+        window_meaningful: bool,
+    ) {
         let (principal_kind, principal_id) =
             crate::tool_runtime::runtime_observation_principal(Some(auth)).unwrap();
         crate::action_audit_sessions::record_action_event(
@@ -3330,7 +3366,7 @@ mod tests {
                 session_title: None,
                 endpoint: "/mcp".to_string(),
                 action_name: "toolsCall".to_string(),
-                operation: Some("workspace_hygiene_check".to_string()),
+                operation: Some(operation.to_string()),
                 project: project.map(str::to_string),
                 principal_kind: None,
                 principal_user_id: None,
@@ -3359,7 +3395,7 @@ mod tests {
                 window_transition_kind: None,
                 response_streaming: None,
                 window_continuity_eligible: None,
-                window_meaningful: true,
+                window_meaningful,
                 recorder_gap_session_id: None,
                 workflow_links: workflow_link
                     .map(|(session_id, project)| {
@@ -4547,6 +4583,52 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn window_activity_projection_keeps_persisted_meaningful_and_projects_current_activity_semantics(
+    ) {
+        let (_tmp, db, runtime) = test_runtime_with_window_db();
+        let auth = crate::auth::shared_key_context("window-activity-semantics");
+        let project = "agent:window-activity-semantics:project";
+        register_project(
+            &runtime,
+            "window-activity-semantics",
+            "project",
+            "/private/window-activity-semantics",
+            Some(&auth),
+        )
+        .await;
+        let activity_window_key = "e".repeat(64);
+        // Deliberately model historical event-time truth that disagrees with the
+        // current definition. The read projection must not rewrite it.
+        record_window_event_with_activity(
+            &db,
+            &auth,
+            &activity_window_key,
+            Some(project),
+            None,
+            1_000,
+            "goal_plan_state",
+            true,
+        );
+
+        let detail = window_for_auth(
+            &runtime,
+            &auth,
+            WindowInput {
+                client_window_key: activity_window_key,
+                activity_limit: Some(20),
+                session_limit: Some(20),
+            },
+        )
+        .await
+        .unwrap();
+        let activity = detail.activity.first().expect("projected activity");
+        assert_eq!(activity.tool_name.as_deref(), Some("goal_plan_state"));
+        assert!(activity.meaningful, "persisted event-time bit must win");
+        assert_eq!(activity.activity_presentation.as_deref(), Some("transport"));
+        assert_eq!(activity.activity_kind, None);
+    }
+
     #[test]
     fn window_activity_lookup_is_principal_and_current_project_authority_bounded() {
         // This multi-principal integration fixture overflows the default libtest
@@ -4641,17 +4723,64 @@ mod tests {
             None,
         );
 
+        // Presentation is not visibility authority. observe_jobs is Transport
+        // presentation but still Meaningful interaction, so it must fail closed
+        // during the same unresolved-Project interval.
+        let transport_window = crate::client_window::ClientWindow::for_test(
+            "runtime-console-pre-resolution-transport",
+        );
+        let transport_key = transport_window.key().to_string();
+        let _transport = runtime.window_activity.start(
+            &transport_window,
+            "trace-pre-resolution-transport",
+            "tools/call",
+            Some((&principal_kind, &principal_id)),
+        );
+        runtime.window_activity.update(
+            "trace-pre-resolution-transport",
+            Some("observe_jobs"),
+            None,
+        );
+
+        // NonMeaningful controller/status traffic keeps the existing bounded
+        // diagnostic visibility before exact Project resolution.
+        let diagnostic_window = crate::client_window::ClientWindow::for_test(
+            "runtime-console-pre-resolution-diagnostic",
+        );
+        let diagnostic_key = diagnostic_window.key().to_string();
+        let _diagnostic = runtime.window_activity.start(
+            &diagnostic_window,
+            "trace-pre-resolution-diagnostic",
+            "tools/call",
+            Some((&principal_kind, &principal_id)),
+        );
+        runtime.window_activity.update(
+            "trace-pre-resolution-diagnostic",
+            Some("goal_plan_state"),
+            None,
+        );
+
         let visible = windows_for_auth(&runtime, &auth_a, Some(20), None)
             .await
             .unwrap();
-        assert_eq!(visible.total, 1);
-        assert_eq!(visible.returned, 1);
-        assert_eq!(visible.windows[0].client_window_key, window_a);
+        assert_eq!(visible.total, 2);
+        assert_eq!(visible.returned, 2);
+        let visible_keys = visible
+            .windows
+            .iter()
+            .map(|row| row.client_window_key.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            visible_keys,
+            std::collections::BTreeSet::from([window_a.as_str(), diagnostic_key.as_str()])
+        );
         let serialized = serde_json::to_string(&visible).unwrap();
         assert!(!serialized.contains(&window_b));
         assert!(!serialized.contains(&revoked_project_window));
         assert!(!serialized.contains(&revoked_session_window));
         assert!(!serialized.contains(&pre_resolution_key));
+        assert!(!serialized.contains(&transport_key));
+        assert!(serialized.contains(&diagnostic_key));
         assert!(!serialized.contains(project_b));
 
         let own = window_for_auth(
@@ -4673,6 +4802,7 @@ mod tests {
             &revoked_project_window,
             &revoked_session_window,
             &pre_resolution_key,
+            &transport_key,
         ] {
             assert_eq!(
                 window_for_auth(
@@ -4707,6 +4837,8 @@ mod tests {
                 revoked_project_window.as_str(),
                 revoked_session_window.as_str(),
                 pre_resolution_key.as_str(),
+                transport_key.as_str(),
+                diagnostic_key.as_str(),
             ])
         );
     }

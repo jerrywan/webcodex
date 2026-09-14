@@ -15,73 +15,6 @@ use std::sync::Mutex;
 /// Bounded number of retained tool-call observations.
 const MAX_TOOL_CALL_OBSERVATIONS: usize = 64;
 
-/// Observability/status tools whose success must not refresh "meaningful
-/// activity". Otherwise a read-only status poller keeps
-/// `last_successful_tool_call` permanently fresh and the layer never goes
-/// stale. Real inspection/edit/shell/git/session work is meaningful.
-pub(crate) const NON_MEANINGFUL_ACTIVITY_TOOLS: &[&str] = &[
-    "runtime_status",
-    "list_tools",
-    "list_runners",
-    "list_projects",
-    "tool_manifest",
-    "read_tool_trace",
-    // MCP App controller/polling traffic proves that a Host/App carrier is
-    // present, not that the model made business progress. Keep these calls in
-    // ordinary Window seen telemetry while excluding them from meaningful
-    // activity. This list is semantic; ModelHidden visibility alone is never
-    // sufficient to classify a tool as non-meaningful.
-    "goal_plan_state",
-    "work_result_state",
-    "agent_wait_state",
-    "agent_continuation_bind",
-    "agent_continuation_recover_endpoint",
-    "agent_continuation_state",
-    "agent_continuation_wake_acquire",
-    "agent_continuation_wake_prepare",
-    "agent_continuation_wake_finish",
-    "agent_continuation_unbind",
-];
-
-pub(crate) fn is_meaningful_activity_tool(tool_name: &str) -> bool {
-    !NON_MEANINGFUL_ACTIVITY_TOOLS.contains(&tool_name)
-}
-
-#[cfg(test)]
-mod activity_classification_tests {
-    use super::is_meaningful_activity_tool;
-
-    #[test]
-    fn app_control_polling_is_non_meaningful_but_business_work_remains_meaningful() {
-        for tool in [
-            "goal_plan_state",
-            "work_result_state",
-            "agent_wait_state",
-            "agent_continuation_bind",
-            "agent_continuation_recover_endpoint",
-            "agent_continuation_state",
-            "agent_continuation_wake_acquire",
-            "agent_continuation_wake_prepare",
-            "agent_continuation_wake_finish",
-            "agent_continuation_unbind",
-        ] {
-            assert!(!is_meaningful_activity_tool(tool), "{tool}");
-        }
-        for tool in [
-            "read_files",
-            "search_project_texts",
-            "apply_text_edits",
-            "git_status",
-            "run_process",
-            "cargo_test",
-            "work_on_project",
-            "post_conversation_message",
-        ] {
-            assert!(is_meaningful_activity_tool(tool), "{tool}");
-        }
-    }
-}
-
 /// One successful meaningful tool call. Scope fields only — no payloads.
 #[derive(Debug, Clone)]
 pub(crate) struct ToolCallObservation {
@@ -137,10 +70,13 @@ impl RuntimeObservations {
             .clone()
     }
 
-    /// Record a successful tool call. Non-meaningful observability tools are
-    /// rejected here so the rule is enforced at the single recording funnel.
+    /// Record a successful tool call. Non-meaningful activity is rejected here
+    /// so the canonical ToolDefinition interaction policy is enforced at the
+    /// single recording funnel as a defensive backstop.
     pub(crate) fn record_successful_tool_call(&self, observation: ToolCallObservation) {
-        if !is_meaningful_activity_tool(&observation.tool) {
+        if !webcodex_tool_contracts::runtime_tool_activity_interaction(&observation.tool)
+            .is_meaningful()
+        {
             return;
         }
         let mut calls = self.tool_calls.lock().expect("tool call observation lock");

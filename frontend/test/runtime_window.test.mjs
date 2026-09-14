@@ -168,10 +168,12 @@ test("renderWindowActivityRows renders activity cards with facts and trace copy"
 
     const activities = [
       {
-        tool_name: "read_file",
+        tool_name: "read_files",
         started_at_ms: 1700000000000,
         status: "success",
         project: "agent:runner-1:proj",
+        activity_presentation: "work",
+        activity_kind: "read",
         meaningful: true,
         service_ms: 45,
         next_call_gap_ms: 12,
@@ -184,6 +186,7 @@ test("renderWindowActivityRows renders activity cards with facts and trace copy"
       {
         method: "unknown_method",
         status: "failed",
+        activity_presentation: "transport",
         recorder_gap_session_id: "wc_sess_gap",
         response_streaming: true,
         window_transition_kind: "overlap",
@@ -202,11 +205,13 @@ test("renderWindowActivityRows renders activity cards with facts and trace copy"
 
     const first = container.children[0];
     assert.ok(first.className.includes("compact"));
-    assert.equal(first.querySelector("strong")?.textContent, "read_file");
+    assert.equal(first.querySelector("strong")?.textContent, "read_files");
 
     const chips = first.querySelectorAll(".chip").map((c) => c.textContent);
     assert.ok(chips.includes("success"));
     assert.ok(chips.includes("agent:runner-1:proj"));
+    assert.ok(chips.includes("work"));
+    assert.ok(chips.includes("read"));
     assert.ok(chips.includes("meaningful"));
     assert.ok(chips.includes("service 45 ms"));
     assert.ok(chips.includes("next gap 12 ms"));
@@ -222,6 +227,7 @@ test("renderWindowActivityRows renders activity cards with facts and trace copy"
     assert.ok(second.querySelector(".window-gap-note"));
     assert.equal(second.querySelector("strong")?.textContent, "unknown_method");
     const secondChips = second.querySelectorAll(".chip").map((c) => c.textContent);
+    assert.ok(secondChips.includes("transport"));
     assert.ok(secondChips.includes("streaming timing unavailable"));
     assert.ok(secondChips.includes("overlap from previous"));
   });

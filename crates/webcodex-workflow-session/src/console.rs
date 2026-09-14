@@ -12,6 +12,9 @@ use super::model::{SessionEvent, SessionMessageKind, SessionRecord};
 use super::query::build_messages_summary;
 use super::util::{bound_chars, looks_like_secret_string};
 use webcodex_core::workflow_session_contract::is_safe_job_id;
+use webcodex_tool_contracts::{
+    runtime_tool_activity_semantics, ToolActivityKind, ToolActivityPresentation,
+};
 
 #[derive(Clone, Copy)]
 pub struct ConsoleValidationHooks {
@@ -220,12 +223,12 @@ pub(super) fn build_list_item(
     let current = interactions.iter().rev().copied().find(|interaction| {
         interaction.finish.is_none()
             && interaction.start.is_some()
-            && !interaction_is_observation_transport(interaction)
+            && interaction_is_primary_activity(interaction)
     });
     let current_sequence = current.map(|interaction| interaction.sequence);
     let last = interactions.iter().rev().copied().find(|interaction| {
         interaction.finish.is_some()
-            && !interaction_is_observation_transport(interaction)
+            && interaction_is_primary_activity(interaction)
             && Some(interaction.sequence) != current_sequence
             && interaction
                 .finish
@@ -261,7 +264,7 @@ pub(super) fn build_detail(
     let overview = build_overview(record, &interactions, true, validation);
     let mut ordered_activity = interactions
         .into_iter()
-        .filter(|interaction| !interaction_is_observation_transport(interaction))
+        .filter(|interaction| interaction_is_primary_activity(interaction))
         .map(|interaction| OrderedActivity {
             activity: activity_from_interaction(interaction, project),
             ledger_sequence: Some(interaction.sequence),
@@ -342,7 +345,7 @@ fn build_overview(
         history_truncated,
     };
     for interaction in interactions.iter().copied().filter(|interaction| {
-        interaction.finish.is_some() && !interaction_is_observation_transport(interaction)
+        interaction.finish.is_some() && interaction_is_work_activity(interaction)
     }) {
         let evidence = interaction
             .finish
@@ -1052,61 +1055,47 @@ fn looks_like_absolute_path(value: &str) -> bool {
 }
 
 fn semantic_kind(event: &SessionEvent) -> &'static str {
-    match event.tool_name.as_str() {
-        "read_files"
-        | "list_project_files"
-        | "list_project_tracked_files"
-        | "project_overview"
-        | "read_project_artifact"
-        | "read_project_artifact_metadata" => "Read",
-        "search_project_texts" => "Searched",
-        "lsp_status"
-        | "document_symbols"
-        | "document_diagnostics"
-        | "hover"
-        | "workspace_symbols"
-        | "goto_definition"
-        | "find_references"
-        | "call_hierarchy" => "Navigated",
-        "apply_text_edits"
-        | "apply_unified_diff"
-        | "write_project_file"
-        | "delete_project_files"
-        | "git_restore_paths"
-        | "discard_untracked"
-        | "workspace_checkpoint_restore" => "Edited",
-        "git_status"
-        | "git_diff_hunks"
-        | "git_review_summary"
-        | "git_log"
-        | "show_changes"
-        | "workspace_hygiene_check"
-        | "finish_coding_task" => "Reviewed",
-        "cargo_test" | "cargo_check" | "cargo_fmt" | "go_test" => "Tested",
-        "run_process"
-        | "run_script"
-        | "run_shell"
-        | "run_job"
-        | "open_session_shell"
-        | "session_shell_exec"
-        | "session_shell_status"
-        | "close_session_shell"
-        | "stop_job" => "Ran",
-        _ if event.write_like => "Edited",
-        _ if event.git_like || event.change_summary_like => "Reviewed",
-        _ if event.shell_like => "Ran",
-        _ if event.read_like => "Read",
-        _ => "Used",
+    semantic_kind_for_tool(&event.tool_name)
+}
+
+fn semantic_kind_for_tool(tool_name: &str) -> &'static str {
+    match runtime_tool_activity_semantics(tool_name).kind {
+        ToolActivityKind::Read => "Read",
+        ToolActivityKind::Search => "Searched",
+        ToolActivityKind::Navigate => "Navigated",
+        ToolActivityKind::Edit => "Edited",
+        ToolActivityKind::Run => "Ran",
+        ToolActivityKind::Test => "Tested",
+        ToolActivityKind::Review => "Reviewed",
+        ToolActivityKind::None => "Used",
     }
 }
 
-// Observation calls remain ledger/validation evidence, but are transport rather
-// than user work. Filter only the Console work/activity projections.
-fn interaction_is_observation_transport(interaction: &Interaction<'_>) -> bool {
+fn activity_presentation_for_tool(tool_name: &str) -> ToolActivityPresentation {
+    runtime_tool_activity_semantics(tool_name).presentation
+}
+
+fn interaction_activity_presentation(
+    interaction: &Interaction<'_>,
+) -> Option<ToolActivityPresentation> {
     interaction
         .finish
         .or(interaction.start)
-        .is_some_and(|event| event.tool_name == "observe_jobs")
+        .map(|event| activity_presentation_for_tool(&event.tool_name))
+}
+
+// Work and Support are user-legible activity. Transport evidence remains in
+// the raw Session ledger and validation aggregation but is not a primary
+// Workflow Session activity card.
+fn interaction_is_primary_activity(interaction: &Interaction<'_>) -> bool {
+    matches!(
+        interaction_activity_presentation(interaction),
+        Some(ToolActivityPresentation::Work | ToolActivityPresentation::Support)
+    )
+}
+
+fn interaction_is_work_activity(interaction: &Interaction<'_>) -> bool {
+    interaction_activity_presentation(interaction) == Some(ToolActivityPresentation::Work)
 }
 
 fn interaction_is_progress_metadata(event: &SessionEvent) -> bool {
@@ -1119,6 +1108,42 @@ fn interaction_is_progress_metadata(event: &SessionEvent) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_kind_labels_follow_tool_definition_semantics() {
+        for (tool, expected) in [
+            ("read_files", "Read"),
+            ("search_project_texts", "Searched"),
+            ("lsp_status", "Navigated"),
+            ("apply_text_edits", "Edited"),
+            ("cargo_test", "Tested"),
+            ("run_process", "Ran"),
+            ("git_review_summary", "Reviewed"),
+            ("observe_jobs", "Used"),
+        ] {
+            assert_eq!(semantic_kind_for_tool(tool), expected, "{tool}");
+        }
+    }
+
+    #[test]
+    fn activity_presentation_keeps_work_support_and_transport_orthogonal() {
+        assert_eq!(
+            activity_presentation_for_tool("read_files"),
+            ToolActivityPresentation::Work
+        );
+        assert_eq!(
+            activity_presentation_for_tool("list_jobs"),
+            ToolActivityPresentation::Support
+        );
+        assert_eq!(
+            activity_presentation_for_tool("observe_jobs"),
+            ToolActivityPresentation::Transport
+        );
+        assert_eq!(
+            activity_presentation_for_tool("goal_plan_state"),
+            ToolActivityPresentation::Transport
+        );
+    }
 
     fn ordered(
         kind: &str,

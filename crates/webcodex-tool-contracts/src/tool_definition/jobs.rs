@@ -377,6 +377,10 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
+            )
+            .with_activity(
+                super::ToolActivityPresentation::Transport,
+                super::ToolActivityInteraction::Meaningful,
             ),
             "Primary continuation path for an already-known Job: use job_id directly; do not call list_jobs first. Pass observation_token unchanged as after_observation_token; use each newer token next time. Observe 1-8 Jobs with bounded baseline/delta logs and isolated item errors. No token gives an immediate baseline; no wait_secs gives an immediate observation. With tokens, one shared bounded wait_secs (clamped to 60) uses wake_on=change (default) for any update, or wake_on=terminal to coalesce logs/progress until any Job is terminal, an item errors, or the deadline expires. Normal continuation: wait_secs=60, wake_on=terminal; terminal wakes immediately. Updates never extend the deadline; timeout can include changed=true and deltas from original tokens. reset is bounded recovery. Use list_jobs for lost identity/inventory; unknown_job points there. Never launches, retries, stops, or subscribes.",
             observe_jobs_input_schema,
@@ -409,6 +413,10 @@ pub(super) const LISTING_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
+            )
+            .with_activity(
+                super::ToolActivityPresentation::Support,
+                super::ToolActivityInteraction::Meaningful,
             ),
             "Recovery and inventory primitive for caller-visible Jobs, not the normal continuation step. Do not call list_jobs when the initiating tool or current context already provides an exact job_id; continue that Job with observe_jobs instead. Use list_jobs when exact Job identity was lost, unknown_job explicitly requests inventory recovery, the user asks to enumerate background work, or multiple historical/parallel Jobs must be inspected. Exact project/session_id filters are preferred when known and combine with status using AND semantics. stdout/stderr bodies are never included; exact Job logs and continuation belong to observe_jobs.",
             list_jobs_input_schema,

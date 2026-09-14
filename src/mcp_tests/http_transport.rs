@@ -707,6 +707,43 @@ async fn mcp_tools_call_writes_a_summary_action_audit_row() {
 }
 
 #[tokio::test]
+async fn observe_jobs_action_audit_remains_window_meaningful_transport() {
+    let config = test_config(Some("secret"));
+    let (_tmp, db) = test_db();
+    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let service = Service::new(build_test_router(config, db.clone(), runtime));
+
+    let mut response = TestClient::post("http://localhost/mcp")
+        .bearer_auth("secret")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 77,
+            "method": "tools/call",
+            "params": {
+                "name": "observe_jobs",
+                "arguments": {"items": [{"job_id": "missing-job-for-activity-test"}]}
+            }
+        }))
+        .send(&service)
+        .await;
+    assert_eq!(response.status_code, Some(StatusCode::OK));
+    let body: Value = response.take_json().await.unwrap();
+    assert!(body.get("result").is_some(), "{body}");
+
+    let (operation, window_meaningful, continuity_eligible): (String, i64, Option<i64>) = db
+        .conn_for_tests()
+        .query_row(
+            "SELECT operation, window_meaningful, window_continuity_eligible FROM action_events",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(operation, "observe_jobs");
+    assert_eq!(window_meaningful, 1);
+    assert_eq!(continuity_eligible, Some(1));
+}
+
+#[tokio::test]
 async fn mcp_pre_result_invalid_arguments_still_records_generic_attempt() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();

@@ -187,7 +187,9 @@ impl WindowActivityRegistry {
         request_observed_at_ms: i64,
     ) -> WindowActivityGuard {
         let meaningful = method == "tools/call"
-            && tool_name.is_some_and(crate::tool_runtime::is_meaningful_activity_tool);
+            && tool_name.is_some_and(|tool| {
+                webcodex_tool_contracts::runtime_tool_activity_interaction(tool).is_meaningful()
+            });
         let mut inner = self.inner.lock().expect("Window activity mutex poisoned");
         let continuity_key = principal.map(|(kind, id)| WindowContinuityKey {
             client_window_key: window.key().to_string(),
@@ -546,10 +548,9 @@ pub(crate) async fn active_window_request_visible_cached(
     if auth.is_admin_caller() || request.method == "tools/list" {
         return true;
     }
-    request
-        .tool_name
-        .as_deref()
-        .is_some_and(|tool| !crate::tool_runtime::observations::is_meaningful_activity_tool(tool))
+    request.tool_name.as_deref().is_some_and(|tool| {
+        !webcodex_tool_contracts::runtime_tool_activity_interaction(tool).is_meaningful()
+    })
 }
 
 pub(crate) struct WindowActivityGuard {
@@ -857,6 +858,49 @@ mod tests {
             1_500,
         );
         assert_eq!(second.transition().gap_ms(), Some(400));
+    }
+
+    #[test]
+    fn observe_jobs_transport_remains_meaningful_for_window_cadence() {
+        let registry = WindowActivityRegistry::default();
+        let window = window("observe-jobs-cadence");
+        meaningful_start(
+            &registry,
+            &window,
+            "trace-first",
+            ("username", "alice"),
+            1_000,
+        )
+        .complete(completion(1_000, 1_100), true);
+
+        let observation = registry.start_observed(
+            &window,
+            "trace-observe-jobs",
+            "tools/call",
+            Some("observe_jobs"),
+            Some(("username", "alice")),
+            1_200,
+        );
+        assert_eq!(observation.transition().gap_ms(), Some(100));
+        let requests = registry.list_for_window(
+            &window_key("observe-jobs-cadence"),
+            Some(("username", "alice")),
+        );
+        assert!(requests
+            .iter()
+            .find(|request| request.server_trace_id == "trace-observe-jobs")
+            .expect("observe_jobs request")
+            .is_meaningful());
+        observation.complete(completion(1_200, 1_225), true);
+
+        let followup = meaningful_start(
+            &registry,
+            &window,
+            "trace-followup",
+            ("username", "alice"),
+            1_500,
+        );
+        assert_eq!(followup.transition().gap_ms(), Some(275));
     }
 
     #[test]

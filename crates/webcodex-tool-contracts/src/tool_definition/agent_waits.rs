@@ -121,6 +121,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             TOOL_PROVIDER_CONTROL,
             super::ToolSemanticContract { effect: super::ToolEffect::Observe, risk: Read, approval: super::ToolApprovalPolicy::None, idempotency: super::ToolIdempotency::PureRead },
             Some(COMMUNICATION_READ), false, NoPath, false, false, super::ToolSessionEvidencePolicy::NONE,
+        )
+        .with_activity(
+            super::ToolActivityPresentation::Transport,
+            super::ToolActivityInteraction::NonMeaningful,
         ),
         COMMUNICATION_READ_SCOPES,
     ),

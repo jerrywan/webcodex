@@ -1562,6 +1562,11 @@ function renderWindowActivityRows(node, activities, options = {}) {
         appendChipElement(facts, String(activity?.status || "unknown"));
         if (activity?.project)
             appendChipElement(facts, String(activity.project));
+        if (activity?.activity_presentation) {
+            appendChipElement(facts, String(activity.activity_presentation), "tone-runtime");
+        }
+        if (activity?.activity_kind)
+            appendChipElement(facts, String(activity.activity_kind));
         if (activity?.meaningful)
             appendChipElement(facts, "meaningful", "tone-runtime");
         if (activity?.recorder_gap_session_id)

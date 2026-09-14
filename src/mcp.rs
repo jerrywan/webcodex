@@ -546,7 +546,10 @@ pub async fn mcp_post(req: &mut Request, depot: &mut Depot, res: &mut Response) 
             let mut event = ActionAuditRecord::new(tool.clone(), success, status)
                 .error(error)
                 .summary(summary)
-                .meaningful(crate::tool_runtime::is_meaningful_activity_tool(tool))
+                .meaningful(
+                    webcodex_tool_contracts::runtime_tool_activity_interaction(tool)
+                        .is_meaningful(),
+                )
                 .recorder_gap(correlation.recorder_gap_session_id.clone());
             event.project = correlation
                 .resolved_project

@@ -354,6 +354,30 @@ async fn meaningful_activity_is_scoped_and_not_refreshed_by_status_calls() {
         observed_at
     );
 
+    // observe_jobs is transport presentation, but it is still a meaningful
+    // model/environment interaction and therefore may refresh runtime
+    // observation freshness.
+    runtime
+        .observations
+        .record_successful_tool_call(ToolCallObservation {
+            principal_kind: "dev".to_string(),
+            principal_id: "dev".to_string(),
+            project: None,
+            surface: "mcp".to_string(),
+            session_id: None,
+            tool: "observe_jobs".to_string(),
+            observed_at: observed_at + 200,
+        });
+    let after_observe_jobs = layers(&runtime).await;
+    assert_eq!(
+        after_observe_jobs["last_successful_tool_call"]["tool"],
+        "observe_jobs"
+    );
+    assert_eq!(
+        after_observe_jobs["last_successful_tool_call"]["observed_at"],
+        observed_at + 200
+    );
+
     // Additional status polling must not refresh the observation.
     for _ in 0..3 {
         let result = runtime
@@ -369,12 +393,12 @@ async fn meaningful_activity_is_scoped_and_not_refreshed_by_status_calls() {
         assert!(result.success);
     }
     let still = layers(&runtime).await;
-    assert_eq!(still["last_successful_tool_call"]["tool"], "start_session");
+    assert_eq!(still["last_successful_tool_call"]["tool"], "observe_jobs");
     assert_eq!(
         still["last_successful_tool_call"]["observed_at"]
             .as_i64()
             .unwrap(),
-        observed_at
+        observed_at + 200
     );
 }
 #[tokio::test]

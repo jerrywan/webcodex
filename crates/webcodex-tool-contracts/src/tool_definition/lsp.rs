@@ -33,7 +33,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             false,
             super::ToolSessionEvidencePolicy::NONE,
-        ),
+        )
+        .with_activity_kind(super::ToolActivityKind::Navigate),
         "Read-only probe of configured Runner-side language-server availability for a Project. Does not start a language server, run checks, or execute Project code. Returns detected languages and availability/running status without absolute executable paths.",
         lsp_status_input_schema,
     )),

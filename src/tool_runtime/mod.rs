@@ -69,7 +69,6 @@ mod script;
 mod search_project_texts;
 mod semantic_navigation;
 mod session_context;
-pub(crate) use observations::is_meaningful_activity_tool;
 pub(crate) use session_context::runtime_observation_principal;
 pub(crate) use window_activity::{
     ToolCallCorrelation, WindowActivityGuard, WindowLoopTransition, WorkflowSessionCorrelation,
