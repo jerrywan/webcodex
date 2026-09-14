@@ -1579,22 +1579,25 @@ pub(super) async fn handle_call(
             }
         }
     }
+    if let Some(lc) = lifecycle.as_deref_mut() {
+        lc.set_tool_name(Some(params.name.clone()));
+    }
     if let Some(lc) = lifecycle.as_deref() {
-        let audit = if params.name == crate::plugin_gateway::PLUGIN_TOOL_NAME {
-            crate::plugin_gateway::audit_arguments(&params.arguments)
-        } else if params.name == crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME {
-            crate::ssh_resource_gateway::audit_arguments(&params.arguments)
-        } else if via_adaptive_runtime_gateway {
-            json!({"tool": params.name, "arguments_present": true})
-        } else {
-            params.arguments.clone()
-        };
-        lc.capture_payload("raw_arguments", &audit);
+        lc.capture_payload_lazy("raw_arguments", || {
+            if params.name == crate::plugin_gateway::PLUGIN_TOOL_NAME {
+                crate::plugin_gateway::audit_arguments(&params.arguments)
+            } else if params.name == crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME {
+                crate::ssh_resource_gateway::audit_arguments(&params.arguments)
+            } else if via_adaptive_runtime_gateway {
+                json!({"tool": params.name, "arguments_present": true})
+            } else {
+                params.arguments.clone()
+            }
+        });
     }
     // Emit dispatch_started only after params parse succeeds and before
     // ToolRuntime work begins.
-    if let Some(lc) = lifecycle.as_deref_mut() {
-        lc.set_tool_name(Some(params.name.clone()));
+    if let Some(lc) = lifecycle.as_deref() {
         lc.dispatch_started();
     }
     if params.name == crate::mcp_gateway::MCP_TOOL_NAME {
@@ -1647,10 +1650,9 @@ pub(super) async fn handle_call(
             unreachable!("plugin_tool parser must yield ToolCall::PluginTool");
         };
         if let Some(lc) = lifecycle.as_deref() {
-            lc.capture_payload(
-                "effective_arguments",
-                &crate::plugin_gateway::audit_arguments(&params.arguments),
-            );
+            lc.capture_payload_lazy("effective_arguments", || {
+                crate::plugin_gateway::audit_arguments(&params.arguments)
+            });
         }
         let invocation = match crate::plugin_gateway::invoke(
             runtime,
@@ -1704,10 +1706,9 @@ pub(super) async fn handle_call(
             *slot = correlation;
         }
         if let Some(lc) = lifecycle.as_deref() {
-            lc.capture_payload(
-                "specialized_governance",
-                &invocation.policy().audit_projection(),
-            );
+            lc.capture_payload_lazy("specialized_governance", || {
+                invocation.policy().audit_projection()
+            });
             lc.dispatch_finished(true, Some(ok), if ok { "success" } else { "tool_error" });
         }
         let result = invocation.to_mcp_result();
@@ -1737,10 +1738,9 @@ pub(super) async fn handle_call(
             Ok(policy) => policy,
             Err(_) => {
                 if let Some(lc) = lifecycle.as_deref() {
-                    lc.capture_payload(
-                        "effective_arguments",
-                        &crate::ssh_resource_gateway::audit_arguments(&params.arguments),
-                    );
+                    lc.capture_payload_lazy("effective_arguments", || {
+                        crate::ssh_resource_gateway::audit_arguments(&params.arguments)
+                    });
                 }
                 let result =
                     crate::ssh_resource_gateway::call(runtime, params.arguments, auth).await;
@@ -1758,14 +1758,15 @@ pub(super) async fn handle_call(
                 ));
             }
         };
-        let audit = crate::ssh_resource_gateway::audit_arguments(&params.arguments);
         let request = match serde_json::from_value::<crate::tool_runtime::SshResourceToolCall>(
             params.arguments.clone(),
         ) {
             Ok(request) if request.validate().is_ok() => request,
             _ => {
                 if let Some(lc) = lifecycle.as_deref() {
-                    lc.capture_payload("effective_arguments", &audit);
+                    lc.capture_payload_lazy("effective_arguments", || {
+                        crate::ssh_resource_gateway::audit_arguments(&params.arguments)
+                    });
                 }
                 let result =
                     crate::ssh_resource_gateway::call(runtime, params.arguments, auth).await;
@@ -1798,7 +1799,7 @@ pub(super) async fn handle_call(
                 description,
             }) => {
                 if let Some(lc) = lifecycle.as_deref() {
-                    lc.capture_payload("specialized_governance", &policy.audit_projection());
+                    lc.capture_payload_lazy("specialized_governance", || policy.audit_projection());
                     lc.dispatch_failed("forbidden");
                     lc.dispatch_finished(false, Some(false), "forbidden");
                 }
@@ -1806,7 +1807,7 @@ pub(super) async fn handle_call(
             }
             Err(SpecializedGovernanceDenial::Tool(result)) => {
                 if let Some(lc) = lifecycle.as_deref() {
-                    lc.capture_payload("specialized_governance", &policy.audit_projection());
+                    lc.capture_payload_lazy("specialized_governance", || policy.audit_projection());
                     lc.dispatch_failed("specialized_governance_denied");
                     lc.dispatch_finished(true, Some(false), "tool_error");
                 }
@@ -1837,11 +1838,12 @@ pub(super) async fn handle_call(
             *slot = correlation;
         }
         if let Some(lc) = lifecycle.as_deref() {
-            lc.capture_payload("effective_arguments", &audit);
-            lc.capture_payload(
-                "specialized_governance",
-                &invocation.policy().audit_projection(),
-            );
+            lc.capture_payload_lazy("effective_arguments", || {
+                crate::ssh_resource_gateway::audit_arguments(&params.arguments)
+            });
+            lc.capture_payload_lazy("specialized_governance", || {
+                invocation.policy().audit_projection()
+            });
             lc.dispatch_finished(true, Some(ok), if ok { "success" } else { "tool_error" });
         }
         let result = invocation.to_mcp_result();

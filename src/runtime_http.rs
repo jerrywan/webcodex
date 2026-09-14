@@ -275,10 +275,10 @@ pub async fn tools_call(req: &mut Request, depot: &mut Depot, res: &mut Response
             return;
         }
     };
-    guard.capture_payload("raw_request_body", &tool_call_trace_raw_body(&body));
     let (tool, params) = match extract_tool_call(&body) {
         Ok(pair) => pair,
         Err(msg) => {
+            guard.capture_payload_lazy("raw_request_body", || tool_call_trace_raw_body(&body));
             // Params-level failure: not yet in ToolRuntime.
             guard.parsed("invalid_tool_call");
             let body = serde_json::json!({
@@ -295,13 +295,13 @@ pub async fn tools_call(req: &mut Request, depot: &mut Depot, res: &mut Response
         }
     };
     guard.set_tool_name(Some(tool.clone()));
+    guard.capture_payload_lazy("raw_request_body", || tool_call_trace_raw_body(&body));
     let window = crate::client_window::api_window(req, res);
     guard.set_client_window(Some(&window));
     guard.parsed("ok");
-    guard.capture_payload(
-        "effective_arguments",
-        &tool_call_trace_effective_arguments(&tool, &params),
-    );
+    guard.capture_payload_lazy("effective_arguments", || {
+        tool_call_trace_effective_arguments(&tool, &params)
+    });
     // dispatch_started only after argument extraction succeeds and immediately
     // before ToolRuntime dispatch.
     guard.dispatch_started();
