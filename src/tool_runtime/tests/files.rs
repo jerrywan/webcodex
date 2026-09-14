@@ -2291,6 +2291,57 @@ fn search_status_and_records_must_agree_before_empty_is_trusted() {
     assert_eq!(proven_empty.output["exit_code"], 1);
 }
 
+#[test]
+fn search_count_uses_backend_evidence_without_claiming_filtered_absence() {
+    let options = SearchOptions::normalize(SearchRequest {
+        result_mode: Some(SearchResultMode::Count),
+        limit: Some(10),
+        ..raw_search_request()
+    })
+    .unwrap();
+    let marker = "{\"webcodex_search\":{\"backend\":\"rg\",\"feature_unavailable\":false}}\n";
+
+    let no_match = search_project_text_output("demo", &options, marker, Some(1), "");
+    assert!(no_match.success, "{:?}", no_match.error);
+    assert_eq!(no_match.output["files"], json!([]));
+    assert_eq!(no_match.output["count_complete"], true);
+    assert_eq!(no_match.output["total_matches"], 0);
+
+    let safe_stdout = format!("{marker}src/lib.rs\u{0}2\n");
+    let safe = search_project_text_output("demo", &options, &safe_stdout, Some(0), "");
+    assert!(safe.success, "{:?}", safe.error);
+    assert_eq!(safe.output["count_complete"], true);
+    assert_eq!(safe.output["total_matches"], 2);
+    assert_eq!(safe.output["files"][0]["path"], "src/lib.rs");
+
+    let malformed_stdout = format!("{marker}src/lib.rs:not-a-number\n");
+    let malformed = search_project_text_output("demo", &options, &malformed_stdout, Some(0), "");
+    assert!(!malformed.success);
+    assert_eq!(
+        malformed.output["reason_code"],
+        "backend_output_inconsistent"
+    );
+
+    let filtered_stdout = format!("{marker}/private/absolute/secret.rs\u{0}2\n");
+    let filtered = search_project_text_output("demo", &options, &filtered_stdout, Some(0), "");
+    assert!(filtered.success, "{:?}", filtered.error);
+    assert_eq!(filtered.output["files"], json!([]));
+    assert_eq!(filtered.output["returned_match_count"], 0);
+    assert_eq!(filtered.output["count_complete"], false);
+    assert_eq!(filtered.output["total_matches"], Value::Null);
+    assert_eq!(filtered.output["truncated"], false);
+    assert!(!serde_json::to_string(&filtered)
+        .unwrap()
+        .contains("/private/absolute/secret.rs"));
+
+    let contradictory = search_project_text_output("demo", &options, &filtered_stdout, Some(1), "");
+    assert!(!contradictory.success);
+    assert_eq!(
+        contradictory.output["reason_code"],
+        "backend_output_inconsistent"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn search_command_preserves_rg_exit_2_despite_head() {

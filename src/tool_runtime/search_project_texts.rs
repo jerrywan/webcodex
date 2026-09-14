@@ -653,6 +653,50 @@ mod tests {
     }
 
     #[test]
+    fn batch_projection_preserves_incomplete_count_truth_after_path_filtering() {
+        let options = SearchOptions::normalize(SearchRequest {
+            pattern: "needle".to_string(),
+            path: None,
+            limit: Some(10),
+            context_before: None,
+            context_after: None,
+            include_globs: None,
+            exclude_globs: None,
+            result_mode: Some(crate::tool_runtime::SearchResultMode::Count),
+            timeout_secs: None,
+        })
+        .unwrap();
+        let marker = "{\"webcodex_search\":{\"backend\":\"rg\",\"feature_unavailable\":false}}\n";
+        let stdout = format!("{marker}/private/absolute/secret.rs\u{0}2\n");
+        let single = crate::tool_runtime::files::search_project_text_output(
+            "agent:special:demo",
+            &options,
+            &stdout,
+            Some(0),
+            "",
+        );
+        assert!(single.success, "{:?}", single.error);
+
+        let item = batch_item(0, single);
+        let mut batch = ToolResult::ok(batch_output(
+            "agent:special:demo",
+            1,
+            vec![item],
+            false,
+            None,
+            None,
+        ));
+        super::super::dispatch::sparsify_search_batch_success_for_model(&[true], &mut batch);
+        let output = &batch.output["items"][0]["output"];
+        assert_eq!(output["count_complete"], false);
+        assert_eq!(output["total_matches"], Value::Null);
+        assert_eq!(output["files"], json!([]));
+        assert!(!serde_json::to_string(&batch)
+            .unwrap()
+            .contains("/private/absolute/secret.rs"));
+    }
+
+    #[test]
     fn complete_default_sparse_fit_is_not_preemptively_budget_truncated() {
         let payload_budget =
             DEFAULT_SEARCH_PROJECT_TEXTS_RESULT_BYTES - MODEL_RESULT_ENVELOPE_RESERVE_BYTES;

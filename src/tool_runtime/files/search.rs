@@ -828,6 +828,36 @@ struct SearchFileCount {
     match_count: u64,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct CountParseEvidence {
+    data_record_seen: bool,
+    parsed_record_count: usize,
+    safe_record_seen: bool,
+    filtered_record_seen: bool,
+    malformed_record_seen: bool,
+}
+
+impl CountParseEvidence {
+    fn parsed_record_seen(self) -> bool {
+        self.parsed_record_count > 0
+    }
+
+    fn projection_complete(self) -> bool {
+        !self.filtered_record_seen
+            && !self.malformed_record_seen
+            && (!self.parsed_record_seen() || self.safe_record_seen)
+    }
+}
+
+#[derive(Debug)]
+struct ParsedFileCounts {
+    files: Vec<SearchFileCount>,
+    returned_match_count: u64,
+    limit_truncated: bool,
+    bytes_truncated: bool,
+    evidence: CountParseEvidence,
+}
+
 #[derive(Debug)]
 enum SearchResultData {
     Matches(Vec<SearchMatch>),
@@ -836,6 +866,7 @@ enum SearchResultData {
         files: Vec<SearchFileCount>,
         returned_match_count: u64,
         count_complete: bool,
+        evidence: CountParseEvidence,
     },
 }
 
@@ -1239,13 +1270,15 @@ fn parse_file_paths(stdout: &str, limit: usize) -> (Vec<SearchFile>, bool, bool)
     )
 }
 
-fn parse_file_counts(stdout: &str, limit: usize) -> (Vec<SearchFileCount>, u64, bool, bool) {
+fn parse_file_counts(stdout: &str, limit: usize) -> ParsedFileCounts {
     let (lines, bytes_truncated) = split_complete_search_lines(stdout);
     let mut counts = Vec::<(String, u64)>::new();
+    let mut evidence = CountParseEvidence::default();
     for line in lines {
         if serde_json::from_str::<Value>(line).is_ok() {
             continue;
         }
+        evidence.data_record_seen = true;
         let parsed = line
             .split_once('\0')
             .or_else(|| line.rsplit_once(':'))
@@ -1253,29 +1286,38 @@ fn parse_file_counts(stdout: &str, limit: usize) -> (Vec<SearchFileCount>, u64, 
                 Some((path, count.trim_end_matches('\r').parse::<u64>().ok()?))
             });
         let Some((path, count)) = parsed else {
+            evidence.malformed_record_seen = true;
             continue;
         };
+        evidence.parsed_record_count = evidence.parsed_record_count.saturating_add(1);
+        if count == 0 {
+            evidence.malformed_record_seen = true;
+            continue;
+        }
         let Some(path) = normalize_search_record_path(path) else {
+            evidence.filtered_record_seen = true;
             continue;
         };
+        evidence.safe_record_seen = true;
         if let Some((_, existing)) = counts.iter_mut().find(|(existing, _)| existing == &path) {
             *existing = existing.saturating_add(count);
         } else {
             counts.push((path, count));
         }
     }
-    let limit_truncated = counts.len() > limit;
+    let limit_truncated = evidence.parsed_record_count > limit;
     counts.truncate(limit);
     let returned_match_count = counts.iter().map(|(_, count)| *count).sum();
-    (
-        counts
+    ParsedFileCounts {
+        files: counts
             .into_iter()
             .map(|(path, match_count)| SearchFileCount { path, match_count })
             .collect(),
         returned_match_count,
         limit_truncated,
         bytes_truncated,
-    )
+        evidence,
+    }
 }
 
 fn parse_search_result(stdout: &str, options: &SearchOptions, backend: String) -> SearchResult {
@@ -1300,18 +1342,20 @@ fn parse_search_result(stdout: &str, options: &SearchOptions, backend: String) -
             )
         }
         SearchResultMode::Count => {
-            let (files, returned_match_count, limit_truncated, bytes_truncated) =
-                parse_file_counts(stdout, options.limit);
+            let parsed = parse_file_counts(stdout, options.limit);
+            let count_complete = !parsed.limit_truncated
+                && !parsed.bytes_truncated
+                && !result_retention_truncated
+                && parsed.evidence.projection_complete();
             (
                 SearchResultData::Count {
-                    files,
-                    returned_match_count,
-                    count_complete: !limit_truncated
-                        && !bytes_truncated
-                        && !result_retention_truncated,
+                    files: parsed.files,
+                    returned_match_count: parsed.returned_match_count,
+                    count_complete,
+                    evidence: parsed.evidence,
                 },
-                limit_truncated,
-                bytes_truncated,
+                parsed.limit_truncated,
+                parsed.bytes_truncated,
             )
         }
     };
@@ -1440,16 +1484,20 @@ pub(crate) fn search_project_text_output_with_agent_error(
     }
 
     let result = parse_search_result(stdout, options, backend_status.backend.clone());
-    // Search status is part of the evidence contract: 0 means at least one
-    // match, 1 means a completed no-match scan, and 141 means bounded output
-    // stopped after at least one complete record. If parsed safe records
-    // disagree, output was malformed, transport-incomplete, or entirely
-    // rejected by the path/privacy filter. Returning an empty success in any
-    // of those cases would falsely claim proven absence.
+    // Search status is backend evidence, not a statement about the final safe
+    // projection. Count mode therefore distinguishes parseable backend count
+    // records from records later removed by path/privacy filtering. A malformed
+    // count stream still fails closed; a filtered-but-parseable stream remains
+    // an incomplete observation rather than a false no-match or protocol error.
     let has_records = search_result_has_records(&result);
-    let status_consistent = match exit_code {
-        Some(1) => !has_records,
-        Some(0 | 141) => has_records,
+    let status_consistent = match (&result.data, exit_code) {
+        (SearchResultData::Count { evidence, .. }, Some(1)) => !evidence.data_record_seen,
+        (SearchResultData::Count { evidence, .. }, Some(0 | 141)) => {
+            !evidence.malformed_record_seen
+                && (evidence.parsed_record_seen() || result.truncation_reason.is_some())
+        }
+        (_, Some(1)) => !has_records,
+        (_, Some(0 | 141)) => has_records,
         _ => true,
     };
     if !status_consistent {
@@ -1500,6 +1548,7 @@ fn search_result_json(
             files,
             returned_match_count,
             count_complete,
+            evidence: _,
         } => {
             output["returned_file_count"] = json!(files.len());
             output["returned_match_count"] = json!(returned_match_count);
