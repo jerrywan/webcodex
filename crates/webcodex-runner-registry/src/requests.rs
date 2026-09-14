@@ -309,6 +309,8 @@ pub(super) fn resolve_disconnected_sync_requests_locked(
                 exit_code: None,
                 stdout: None,
                 stderr: None,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 duration_ms: None,
                 error: Some(error.to_string()),
                 request_dispatched: Some(pending.dispatched),

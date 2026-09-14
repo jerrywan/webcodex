@@ -697,6 +697,8 @@ async fn apply_text_edits_conflict_then_same_sha_occurrence_retry_needs_no_hidde
             "error": "Rejected transactional file batch: exact match is ambiguous. No files were modified. Retry guidance: choose an advertised occurrence or refine the exact match; reuse the same expected_sha256 unless you reread or observe a changed file."
         }).to_string()),
         stderr: Some(String::new()),
+        stdout_truncated: false,
+        stderr_truncated: false,
         duration_ms: Some(1),
         error: None,
     }).await.unwrap();
@@ -770,6 +772,8 @@ async fn apply_text_edits_conflict_then_same_sha_occurrence_retry_needs_no_hidde
                 .to_string(),
             ),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -833,6 +837,8 @@ async fn apply_text_edits_without_occurrence_unique_match_queues_and_succeeds() 
                 .to_string(),
             ),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -894,6 +900,8 @@ async fn apply_text_edits_without_occurrence_ambiguous_match_fails_closed() {
                 .to_string(),
             ),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -1041,6 +1049,8 @@ async fn apply_text_edits_dry_run_does_not_write() {
                     .to_string(),
             ),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -1219,6 +1229,8 @@ async fn apply_text_edits_session_event_summary() {
                     .to_string(),
             ),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })

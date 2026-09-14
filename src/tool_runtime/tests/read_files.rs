@@ -1010,6 +1010,8 @@ async fn read_files_deadline_preserves_completed_results_and_cancels_unfinished_
                 exit_code: Some(0),
                 stdout: Some(canonical_agent_file_read_output("late\n", 1)),
                 stderr: Some(String::new()),
+                stdout_truncated: false,
+                stderr_truncated: false,
                 duration_ms: Some(100),
                 error: None,
             })

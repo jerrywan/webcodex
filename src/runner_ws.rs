@@ -661,6 +661,8 @@ mod tests {
                     exit_code: Some(0),
                     stdout: Some("spoofed".to_string()),
                     stderr: None,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
                     duration_ms: Some(1),
                     error: None,
                 }
@@ -688,6 +690,8 @@ mod tests {
                     exit_code: Some(0),
                     stdout: Some("authentic".to_string()),
                     stderr: None,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
                     duration_ms: Some(1),
                     error: None,
                 }
@@ -828,6 +832,8 @@ mod tests {
                 exit_code: Some(0),
                 stdout: Some("hi".to_string()),
                 stderr: None,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 duration_ms: Some(1),
                 error: None,
             }
@@ -1192,6 +1198,8 @@ mod tests {
                     exit_code: Some(0),
                     stdout: Some("hi".to_string()),
                     stderr: None,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
                     duration_ms: Some(1),
                     error: None,
                 }

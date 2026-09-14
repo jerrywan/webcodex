@@ -622,6 +622,8 @@ async fn delete_project_files_replacement_after_poll_reports_outcome_unknown() {
             exit_code: Some(0),
             stdout: Some(r#"{"deleted_paths":["tmp.txt"]}"#.to_string()),
             stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -3125,6 +3127,8 @@ async fn search_agent_command_timeout_returns_search_timeout() {
                     .to_string(),
             ),
             stderr: Some("command timed out after 1 seconds".to_string()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1000),
             error: Some("command timed out".to_string()),
         })
@@ -3175,6 +3179,8 @@ async fn search_agent_execution_failure_is_structured_and_does_not_leak_diagnost
                     .to_string(),
             ),
             stderr: Some(private_diagnostic.to_string()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(5),
             error: Some(private_diagnostic.to_string()),
         })
@@ -3231,6 +3237,8 @@ async fn search_agent_timeout_without_trusted_marker_cannot_return_partial_succe
             exit_code: Some(-1),
             stdout: Some("src/a.rs:1:needle\n".to_string()),
             stderr: Some("command timed out after 1 seconds".to_string()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1000),
             error: Some("command timed out".to_string()),
         })
@@ -3291,6 +3299,8 @@ async fn search_agent_timeout_with_complete_records_returns_partial_success() {
                     .to_string(),
             ),
             stderr: Some("command timed out after 1 seconds".to_string()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1000),
             error: Some("command timed out".to_string()),
         })
@@ -3366,6 +3376,8 @@ async fn search_agent_outer_timeout_returns_search_timeout_and_cancels() {
             exit_code: Some(0),
             stdout: Some(String::new()),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })

@@ -105,6 +105,8 @@ async fn read_file_accepts_unique_short_id() {
             exit_code: Some(0),
             stdout: Some(canonical_agent_file_read_output("hello\n", 1)),
             stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -151,6 +153,8 @@ async fn read_files_short_id_continuation_binds_resolved_project_across_registry
             exit_code: Some(0),
             stdout: Some(canonical_agent_file_read_range("one\ntwo", 1, 1)),
             stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -224,6 +228,8 @@ async fn read_files_short_id_continuation_binds_resolved_project_across_registry
             exit_code: Some(0),
             stdout: Some(canonical_agent_file_read_range("one\ntwo", 2, 1)),
             stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -270,6 +276,8 @@ async fn read_files_short_id_item_continuation_uses_resolved_project_id() {
             exit_code: Some(0),
             stdout: Some(canonical_agent_file_read_range("one\ntwo", 1, 1)),
             stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -317,6 +325,8 @@ async fn git_status_accepts_unique_short_id() {
             exit_code: Some(0),
             stdout: Some(String::new()),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -387,6 +397,8 @@ async fn full_id_remains_compatible_for_project_tools() {
             exit_code: Some(0),
             stdout: Some(canonical_agent_file_read_output("hello\n", 1)),
             stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })

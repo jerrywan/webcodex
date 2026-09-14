@@ -1712,6 +1712,8 @@ async fn unique_short_agent_project_id_is_resolved_by_runtime_surface() {
             exit_code: Some(0),
             stdout: Some("hi\n".to_string()),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })

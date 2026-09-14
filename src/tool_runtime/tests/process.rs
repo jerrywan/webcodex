@@ -209,6 +209,8 @@ async fn complete_process_lifecycle(
                 exit_code,
                 stdout: Some(stdout.to_string()),
                 stderr: Some(stderr.to_string()),
+                stdout_truncated: false,
+                stderr_truncated: false,
                 duration_ms: Some(7),
                 error: error.map(str::to_string),
             },

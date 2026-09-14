@@ -1679,6 +1679,8 @@ mod tests {
             exit_code: None,
             stdout: None,
             stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: Some(message.to_string()),
             request_dispatched: Some(true),

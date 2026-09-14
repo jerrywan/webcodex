@@ -480,6 +480,8 @@ async fn call_kernel_with_fake_operator_store(
                         exit_code,
                         stdout,
                         stderr: Some(String::new()),
+                        stdout_truncated: false,
+                        stderr_truncated: false,
                         duration_ms: Some(1),
                         error,
                     })

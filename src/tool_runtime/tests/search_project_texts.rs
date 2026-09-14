@@ -1467,6 +1467,8 @@ async fn search_project_texts_retry_uses_only_remaining_absolute_deadline() {
             exit_code: Some(0),
             stdout: Some(search_stdout("matches", "src/late.rs", "late")),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(200),
             error: None,
         })
@@ -2081,6 +2083,8 @@ async fn search_project_texts_deadline_preserves_fast_result_and_cancels_unfinis
                 exit_code: Some(0),
                 stdout: Some(search_stdout("matches", "src/late.rs", "late")),
                 stderr: Some(String::new()),
+                stdout_truncated: false,
+                stderr_truncated: false,
                 duration_ms: Some(200),
                 error: None,
             })

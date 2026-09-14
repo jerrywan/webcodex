@@ -1426,6 +1426,8 @@ async fn mcp_image_call_returns_native_image_for_remote_agent_project() {
             exit_code: Some(0),
             stdout: Some(stdout),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })
@@ -2211,6 +2213,8 @@ async fn mcp_show_changes_distinguishes_recording_session_id_from_query_session_
                 exit_code: Some(0),
                 stdout: Some(stdout),
                 stderr: Some(String::new()),
+                stdout_truncated: false,
+                stderr_truncated: false,
                 duration_ms: Some(1),
                 error: None,
             })

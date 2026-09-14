@@ -1797,6 +1797,10 @@ pub struct ShellRunResponse {
     pub stdout: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stdout_truncated: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stderr_truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1941,6 +1945,10 @@ pub struct RunnerResultRequest {
     pub stdout: Option<String>,
     #[serde(default)]
     pub stderr: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stdout_truncated: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stderr_truncated: bool,
     #[serde(default)]
     pub duration_ms: Option<u64>,
     #[serde(default)]
@@ -3425,6 +3433,8 @@ mod envelope_tests {
                     exit_code: Some(0),
                     stdout: Some("hi".to_string()),
                     stderr: None,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
                     duration_ms: Some(5),
                     error: None,
                 },
@@ -3743,6 +3753,40 @@ mod envelope_tests {
     }
 
     #[test]
+    fn runner_result_truncation_evidence_is_additive_and_backward_compatible() {
+        let legacy = r#"{
+            "client_id": "oe",
+            "agent_instance_id": "22222222-2222-2222-2222-222222222222",
+            "request_id": "req-legacy",
+            "exit_code": 0,
+            "stdout": "ok",
+            "stderr": ""
+        }"#;
+        let legacy: RunnerResultRequest = serde_json::from_str(legacy).unwrap();
+        assert!(!legacy.stdout_truncated);
+        assert!(!legacy.stderr_truncated);
+
+        let current = RunnerResultRequest {
+            client_id: "oe".to_string(),
+            runner_instance_id: "22222222-2222-2222-2222-222222222222".to_string(),
+            request_id: "req-current".to_string(),
+            exit_code: Some(0),
+            stdout: Some("tail".to_string()),
+            stderr: Some("tail".to_string()),
+            stdout_truncated: true,
+            stderr_truncated: true,
+            duration_ms: Some(1),
+            error: None,
+        };
+        let encoded = serde_json::to_string(&current).unwrap();
+        assert!(encoded.contains("\"stdout_truncated\":true"));
+        assert!(encoded.contains("\"stderr_truncated\":true"));
+        let decoded: RunnerResultRequest = serde_json::from_str(&encoded).unwrap();
+        assert!(decoded.stdout_truncated);
+        assert!(decoded.stderr_truncated);
+    }
+
+    #[test]
     fn poll_result_job_update_round_trip_agent_instance_id() {
         let poll = RunnerPollRequest {
             client_id: "oe".to_string(),
@@ -3762,6 +3806,8 @@ mod envelope_tests {
             exit_code: Some(0),
             stdout: None,
             stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: None,
             error: None,
         };
