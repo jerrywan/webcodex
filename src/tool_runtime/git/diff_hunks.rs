@@ -2015,20 +2015,6 @@ impl ToolRuntime {
                 Some(&output),
             );
         };
-        if wire.stale
-            || decoded
-                .as_ref()
-                .is_some_and(|token| token.fence() != wire.pre_fence)
-        {
-            return git_diff_hunks_failure(
-                &project,
-                &paths,
-                cached,
-                "stale_continuation",
-                output.exit_code,
-                &stderr,
-            );
-        }
         if wire.pre_hash_exit != 0
             || wire.post_hash_exit != 0
             || !is_git_object_hex(&wire.pre_fence)
@@ -2041,6 +2027,20 @@ impl ToolRuntime {
                 "source_fence_unavailable",
                 "source_fence",
                 Some(&output),
+            );
+        }
+        if wire.stale
+            || decoded
+                .as_ref()
+                .is_some_and(|token| token.fence() != wire.pre_fence)
+        {
+            return git_diff_hunks_failure(
+                &project,
+                &paths,
+                cached,
+                "stale_continuation",
+                output.exit_code,
+                &stderr,
             );
         }
         if wire.pre_diff_exit != 0 || wire.post_diff_exit != 0 || wire.diff_exit != 0 {

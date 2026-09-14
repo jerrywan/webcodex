@@ -985,9 +985,12 @@ async fn git_diff_hunks_source_failures_report_diagnostic_stage() {
     let fence = run_git_diff_hunks_with_faulted_source(
         "git-source-fence-invalid",
         |_exit, stdout, stderr| {
-            let mutated = stdout.replacen("pre_hash_exit=0", "pre_hash_exit=1", 1);
+            let mutated = stdout
+                .replacen("pre_hash_exit=0", "pre_hash_exit=1", 1)
+                .replacen("stale=0", "stale=1", 1);
             assert_ne!(mutated, stdout);
-            // The generated source script exits 1 for this exact observation.
+            // A failed fence observation can also make an expected-fence comparison
+            // look stale. Fence validity is authoritative before stale identity.
             (1, mutated, stderr, false, false)
         },
     )
