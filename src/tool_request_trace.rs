@@ -24,6 +24,7 @@
 
 use crate::client_window::ClientWindow;
 use crate::config::ToolRequestTraceMode;
+use crate::json_digest::update_sha256_with_json;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -199,6 +200,16 @@ pub(crate) fn current_full_trace_ref() -> Option<String> {
     full_trace_enabled().then(current_active_trace_id).flatten()
 }
 
+fn json_sha256_or_empty<T: Serialize + ?Sized>(value: &T) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    if update_sha256_with_json(&mut hasher, value).is_err() {
+        // Preserve the historical `to_vec(...).unwrap_or_default()` fallback:
+        // serialization failure hashes an empty byte sequence, never a partial one.
+        hasher = Sha256::new();
+    }
+    hasher.finalize().into()
+}
+
 /// Safe JSON-RPC id summary: type + length + short digest. Never the raw string.
 pub fn jsonrpc_id_safe(id: Option<&serde_json::Value>) -> String {
     use serde_json::Value;
@@ -219,8 +230,7 @@ pub fn jsonrpc_id_safe(id: Option<&serde_json::Value>) -> String {
             )
         }
         Some(Value::Array(a)) => {
-            let raw = serde_json::to_vec(a).unwrap_or_default();
-            let digest = Sha256::digest(&raw);
+            let digest = json_sha256_or_empty(a);
             format!(
                 "array:len={}:sha256_8={:02x}{:02x}{:02x}{:02x}",
                 a.len(),
@@ -231,8 +241,7 @@ pub fn jsonrpc_id_safe(id: Option<&serde_json::Value>) -> String {
             )
         }
         Some(Value::Object(o)) => {
-            let raw = serde_json::to_vec(o).unwrap_or_default();
-            let digest = Sha256::digest(&raw);
+            let digest = json_sha256_or_empty(o);
             format!(
                 "object:keys={}:sha256_8={:02x}{:02x}{:02x}{:02x}",
                 o.len(),
@@ -1989,6 +1998,41 @@ mod tests {
         assert!(!summary.contains(secret));
         assert!(summary.starts_with("string:len="));
         assert!(summary.contains("sha256_8="));
+    }
+
+    #[test]
+    fn jsonrpc_id_safe_streaming_digest_matches_buffered_json() {
+        for value in [
+            json!(["quote=\"", "slash=\\", "Unicode 你好 🦀", {"nested": [1, 2, 3]}]),
+            json!({
+                "escaped": "line\nnext\tvalue",
+                "unicode": "日本語 🌍",
+                "nested": {"array": [null, true, 42]}
+            }),
+        ] {
+            let raw = serde_json::to_vec(&value).unwrap();
+            let digest = Sha256::digest(&raw);
+            let expected = match &value {
+                Value::Array(values) => format!(
+                    "array:len={}:sha256_8={:02x}{:02x}{:02x}{:02x}",
+                    values.len(),
+                    digest[0],
+                    digest[1],
+                    digest[2],
+                    digest[3]
+                ),
+                Value::Object(values) => format!(
+                    "object:keys={}:sha256_8={:02x}{:02x}{:02x}{:02x}",
+                    values.len(),
+                    digest[0],
+                    digest[1],
+                    digest[2],
+                    digest[3]
+                ),
+                _ => unreachable!(),
+            };
+            assert_eq!(jsonrpc_id_safe(Some(&value)), expected);
+        }
     }
 
     #[test]
