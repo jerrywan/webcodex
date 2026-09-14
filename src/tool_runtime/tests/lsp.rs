@@ -141,7 +141,8 @@ fn lsp_input_schemas_have_required_bounds() {
         json!(["incoming", "outgoing", "both"])
     );
     assert_eq!(hierarchy["properties"]["depth"]["maximum"], 2);
-    assert_eq!(hierarchy["properties"]["limit"]["maximum"], 100);
+    assert_eq!(hierarchy["properties"]["limit"]["minimum"], 1);
+    assert!(hierarchy["properties"]["limit"].get("maximum").is_none());
     assert_eq!(hierarchy["additionalProperties"], false);
     let diagnostics_output = &by_name["document_diagnostics"].output_schema;
     let output_properties = &diagnostics_output["properties"]["output"]["properties"];
