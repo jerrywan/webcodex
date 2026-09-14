@@ -494,7 +494,8 @@ fn file_apply_text_edits_expected_file_sha256_mismatch_without_write() {
         ),
     ));
     let err = out["error"].as_str().unwrap();
-    assert!(err.contains("expected_sha256 does not match"));
+    assert_eq!(out["error_kind"], "sha256_conflict");
+    assert_eq!(out["state_changed"], false);
     assert!(err.contains("No files were modified"));
     assert_eq!(out["changed"], false);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\n");
