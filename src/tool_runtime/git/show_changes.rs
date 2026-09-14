@@ -1475,10 +1475,10 @@ pub(crate) fn parse_show_changes_output_with_observation(
         vec!["inspect git status failure before relying on worktree cleanliness".to_string()]
     };
 
-    // Parse the already production-bounded diff hunks. The legacy per-hunk
-    // `truncated` flag remains parser-local for 0.4.x compatibility; producer
-    // source completeness is annotated separately once the producer metadata
-    // has been evaluated below.
+    // Parse the already production-bounded diff hunks. The parser-local
+    // `truncated` flag is consumed internally; show_changes exposes only the
+    // authoritative source completeness annotated after producer metadata is
+    // evaluated below.
     let (mut diff_hunks, parser_hunk_count, parser_truncated) = match diff_stdout {
         Some(diff) => parse_git_diff_hunks(diff, max_hunks, max_hunk_lines),
         None => (Vec::new(), 0, false),
@@ -1589,7 +1589,7 @@ pub(crate) fn parse_show_changes_output_with_observation(
         // most `max_hunks` hunks and `max_hunk_lines` lines per hunk before
         // transport. Its reported counts are authoritative for aggregate
         // dropped hunks/lines; per-hunk source completeness is carried by the
-        // additive `source_completeness` annotation above.
+        // single authoritative `source_completeness` annotation above.
         let hunk_count = frames.diff_hunks_returned.unwrap_or(parser_hunk_count);
         let hunks_truncated =
             frames.diff_hunks_truncated.unwrap_or(parser_truncated) || parser_truncated;
@@ -1612,6 +1612,9 @@ fn annotate_show_changes_hunk_source_completeness(
             continue;
         };
         for hunk in hunks {
+            let Some(hunk) = hunk.as_object_mut() else {
+                continue;
+            };
             let parser_truncated = hunk
                 .get("truncated")
                 .and_then(Value::as_bool)
@@ -1624,7 +1627,13 @@ fn annotate_show_changes_hunk_source_completeness(
             } else {
                 "unknown"
             };
-            hunk["source_completeness"] = json!(source_completeness);
+            // show_changes has one authoritative hunk-completeness vocabulary.
+            // The parser-local flag remains internal to parsing/git_diff_hunks.
+            hunk.remove("truncated");
+            hunk.insert(
+                "source_completeness".to_string(),
+                json!(source_completeness),
+            );
         }
     }
 }
@@ -2172,26 +2181,20 @@ fn set_show_changes_verdict(output: &mut Value) {
             }),
         )
         .to_value();
-        let canonical_tool = canonical_recovery_call["tool"].clone();
-        let canonical_arguments = canonical_recovery_call["arguments"].clone();
         output["diff_review_handoff"] = json!({
-            "tool": canonical_tool.clone(),
             "scope": "worktree",
             "reason": "show_changes_diff_truncated",
             "truncation_reasons": diff_truncation_reasons,
             "recovery": {
                 "kind": recovery_kind,
-                "tool": canonical_tool,
-                "arguments": canonical_arguments.clone(),
+                "tool": canonical_recovery_call["tool"].clone(),
+                "arguments": canonical_recovery_call["arguments"].clone(),
                 "safe_continuation_for_omitted_lines": if current_hunk_omitted {
                     Value::Bool(false)
                 } else {
                     Value::Null
                 },
             },
-            // 0.4.x compatibility projection: arguments only. The canonical
-            // parser-ready call is recovery.tool + recovery.arguments.
-            "suggested_call": canonical_arguments,
         });
         push_unique_reason(&mut warning_reasons, "truncated_by_limit");
         push_unique_action(

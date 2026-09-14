@@ -394,10 +394,14 @@ mod tests {
                 "session_continuity.recovery_tool",
                 "session_handoff_summary",
             ),
-            ("show_changes", "diff_review_handoff.tool", "git_diff_hunks"),
+            (
+                "show_changes",
+                "diff_review_handoff.recovery.tool",
+                "git_diff_hunks",
+            ),
             (
                 "finish_coding_task",
-                "changes.show_changes.diff_review_handoff.tool",
+                "changes.show_changes.diff_review_handoff.recovery.tool",
                 "git_diff_hunks",
             ),
         ] {

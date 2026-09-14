@@ -144,14 +144,19 @@ fn inspection_truthfulness_schemas_keep_typed_missing_and_canonical_diff_recover
         .as_str()
         .unwrap()
         .contains("source_completeness"));
-    let hunk = &properties["hunks"]["items"];
+    let file = &properties["hunks"]["items"];
+    assert_eq!(file["additionalProperties"], true);
+    let hunk = &file["properties"]["hunks"]["items"];
     assert_eq!(hunk["additionalProperties"], true);
-    assert_eq!(hunk["properties"]["truncated"]["type"], "boolean");
+    assert!(hunk["properties"].get("truncated").is_none());
+    assert_eq!(hunk["required"], json!(["source_completeness"]));
     assert_eq!(
         hunk["properties"]["source_completeness"]["enum"],
         json!(["complete", "unknown"])
     );
     let handoff = &properties["diff_review_handoff"]["properties"];
+    assert!(handoff.get("tool").is_none());
+    assert!(handoff.get("suggested_call").is_none());
     assert_eq!(
         handoff["recovery"]["properties"]["tool"]["const"],
         "git_diff_hunks"
@@ -160,10 +165,6 @@ fn inspection_truthfulness_schemas_keep_typed_missing_and_canonical_diff_recover
         .as_str()
         .unwrap()
         .contains("Canonical parser-ready"));
-    assert!(handoff["suggested_call"]["description"]
-        .as_str()
-        .unwrap()
-        .contains("Compatibility arguments-only projection"));
 }
 
 fn continuation_feedback_subschema(specs: &[ToolSpec], tool: &str) -> Value {
