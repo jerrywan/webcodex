@@ -13,7 +13,8 @@ use super::query::build_messages_summary;
 use super::util::{bound_chars, looks_like_secret_string};
 use webcodex_core::workflow_session_contract::is_safe_job_id;
 use webcodex_tool_contracts::{
-    runtime_tool_activity_semantics, ToolActivityKind, ToolActivityPresentation,
+    lookup_tool_definition, runtime_tool_activity_semantics, ToolActivityKind,
+    ToolActivityPresentation,
 };
 
 #[derive(Clone, Copy)]
@@ -1055,7 +1056,24 @@ fn looks_like_absolute_path(value: &str) -> bool {
 }
 
 fn semantic_kind(event: &SessionEvent) -> &'static str {
-    semantic_kind_for_tool(&event.tool_name)
+    if lookup_tool_definition(&event.tool_name).is_some() {
+        return semantic_kind_for_tool(&event.tool_name);
+    }
+    // Durable Session ledgers can outlive a public tool name. For retired or
+    // otherwise unknown historical tools, retain the event-time classification
+    // facts that were persisted with the call instead of degrading everything
+    // to `Used`. Current runtime tools always resolve through ToolDefinition.
+    if event.write_like {
+        "Edited"
+    } else if event.git_like || event.change_summary_like {
+        "Reviewed"
+    } else if event.shell_like {
+        "Ran"
+    } else if event.read_like {
+        "Read"
+    } else {
+        "Used"
+    }
 }
 
 fn semantic_kind_for_tool(tool_name: &str) -> &'static str {
@@ -1123,6 +1141,78 @@ mod tests {
         ] {
             assert_eq!(semantic_kind_for_tool(tool), expected, "{tool}");
         }
+    }
+
+    #[test]
+    fn retired_tool_activity_uses_persisted_event_time_classification() {
+        let mut event = SessionEvent {
+            event_id: "legacy-event".to_string(),
+            call_id: None,
+            logical_invocation_id: None,
+            logical_invocation_role: None,
+            session_id: "wc_sess_legacy".to_string(),
+            kind: "tool_call_finished".to_string(),
+            context_revision: None,
+            context_result_summary: None,
+            timestamp: 1,
+            transport: "api".to_string(),
+            tool_name: "retired_tool".to_string(),
+            project: None,
+            resolved_project: None,
+            risk_class: "read".to_string(),
+            read_like: true,
+            write_like: false,
+            shell_like: false,
+            git_like: false,
+            change_summary_like: false,
+            diff_review_like: false,
+            started_at: Some(1),
+            finished_at: Some(1),
+            duration_ms: Some(0),
+            status: Some("succeeded".to_string()),
+            exit_code: None,
+            failure_kind: None,
+            error_kind: None,
+            expected_failure: None,
+            expected_failure_kind: None,
+            result_expectation: None,
+            accepted_exit_codes: Vec::new(),
+            assertion_name: None,
+            actual_failure_kind: None,
+            failure_expectation_result: None,
+            warning_kind: None,
+            session_project: None,
+            request_project: None,
+            error_message_summary: None,
+            changed_paths: Vec::new(),
+            observed_paths: Vec::new(),
+            job_id: None,
+            persistent_shell: None,
+            effect_evidence: None,
+            input_summary: None,
+            validation_output_summary: None,
+            permission: None,
+            instruction: None,
+            requested_mode: None,
+            previous_mode: None,
+            requested_guards: None,
+            previous_guards: None,
+            capability_changed: None,
+            context_refreshed: None,
+            execution_context: None,
+            previous_execution_context: None,
+            execution_context_changed: None,
+        };
+        assert_eq!(semantic_kind(&event), "Read");
+        event.read_like = false;
+        event.write_like = true;
+        assert_eq!(semantic_kind(&event), "Edited");
+        event.write_like = false;
+        event.git_like = true;
+        assert_eq!(semantic_kind(&event), "Reviewed");
+        event.git_like = false;
+        event.shell_like = true;
+        assert_eq!(semantic_kind(&event), "Ran");
     }
 
     #[test]
