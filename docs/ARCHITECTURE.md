@@ -285,7 +285,7 @@ The current layers are:
 - **leaf** — `webcodex-core`, `webcodex-process`, `webcodex-computer`, and
   `webcodex-admin`; these do not depend on another workspace package.
 - **domain** — Runner config/registry, Store, Workspace, Workflow Session,
-  Tool contracts, Validation, and Persistent Shell ownership.
+  Tool contracts, Validation, Persistent Shell, and native LSP ownership.
 - **runtime** — `webcodex-runner` and `webcodex-tool-runtime-contracts`.
 - **application** — `webcodex-connector-runtime`, which composes the domain
   crates needed by the project-bound Connector path.

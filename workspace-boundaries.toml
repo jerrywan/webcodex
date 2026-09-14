@@ -109,6 +109,18 @@ dev = []
 build = []
 test_support = []
 
+[packages.webcodex-lsp]
+layer = "domain"
+role = "Native bounded Language Server Protocol lifecycle and semantic navigation."
+normal = [
+    "webcodex-core",
+    "webcodex-process",
+    "webcodex-runner-config",
+]
+dev = []
+build = []
+test_support = []
+
 [packages.webcodex-persistent-shell]
 layer = "domain"
 role = "Persistent local shell lifecycle built on process primitives."
@@ -131,6 +143,7 @@ role = "Runner executable/runtime composition for local project execution."
 normal = [
     "webcodex-computer",
     "webcodex-core",
+    "webcodex-lsp",
     "webcodex-persistent-shell",
     "webcodex-process",
     "webcodex-runner-config",
