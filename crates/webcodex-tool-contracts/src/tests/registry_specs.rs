@@ -274,6 +274,8 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         "conflicts fail closed",
         "rechecks planned source content before mutation",
         "expected correctness and reliability",
+        "minimal error facts",
+        "one parser-ready read_files recovery call",
         "inspect the resulting diff",
         "validate the final source",
     ] {
@@ -308,6 +310,8 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         "expected_read_revision",
         "model-facing snapshot handle",
         "model does not copy a digest",
+        "minimal error facts",
+        "one parser-ready read_files recovery call",
         "clearest reliable mutation",
         "inspect the resulting diff",
         "validate the final source",
@@ -813,9 +817,9 @@ fn edit_tool_surface_keeps_mutation_options_visible_and_schemas_stable() {
             "apply_patch edit summary must expose {field}"
         );
     }
-    assert!(patch_spec.description.contains("multiple chunks"));
-    assert!(patch_spec.description.contains("duplicate file operations"));
-    assert!(patch_spec.description.contains("never relax"));
+    assert!(patch_spec.description.contains("Transactional"));
+    assert!(patch_spec.description.contains("matching_mode_rejected"));
+    assert!(patch_spec.description.contains("weakening the guard"));
     let unified_diff = &spec_named(&specs, "apply_unified_diff").input_schema["properties"];
     for field in ["project", "diff", "deny_sensitive_paths"] {
         assert!(

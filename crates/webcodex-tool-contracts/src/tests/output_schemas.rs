@@ -744,6 +744,7 @@ fn read_continuation_output_schemas_accept_actionable_recovery_shapes() {
                         "format": "plain",
                         "path": "src/0.rs",
                         "sha256": "b".repeat(64),
+                        "read_revision": 3817291045227_u64,
                         "start_line": 1,
                         "limit": 100,
                         "total_lines": 200,
@@ -758,7 +759,7 @@ fn read_continuation_output_schemas_accept_actionable_recovery_shapes() {
                     "continuation": {
                         "kind": "read_range",
                         "safe_cursor": true,
-                        "source_sha256": "b".repeat(64),
+                        "source_read_revision": 3817291045227_u64,
                         "snapshot_stable": false,
                         "continuation_semantics": {
                             "kind": "page",
@@ -1975,9 +1976,7 @@ fn write_project_file_output_schema_include_metadata_fields() {
         "execution_state",
         "error_kind",
         "failure_kind",
-        "recovery_action",
-        "retry_guidance",
-        "error",
+        "recovery",
     ] {
         assert!(
             output_schema_properties(&specs, "write_project_file").contains_key(field),
@@ -1985,6 +1984,19 @@ fn write_project_file_output_schema_include_metadata_fields() {
         );
     }
     assert!(!output_schema_properties(&specs, "write_project_file").contains_key("warning"));
+    for removed in [
+        "recovery_action",
+        "retry_guidance",
+        "expected_read_revision",
+        "reread_required",
+        "suggested_call",
+        "error",
+    ] {
+        assert!(
+            !output_schema_properties(&specs, "write_project_file").contains_key(removed),
+            "write_project_file still exposes {removed}"
+        );
+    }
     assert_eq!(
         output_schema_property(&specs, "write_project_file", "bytes_written")["type"],
         "integer"

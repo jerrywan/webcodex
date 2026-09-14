@@ -50,26 +50,27 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
             .unwrap()
             .contains("no-op"));
     }
-    let output = &spec.output_schema["properties"]["output"]["properties"]["conflict_recovery"];
-    assert_eq!(output["properties"]["schema_version"]["const"], 1);
-    assert_eq!(output["properties"]["candidate_ranges"]["maxItems"], 8);
-    assert_eq!(output["properties"]["direct_retry_safe"]["type"], "boolean");
-    assert_eq!(output["properties"]["reread_required"]["type"], "boolean");
-    assert_eq!(
-        output["properties"]["expected_read_revision"]["type"],
-        "integer"
-    );
-    assert_eq!(
-        output["properties"]["expected_read_revision"]["maximum"],
-        9_007_199_254_740_991_u64
-    );
-    assert_eq!(
-        output["properties"]["positional_retry_requires_read_revision"]["type"],
-        "boolean"
-    );
-    assert!(output["properties"].get("expected_sha256").is_none());
-    assert!(output["properties"].get("current_sha256").is_none());
     let output_properties = &spec.output_schema["properties"]["output"]["properties"];
+    for removed in [
+        "conflict_recovery",
+        "retry_guidance",
+        "expected_read_revision",
+        "reread_required",
+        "suggested_call",
+        "recovery_action",
+    ] {
+        assert!(
+            output_properties.get(removed).is_none(),
+            "legacy recovery field {removed}"
+        );
+    }
+    assert_eq!(output_properties["recovery"]["type"], "object");
+    let candidate = &output_properties["candidate_ranges"]["items"];
+    assert_eq!(
+        candidate["required"],
+        serde_json::json!(["start_line", "end_line"])
+    );
+    assert_eq!(candidate["properties"]["occurrence"]["minimum"], 1);
     assert!(output_properties["change_index"]["anyOf"].is_array());
     assert!(output_properties["edit_index"]["anyOf"].is_array());
     assert!(output_properties["state_changed"]["anyOf"].is_array());
@@ -77,12 +78,7 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
         output_properties["execution_state"]["enum"],
         serde_json::json!(["not_started", "completed", "outcome_unknown"])
     );
-    assert_eq!(output_properties["retry_guidance"]["type"], "string");
     assert_eq!(output_properties["ignored_noop_count"]["type"], "integer");
-    assert!(output["properties"]["conflict_kind"]["enum"]
-        .as_array()
-        .unwrap()
-        .contains(&serde_json::json!("multiple_matches")));
 
     let stale_revision = serde_json::json!({
         "success": false,
@@ -92,57 +88,31 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
             "change_index": 0,
             "kind": "edit",
             "path": "src/lib.rs",
-            "expected_read_revision": 3817291045227_u64,
-            "reread_required": true,
-            "suggested_call": {
+            "recovery": {
                 "tool": "read_files",
                 "arguments": {"project": "agent:r:p", "items": [{"path": "src/lib.rs"}]}
-            },
-            "retry_guidance": "reread the file and use its current read_revision",
-            "conflict_recovery": {
-                "schema_version": 1,
-                "conflict_kind": "stale_file_revision",
-                "occurrence_selector_supported": false,
-                "direct_retry_safe": false,
-                "reread_required": true,
-                "expected_read_revision": 3817291045227_u64,
-                "recovery_action": "reread_file"
             }
         },
-        "error": "guarded read revision is stale"
+        "error": "source changed before mutation"
     });
     crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
         &stale_revision,
         &spec.output_schema,
     )
-    .unwrap_or_else(|error| {
-        panic!("stale read-revision recovery must match output schema: {error}")
-    });
+    .unwrap_or_else(|error| panic!("compact stale recovery must match output schema: {error}"));
 
     let scoped_conflict = serde_json::json!({
         "success": false,
         "output": {
             "state_changed": false,
-            "error_kind": "edit_conflict",
+            "error_kind": "occurrence_outside_line_scope",
             "change_index": 0,
             "edit_index": 0,
             "kind": "replace_exact",
             "path": "src/lib.rs",
-            "retry_guidance": "align the global occurrence with line_scope",
-            "conflict_recovery": {
-                "schema_version": 1,
-                "conflict_kind": "occurrence_outside_line_scope",
-                "occurrence_selector_supported": true,
-                "direct_retry_safe": true,
-                "reread_required": false,
-                "match_count": 2,
-                "requested_occurrence": 1,
-                "line_scope": {"start_line": 40, "end_line": 60},
-                "line_scope_match_count": 1,
-                "candidate_ranges": [{"occurrence": 2, "start_line": 50, "end_line": 50}],
-                "candidates_truncated": false,
-                "recovery_action": "align_occurrence_with_line_scope"
-            }
+            "match_count": 2,
+            "candidate_ranges": [{"occurrence": 2, "start_line": 50, "end_line": 50}],
+            "candidates_truncated": false
         },
         "error": "occurrence and line_scope disagree"
     });
@@ -150,7 +120,7 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
         &scoped_conflict,
         &spec.output_schema,
     )
-    .unwrap_or_else(|error| panic!("scoped conflict recovery must match output schema: {error}"));
+    .unwrap_or_else(|error| panic!("compact conflict evidence must match output schema: {error}"));
 
     let openapi = crate::openapi::build_openapi_spec();
     let action = &openapi["paths"]["/api/actions/apply_text_edits"]["post"];
@@ -790,10 +760,10 @@ async fn apply_text_edits_mixed_batch_rejects_mismatched_strong_revision_before_
     assert!(!result.success);
     assert_eq!(result.output["error_kind"], "read_revision_path_mismatch");
     assert_eq!(result.output["state_changed"], false);
-    assert_eq!(result.output["expected_read_revision"], revision);
-    assert_eq!(result.output["suggested_call"]["tool"], "read_files");
+    assert!(result.output.get("expected_read_revision").is_none());
+    assert_eq!(result.output["recovery"]["tool"], "read_files");
     assert_eq!(
-        result.output["suggested_call"]["arguments"]["items"][0]["path"],
+        result.output["recovery"]["arguments"]["items"][0]["path"],
         "other.txt"
     );
     assert_no_apply_text_edits_runner_request(&runtime, "ate-revision-mixed").await;
@@ -881,19 +851,25 @@ async fn apply_text_edits_ambiguous_unguarded_requires_read_before_positional_re
     }).await.unwrap();
     let conflict = first.await.unwrap();
     assert!(!conflict.success);
-    assert_eq!(conflict.output["conflict_recovery"]["match_count"], 2);
-    assert_eq!(
-        conflict.output["conflict_recovery"]["direct_retry_safe"],
-        false
-    );
-    assert_eq!(
-        conflict.output["conflict_recovery"]["positional_retry_requires_read_revision"],
-        true
-    );
-    assert!(conflict.output["retry_guidance"]
-        .as_str()
-        .unwrap()
-        .contains("expected_read_revision"));
+    assert_eq!(conflict.output["error_kind"], "multiple_matches");
+    assert_eq!(conflict.output["match_count"], 2);
+    assert_eq!(conflict.output["recovery"]["tool"], "read_files");
+    let candidates = conflict.output["candidate_ranges"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert!(candidates
+        .iter()
+        .all(|candidate| candidate.get("occurrence").is_none()));
+    for removed in [
+        "conflict_recovery",
+        "retry_guidance",
+        "direct_retry_safe",
+        "positional_retry_requires_read_revision",
+    ] {
+        assert!(
+            conflict.output.get(removed).is_none(),
+            "legacy field {removed}"
+        );
+    }
     let conflict_error = conflict
         .error
         .as_deref()
@@ -903,7 +879,7 @@ async fn apply_text_edits_ambiguous_unguarded_requires_read_before_positional_re
         "{conflict_error}"
     );
     assert!(
-        conflict_error.contains("expected_read_revision"),
+        !conflict_error.contains("expected_read_revision"),
         "{conflict_error}"
     );
     assert_no_apply_text_edits_runner_request(&runtime, "ate-recovery").await;
@@ -1101,10 +1077,7 @@ async fn apply_text_edits_server_preflight_reports_exact_failed_edit() {
     assert_eq!(result.output["edit_index"], 0);
     assert_eq!(result.output["kind"], "replace_exact");
     assert_eq!(result.output["path"], "src/second.rs");
-    assert!(result.output["retry_guidance"]
-        .as_str()
-        .unwrap()
-        .contains("retry the whole batch"));
+    assert!(result.output.get("retry_guidance").is_none());
     let output_schema = crate::tool_runtime::registry::output_schema_for_tool("apply_text_edits");
     let serialized = serde_json::to_value(&result).unwrap();
     crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
@@ -1135,7 +1108,7 @@ async fn apply_text_edits_empty_batch_proves_preflight_no_effect_without_fake_in
             "{field} must remain absent"
         );
     }
-    assert!(result.output["retry_guidance"].is_string());
+    assert!(result.output.get("retry_guidance").is_none());
 }
 
 #[tokio::test]
@@ -1435,10 +1408,7 @@ fn assert_apply_text_edits_outcome_unknown(result: &ToolResult) {
     assert!(result.output["state_changed"].is_null());
     assert_eq!(result.output["error_kind"], "outcome_unknown");
     assert_eq!(result.output["failure_kind"], "outcome_unknown");
-    assert_eq!(
-        result.output["recovery_action"],
-        "inspect_workspace_before_retry"
-    );
+    assert!(result.output.get("recovery_action").is_none());
     assert_eq!(result.output["recovery_kind"], "reobserve");
     assert!(result.output.get("conflict_recovery").is_none());
     let error = result.error.as_deref().expect("model-facing uncertainty");

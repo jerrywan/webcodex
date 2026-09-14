@@ -27,10 +27,7 @@ fn assert_outcome_unknown(result: &ToolResult) {
     assert!(result.output["state_changed"].is_null());
     assert_eq!(result.output["error_kind"], "outcome_unknown");
     assert_eq!(result.output["failure_kind"], "outcome_unknown");
-    assert_eq!(
-        result.output["recovery_action"],
-        "inspect_workspace_before_retry"
-    );
+    assert!(result.output.get("recovery_action").is_none());
     assert_eq!(result.output["recovery_kind"], "reobserve");
     let error = result.error.as_deref().expect("model-facing uncertainty");
     assert!(error.contains("outcome is unknown"), "{error}");
@@ -130,17 +127,18 @@ async fn write_project_file_translates_read_revision_to_wire_sha_and_sanitizes_s
     let result = task.await.unwrap();
     assert!(!result.success);
     assert_eq!(result.output["error_kind"], "stale_file_revision");
-    assert_eq!(result.output["expected_read_revision"], revision);
-    assert_eq!(result.output["reread_required"], true);
-    assert_eq!(result.output["suggested_call"]["tool"], "read_files");
+    assert!(result.output.get("expected_read_revision").is_none());
+    assert!(result.output.get("reread_required").is_none());
+    assert_eq!(result.output["recovery"]["tool"], "read_files");
     assert_eq!(
-        result.output["suggested_call"]["arguments"]["items"][0]["path"],
+        result.output["recovery"]["arguments"]["items"][0]["path"],
         "existing.txt"
     );
     assert!(result.output.get("sha256").is_none());
     let error = result.error.as_deref().unwrap();
-    assert!(error.contains("read revision"));
+    assert!(error.contains("source"));
     assert!(!error.contains("expected_sha256"));
+    assert!(!error.contains("read revision"));
 
     let schema = crate::tool_runtime::registry::output_schema_for_tool("write_project_file");
     crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
@@ -188,8 +186,8 @@ async fn write_project_file_rejects_project_mismatched_read_revision_before_disp
         "read_revision_project_mismatch"
     );
     assert_eq!(result.output["state_changed"], false);
-    assert_eq!(result.output["expected_read_revision"], revision);
-    assert_eq!(result.output["suggested_call"]["tool"], "read_files");
+    assert!(result.output.get("expected_read_revision").is_none());
+    assert_eq!(result.output["recovery"]["tool"], "read_files");
     assert!(
         probe_patch_agent_request(&runtime, "write-revision-project-mismatch")
             .await

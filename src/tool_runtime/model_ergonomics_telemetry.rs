@@ -436,14 +436,13 @@ fn edit_facts(tool_name: &str, success: bool, output: &Value) -> EditFacts {
 }
 
 fn edit_conflict_kind(output: &Value) -> Option<String> {
-    let value = output
-        .pointer("/conflict_recovery/conflict_kind")
-        .and_then(Value::as_str)?;
+    let value = output.get("error_kind").and_then(Value::as_str)?;
     matches!(
         value,
         "multiple_matches"
             | "match_not_found"
             | "occurrence_out_of_range"
+            | "occurrence_outside_line_scope"
             | "overlapping_edits"
             | "stale_file_revision"
     )
@@ -926,19 +925,19 @@ mod tests {
             ),
             (
                 false,
-                json!({"conflict_recovery": {"conflict_kind": "multiple_matches"}}),
+                json!({"error_kind": "multiple_matches"}),
                 Some("conflict"),
                 Some("multiple_matches"),
             ),
             (
                 false,
-                json!({"conflict_recovery": {"conflict_kind": "stale_file_revision"}}),
+                json!({"error_kind": "stale_file_revision"}),
                 Some("conflict"),
                 Some("stale_file_revision"),
             ),
             (
                 false,
-                json!({"rollback_complete": false, "changed": true, "conflict_recovery": {"conflict_kind": "multiple_matches"}}),
+                json!({"rollback_complete": false, "changed": true, "error_kind": "multiple_matches"}),
                 Some("uncertain"),
                 Some("multiple_matches"),
             ),

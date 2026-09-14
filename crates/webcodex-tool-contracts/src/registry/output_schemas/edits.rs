@@ -207,76 +207,20 @@ fn apply_patch_file_summary_schema() -> Value {
     })
 }
 
-fn edit_conflict_recovery_schema() -> Value {
+fn edit_candidate_range_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "schema_version": {"type": "integer", "const": 1},
-            "conflict_kind": {"type": "string", "enum": [
-                "multiple_matches", "match_not_found", "occurrence_out_of_range",
-                "occurrence_outside_line_scope", "overlapping_edits", "stale_file_revision"
-            ]},
-            "recovery_action": {"type": "string", "enum": [
-                "select_occurrence_or_refine_match", "reread_or_refine_match",
-                "choose_valid_occurrence_or_refine_match", "narrow_line_scope_or_select_occurrence",
-                "adjust_line_scope_or_refine_match", "align_occurrence_with_line_scope",
-                "refine_edit_batch", "reread_file"
-            ]},
-            "occurrence_selector_supported": {"type": "boolean"},
-            "direct_retry_safe": {
-                "type": "boolean",
-                "description": "True only when a corrected request can safely reuse the same model-facing snapshot identity. Positional occurrence/line_scope recovery without expected_read_revision is never direct-retry safe."
-            },
-            "reread_required": {
-                "type": "boolean",
-                "description": "True when the caller must reread the affected file before another write attempt."
-            },
-            "expected_read_revision": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 9007199254740991_u64,
-                "description": "Model-facing read revision that became stale. Runner SHA diagnostics are not projected here."
-            },
-            "positional_retry_requires_read_revision": {
-                "type": "boolean",
-                "description": "True when occurrence or line_scope would become positional authority and therefore requires a fresh read revision before retry."
-            },
-            "match_count": {"type": "integer", "minimum": 0},
-            "requested_occurrence": {"type": "integer", "minimum": 1},
-            "line_scope": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "start_line": {"type": "integer", "minimum": 1},
-                    "end_line": {"type": "integer", "minimum": 1}
-                },
-                "required": ["start_line", "end_line"]
-            },
-            "line_scope_match_count": {"type": "integer", "minimum": 0},
-            "candidate_ranges": {
-                "type": "array", "maxItems": 8,
-                "items": {
-                    "type": "object", "additionalProperties": false,
-                    "properties": {
-                        "occurrence": {"type": "integer", "minimum": 1},
-                        "start_line": {"type": "integer", "minimum": 1},
-                        "end_line": {"type": "integer", "minimum": 1}
-                    },
-                    "required": ["occurrence", "start_line", "end_line"]
-                }
-            },
-            "candidates_truncated": {"type": "boolean"},
-            "conflicting_edit_indices": {
-                "type": "array", "maxItems": 2,
-                "items": {"type": "integer", "minimum": 0, "maximum": 19}
-            }
+            "occurrence": {"type": "integer", "minimum": 1},
+            "start_line": {"type": "integer", "minimum": 1},
+            "end_line": {"type": "integer", "minimum": 1}
         },
-        "required": ["schema_version", "conflict_kind", "recovery_action", "occurrence_selector_supported"]
+        "required": ["start_line", "end_line"]
     })
 }
 
-fn read_revision_recovery_call_schema() -> Value {
+fn read_files_recovery_call_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
@@ -366,28 +310,8 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 nullable_schema("string", "not_started or outcome_unknown for delivery-boundary failures."),
             ),
             (
-                "recovery_action",
-                nullable_schema("string", "Bounded next action; outcome_unknown requires workspace inspection before another write."),
-            ),
-            (
-                "retry_guidance",
-                schema_type("string", "Bounded correction guidance for a deterministic preflight rejection."),
-            ),
-            (
-                "expected_read_revision",
-                nullable_schema("integer", "Model-facing read revision used by the rejected whole-file replacement, when applicable."),
-            ),
-            (
-                "reread_required",
-                schema_type("boolean", "True when a stale/unknown read revision requires read_files before retry."),
-            ),
-            (
-                "suggested_call",
-                read_revision_recovery_call_schema(),
-            ),
-            (
-                "error",
-                schema_type("string", "Agent-side whole-file write rejection message, when unsuccessful."),
+                "recovery",
+                read_files_recovery_call_schema(),
             ),
         ])),
         "apply_patch" => Some(wrapped_output_schema(vec![
@@ -463,10 +387,6 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 nullable_schema("string", "not_started or outcome_unknown for delivery-boundary failures."),
             ),
             (
-                "recovery_action",
-                nullable_schema("string", "Bounded next action; outcome_unknown requires workspace inspection before another write."),
-            ),
-            (
                 "rollback_complete",
                 nullable_schema("boolean", "Whether a failed transactional apply fully restored every prior change; false makes the final workspace state uncertain."),
             ),
@@ -487,24 +407,24 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 nullable_schema("string", "Project-relative failed path when known."),
             ),
             (
-                "retry_guidance",
-                schema_type("string", "Bounded recovery guidance for a deterministic no-mutation rejection."),
+                "match_count",
+                schema_type("integer", "Exact-match count reported for a deterministic text conflict when useful."),
             ),
             (
-                "expected_read_revision",
-                nullable_schema("integer", "Model-facing read revision associated with a stale guarded change, when applicable."),
+                "candidate_ranges",
+                array_schema(edit_candidate_range_schema(), "Bounded candidate source ranges. occurrence is included only when the current read revision makes positional retry safe."),
             ),
             (
-                "reread_required",
-                schema_type("boolean", "True when the caller must obtain a new read_revision before retry."),
+                "candidates_truncated",
+                schema_type("boolean", "True when additional exact-match candidates exist beyond candidate_ranges."),
             ),
             (
-                "suggested_call",
-                read_revision_recovery_call_schema(),
+                "conflicting_edit_indices",
+                array_schema(schema_type("integer", "Zero-based edit index participating in an overlap conflict."), "The edit indices whose planned ranges overlap."),
             ),
             (
-                "conflict_recovery",
-                edit_conflict_recovery_schema(),
+                "recovery",
+                read_files_recovery_call_schema(),
             ),
         ])),
         _ => None,
