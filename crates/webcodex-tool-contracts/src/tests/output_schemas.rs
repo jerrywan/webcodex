@@ -1980,6 +1980,28 @@ fn computer_recovery_output_schemas_use_canonical_action_shapes() {
             false
         );
     }
+
+    let schema = output_schema_for_tool("computer_list_windows");
+    let canonical_recovery = json!({
+        "success": false,
+        "output": {
+            "recovery_kind": "reobserve",
+            "suggested_call": {
+                "tool": "computer_list_windows",
+                "arguments": {"client_id": "special"}
+            }
+        },
+        "error": "reobserve"
+    });
+    test_support::validate_schema_instance(&canonical_recovery, &schema).unwrap();
+
+    let mut legacy = canonical_recovery.clone();
+    legacy["output"]["recovery_tool"] = json!("computer_list_windows");
+    assert!(test_support::validate_schema_instance(&legacy, &schema).is_err());
+
+    let mut duplicate_recovery_shape = canonical_recovery;
+    duplicate_recovery_shape["output"]["reconcile_with"] = json!("computer_list_windows");
+    assert!(test_support::validate_schema_instance(&duplicate_recovery_shape, &schema).is_err());
 }
 
 #[test]
@@ -2014,6 +2036,14 @@ fn skill_recovery_output_schema_accepts_canonical_shapes_and_declares_legacy_rej
         .remove("suggested_call");
     family_only["output"]["reconcile_with"] = json!("skill_versions");
     test_support::validate_schema_instance(&family_only, &schema).unwrap();
+
+    let mut legacy = actionable.clone();
+    legacy["output"]["recovery_tool"] = json!("skill_versions");
+    assert!(test_support::validate_schema_instance(&legacy, &schema).is_err());
+
+    let mut duplicate_recovery_shape = actionable.clone();
+    duplicate_recovery_shape["output"]["reconcile_with"] = json!("skill_versions");
+    assert!(test_support::validate_schema_instance(&duplicate_recovery_shape, &schema).is_err());
 
     let recovery_constraints = schema["properties"]["output"]["allOf"]
         .as_array()
