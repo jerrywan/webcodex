@@ -225,15 +225,6 @@ fn add_run_process_expectation_projection(
     let Some(output) = result.output.as_object_mut() else {
         return;
     };
-    let execution_success = output.get("execution_state").and_then(Value::as_str)
-        == Some("completed")
-        && output.get("command_completed").and_then(Value::as_bool) == Some(true)
-        && output.get("command_ok").and_then(Value::as_bool) == Some(true)
-        && output.get("tool_failure").and_then(Value::as_bool) != Some(true);
-    output.insert(
-        "execution_success".to_string(),
-        Value::Bool(execution_success),
-    );
     output.insert(
         "expectation_satisfied".to_string(),
         Value::Bool(expectation_satisfied),
@@ -2641,7 +2632,6 @@ mod structured_execution_sparse_projection_tests {
                 "recovery": {"kind": "inspect_output"}
             }),
         );
-        result.output["execution_success"] = json!(false);
         result.output["expectation_satisfied"] = json!(true);
         sparsify_failure_model_result_metadata("run_process", &mut result);
 
@@ -2674,7 +2664,6 @@ mod structured_execution_sparse_projection_tests {
             "job_id",
             "observation_token",
             "recovery",
-            "execution_success",
             "expectation_satisfied",
         ] {
             assert!(

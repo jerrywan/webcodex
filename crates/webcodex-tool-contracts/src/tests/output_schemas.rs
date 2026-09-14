@@ -787,7 +787,6 @@ fn key_tool_output_schemas_include_expected_fields() {
         "executor",
         "execution_source",
         "execution_state",
-        "execution_success",
         "expectation_satisfied",
         "promoted_to_job",
         "terminal",
