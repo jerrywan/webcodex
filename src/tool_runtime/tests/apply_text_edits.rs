@@ -704,6 +704,8 @@ async fn apply_text_edits_translates_strong_read_revisions_to_existing_wire_sha_
                 .to_string(),
             ),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })

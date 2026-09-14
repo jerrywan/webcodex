@@ -305,11 +305,12 @@ fn safe_recovery_action(result: &ToolResult) -> Option<&'static str> {
         .get("recovery_action")
         .and_then(|value| value.as_str())
         .or_else(|| {
-            result
-                .output
-                .get("recovery")
-                .and_then(|value| value.get("action"))
-                .and_then(|value| value.as_str())
+            result.output.get("recovery").and_then(|value| {
+                value
+                    .get("tool")
+                    .or_else(|| value.get("action"))
+                    .and_then(|value| value.as_str())
+            })
         })?;
     match raw {
         "read_files" => Some("read_files"),
@@ -604,6 +605,32 @@ mod tests {
         );
         assert_eq!(event.error_kind, Some("matching_mode_rejected"));
         assert!(!record_contains_sensitive_keys(event));
+    }
+
+    #[test]
+    fn compact_parser_ready_recovery_records_read_files_action() {
+        let parser_ready = ToolResult::err_with_output(
+            "stale file",
+            json!({
+                "recovery": {
+                    "tool": "read_files",
+                    "arguments": {
+                        "project": "agent:test:project",
+                        "items": [{"path": "src/private.rs"}]
+                    }
+                }
+            }),
+        );
+        assert_eq!(safe_recovery_action(&parser_ready), Some("read_files"));
+
+        let legacy_domain_shape = ToolResult::err_with_output(
+            "context mismatch",
+            json!({"recovery": {"action": "read_files"}}),
+        );
+        assert_eq!(
+            safe_recovery_action(&legacy_domain_shape),
+            Some("read_files")
+        );
     }
 
     #[test]
