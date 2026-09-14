@@ -156,6 +156,31 @@ fn show_changes_handoff_arguments_schema() -> Value {
     })
 }
 
+fn show_changes_compat_suggested_call_schema() -> Value {
+    let mut schema = show_changes_handoff_arguments_schema();
+    schema["description"] = json!("Compatibility arguments-only projection of diff_review_handoff.recovery.arguments. The canonical parser-ready call is recovery.tool plus recovery.arguments.");
+    schema
+}
+
+fn show_changes_hunk_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Bounded file diff hunk. Legacy `truncated` is parser-local compatibility metadata; additive `source_completeness` is authoritative for producer/source completeness when present.",
+        "additionalProperties": true,
+        "properties": {
+            "truncated": {
+                "type": "boolean",
+                "description": "Legacy parser-local truncation flag. false does not prove producer/source completeness."
+            },
+            "source_completeness": {
+                "type": "string",
+                "enum": ["complete", "unknown"],
+                "description": "Authoritative producer/source completeness when present. unknown means the system cannot prove this returned hunk is source-complete."
+            }
+        }
+    })
+}
+
 pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
     match name {
         "git_commit_paths" => Some(wrapped_output_schema(vec![
@@ -574,8 +599,8 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             (
                 "hunks",
                 array_schema(
-                    open_object_schema("Bounded file diff hunks."),
-                    "Diff hunks.",
+                    show_changes_hunk_schema(),
+                    "Diff hunks. Do not interpret `truncated=false` as producer completeness; use per-hunk source_completeness when present and top-level truncation metadata otherwise.",
                 ),
             ),
             (
@@ -620,7 +645,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                         },
                         "recovery": {
                             "type": "object",
-                            "description": "Structured parser-ready first recovery call plus the truncation class. For line or mixed truncation, continuation is explicitly unsafe for omitted current-hunk lines.",
+                            "description": "Canonical parser-ready first recovery call is the exact tool + arguments pair here; kind and safety fields classify the recovery. For line or mixed truncation, continuation is explicitly unsafe for omitted current-hunk lines.",
                             "additionalProperties": false,
                             "properties": {
                                 "kind": {"type": "string", "enum": ["page", "hunk_lines", "mixed"]},
@@ -630,7 +655,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                             },
                             "required": ["kind", "tool", "arguments", "safe_continuation_for_omitted_lines"]
                         },
-                        "suggested_call": show_changes_handoff_arguments_schema()
+                        "suggested_call": show_changes_compat_suggested_call_schema()
                     },
                     "required": ["tool", "scope", "reason", "truncation_reasons", "recovery", "suggested_call"]
                 }),

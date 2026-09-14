@@ -118,6 +118,54 @@ fn t2_continuation_output_schemas_distinguish_cursor_kinds_and_carriers() {
     assert_eq!(refine_semantics["carrier"]["const"], "none");
 }
 
+#[test]
+fn inspection_truthfulness_schemas_keep_typed_missing_and_canonical_diff_recovery() {
+    let specs = registered_tool_specs();
+
+    let search = spec_named(&specs, "search_project_texts");
+    let search_failure = &search.output_schema["properties"]["output"]["anyOf"][0]["anyOf"][0]
+        ["properties"]["items"]["items"]["properties"]["output"]["anyOf"][1];
+    assert!(search_failure["properties"]["reason_code"]["enum"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("not_found")));
+    assert!(search_failure["properties"]["failure_stage"]["enum"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("path_resolution")));
+    assert!(search_failure["properties"]["detail_code"]["enum"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("not_found")));
+
+    let show_changes = spec_named(&specs, "show_changes");
+    let properties = &show_changes.output_schema["properties"]["output"]["properties"];
+    assert!(properties["hunks"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("source_completeness"));
+    let hunk = &properties["hunks"]["items"];
+    assert_eq!(hunk["additionalProperties"], true);
+    assert_eq!(hunk["properties"]["truncated"]["type"], "boolean");
+    assert_eq!(
+        hunk["properties"]["source_completeness"]["enum"],
+        json!(["complete", "unknown"])
+    );
+    let handoff = &properties["diff_review_handoff"]["properties"];
+    assert_eq!(
+        handoff["recovery"]["properties"]["tool"]["const"],
+        "git_diff_hunks"
+    );
+    assert!(handoff["recovery"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("Canonical parser-ready"));
+    assert!(handoff["suggested_call"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("Compatibility arguments-only projection"));
+}
+
 fn continuation_feedback_subschema(specs: &[ToolSpec], tool: &str) -> Value {
     let spec = spec_named(specs, tool);
     spec.output_schema["properties"]["output"]["properties"]["continuation_feedback"].clone()

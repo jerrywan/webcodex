@@ -259,14 +259,14 @@ fn search_project_texts_output_schema() -> Value {
                 "type": "string",
                 "enum": [
                     "invalid_pattern", "invalid_path", "invalid_glob", "invalid_search_request",
-                    "search_backend_feature_unavailable", "search_execution_failed", "timeout",
+                    "not_found", "search_backend_feature_unavailable", "search_execution_failed", "timeout",
                     "search_request_dropped", "external_provider_error", "agent_unavailable"
                 ]
             },
             "failure_stage": {
                 "type": "string",
                 "enum": [
-                    "request_validation", "backend_selection", "backend_protocol",
+                    "request_validation", "path_resolution", "backend_selection", "backend_protocol",
                     "backend_execution", "agent_request", "agent_execution",
                     "agent_transport", "provider", "local_execution", "batch_deadline"
                 ]
@@ -275,7 +275,7 @@ fn search_project_texts_output_schema() -> Value {
                 "type": "string",
                 "enum": [
                     "invalid_pattern", "invalid_path", "invalid_glob",
-                    "invalid_search_request", "backend_feature_unavailable",
+                    "invalid_search_request", "not_found", "backend_feature_unavailable",
                     "backend_identity_missing", "backend_identity_invalid",
                     "backend_status_unavailable", "backend_output_inconsistent",
                     "backend_process_failed", "agent_request_failed",

@@ -359,6 +359,48 @@ search_project_text = "project_search"
 }
 
 #[test]
+fn native_search_preflight_reports_only_proven_missing_paths() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join("src")).unwrap();
+    let router = ExternalToolRouter::new(&ToolProvidersConfig {
+        strategy: ToolProviderStrategy::Native,
+        claude_code: ClaudeCodeMcpConfig::default(),
+    });
+
+    let mut missing = runner_request("run_shell", root.path(), ".", None);
+    missing.command = EXTERNAL_SEARCH_REQUEST_PREFIX.to_string();
+    let mut missing_payload = search_request();
+    missing_payload["path"] = json!("src/definitely-missing");
+    missing.stdin = Some(missing_payload.to_string());
+    let ExternalRoute::Handled(result) = router.route(&permissive_test_policy(), &missing) else {
+        panic!("proven missing search path was not handled by the Runner preflight");
+    };
+    assert_eq!(result.exit_code, Some(2));
+    let marker: Value = serde_json::from_str(result.stdout.as_deref().unwrap()).unwrap();
+    assert_eq!(marker["webcodex_search"]["path_status"], "not_found");
+    assert_eq!(marker["webcodex_search"]["backend"], "native");
+    assert!(result.stderr.as_deref().unwrap_or_default().is_empty());
+
+    let mut existing = runner_request("run_shell", root.path(), ".", None);
+    existing.command = EXTERNAL_SEARCH_REQUEST_PREFIX.to_string();
+    existing.stdin = Some(search_request().to_string());
+    assert!(matches!(
+        router.route(&permissive_test_policy(), &existing),
+        ExternalRoute::Native
+    ));
+
+    let mut invalid = runner_request("run_shell", root.path(), ".", None);
+    invalid.command = EXTERNAL_SEARCH_REQUEST_PREFIX.to_string();
+    let mut invalid_payload = search_request();
+    invalid_payload["path"] = json!("../outside");
+    invalid.stdin = Some(invalid_payload.to_string());
+    assert!(matches!(
+        router.route(&permissive_test_policy(), &invalid),
+        ExternalRoute::Native
+    ));
+}
+
+#[test]
 fn status_reports_discovery_mapping_process_and_bounded_error() {
     let _serial = serialize_fake_mcp_test();
     let fixture = Fixture::new("normal");

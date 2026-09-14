@@ -239,6 +239,7 @@ fn failure_reason_code(result: &ToolResult) -> &'static str {
         }
         Some("search_timeout") => "timeout",
         Some("search_backend_feature_unavailable") => "search_backend_feature_unavailable",
+        Some("search_path_not_found") => "not_found",
         Some("search_execution_failed") => "search_execution_failed",
         Some("search_request_dropped") => "search_request_dropped",
         _ if result.output.get("format").and_then(Value::as_str)
@@ -255,6 +256,7 @@ fn batch_failure_stage(result: &ToolResult, broad_reason: &str) -> &'static str 
         Some("request_validation") => "request_validation",
         Some("backend_selection") => "backend_selection",
         Some("backend_protocol") => "backend_protocol",
+        Some("path_resolution") => "path_resolution",
         Some("backend_execution") => "backend_execution",
         Some("agent_request") => "agent_request",
         Some("agent_execution") => "agent_execution",
@@ -266,6 +268,7 @@ fn batch_failure_stage(result: &ToolResult, broad_reason: &str) -> &'static str 
             "invalid_pattern" | "invalid_path" | "invalid_glob" | "invalid_search_request" => {
                 "request_validation"
             }
+            "not_found" => "path_resolution",
             "search_backend_feature_unavailable" => "backend_selection",
             "search_request_dropped" => "agent_transport",
             "external_provider_error" => "provider",
@@ -282,6 +285,7 @@ fn batch_failure_detail_code(result: &ToolResult, broad_reason: &'static str) ->
         Some("invalid_path") => "invalid_path",
         Some("invalid_glob") => "invalid_glob",
         Some("invalid_search_request") => "invalid_search_request",
+        Some("not_found") => "not_found",
         Some("backend_feature_unavailable") => "backend_feature_unavailable",
         Some("backend_identity_missing") => "backend_identity_missing",
         Some("backend_identity_invalid") => "backend_identity_invalid",

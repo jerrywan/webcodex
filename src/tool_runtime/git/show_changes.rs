@@ -11,7 +11,7 @@ use webcodex_core::runtime_contract::DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES;
 use super::super::helpers::{
     decode_git_quoted_path, shell_escape_simple, validate_project_relative_path,
 };
-use super::super::tool_result::ToolResult;
+use super::super::tool_result::{SuggestedToolCall, ToolResult};
 use super::super::ToolRuntime;
 use super::diff_hunks::{
     git_diff_file_hunk_count, git_diff_files_have_omitted_lines, parse_git_diff_hunks,
@@ -1475,11 +1475,11 @@ pub(crate) fn parse_show_changes_output_with_observation(
         vec!["inspect git status failure before relying on worktree cleanliness".to_string()]
     };
 
-    // Parse the (already production-bounded) diff hunks with the Rust-side
-    // parser. The parser's `truncated` flag captures a line-level bound on the
-    // final returned hunk, distinct from the production-side hunk-count bound,
-    // so both reasons can be surfaced.
-    let (diff_hunks, parser_hunk_count, parser_truncated) = match diff_stdout {
+    // Parse the already production-bounded diff hunks. The legacy per-hunk
+    // `truncated` flag remains parser-local for 0.4.x compatibility; producer
+    // source completeness is annotated separately once the producer metadata
+    // has been evaluated below.
+    let (mut diff_hunks, parser_hunk_count, parser_truncated) = match diff_stdout {
         Some(diff) => parse_git_diff_hunks(diff, max_hunks, max_hunk_lines),
         None => (Vec::new(), 0, false),
     };
@@ -1523,6 +1523,11 @@ pub(crate) fn parse_show_changes_output_with_observation(
     // exact byte metadata. Missing, malformed, or internally inconsistent
     // metadata cannot prove transport safety.
     let transport_safe = show_changes_transport_safe(frames, diff_stdout.is_some(), max_hunks);
+    annotate_show_changes_hunk_source_completeness(
+        &mut diff_hunks,
+        transport_safe,
+        frames.diff_trunc_hunk_lines == Some(true) || frames.diff_trunc_bytes_in_hunk == Some(true),
+    );
 
     let mut output = json!({
         "project": project,
@@ -1582,9 +1587,9 @@ pub(crate) fn parse_show_changes_output_with_observation(
     if diff_stdout.is_some() {
         // The production-side diff loop already bounded the raw diff to at
         // most `max_hunks` hunks and `max_hunk_lines` lines per hunk before
-        // transport. Its reported counts are authoritative for dropped hunks;
-        // the parser's `truncated` still captures the final returned hunk being
-        // line-bounded. Combine both.
+        // transport. Its reported counts are authoritative for aggregate
+        // dropped hunks/lines; per-hunk source completeness is carried by the
+        // additive `source_completeness` annotation above.
         let hunk_count = frames.diff_hunks_returned.unwrap_or(parser_hunk_count);
         let hunks_truncated =
             frames.diff_hunks_truncated.unwrap_or(parser_truncated) || parser_truncated;
@@ -1595,6 +1600,33 @@ pub(crate) fn parse_show_changes_output_with_observation(
 
     set_show_changes_verdict(&mut output);
     output
+}
+
+fn annotate_show_changes_hunk_source_completeness(
+    files: &mut [Value],
+    producer_metadata_trustworthy: bool,
+    producer_current_hunk_omitted: bool,
+) {
+    for file in files {
+        let Some(hunks) = file.get_mut("hunks").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for hunk in hunks {
+            let parser_truncated = hunk
+                .get("truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let source_completeness = if producer_metadata_trustworthy
+                && !producer_current_hunk_omitted
+                && !parser_truncated
+            {
+                "complete"
+            } else {
+                "unknown"
+            };
+            hunk["source_completeness"] = json!(source_completeness);
+        }
+    }
 }
 
 fn skipped_untracked_preview(path: &str, reason: &str, byte_count: Option<u64>) -> Value {
@@ -2128,30 +2160,38 @@ fn set_show_changes_verdict(output: &mut Value) {
             (false, true) => "hunk_lines",
             (false, false) => unreachable!("truncated show_changes diff needs a recovery kind"),
         };
-        let suggested_call = json!({
-            "project": project,
-            "cached": false,
-            "paths": suggested_paths,
-            "max_hunks": DEFAULT_MAX_HUNKS,
-            "max_hunk_lines": suggested_max_hunk_lines,
-            "max_page_bytes": DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES,
-        });
+        let canonical_recovery_call = SuggestedToolCall::new(
+            "git_diff_hunks",
+            json!({
+                "project": project,
+                "cached": false,
+                "paths": suggested_paths,
+                "max_hunks": DEFAULT_MAX_HUNKS,
+                "max_hunk_lines": suggested_max_hunk_lines,
+                "max_page_bytes": DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES,
+            }),
+        )
+        .to_value();
+        let canonical_tool = canonical_recovery_call["tool"].clone();
+        let canonical_arguments = canonical_recovery_call["arguments"].clone();
         output["diff_review_handoff"] = json!({
-            "tool": "git_diff_hunks",
+            "tool": canonical_tool.clone(),
             "scope": "worktree",
             "reason": "show_changes_diff_truncated",
             "truncation_reasons": diff_truncation_reasons,
             "recovery": {
                 "kind": recovery_kind,
-                "tool": "git_diff_hunks",
-                "arguments": suggested_call.clone(),
+                "tool": canonical_tool,
+                "arguments": canonical_arguments.clone(),
                 "safe_continuation_for_omitted_lines": if current_hunk_omitted {
                     Value::Bool(false)
                 } else {
                     Value::Null
                 },
             },
-            "suggested_call": suggested_call,
+            // 0.4.x compatibility projection: arguments only. The canonical
+            // parser-ready call is recovery.tool + recovery.arguments.
+            "suggested_call": canonical_arguments,
         });
         push_unique_reason(&mut warning_reasons, "truncated_by_limit");
         push_unique_action(

@@ -3814,6 +3814,10 @@ fn show_changes_complete_diff_does_not_handoff_to_git_diff_hunks() {
 
     let output = bounded_show_changes_output(tmp.path(), true, 20, 80);
     assert_eq!(output["hunks_truncated"], false);
+    assert_eq!(
+        output["hunks"][0]["hunks"][0]["source_completeness"],
+        "complete"
+    );
     assert!(output.get("diff_review_handoff").is_none());
     assert!(!output["suggested_next_actions"]
         .as_array()
@@ -3940,6 +3944,10 @@ fn show_changes_diff_respects_max_hunks() {
     assert!(reasons.iter().any(|r| r == "diff_hunk_count_limit"));
     assert!(!reasons.iter().any(|r| r == "diff_hunk_line_limit"));
     assert!(!reasons.iter().any(|r| r == "diff_byte_budget"));
+    assert_eq!(
+        output["hunks"][0]["hunks"][0]["source_completeness"], "complete",
+        "page-only truncation must not make a returned hunk look source-incomplete"
+    );
     assert_eq!(output["diff_review_handoff"]["tool"], "git_diff_hunks");
     assert_eq!(output["diff_review_handoff"]["scope"], "worktree");
     assert_eq!(
@@ -4022,6 +4030,11 @@ fn show_changes_diff_respects_max_hunk_lines() {
     let lines = hunks[0]["diff"].as_str().unwrap().lines().count();
     // header line + up to 3 content lines = at most 4 lines.
     assert!(lines <= 4, "hunk must be line-bounded: {hunks:?}");
+    assert_eq!(hunks[0]["truncated"], false);
+    assert_eq!(
+        hunks[0]["source_completeness"], "unknown",
+        "producer-side line truncation must not let legacy parser-local false prove completeness"
+    );
     assert_eq!(output["hunks_truncated"], true);
     let reasons = output["truncation_reasons"].as_array().unwrap();
     assert!(reasons.iter().any(|r| r == "diff_hunk_line_limit"));
@@ -4080,6 +4093,10 @@ fn show_changes_combined_hunk_count_and_line_truncation_keeps_both_guidance_path
     assert!(reasons
         .iter()
         .any(|reason| reason == "diff_hunk_line_limit"));
+    assert_eq!(
+        output["hunks"][0]["hunks"][0]["source_completeness"], "unknown",
+        "mixed page/line truncation leaves per-hunk source completeness unknown"
+    );
     let handoff_reasons = output["diff_review_handoff"]["truncation_reasons"]
         .as_array()
         .unwrap();
@@ -4230,11 +4247,19 @@ fn show_changes_schema_covers_truncation_and_transport_fields() {
     let recovery = &handoff["properties"]["recovery"];
     assert_eq!(recovery["additionalProperties"], false);
     assert_eq!(recovery["properties"]["tool"]["const"], "git_diff_hunks");
+    assert!(recovery["description"]
+        .as_str()
+        .unwrap()
+        .contains("Canonical parser-ready"));
     assert_eq!(
         recovery["properties"]["kind"]["enum"],
         json!(["page", "hunk_lines", "mixed"])
     );
     let suggested = &handoff["properties"]["suggested_call"];
+    assert!(suggested["description"]
+        .as_str()
+        .unwrap()
+        .contains("Compatibility arguments-only projection"));
     assert_eq!(suggested["additionalProperties"], false);
     assert_eq!(suggested["properties"]["cached"]["const"], false);
     assert_eq!(

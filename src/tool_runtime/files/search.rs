@@ -890,6 +890,7 @@ fn search_result_has_records(result: &SearchResult) -> bool {
 struct SearchBackendStatus {
     backend: String,
     feature_unavailable: bool,
+    path_not_found: bool,
     marker_present: bool,
     marker_invalid: bool,
     payload_start: usize,
@@ -899,6 +900,7 @@ fn missing_search_backend_status(marker_invalid: bool) -> SearchBackendStatus {
     SearchBackendStatus {
         backend: "grep".to_string(),
         feature_unavailable: false,
+        path_not_found: false,
         marker_present: false,
         marker_invalid,
         payload_start: 0,
@@ -945,12 +947,18 @@ fn parse_search_backend_status(stdout: &str) -> SearchBackendStatus {
     {
         return missing_search_backend_status(true);
     }
+    let path_not_found = match marker.get("path_status") {
+        None => false,
+        Some(value) if value.as_str() == Some("not_found") => true,
+        Some(_) => return missing_search_backend_status(true),
+    };
     SearchBackendStatus {
         backend: backend.to_string(),
         feature_unavailable: marker
             .get("feature_unavailable")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        path_not_found,
         marker_present: true,
         marker_invalid: false,
         payload_start,
@@ -1362,6 +1370,17 @@ pub(crate) fn search_project_text_output_with_agent_error(
             message,
             None,
             exit_code,
+        );
+    }
+    if backend_status.path_not_found {
+        return search_failure_tool_result(
+            options,
+            "search_path_not_found",
+            "path_resolution",
+            "not_found",
+            "search_project_text path was not found",
+            None,
+            None,
         );
     }
     if backend_status.feature_unavailable {

@@ -87,6 +87,9 @@ pub(super) fn sparsify_complete_diff_files(files: &mut [Value]) {
             if hunk.get("truncated").and_then(Value::as_bool) == Some(false) {
                 hunk.remove("truncated");
             }
+            if hunk.get("source_completeness").and_then(Value::as_str) == Some("complete") {
+                hunk.remove("source_completeness");
+            }
             let line_count_is_derived = match (
                 hunk.get("line_count").and_then(Value::as_u64),
                 hunk.get("diff").and_then(Value::as_str),

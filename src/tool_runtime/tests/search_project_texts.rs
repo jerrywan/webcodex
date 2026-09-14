@@ -1489,6 +1489,32 @@ async fn search_project_texts_does_not_retry_nontransient_agent_failures() {
     );
     assert_no_agent_request(&runtime, client_id).await;
 
+    let mut missing_query = query("missing", None);
+    missing_query.path = Some("src/definitely-missing".to_string());
+    let missing_result = run_single_agent_batch_response(
+        "batch-search-no-retry-missing",
+        missing_query,
+        2,
+        r#"{"webcodex_search":{"backend":"native","feature_unavailable":false,"path_status":"not_found"}}
+"#
+        .to_string(),
+        "",
+    )
+    .await;
+    let missing_output = &missing_result.output["items"][0]["output"];
+    assert_eq!(missing_output["reason_code"], "not_found");
+    assert_eq!(missing_output["failure_stage"], "path_resolution");
+    assert_eq!(missing_output["detail_code"], "not_found");
+    assert_eq!(missing_output["state_changed"], false);
+    assert!(missing_output.get("backend").is_none());
+    assert!(missing_output.get("exit_code").is_none());
+    let schema = crate::tool_runtime::registry::output_schema_for_tool("search_project_texts");
+    crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+        &serde_json::to_value(&missing_result).unwrap(),
+        &schema,
+    )
+    .unwrap();
+
     let mut timeout_query = query("timeout", None);
     timeout_query.timeout_secs = Some(1);
     let timeout_result = run_single_agent_batch_response(
