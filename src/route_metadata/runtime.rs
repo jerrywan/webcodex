@@ -36,7 +36,7 @@ pub(super) const ROUTES: &[RouteSpec] = &[
         BodyAware(OAuthBodyAwarePolicy::RuntimeToolCall),
         RuntimeApi,
         Hidden,
-        Command,
+        Other,
         AuthMiddleware,
     ),
     route(

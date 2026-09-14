@@ -88,7 +88,7 @@ pub(crate) fn build_openapi_spec() -> Value {
 fn direct_operation(definition: &ToolDefinition, spec: &ToolSpec) -> Value {
     let description = action_operation_description(definition, spec);
     let request_schema = action_request_schema(definition.name, spec.input_schema.clone());
-    let response_schema = project_schema_descriptions(spec.output_schema.clone());
+    let response_schema = action_tool_result_schema(spec.output_schema.clone());
     json!({
         "operationId": definition.name,
         "description": description,
@@ -130,16 +130,7 @@ fn gateway_operation() -> Value {
         },
         "required": ["tool", "arguments"]
     });
-    let response_schema = json!({
-        "type": "object",
-        "properties": {
-            "success": {"type": "boolean"},
-            "output": {"type": "object", "additionalProperties": true},
-            "error": {"anyOf": [{"type": "string"}, {"type": "null"}]}
-        },
-        "required": ["success"],
-        "additionalProperties": true
-    });
+    let response_schema = action_tool_result_schema(json!({}));
     json!({
         "operationId": ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
         "description": "Call one GPT-Action-supported long-tail tool from the canonical Adaptive Runtime surface. Use direct Action operations for direct tools. This gateway grants no authority and cannot target model-hidden or protocol-unsupported tools.",
@@ -152,13 +143,56 @@ fn gateway_operation() -> Value {
     })
 }
 
+fn action_tool_result_schema(output_schema: Value) -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "success": {"type": "boolean"},
+            "output": project_schema_descriptions(output_schema),
+            "error": {"type": "string"}
+        },
+        "required": ["success", "output"]
+    })
+}
+
+fn action_tool_result_failure_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "success": {"type": "boolean", "const": false},
+            "output": {},
+            "error": {"type": "string"}
+        },
+        "required": ["success", "output"]
+    })
+}
+
+fn json_error_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "status": {"type": "integer"},
+            "error": {"type": "string"}
+        },
+        "required": ["status", "error"]
+    })
+}
+
 fn standard_responses(success_schema: Value) -> Value {
     json!({
         "200": {
             "description": "Canonical ToolResult returned by ToolRuntime.",
             "content": {"application/json": {"schema": success_schema}}
         },
-        "400": {"description": "Invalid Action request or canonical tool failure."},
+        "400": {
+            "description": "Invalid Action request or canonical tool failure.",
+            "content": {"application/json": {"schema": {
+                "oneOf": [action_tool_result_failure_schema(), json_error_response_schema()]
+            }}}
+        },
         "403": {"description": "Canonical scope, authority, or permission admission denied the request."}
     })
 }
@@ -421,6 +455,95 @@ mod tests {
             strip_descriptions(&mut action);
             assert_eq!(action, canonical, "{}", definition.name);
         }
+    }
+
+    #[test]
+    fn direct_response_schemas_wrap_canonical_output_in_tool_result() {
+        let generated = build_openapi_spec();
+        let specs = registered_tool_specs()
+            .into_iter()
+            .map(|spec| (spec.name.clone(), spec))
+            .collect::<BTreeMap<_, _>>();
+        for definition in gpt_action_direct_tool_definitions() {
+            let schema = &generated["paths"]
+                [format!("{GPT_ACTION_PATH_PREFIX}{}", definition.name)]["post"]["responses"]
+                ["200"]["content"]["application/json"]["schema"];
+            assert_eq!(schema["type"], "object", "{}", definition.name);
+            assert_eq!(schema["additionalProperties"], false, "{}", definition.name);
+            assert_eq!(
+                schema["required"],
+                json!(["success", "output"]),
+                "{}",
+                definition.name
+            );
+            assert_eq!(
+                schema["properties"]["success"]["type"], "boolean",
+                "{}",
+                definition.name
+            );
+            assert_eq!(
+                schema["properties"]["error"]["type"], "string",
+                "{}",
+                definition.name
+            );
+            assert_eq!(
+                schema["properties"]["output"],
+                project_schema_descriptions(specs[definition.name].output_schema.clone()),
+                "{}",
+                definition.name
+            );
+        }
+    }
+
+    #[test]
+    fn gateway_response_schema_uses_the_same_tool_result_envelope() {
+        let generated = build_openapi_spec();
+        let schema = &generated["paths"]
+            [format!("{GPT_ACTION_PATH_PREFIX}{ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME}")]["post"]
+            ["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["required"], json!(["success", "output"]));
+        assert_eq!(schema["properties"]["success"]["type"], "boolean");
+        assert_eq!(schema["properties"]["output"], json!({}));
+        assert_eq!(schema["properties"]["error"]["type"], "string");
+    }
+
+    #[test]
+    fn action_response_schemas_match_tool_result_serde_shape() {
+        let generated = build_openapi_spec();
+        let direct_schema = &generated["paths"][format!("{GPT_ACTION_PATH_PREFIX}runtime_status")]
+            ["post"]["responses"]["200"]["content"]["application/json"]["schema"];
+        let success = serde_json::to_value(crate::tool_runtime::ToolResult::ok(json!({
+            "status": "ok"
+        })))
+        .unwrap();
+        assert!(success.get("success").is_some());
+        assert!(success.get("output").is_some());
+        assert!(success.get("error").is_none());
+        assert_eq!(direct_schema["required"], json!(["success", "output"]));
+        assert!(!direct_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "error"));
+
+        let failure = serde_json::to_value(crate::tool_runtime::ToolResult::err("failed")).unwrap();
+        assert_eq!(failure["success"], false);
+        assert!(failure.get("output").is_some());
+        assert_eq!(failure["error"], "failed");
+        let failure_variants = generated["paths"]
+            [format!("{GPT_ACTION_PATH_PREFIX}runtime_status")]["post"]["responses"]["400"]
+            ["content"]["application/json"]["schema"]["oneOf"]
+            .as_array()
+            .unwrap();
+        assert_eq!(failure_variants.len(), 2);
+        assert_eq!(
+            failure_variants[0]["required"],
+            json!(["success", "output"])
+        );
+        assert_eq!(failure_variants[0]["properties"]["error"]["type"], "string");
+        assert_eq!(failure_variants[1]["required"], json!(["status", "error"]));
     }
 
     #[test]

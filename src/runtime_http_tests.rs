@@ -571,7 +571,7 @@ async fn http_runtime_status_optional_body_accepts_empty_and_rejects_malformed_j
 }
 
 // =========================================================================
-// Phase 2: callRuntimeTool / /api/tools/call generic entry point
+// Legacy /api/tools/call generic entry point
 // =========================================================================
 
 fn phase2_service() -> (tempfile::TempDir, salvo::Service) {
@@ -1513,7 +1513,7 @@ async fn api_tools_call_message_tool_keeps_business_session_id_with_recording_se
             "session_id": business_session_id,
             TOOL_CALL_RECORDING_SESSION_ID_FIELD: tracking_session_id,
             "kind": "guidance",
-            "message": "Keep this behind callRuntimeTool.",
+            "message": "Keep this behind call_runtime_tool.",
             "tags": ["openapi", "constraint"],
             "priority": "normal"
         }))

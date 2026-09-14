@@ -112,7 +112,6 @@ pub(crate) use files::{
     validate_project_artifact_export_snapshot, ProjectArtifactExportSnapshot,
     MAX_PROJECT_ARTIFACT_EXPORT_BYTES, MAX_READ_PROJECT_ARTIFACT_LENGTH,
 };
-pub(crate) use patch::MAX_UNIFIED_DIFF_BYTES;
 #[cfg(test)]
 pub(crate) use permissions::{AuthorityMode, PermissionEvaluator};
 #[cfg(test)]

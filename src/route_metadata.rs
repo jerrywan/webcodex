@@ -380,6 +380,80 @@ pub(crate) fn audit_class_for_path(path: &str) -> Option<AuditClass> {
     lookup_path(path).map(|spec| spec.audit_class)
 }
 
+/// Project one canonical runtime ToolDefinition into the historical ActionAudit
+/// stats vocabulary. This is observability-only: it grants no authority and
+/// deliberately derives from the runtime tool SSOT instead of transport names.
+pub(crate) fn audit_class_for_runtime_tool(tool_name: &str) -> Option<AuditClass> {
+    use webcodex_tool_contracts::{
+        ToolActivityKind, ToolEffect, ToolExecutionForm, ToolExecutionStart,
+        TOOL_CATEGORY_ARTIFACT, TOOL_CATEGORY_EDIT, TOOL_CATEGORY_GIT, TOOL_CATEGORY_JOB,
+        TOOL_CATEGORY_PATCH, TOOL_CATEGORY_RUNTIME, TOOL_CATEGORY_VALIDATION,
+    };
+
+    let definition = webcodex_tool_contracts::lookup_tool_definition(tool_name)?;
+    let activity = definition.activity_semantics();
+
+    if definition.is_git_like() || definition.category == TOOL_CATEGORY_GIT {
+        return Some(AuditClass::Git);
+    }
+    if definition.category == TOOL_CATEGORY_ARTIFACT {
+        return Some(AuditClass::Artifact);
+    }
+    if matches!(
+        definition.category,
+        TOOL_CATEGORY_EDIT | TOOL_CATEGORY_PATCH
+    ) || activity.kind == ToolActivityKind::Edit
+    {
+        return Some(AuditClass::Edit);
+    }
+    if definition.execution.is_some_and(|execution| {
+        matches!(
+            execution.form,
+            ToolExecutionForm::ShellCommand | ToolExecutionForm::PersistentShellCommand
+        ) && execution.start != ToolExecutionStart::AsyncImmediate
+    }) {
+        return Some(AuditClass::Shell);
+    }
+    if definition.category == TOOL_CATEGORY_RUNTIME {
+        return Some(if definition.metadata().effect == ToolEffect::Observe {
+            AuditClass::Report
+        } else {
+            AuditClass::Command
+        });
+    }
+    if matches!(
+        definition.category,
+        TOOL_CATEGORY_JOB | TOOL_CATEGORY_VALIDATION
+    ) || matches!(
+        activity.kind,
+        ToolActivityKind::Run | ToolActivityKind::Test
+    ) {
+        return Some(AuditClass::Job);
+    }
+
+    Some(match activity.kind {
+        ToolActivityKind::Read | ToolActivityKind::Search | ToolActivityKind::Navigate => {
+            AuditClass::Context
+        }
+        ToolActivityKind::Edit => AuditClass::Edit,
+        ToolActivityKind::Run | ToolActivityKind::Test => AuditClass::Job,
+        ToolActivityKind::Review => AuditClass::Report,
+        ToolActivityKind::None => AuditClass::Command,
+    })
+}
+
+/// Persisted GPT Action events share one dynamic HTTP adapter, so endpoint-only
+/// classification is intentionally insufficient. Their canonical `operation`
+/// records the resolved runtime tool identity and is projected through the same
+/// ToolDefinition semantics used elsewhere. Ordinary and historical REST events
+/// keep their route-based compatibility classes unchanged.
+pub(crate) fn audit_class_for_event(endpoint: &str, operation: Option<&str>) -> Option<AuditClass> {
+    if lookup("POST", endpoint).is_some_and(|spec| spec.id == RouteId::GptActionsInvoke) {
+        return operation.and_then(audit_class_for_runtime_tool);
+    }
+    audit_class_for_path(endpoint)
+}
+
 fn normalize_path(path: &str) -> String {
     let path = path.trim();
     let path = path.split('?').next().unwrap_or(path);
@@ -733,9 +807,38 @@ mod tests {
             ("/api/artifacts/import", Artifact),
             ("/api/projects/git_status", Git),
             ("/api/projects/run_shell", Shell),
+            ("/api/actions/{tool_name}", Other),
         ] {
             assert_eq!(audit_class_for_path(path), Some(class), "{path}");
         }
+        for (tool, class) in [
+            ("apply_text_edits", Edit),
+            ("run_shell", Shell),
+            ("import_conversation_files_to_project", Artifact),
+            ("git_diff_hunks", Git),
+            ("read_files", Context),
+            ("runtime_status", Report),
+            ("cargo_test", Job),
+            ("workspace_hygiene_check", Report),
+            ("plugin_tool", Command),
+        ] {
+            assert_eq!(audit_class_for_runtime_tool(tool), Some(class), "{tool}");
+            assert_eq!(
+                audit_class_for_event("/api/actions/{tool_name}", Some(tool)),
+                Some(class),
+                "{tool} placeholder route"
+            );
+            assert_eq!(
+                audit_class_for_event(&format!("/api/actions/{tool}"), Some(tool)),
+                Some(class),
+                "{tool} concrete route"
+            );
+        }
+        assert_eq!(
+            audit_class_for_event("/api/actions/{tool_name}", None),
+            None
+        );
+
         assert_eq!(
             audit_class_for_path("/api/connector/edits/apply"),
             Some(Other)
