@@ -55,7 +55,7 @@ fn config_failure(
     message: &'static str,
     recovery: RecoveryKind,
 ) -> ToolResult {
-    ToolResult::err_with_output(message, response_value(&response)).with_recovery(recovery, None)
+    ToolResult::err_with_output(message, response_value(&response)).with_recovery(recovery)
 }
 
 fn not_started(action: RunnerConfigAction, code: &str) -> ToolResult {

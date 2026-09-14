@@ -3163,7 +3163,7 @@ mod tests {
                 "Communication resource does not exist",
                 output.clone(),
             )
-            .with_recovery(RecoveryKind::FixInput, None);
+            .with_recovery(RecoveryKind::FixInput);
             let expected_output = result.output.clone();
             let mut response = Response::new();
             render_communication_result(&mut response, result);

@@ -175,14 +175,14 @@ Those similarities do **not** create a shared token runtime. Git continuation ke
 
 T2 also introduces one small shared `SuggestedToolCall { tool, arguments }` result-expression primitive and a matching schema helper. It only represents a bounded parser-ready advisory call already chosen by a domain producer. It does not dispatch, grant authority, carry retry permission, or replace the actual continuation identity. Existing domain envelopes remain intact: for example, `read_files` still reports `safe_cursor`, source SHA and snapshot stability; Git still distinguishes later-record continuation from omitted-current-hunk refinement; Session continuity still reports its own recovery state.
 
-Failure recovery remains a separate lane owned by the existing `RecoveryKind` / `RecoveryTool` vocabulary. `retry_same` continues to mean exact safe replay only, and `outcome_unknown` never becomes retry authority. Successful or partial business continuation does not acquire `recovery_kind` merely because more work remains. Model-context coherence is a third lane: `session_context_revision -> ack_session_context_revision` is projected as `checkpoint / revision`, but ACK grants no authority, resolves no Session message, and does not gate execution.
+Failure recovery remains a separate lane classified by `RecoveryKind`. Domains provide a parser-ready `{tool, arguments}` action when they can prove its complete scope; otherwise they may provide a non-actionable recovery-family hint. The retired `RecoveryTool` enum and `recovery_tool` output field are no longer published. `retry_same` continues to mean exact safe replay only, and `outcome_unknown` never becomes retry authority. Successful or partial business continuation does not acquire `recovery_kind` merely because more work remains. Model-context coherence is a third lane: `session_context_revision -> ack_session_context_revision` has checkpoint/revision semantics documented in the tool contract without a repeated result descriptor. ACK grants no authority, resolves no Session message, and does not gate execution.
 
 After T1 and T2 the primitive foundation therefore has four distinct views:
 
 ```text
 tool selection          execution form / lifetime / start / continuation primitive
 result follow-up        continuation kind / carrier
-failed invocation       RecoveryKind / RecoveryTool
+failed invocation       recovery kind / domain-proven advisory action
 model-context coherence session context checkpoint / ACK
 ```
 

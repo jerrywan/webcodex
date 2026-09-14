@@ -671,7 +671,6 @@ fn apply_computer_recovery_contract(schema: &mut Value) {
     let properties = schema["properties"]["output"]["properties"]
         .as_object_mut()
         .expect("wrapped Computer output properties");
-    properties.remove("recovery_tool");
     properties.insert(
         "reconcile_with".to_string(),
         json!({

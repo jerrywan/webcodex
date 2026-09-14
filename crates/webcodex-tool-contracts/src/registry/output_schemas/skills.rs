@@ -54,7 +54,6 @@ fn apply_skill_recovery_contract(name: &str, schema: &mut Value) {
         let properties = schema["properties"]["output"]["properties"]
             .as_object_mut()
             .expect("wrapped Skill output properties");
-        properties.remove("recovery_tool");
         if mutation {
             properties.insert(
                 "suggested_call".to_string(),

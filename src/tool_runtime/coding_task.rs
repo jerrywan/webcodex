@@ -141,7 +141,7 @@ fn invalid_project_source(message: impl Into<String>, fields: Value) -> ToolResu
     if let (Some(output), Some(fields)) = (output.as_object_mut(), fields.as_object()) {
         output.extend(fields.clone());
     }
-    ToolResult::err_with_output(message, output).with_recovery(RecoveryKind::FixInput, None)
+    ToolResult::err_with_output(message, output).with_recovery(RecoveryKind::FixInput)
 }
 
 #[cfg(test)]
@@ -245,7 +245,7 @@ fn registration_scope_denied(auth: Option<&AuthContext>, operation: &str) -> Opt
                     "state_changed": false,
                 }),
             )
-            .with_recovery(RecoveryKind::UserAction, None)
+            .with_recovery(RecoveryKind::UserAction)
         })
 }
 

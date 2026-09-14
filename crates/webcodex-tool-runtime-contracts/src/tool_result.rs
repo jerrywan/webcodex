@@ -33,29 +33,6 @@ impl RecoveryKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecoveryTool {
-    ComputerFindElements,
-    ComputerListWindows,
-    ComputerListApplications,
-    ComputerListDisplays,
-    ComputerSnapshotDisplay,
-    ReadProjectArtifactMetadata,
-}
-
-impl RecoveryTool {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::ComputerFindElements => "computer_find_elements",
-            Self::ComputerListWindows => "computer_list_windows",
-            Self::ComputerListApplications => "computer_list_applications",
-            Self::ComputerListDisplays => "computer_list_displays",
-            Self::ComputerSnapshotDisplay => "computer_snapshot_display",
-            Self::ReadProjectArtifactMetadata => "read_project_artifact_metadata",
-        }
-    }
-}
-
 /// Parser-ready advisory expression of one possible next tool call. It carries
 /// no authority, never executes by itself, and is not a retry, cursor, or
 /// idempotency identity. Domain producers remain responsible for bounding and
@@ -112,11 +89,7 @@ impl ToolResult {
         }
     }
 
-    pub fn with_recovery(
-        mut self,
-        recovery_kind: RecoveryKind,
-        recovery_tool: Option<RecoveryTool>,
-    ) -> Self {
+    pub fn with_recovery(mut self, recovery_kind: RecoveryKind) -> Self {
         if self.success {
             return self;
         }
@@ -127,12 +100,6 @@ impl ToolResult {
             "recovery_kind".to_string(),
             Value::String(recovery_kind.as_str().to_string()),
         );
-        if let Some(recovery_tool) = recovery_tool {
-            output.insert(
-                "recovery_tool".to_string(),
-                Value::String(recovery_tool.as_str().to_string()),
-            );
-        }
         self
     }
 }
@@ -210,34 +177,20 @@ mod tests {
         assert!(call.get("authority").is_none());
         assert!(call.get("retry_token").is_none());
         assert!(call.get("continuation_token").is_none());
-        assert!(
-            !webcodex_core::runtime_contract::RECOVERY_TOOL_VALUES.contains(&"list_jobs"),
-            "parser-ready Job follow-up must not also remain in recovery_tool vocabulary"
-        );
     }
 
     #[test]
     fn recovery_metadata_is_bounded_and_never_decorates_success() {
-        let success = ToolResult::ok(json!({"value": true})).with_recovery(
-            RecoveryKind::Reobserve,
-            Some(RecoveryTool::ComputerListWindows),
-        );
+        let success = ToolResult::ok(json!({"value": true})).with_recovery(RecoveryKind::Reobserve);
         assert!(success.output.get("recovery_kind").is_none());
         assert!(success.output.get("recovery_tool").is_none());
 
         let secret = "PRIVATE_FREE_FORM_BODY";
         let failure = ToolResult::err_with_output(secret, json!({"message": secret}))
-            .with_recovery(
-                RecoveryKind::Reobserve,
-                Some(RecoveryTool::ComputerListWindows),
-            );
+            .with_recovery(RecoveryKind::Reobserve);
         assert_eq!(failure.output["recovery_kind"], "reobserve");
-        assert_eq!(failure.output["recovery_tool"], "computer_list_windows");
+        assert!(failure.output.get("recovery_tool").is_none());
         assert!(!failure.output["recovery_kind"]
-            .as_str()
-            .unwrap()
-            .contains(secret));
-        assert!(!failure.output["recovery_tool"]
             .as_str()
             .unwrap()
             .contains(secret));

@@ -182,7 +182,7 @@ fn git_commit_paths_outcome_unknown(expected_head: &str, reason: &str) -> ToolRe
             "hook_policy": "bypassed_exact_tree",
         }),
     )
-    .with_recovery(RecoveryKind::Reobserve, None)
+    .with_recovery(RecoveryKind::Reobserve)
 }
 
 impl ToolRuntime {
@@ -344,7 +344,7 @@ impl ToolRuntime {
                                 "hook_policy": "bypassed_exact_tree",
                             }),
                         )
-                        .with_recovery(RecoveryKind::Reobserve, None)
+                        .with_recovery(RecoveryKind::Reobserve)
                     }
                     "success" | "index_cleanup_failed" => git_commit_paths_outcome_unknown(
                         &expected_head,

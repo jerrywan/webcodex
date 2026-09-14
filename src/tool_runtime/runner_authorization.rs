@@ -18,7 +18,7 @@ fn runner_capability_unavailable_result(message: impl Into<String>) -> ToolResul
         message,
         json!({"error_kind": "agent_capability_unavailable"}),
     )
-    .with_recovery(RecoveryKind::NoAction, None)
+    .with_recovery(RecoveryKind::NoAction)
 }
 
 impl ToolRuntime {
@@ -85,7 +85,7 @@ impl ToolRuntime {
                     "tool_failure": true,
                 }),
             )
-            .with_recovery(RecoveryKind::FixInput, None));
+            .with_recovery(RecoveryKind::FixInput));
         }
         let client_id = proj.client_id.clone();
         let access = crate::runner_http::runner_access_from_auth(auth);
@@ -174,7 +174,7 @@ impl ToolRuntime {
                                 "tool_failure": true,
                             }),
                         )
-                        .with_recovery(RecoveryKind::NoAction, None));
+                        .with_recovery(RecoveryKind::NoAction));
                     }
                     return Err(runner_capability_unavailable_result(message));
                 }

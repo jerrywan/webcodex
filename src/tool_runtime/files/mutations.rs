@@ -28,7 +28,7 @@ fn structured_edit_not_started_result(tool_name: &str, reason: impl AsRef<str>) 
             "recovery_action": "retry_same_after_runner_recovery",
         }),
     )
-    .with_recovery(crate::tool_runtime::RecoveryKind::RetrySame, None)
+    .with_recovery(crate::tool_runtime::RecoveryKind::RetrySame)
 }
 
 fn structured_edit_outcome_unknown_result(
@@ -73,7 +73,7 @@ fn structured_edit_outcome_unknown_result(
         ),
         output,
     )
-    .with_recovery(crate::tool_runtime::RecoveryKind::Reobserve, None)
+    .with_recovery(crate::tool_runtime::RecoveryKind::Reobserve)
 }
 
 fn structured_edit_delivery_failure(
@@ -166,7 +166,7 @@ fn write_project_file_preflight_rejection(
             "retry_guidance": retry_guidance,
         }),
     )
-    .with_recovery(crate::tool_runtime::RecoveryKind::FixInput, None)
+    .with_recovery(crate::tool_runtime::RecoveryKind::FixInput)
 }
 
 fn apply_text_edit_occurrence_capability_rejection(reason: impl AsRef<str>) -> ToolResult {
@@ -221,7 +221,7 @@ fn apply_patch_capability_rejection(
             "retry_guidance": format!("reconnect or upgrade the Runner so it explicitly advertises {capability}")
         }),
     )
-    .with_recovery(crate::tool_runtime::RecoveryKind::RetrySame, None)
+    .with_recovery(crate::tool_runtime::RecoveryKind::RetrySame)
 }
 
 /// Maximum decoded size for whole-payload/model-facing artifact operations.

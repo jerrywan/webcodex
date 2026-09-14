@@ -148,7 +148,7 @@ impl ProjectResolverError {
 
     pub(crate) fn into_tool_result(self) -> ToolResult {
         ToolResult::err_with_output(self.to_message(), self.to_output())
-            .with_recovery(RecoveryKind::FixInput, None)
+            .with_recovery(RecoveryKind::FixInput)
     }
 }
 

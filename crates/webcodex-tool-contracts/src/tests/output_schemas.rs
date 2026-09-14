@@ -2037,12 +2037,19 @@ fn skill_recovery_output_schema_accepts_canonical_shapes_and_declares_legacy_rej
 }
 
 fn default_output_schema_field_names() -> BTreeSet<&'static str> {
-    BTreeSet::from([
-        "session_hint",
-        "permission",
-        "recovery_kind",
-        "recovery_tool",
-    ])
+    BTreeSet::from(["session_hint", "permission", "recovery_kind"])
+}
+
+#[test]
+fn model_facing_output_schemas_do_not_publish_retired_recovery_tool() {
+    for spec in registered_tool_specs() {
+        let serialized = serde_json::to_string(&spec.output_schema).unwrap();
+        assert!(
+            !serialized.contains("\"recovery_tool\":"),
+            "{} still declares a retired recovery_tool property",
+            spec.name
+        );
+    }
 }
 
 #[test]

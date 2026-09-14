@@ -1679,7 +1679,7 @@ fn coding_agent_project_not_writable_result(run_id: &str) -> ToolResult {
             "execution_state": "not_started",
         }),
     )
-    .with_recovery(RecoveryKind::UserAction, None)
+    .with_recovery(RecoveryKind::UserAction)
 }
 
 fn coding_agent_error(
@@ -1697,7 +1697,7 @@ fn coding_agent_error(
             "execution_state": execution_state,
         }),
     )
-    .with_recovery(recovery, None)
+    .with_recovery(recovery)
 }
 
 fn coding_agent_start_failure_from_response(

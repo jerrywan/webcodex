@@ -119,7 +119,7 @@ fn goal_store_unavailable() -> ToolResult {
             "state_changed": false,
         }),
     )
-    .with_recovery(RecoveryKind::UserAction, None)
+    .with_recovery(RecoveryKind::UserAction)
 }
 
 fn goal_error(error: GoalStoreError, store_failure_recovery: RecoveryKind) -> ToolResult {
@@ -138,7 +138,7 @@ fn goal_error(error: GoalStoreError, store_failure_recovery: RecoveryKind) -> To
             "state_changed": false,
         }),
     )
-    .with_recovery(recovery, None)
+    .with_recovery(recovery)
 }
 
 fn target_authorization_error(error: crate::db::CommunicationStoreError) -> ToolResult {
@@ -150,7 +150,7 @@ fn target_authorization_error(error: crate::db::CommunicationStoreError) -> Tool
             "state_changed": false,
         }),
     )
-    .with_recovery(RecoveryKind::Reobserve, None)
+    .with_recovery(RecoveryKind::Reobserve)
 }
 
 fn serialized_goal_success<T: Serialize>(value: T) -> ToolResult {
@@ -163,7 +163,7 @@ fn serialized_goal_success<T: Serialize>(value: T) -> ToolResult {
                 "state_changed": false,
             }),
         )
-        .with_recovery(RecoveryKind::NoAction, None),
+        .with_recovery(RecoveryKind::NoAction),
     }
 }
 

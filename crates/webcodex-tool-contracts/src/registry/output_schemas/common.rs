@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 
 use webcodex_core::runtime_contract::{
     ContinuationCarrier, ContinuationKind, CONTINUATION_CARRIER_VALUES, CONTINUATION_KIND_VALUES,
-    RECOVERY_KIND_VALUES, RECOVERY_TOOL_VALUES,
+    RECOVERY_KIND_VALUES,
 };
 use webcodex_core::workflow_session_contract::{
     SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_INSTRUCTION, SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_REASON,
@@ -454,14 +454,6 @@ pub fn recovery_kind_schema() -> Value {
     })
 }
 
-pub fn recovery_tool_schema() -> Value {
-    json!({
-        "type": "string",
-        "enum": RECOVERY_TOOL_VALUES,
-        "description": "Optional bounded public WebCodex tool to use for the declared reobserve or reconcile action. This field never grants authority or triggers execution."
-    })
-}
-
 pub fn wrapped_output_schema(output_properties: Vec<(&str, Value)>) -> Value {
     let mut output_properties = output_properties;
     output_properties.extend([
@@ -475,7 +467,6 @@ pub fn wrapped_output_schema(output_properties: Vec<(&str, Value)>) -> Value {
         ("session_hint", session_hint_schema()),
         ("permission", permission_decision_schema()),
         ("recovery_kind", recovery_kind_schema()),
-        ("recovery_tool", recovery_tool_schema()),
     ]);
     let properties = output_properties
         .into_iter()
@@ -512,29 +503,7 @@ pub fn wrapped_output_schema(output_properties: Vec<(&str, Value)>) -> Value {
                                 "recovery_kind": {
                                     "type": "null",
                                     "const": "__forbidden_on_success__"
-                                },
-                                "recovery_tool": {
-                                    "type": "null",
-                                    "const": "__forbidden_on_success__"
                                 }
-                            }
-                        }
-                    }
-                }
-            },
-            {
-                "if": {
-                    "properties": {
-                        "output": {"required": ["recovery_tool"]}
-                    },
-                    "required": ["output"]
-                },
-                "then": {
-                    "properties": {
-                        "output": {
-                            "required": ["recovery_kind"],
-                            "properties": {
-                                "recovery_kind": {"enum": ["reobserve", "reconcile"]}
                             }
                         }
                     }

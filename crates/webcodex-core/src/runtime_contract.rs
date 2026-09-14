@@ -46,14 +46,6 @@ pub const RECOVERY_KIND_VALUES: [&str; 7] = [
     "user_action",
     "none",
 ];
-pub const RECOVERY_TOOL_VALUES: [&str; 6] = [
-    "computer_find_elements",
-    "computer_list_windows",
-    "computer_list_applications",
-    "computer_list_displays",
-    "computer_snapshot_display",
-    "read_project_artifact_metadata",
-];
 
 /// Closed model-facing vocabulary for continuing successful or partial
 /// observations. This is deliberately separate from failure recovery,

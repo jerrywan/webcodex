@@ -768,7 +768,7 @@ fn invalid_session_message_observation_request(session_id: &str, message: &str) 
             "state_changed": false,
         }),
     )
-    .with_recovery(RecoveryKind::FixInput, None)
+    .with_recovery(RecoveryKind::FixInput)
 }
 
 fn session_message_observation_error_result(
@@ -791,7 +791,7 @@ fn session_message_observation_error_result(
                 "state_changed": false,
             }),
         )
-        .with_recovery(RecoveryKind::FixInput, None),
+        .with_recovery(RecoveryKind::FixInput),
         sessions::SessionMessageObservationError::InvalidObservationState => {
             ToolResult::err_with_output(
                 "invalid_message_observation_state",
@@ -801,7 +801,7 @@ fn session_message_observation_error_result(
                     "state_changed": false,
                 }),
             )
-            .with_recovery(RecoveryKind::NoAction, None)
+            .with_recovery(RecoveryKind::NoAction)
         }
     }
 }

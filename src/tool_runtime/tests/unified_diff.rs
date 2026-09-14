@@ -340,7 +340,6 @@ fn apply_unified_diff_schema_matches_flat_runtime_contract_and_old_tools_are_abs
         "recovery_action",
         "permission",
         "recovery_kind",
-        "recovery_tool",
         "session_hint",
         "trace_ref",
     ]

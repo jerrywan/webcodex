@@ -684,7 +684,7 @@ fn invalid_job_observation_result(error_kind: &str, message: String) -> ToolResu
             "state_changed": false,
         }),
     )
-    .with_recovery(RecoveryKind::FixInput, None)
+    .with_recovery(RecoveryKind::FixInput)
 }
 
 fn unknown_job_observation_result(job_id: &str) -> ToolResult {
@@ -698,7 +698,7 @@ fn unknown_job_observation_result(job_id: &str) -> ToolResult {
             "suggested_call": list_jobs_recovery_suggested_call(None),
         }),
     )
-    .with_recovery(RecoveryKind::Reobserve, None)
+    .with_recovery(RecoveryKind::Reobserve)
 }
 
 fn agent_job_log_error_result(job_id: &str, error: String) -> ToolResult {
@@ -728,7 +728,7 @@ fn confirmation_required_result(project: &str, job_id: &str) -> ToolResult {
             "command_started": false,
         }),
     )
-    .with_recovery(RecoveryKind::UserAction, None)
+    .with_recovery(RecoveryKind::UserAction)
 }
 
 fn job_not_found_result(project: &str, job_id: &str) -> ToolResult {
@@ -751,7 +751,7 @@ fn job_not_found_result(project: &str, job_id: &str) -> ToolResult {
             "suggested_call": list_jobs_recovery_suggested_call(Some(project)),
         }),
     )
-    .with_recovery(RecoveryKind::Reobserve, None)
+    .with_recovery(RecoveryKind::Reobserve)
 }
 
 fn job_project_mismatch_result(
@@ -781,7 +781,7 @@ fn job_project_mismatch_result(
             "command_started": false,
         }),
     )
-    .with_recovery(RecoveryKind::FixInput, None)
+    .with_recovery(RecoveryKind::FixInput)
 }
 
 fn job_stop_forbidden_result(
@@ -813,7 +813,7 @@ fn job_stop_forbidden_result(
             "command_started": false,
         }),
     )
-    .with_recovery(RecoveryKind::FixInput, None)
+    .with_recovery(RecoveryKind::FixInput)
 }
 
 fn job_session_unknown_warning() -> Value {
@@ -852,7 +852,7 @@ fn job_recovering_stop_result(project: &str, job: &ShellJobInfo) -> ToolResult {
             "command_started": false,
         }),
     )
-    .with_recovery(RecoveryKind::Wait, None)
+    .with_recovery(RecoveryKind::Wait)
 }
 
 fn ownership_basis_for_stop(

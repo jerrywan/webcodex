@@ -1874,7 +1874,7 @@ fn computer_suggested_recovery(
             "suggested_call".to_string(),
             SuggestedToolCall::new(tool, arguments).to_value(),
         );
-    result.with_recovery(recovery_kind, None)
+    result.with_recovery(recovery_kind)
 }
 
 fn computer_reconcile_recovery(
@@ -1887,7 +1887,7 @@ fn computer_reconcile_recovery(
         .as_object_mut()
         .expect("Computer recovery output is an object")
         .insert("reconcile_with".to_string(), json!(reconcile_with));
-    result.with_recovery(recovery_kind, None)
+    result.with_recovery(recovery_kind)
 }
 
 fn computer_error_with_client(kind: &str, message: &str, client_id: Option<&str>) -> ToolResult {
@@ -1940,8 +1940,8 @@ fn computer_error_with_client(kind: &str, message: &str, client_id: Option<&str>
                 "computer_list_displays",
             ),
         },
-        "invalid_request" => result.with_recovery(RecoveryKind::FixInput, None),
-        "permission_denied" => result.with_recovery(RecoveryKind::UserAction, None),
+        "invalid_request" => result.with_recovery(RecoveryKind::FixInput),
+        "permission_denied" => result.with_recovery(RecoveryKind::UserAction),
         _ => result,
     }
 }
@@ -2004,8 +2004,8 @@ fn computer_pointer_effect_not_started(
             RecoveryKind::Reobserve,
             "computer_snapshot_display",
         ),
-        "invalid_request" => result.with_recovery(RecoveryKind::FixInput, None),
-        "permission_denied" => result.with_recovery(RecoveryKind::UserAction, None),
+        "invalid_request" => result.with_recovery(RecoveryKind::FixInput),
+        "permission_denied" => result.with_recovery(RecoveryKind::UserAction),
         _ => result,
     }
 }
@@ -2125,8 +2125,8 @@ fn computer_clipboard_write_not_started(
     output.insert("state_changed".to_string(), json!(false));
     let result = ToolResult::err_with_output(message.to_string(), Value::Object(output));
     match error_kind {
-        "invalid_request" => result.with_recovery(RecoveryKind::FixInput, None),
-        "permission_denied" => result.with_recovery(RecoveryKind::UserAction, None),
+        "invalid_request" => result.with_recovery(RecoveryKind::FixInput),
+        "permission_denied" => result.with_recovery(RecoveryKind::UserAction),
         _ => result,
     }
 }
@@ -2146,7 +2146,7 @@ fn computer_clipboard_write_outcome_unknown(
         output.insert("state_changed".to_string(), json!(state_changed));
     }
     ToolResult::err_with_output(safe_message, Value::Object(output))
-        .with_recovery(RecoveryKind::Reobserve, None)
+        .with_recovery(RecoveryKind::Reobserve)
 }
 
 fn computer_clipboard_write_delivery_failure(
@@ -2202,7 +2202,7 @@ fn computer_effect_outcome_unknown(message: &str) -> ToolResult {
             "execution_state": "outcome_unknown"
         }),
     )
-    .with_recovery(RecoveryKind::Reobserve, None)
+    .with_recovery(RecoveryKind::Reobserve)
 }
 
 fn computer_effect_delivery_failure(message: &str, request_dispatched: Option<bool>) -> ToolResult {
@@ -2247,8 +2247,8 @@ fn computer_application_effect_not_started(
             "computer_list_applications",
             json!({"client_id": client_id}),
         ),
-        "invalid_request" => result.with_recovery(RecoveryKind::FixInput, None),
-        "permission_denied" => result.with_recovery(RecoveryKind::UserAction, None),
+        "invalid_request" => result.with_recovery(RecoveryKind::FixInput),
+        "permission_denied" => result.with_recovery(RecoveryKind::UserAction),
         _ => result,
     }
 }

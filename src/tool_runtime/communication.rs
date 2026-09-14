@@ -95,7 +95,7 @@ fn communication_principal_unavailable(message: &str) -> ToolResult {
             "state_changed": false,
         }),
     )
-    .with_recovery(RecoveryKind::UserAction, None)
+    .with_recovery(RecoveryKind::UserAction)
 }
 
 fn access_from_endpoint(
@@ -123,7 +123,7 @@ fn access_from_endpoint(
                 "state_changed": false,
             }),
         )
-        .with_recovery(RecoveryKind::FixInput, None)),
+        .with_recovery(RecoveryKind::FixInput)),
     }
 }
 
@@ -135,7 +135,7 @@ pub(super) fn communication_store_unavailable() -> ToolResult {
             "state_changed": false,
         }),
     )
-    .with_recovery(RecoveryKind::UserAction, None)
+    .with_recovery(RecoveryKind::UserAction)
 }
 
 fn communication_recovery_kind(
@@ -169,7 +169,7 @@ pub(super) fn communication_error(
             "state_changed": false,
         }),
     )
-    .with_recovery(recovery, None)
+    .with_recovery(recovery)
 }
 
 pub(super) fn serialized_success<T: Serialize>(value: T) -> ToolResult {
@@ -182,7 +182,7 @@ pub(super) fn serialized_success<T: Serialize>(value: T) -> ToolResult {
                 "state_changed": false,
             }),
         )
-        .with_recovery(RecoveryKind::NoAction, None),
+        .with_recovery(RecoveryKind::NoAction),
     }
 }
 
@@ -962,7 +962,7 @@ impl ToolRuntime {
                         "state_changed": false,
                     }),
                 )
-                .with_recovery(RecoveryKind::FixInput, None)
+                .with_recovery(RecoveryKind::FixInput)
             }
         };
         let principal = match communication_principal(auth) {

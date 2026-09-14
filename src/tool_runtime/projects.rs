@@ -504,7 +504,7 @@ impl ToolRuntime {
                         "state_changed": false,
                     }),
                 )
-                .with_recovery(RecoveryKind::NoAction, None);
+                .with_recovery(RecoveryKind::NoAction);
             }
         }
         self.submit_project_op(
@@ -562,7 +562,7 @@ impl ToolRuntime {
                         "state_changed": false,
                     }),
                 )
-                .with_recovery(RecoveryKind::NoAction, None);
+                .with_recovery(RecoveryKind::NoAction);
             }
         }
         let fresh_managed_bootstrap = resume_project_id.is_none();
