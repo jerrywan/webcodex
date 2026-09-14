@@ -1231,26 +1231,23 @@ async fn apply_text_edits_scoped_request_fails_closed_before_enqueue_without_cap
     )
     .await;
     let project = agent_test_project_id("ate-scope-off");
-    let result = runtime
-        .apply_text_edits(
-            project,
-            vec![edit_change(
-                "src/lib.rs",
-                &"a".repeat(64),
-                vec![scoped_text_edit(
-                    text_edit(
-                        ApplyTextEditKind::ReplaceExact,
-                        Some("dup"),
-                        Some("x"),
-                        None,
-                    ),
-                    40,
-                    60,
-                )],
-            )],
-            None,
-        )
-        .await;
+    let revision = seed_read_revision(&runtime, &project, "src/lib.rs", &"a".repeat(64)).await;
+    let mut change = edit_change(
+        "src/lib.rs",
+        &"a".repeat(64),
+        vec![scoped_text_edit(
+            text_edit(
+                ApplyTextEditKind::ReplaceExact,
+                Some("dup"),
+                Some("x"),
+                None,
+            ),
+            40,
+            60,
+        )],
+    );
+    change.expected_read_revision = Some(revision);
+    let result = runtime.apply_text_edits(project, vec![change], None).await;
     assert!(!result.success);
     assert_eq!(result.output["state_changed"], false);
     assert_eq!(result.output["failure_kind"], "capability_unavailable");
@@ -1429,7 +1426,7 @@ async fn apply_text_edits_session_event_summary() {
         "input_summary must not leak new_text content: {}",
         summary_str
     );
-    assert_eq!(input_summary["expected_sha256_count"], 1);
+    assert_eq!(input_summary["expected_read_revision_count"], 0);
 }
 
 fn assert_apply_text_edits_outcome_unknown(result: &ToolResult) {

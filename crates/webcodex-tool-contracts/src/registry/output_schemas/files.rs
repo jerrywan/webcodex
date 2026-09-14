@@ -386,16 +386,16 @@ fn read_range_continuation_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "description": "Actionable positional continuation for unread lines in one file. The cursor is deterministic for the observed file position, but it is not a frozen snapshot: compare the next call's full-file sha256 with source_sha256 before concatenating ranges as one unchanged source.",
+        "description": "Actionable positional continuation for unread lines in one file. The cursor is deterministic for the observed position, while source_read_revision identifies the exact full-file snapshot that produced the range. Compare it with the next call's read_revision before joining ranges.",
         "properties": {
             "kind": {"type": "string", "const": "read_range"},
             "safe_cursor": {"type": "boolean", "const": true},
-            "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "source_read_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991_u64},
             "snapshot_stable": {"type": "boolean", "const": false},
             "continuation_semantics": continuation_semantics_schema(
                 ContinuationKind::Page,
                 ContinuationCarrier::Position,
-                "This read continues by positional file range; source_sha256 remains the separate source-consistency fence.",
+                "This read continues by positional file range; source_read_revision is the separate source-consistency fence.",
             ),
             "suggested_call": suggested_tool_call_schema(
                 "read_files",
@@ -404,7 +404,7 @@ fn read_range_continuation_schema() -> Value {
             )
         },
         "required": [
-            "kind", "safe_cursor", "source_sha256", "snapshot_stable",
+            "kind", "safe_cursor", "source_read_revision", "snapshot_stable",
             "continuation_semantics", "suggested_call"
         ]
     })
@@ -514,6 +514,7 @@ fn read_files_output_schema() -> Value {
         "format": {"type": "string", "enum": ["plain", "numbered"]},
         "path": schema_type("string", "Project-relative path; omitted from a sparse complete item when identical to the outer item path."),
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "read_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991_u64, "description": "Model-facing handle for this exact full-file Project/path/Runner snapshot."},
         "start_line": {"type": "integer", "minimum": 1},
         "limit": {"type": "integer", "minimum": 1, "maximum": 2000},
         "total_lines": {"type": "integer", "minimum": 0},
@@ -529,7 +530,7 @@ fn read_files_output_schema() -> Value {
         "additionalProperties": false,
         "properties": read_success_properties.clone(),
         "required": [
-            "text", "format", "path", "sha256", "start_line", "limit",
+            "text", "format", "path", "sha256", "read_revision", "start_line", "limit",
             "total_lines", "returned_lines", "end_line", "has_more", "next_start_line"
         ]
     });
@@ -571,7 +572,7 @@ fn read_files_output_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": read_success_sparse_properties,
-        "required": ["text", "sha256", "total_lines"],
+        "required": ["text", "sha256", "read_revision", "total_lines"],
         "description": "Sparse model-facing item form for a provably complete default full-file read. The outer item path is the only navigation identity; inner path and range fields are omitted, and no continuation exists."
     });
     let read_success = json!({
