@@ -4,7 +4,7 @@ use super::common::{
     array_schema, cargo_test_count_assertion_schema, continuation_semantics_schema,
     job_activity_schema, nullable_schema, observe_job_continuation_schema,
     permission_decision_schema, recovery_kind_schema, schema_type, session_hint_schema,
-    wrapped_output_schema,
+    suggested_tool_call_schema, wrapped_output_schema,
 };
 use webcodex_core::runtime_contract::{ContinuationCarrier, ContinuationKind};
 
@@ -421,6 +421,24 @@ fn job_structured_execution_metadata_schema() -> Value {
     })
 }
 
+fn list_jobs_recovery_call_schema(project: bool) -> Value {
+    let arguments = if project {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {"project": {"type": "string", "minLength": 1}},
+            "required": ["project"]
+        })
+    } else {
+        json!({"type": "object", "additionalProperties": false, "properties": {}})
+    };
+    suggested_tool_call_schema(
+        "list_jobs",
+        arguments,
+        "Parser-ready advisory list_jobs recovery call. It grants no authority and carries only business identity proven by the producing Job path.",
+    )
+}
+
 fn observe_jobs_output_schema() -> Value {
     let job_observation = json!({
         "type": "object",
@@ -572,7 +590,7 @@ fn observe_jobs_output_schema() -> Value {
             "observation_token", "continuation_semantics"
         ]
     });
-    let item = json!({
+    let mut item = json!({
         "type": "object",
         "additionalProperties": false,
         "properties": {
@@ -582,7 +600,7 @@ fn observe_jobs_output_schema() -> Value {
             "output": {"anyOf": [job_observation.clone(), {"type": "null"}]},
             "error_kind": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "recovery_kind": recovery_kind_schema(),
-            "recovery_tool": {"type": "string", "const": "list_jobs", "description": "Optional bounded re-observation target for a missing Job."},
+            "suggested_call": list_jobs_recovery_call_schema(false),
             "error": {"anyOf": [{"type": "string"}, {"type": "null"}]}
         },
         "required": ["index", "job_id", "success", "output", "error_kind", "error"],
@@ -593,7 +611,7 @@ fn observe_jobs_output_schema() -> Value {
                     "output": job_observation,
                     "error_kind": {"type": "null"},
                     "recovery_kind": {"type": "null", "const": "__forbidden_on_success__"},
-                    "recovery_tool": {"type": "null", "const": "__forbidden_on_success__"},
+                    "suggested_call": {"type": "null", "const": "__forbidden_on_success__"},
                     "error": {"type": "null"}
                 }
             },
@@ -607,6 +625,16 @@ fn observe_jobs_output_schema() -> Value {
             }
         }]
     });
+    item["allOf"].as_array_mut().unwrap().push(json!({
+        "if": {
+            "properties": {"error_kind": {"const": "unknown_job"}},
+            "required": ["error_kind"]
+        },
+        "then": {
+            "required": ["suggested_call"],
+            "properties": {"recovery_kind": {"const": "reobserve"}}
+        }
+    }));
     let batch_output = json!({
         "type": "object",
         "additionalProperties": false,
@@ -1184,6 +1212,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             ("job_id", schema_type("string", "Runtime job id.")),
             ("project", schema_type("string", "Project id.")),
+            ("suggested_call", list_jobs_recovery_call_schema(true)),
             (
                 "status_before",
                 schema_type("string", "Job status observed before stop."),
@@ -1205,6 +1234,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
         "job_tail" => {
             let mut schema = wrapped_output_schema(vec![
             ("job_id", schema_type("string", "Runtime job id.")),
+            ("suggested_call", list_jobs_recovery_call_schema(false)),
             (
                 "session_id",
                 nullable_schema("string", "Workflow Session that owns this job, when recorded."),

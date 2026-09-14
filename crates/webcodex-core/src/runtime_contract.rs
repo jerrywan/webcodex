@@ -46,8 +46,7 @@ pub const RECOVERY_KIND_VALUES: [&str; 7] = [
     "user_action",
     "none",
 ];
-pub const RECOVERY_TOOL_VALUES: [&str; 7] = [
-    "list_jobs",
+pub const RECOVERY_TOOL_VALUES: [&str; 6] = [
     "computer_find_elements",
     "computer_list_windows",
     "computer_list_applications",

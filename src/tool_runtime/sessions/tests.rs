@@ -3569,8 +3569,8 @@ fn session_context_unknown_ack_is_compact_and_never_certifies_latest() {
         assert_eq!(
             response.output["session_continuity"],
             json!({
-                "status": status, "recovery_required": true,
-                "recovery_tool": "session_handoff_summary", "recovery_session_id": session.session_id,
+                "status": status,
+                "recovery_required": true,
                 "suggested_call": {
                     "tool": "session_handoff_summary",
                     "arguments": {"session_id": session.session_id},
@@ -3673,10 +3673,12 @@ fn session_context_incomplete_delta_requires_explicit_recovery() {
             result.output["session_continuity"]["recovery_required"],
             true
         );
-        assert_eq!(
-            result.output["session_continuity"]["recovery_tool"],
-            "session_handoff_summary"
-        );
+        assert!(result.output["session_continuity"]
+            .get("recovery_tool")
+            .is_none());
+        assert!(result.output["session_continuity"]
+            .get("recovery_session_id")
+            .is_none());
         let suggested = &result.output["session_continuity"]["suggested_call"];
         assert_eq!(suggested["tool"], "session_handoff_summary");
         assert_eq!(suggested["arguments"]["session_id"], session.session_id);

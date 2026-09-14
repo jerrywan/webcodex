@@ -458,8 +458,6 @@ fn add_context_projection_to_output_shape(
                     "properties": {
                         "status": {"type": "string", "enum": ["exact", "behind", "unacknowledged", "invalid", "recovered"]},
                         "recovery_required": {"type": "boolean"},
-                        "recovery_tool": {"const": "session_handoff_summary"},
-                        "recovery_session_id": {"type": "string"},
                         "suggested_call": webcodex_tool_contracts::suggested_tool_call_schema(
                             "session_handoff_summary",
                             json!({

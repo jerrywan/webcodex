@@ -388,10 +388,10 @@ mod tests {
                 "session_hint.suggested_next_tool",
                 "session_discussion_summary",
             ),
-            ("observe_jobs", "recovery_tool", "list_jobs"),
+            ("observe_jobs", "items[].suggested_call.tool", "list_jobs"),
             (
                 "run_process",
-                "session_continuity.recovery_tool",
+                "session_continuity.suggested_call.tool",
                 "session_handoff_summary",
             ),
             (

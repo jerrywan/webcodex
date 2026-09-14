@@ -688,7 +688,7 @@ fn observe_presentation_preserves_wait_uncertainty_and_unknown_job_without_log_b
                 "success": false,
                 "error_kind": "unknown_job",
                 "recovery_kind": "reobserve",
-                "recovery_tool": "list_jobs",
+                "suggested_call": {"tool": "list_jobs", "arguments": {}},
                 "error": "unbounded internal error text"
             }
         ],
@@ -710,7 +710,10 @@ fn observe_presentation_preserves_wait_uncertainty_and_unknown_job_without_log_b
         "outcome_unknown"
     );
     assert_eq!(meta["items"][1]["error_kind"], "unknown_job");
-    assert_eq!(meta["items"][1]["recovery_tool"], "list_jobs");
+    assert_eq!(
+        meta["items"][1]["suggested_call"],
+        json!({"tool": "list_jobs", "arguments": {}})
+    );
     let serialized = serde_json::to_string(meta).unwrap();
     for forbidden in [
         "SECRET-STDOUT",
@@ -2128,8 +2131,8 @@ async fn mcp_job_presentation_tracks_real_running_to_terminal_transition() {
         "unknown_job"
     );
     assert_eq!(
-        presentation(&unknown)["items"][0]["recovery_tool"],
-        "list_jobs"
+        presentation(&unknown)["items"][0]["suggested_call"],
+        json!({"tool": "list_jobs", "arguments": {}})
     );
 
     assert!(runtime.runner_registry.remove_job_record(&job_id).await);

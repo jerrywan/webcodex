@@ -1714,7 +1714,28 @@ fn assert_unknown_job(result: ToolResult) {
     assert_eq!(result.output["failure_kind"], "job_not_found");
     assert_eq!(result.output["state_changed"], false);
     assert_eq!(result.output["recovery_kind"], "reobserve");
-    assert_eq!(result.output["recovery_tool"], "list_jobs");
+    assert!(result.output.get("recovery_tool").is_none());
+    assert_eq!(
+        result.output["suggested_call"],
+        json!({"tool": "list_jobs", "arguments": {}})
+    );
+    let suggested = &result.output["suggested_call"];
+    let parsed = ToolCall::from_tool_name(
+        suggested["tool"].as_str().unwrap(),
+        suggested["arguments"].clone(),
+    )
+    .expect("unknown Job recovery must parse");
+    match parsed {
+        ToolCall::ListJobs {
+            project,
+            session_id,
+            ..
+        } => {
+            assert!(project.is_none());
+            assert!(session_id.is_none());
+        }
+        other => panic!("unexpected recovery call: {}", other.tool_name()),
+    }
     assert!(
         result.error.unwrap_or_default().contains("unknown job"),
         "unauthorized job lookup should be hidden as unknown"
@@ -1745,6 +1766,7 @@ async fn agent_job_log_invalid_token_is_fix_input_not_unknown_job() {
     assert_eq!(result.output["state_changed"], false);
     assert_eq!(result.output["recovery_kind"], "fix_input");
     assert!(result.output.get("recovery_tool").is_none());
+    assert!(result.output.get("suggested_call").is_none());
     assert!(result.error.unwrap_or_default().contains("malformed"));
 }
 

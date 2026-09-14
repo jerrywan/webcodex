@@ -701,7 +701,8 @@
     addRow(body, "stderr lines", Number.isInteger(item.stderr_lines) ? item.stderr_lines : null);
     addRow(body, "Error", boundedString(item.error_kind));
     addRow(body, "Recovery action", boundedString(item.recovery_kind));
-    addRow(body, "Re-observe with", boundedString(item.recovery_tool));
+    const suggestedCall = item.suggested_call && typeof item.suggested_call === "object" ? item.suggested_call : null;
+    addRow(body, "Suggested call", suggestedCall ? boundedString(suggestedCall.tool) : null);
     const progress = item.progress && typeof item.progress === "object" ? item.progress : null;
     if (progress) {
       addRow(body, "Progress state", boundedString(progress.state));

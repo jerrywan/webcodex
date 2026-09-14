@@ -1063,7 +1063,7 @@ mod tests {
         )
         .unwrap()
         .finish_after(Duration::ZERO)
-        .record_for_tool_result(&ToolResult::ok(json!({"session_continuity": {"status": "unacknowledged", "recovery_required": true, "recovery_tool": "session_handoff_summary"}})))
+        .record_for_tool_result(&ToolResult::ok(json!({"session_continuity": {"status": "unacknowledged", "recovery_required": true, "suggested_call": {"tool": "session_handoff_summary", "arguments": {"session_id": "wc_sess_test"}}}})))
         .unwrap();
         assert!(missing.context_continuity_eligible);
         assert_eq!(missing.context_ack_present, Some(false));
@@ -1152,7 +1152,10 @@ mod tests {
                 }
                 ContextRecoveryKind::CompactHint => {
                     projection["session_continuity"]["recovery_required"] = json!(true);
-                    projection["session_continuity"]["recovery_session_id"] = json!(private);
+                    projection["session_continuity"]["suggested_call"] = json!({
+                        "tool": "session_handoff_summary",
+                        "arguments": {"session_id": private}
+                    });
                 }
                 ContextRecoveryKind::Delta => {
                     projection["session_recovery"] = json!({

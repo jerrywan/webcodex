@@ -2,7 +2,7 @@
 
 use super::{
     ContinuationCarrier, ContinuationKind, ContinuationSemantics, ObserveJobsItem,
-    ObserveJobsWakeOn, RecoveryKind, RecoveryTool, ToolResult, ToolRuntime,
+    ObserveJobsWakeOn, RecoveryKind, SuggestedToolCall, ToolResult, ToolRuntime,
 };
 use crate::auth::AuthContext;
 use futures_util::{stream, StreamExt};
@@ -92,11 +92,11 @@ fn observation_error_kind(result: &ToolResult) -> &'static str {
     }
 }
 
-fn observation_recovery(error_kind: &str) -> (RecoveryKind, Option<RecoveryTool>) {
+fn observation_recovery(error_kind: &str) -> RecoveryKind {
     match error_kind {
-        "invalid_observation_token" | "output_budget_exceeded" => (RecoveryKind::FixInput, None),
-        "unknown_job" => (RecoveryKind::Reobserve, Some(RecoveryTool::ListJobs)),
-        _ => (RecoveryKind::NoAction, None),
+        "invalid_observation_token" | "output_budget_exceeded" => RecoveryKind::FixInput,
+        "unknown_job" => RecoveryKind::Reobserve,
+        _ => RecoveryKind::NoAction,
     }
 }
 
@@ -121,7 +121,7 @@ fn batch_item(observed: ObservedJob) -> Value {
         })
     } else {
         let error_kind = observation_error_kind(&observed.result);
-        let (recovery_kind, recovery_tool) = observation_recovery(error_kind);
+        let recovery_kind = observation_recovery(error_kind);
         let mut item = json!({
             "index": observed.index,
             "job_id": observed.job_id,
@@ -131,8 +131,8 @@ fn batch_item(observed: ObservedJob) -> Value {
             "recovery_kind": recovery_kind.as_str(),
             "error": bounded_error(observed.result.error.as_deref()),
         });
-        if let Some(recovery_tool) = recovery_tool {
-            item["recovery_tool"] = json!(recovery_tool.as_str());
+        if error_kind == "unknown_job" {
+            item["suggested_call"] = SuggestedToolCall::new("list_jobs", json!({})).to_value();
         }
         item
     }
@@ -309,7 +309,7 @@ fn sparse_success_item(item: &Value) -> Option<Value> {
         || !item.get("error_kind").is_some_and(Value::is_null)
         || !item.get("error").is_some_and(Value::is_null)
         || item.get("recovery_kind").is_some()
-        || item.get("recovery_tool").is_some()
+        || item.get("suggested_call").is_some()
     {
         return None;
     }
@@ -786,10 +786,28 @@ mod tests {
         });
         assert_eq!(missing["error_kind"], "unknown_job");
         assert_eq!(missing["recovery_kind"], "reobserve");
-        assert_eq!(missing["recovery_tool"], "list_jobs");
+        assert!(missing.get("recovery_tool").is_none());
+        let suggested = &missing["suggested_call"];
+        assert_eq!(suggested, &json!({"tool": "list_jobs", "arguments": {}}));
+        let parsed = crate::tool_runtime::ToolCall::from_tool_name(
+            suggested["tool"].as_str().unwrap(),
+            suggested["arguments"].clone(),
+        )
+        .expect("unknown Job recovery must be parser-ready");
+        match parsed {
+            crate::tool_runtime::ToolCall::ListJobs {
+                project,
+                session_id,
+                ..
+            } => {
+                assert!(project.is_none());
+                assert!(session_id.is_none());
+            }
+            other => panic!("unexpected recovery call: {}", other.tool_name()),
+        }
         assert!(
             crate::tool_runtime::tool_definition::is_adaptive_runtime_direct_tool(
-                missing["recovery_tool"].as_str().unwrap()
+                suggested["tool"].as_str().unwrap()
             )
         );
 
@@ -800,6 +818,7 @@ mod tests {
         });
         assert_eq!(invalid_token["recovery_kind"], "fix_input");
         assert!(invalid_token.get("recovery_tool").is_none());
+        assert!(invalid_token.get("suggested_call").is_none());
 
         let success = batch_item(ObservedJob {
             index: 2,
@@ -808,6 +827,7 @@ mod tests {
         });
         assert!(success.get("recovery_kind").is_none());
         assert!(success.get("recovery_tool").is_none());
+        assert!(success.get("suggested_call").is_none());
     }
 
     #[test]

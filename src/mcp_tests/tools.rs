@@ -737,6 +737,10 @@ fn stateless_workflow_recorder_metadata_does_not_expand_project_connector_or_loc
             suggested["properties"]["arguments"]["required"],
             json!(["session_id"])
         );
+        let continuity = &tool["outputSchema"]["properties"]["output"]["properties"]
+            ["session_continuity"]["properties"];
+        assert!(continuity.get("recovery_tool").is_none());
+        assert!(continuity.get("recovery_session_id").is_none());
         assert!(properties.contains_key(
             crate::tool_runtime::context_projection::TOOL_CALL_CONTEXT_REQUEST_FIELD
         ));

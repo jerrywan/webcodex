@@ -574,7 +574,7 @@ fn observe_jobs_failure_item_schema_closes_recovery_metadata() {
                 "output": null,
                 "error_kind": "unknown_job",
                 "recovery_kind": "reobserve",
-                "recovery_tool": "list_jobs",
+                "suggested_call": {"tool": "list_jobs", "arguments": {}},
                 "error": "unknown job"
             }],
             "wait": {
@@ -594,9 +594,18 @@ fn observe_jobs_failure_item_schema_closes_recovery_metadata() {
     invalid_kind["output"]["items"][0]["recovery_kind"] = json!("blind_retry");
     assert!(validate(&invalid_kind).is_err());
 
-    let mut invalid_tool = result;
-    invalid_tool["output"]["items"][0]["recovery_tool"] = json!("computer_list_windows");
+    let mut invalid_tool = result.clone();
+    invalid_tool["output"]["items"][0]["suggested_call"]["tool"] = json!("computer_list_windows");
     assert!(validate(&invalid_tool).is_err());
+
+    let mut inferred_scope = result.clone();
+    inferred_scope["output"]["items"][0]["suggested_call"]["arguments"] =
+        json!({"project": "agent:should-not-be-inferred:demo"});
+    assert!(validate(&inferred_scope).is_err());
+
+    let mut duplicate_alias = result;
+    duplicate_alias["output"]["items"][0]["recovery_tool"] = json!("list_jobs");
+    assert!(validate(&duplicate_alias).is_err());
 }
 
 #[test]

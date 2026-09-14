@@ -811,7 +811,7 @@ fn observe_jobs_compact_projection_preserves_mixed_failure_and_budget_recovery()
         "output": null,
         "error_kind": "unknown_job",
         "recovery_kind": "reobserve",
-        "recovery_tool": "list_jobs",
+        "suggested_call": {"tool": "list_jobs", "arguments": {}},
         "error": "unknown job: missing-job"
     });
     let mixed = canonical_batch(vec![success.clone(), failure], "item_error", 0);
@@ -819,7 +819,10 @@ fn observe_jobs_compact_projection_preserves_mixed_failure_and_budget_recovery()
         serde_json::to_value(compact_projection(&mixed)).unwrap(),
         serde_json::to_value(&mixed).unwrap()
     );
-    assert_eq!(mixed.output["items"][1]["recovery_tool"], "list_jobs");
+    assert_eq!(
+        mixed.output["items"][1]["suggested_call"],
+        json!({"tool": "list_jobs", "arguments": {}})
+    );
 
     let mut truncated = canonical_batch(vec![success], "immediate", 0);
     truncated.output["output_truncated"] = json!(true);
@@ -951,7 +954,8 @@ fn observe_jobs_projection_reports_deterministic_byte_measurements() {
             json!({
                 "index": 1, "job_id": "missing-measure", "success": false,
                 "output": null, "error_kind": "unknown_job", "recovery_kind": "reobserve",
-                "recovery_tool": "list_jobs", "error": "unknown job: missing-measure"
+                "suggested_call": {"tool": "list_jobs", "arguments": {}},
+                "error": "unknown job: missing-measure"
             }),
         ],
         "item_error",

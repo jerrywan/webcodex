@@ -35,7 +35,6 @@ impl RecoveryKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryTool {
-    ListJobs,
     ComputerFindElements,
     ComputerListWindows,
     ComputerListApplications,
@@ -47,7 +46,6 @@ pub enum RecoveryTool {
 impl RecoveryTool {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::ListJobs => "list_jobs",
             Self::ComputerFindElements => "computer_find_elements",
             Self::ComputerListWindows => "computer_list_windows",
             Self::ComputerListApplications => "computer_list_applications",
@@ -212,6 +210,10 @@ mod tests {
         assert!(call.get("authority").is_none());
         assert!(call.get("retry_token").is_none());
         assert!(call.get("continuation_token").is_none());
+        assert!(
+            !webcodex_core::runtime_contract::RECOVERY_TOOL_VALUES.contains(&"list_jobs"),
+            "parser-ready Job follow-up must not also remain in recovery_tool vocabulary"
+        );
     }
 
     #[test]
