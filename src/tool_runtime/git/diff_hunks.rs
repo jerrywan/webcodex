@@ -30,7 +30,6 @@ const MAX_MAX_HUNKS: usize = 100;
 pub(super) const DEFAULT_MAX_HUNK_LINES: usize = 160;
 pub(crate) const MAX_MAX_HUNK_LINES: usize = 400;
 const GIT_DIFF_HUNKS_V2_CONTINUATION_PREFIX: &str = "wcdh2.";
-const GIT_DIFF_HUNKS_V2_CONTINUATION_MAX_BYTES: usize = 192;
 const GIT_DIFF_HUNKS_V2_WORKTREE_PAGE: u8 = 1;
 const GIT_DIFF_HUNKS_V2_COMMITTED_PAGE: u8 = 2;
 const GIT_DIFF_HUNKS_V2_WORKTREE_FRAGMENT: u8 = 3;
@@ -394,8 +393,8 @@ fn encode_git_diff_hunks_v2_token(
         "{GIT_DIFF_HUNKS_V2_CONTINUATION_PREFIX}{}",
         general_purpose::URL_SAFE_NO_PAD.encode(payload)
     );
-    if value.len() > GIT_DIFF_HUNKS_V2_CONTINUATION_MAX_BYTES {
-        return Err("git diff continuation exceeded its v2 size bound".to_string());
+    if value.len() > GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES {
+        return Err("git diff continuation exceeded its size bound".to_string());
     }
     Ok(value)
 }
@@ -2030,16 +2029,6 @@ impl ToolRuntime {
                 &stderr,
             );
         }
-        if output.exit_code != Some(0) {
-            return git_diff_hunks_source_failure(
-                &project,
-                &paths,
-                cached,
-                "source_execution_failed",
-                "source_execution",
-                Some(&output),
-            );
-        }
         if wire.pre_hash_exit != 0
             || wire.post_hash_exit != 0
             || !is_git_object_hex(&wire.pre_fence)
@@ -2085,6 +2074,21 @@ impl ToolRuntime {
                 cached,
                 "source_page_filter_failed",
                 "page_filter",
+                Some(&output),
+            );
+        }
+        // A valid WCDH frame carries more precise source-stage evidence than the
+        // wrapper process exit. The generated script intentionally exits nonzero
+        // for fence, source-change, and page-filter failures after emitting that
+        // frame, so classify those facts first and use the wrapper exit only as a
+        // fallback when the framed observation itself reports no specific fault.
+        if output.exit_code != Some(0) {
+            return git_diff_hunks_source_failure(
+                &project,
+                &paths,
+                cached,
+                "source_execution_failed",
+                "source_execution",
                 Some(&output),
             );
         }
@@ -2372,7 +2376,7 @@ mod continuation_token_tests {
             &committed_fragment,
         ] {
             assert!(token.starts_with("wcdh2."));
-            assert!(token.len() < GIT_DIFF_HUNKS_V2_CONTINUATION_MAX_BYTES);
+            assert!(token.len() < GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES);
         }
         assert_eq!(worktree_page.len(), 105);
         assert_eq!(committed_page.len(), 148);

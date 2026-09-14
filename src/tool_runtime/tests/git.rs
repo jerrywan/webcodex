@@ -984,25 +984,44 @@ async fn git_diff_hunks_source_failures_report_diagnostic_stage() {
 
     let fence = run_git_diff_hunks_with_faulted_source(
         "git-source-fence-invalid",
-        |exit, stdout, stderr| {
-            let start = stdout.find("pre_fence=").unwrap() + "pre_fence=".len();
-            let end = stdout[start..].find('\n').unwrap() + start;
-            let mut invalid = stdout;
-            invalid.replace_range(start..end, &"z".repeat(end - start));
-            (exit, invalid, stderr, false, false)
+        |_exit, stdout, stderr| {
+            let mutated = stdout.replacen("pre_hash_exit=0", "pre_hash_exit=1", 1);
+            assert_ne!(mutated, stdout);
+            // The generated source script exits 1 for this exact observation.
+            (1, mutated, stderr, false, false)
         },
     )
     .await;
     assert_eq!(fence.output["reason_code"], "source_fence_unavailable");
     assert_eq!(fence.output["source_stage"], "source_fence");
 
-    let page_filter =
-        run_git_diff_hunks_with_faulted_source("git-source-page-filter", |exit, stdout, stderr| {
+    let source_changed = run_git_diff_hunks_with_faulted_source(
+        "git-source-changed",
+        |_exit, mut stdout, stderr| {
+            let start = stdout.find("post_fence=").unwrap() + "post_fence=".len();
+            let current = stdout.as_bytes()[start];
+            let replacement = if current == b'a' { "b" } else { "a" };
+            stdout.replace_range(start..start + 1, replacement);
+            // pre_fence != post_fence also makes the generated script exit 1.
+            (1, stdout, stderr, false, false)
+        },
+    )
+    .await;
+    assert_eq!(
+        source_changed.output["reason_code"],
+        "source_changed_during_observation"
+    );
+
+    let page_filter = run_git_diff_hunks_with_faulted_source(
+        "git-source-page-filter",
+        |_exit, stdout, stderr| {
             let mutated = stdout.replacen("page_filter_exit=0", "page_filter_exit=1", 1);
             assert_ne!(mutated, stdout);
-            (exit, mutated, stderr, false, false)
-        })
-        .await;
+            // A nonzero page filter exit is reflected by wrapper exit 1 too.
+            (1, mutated, stderr, false, false)
+        },
+    )
+    .await;
     assert_eq!(
         page_filter.output["reason_code"],
         "source_page_filter_failed"

@@ -17,7 +17,7 @@ pub const DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES: usize = 64 * 1024;
 /// Keep producer stdout comfortably below the ordinary 256 KiB per-stream
 /// Runner result-retention default, leaving headroom for framing and metadata.
 pub const MAX_GIT_DIFF_HUNKS_PAGE_BYTES: usize = 192 * 1024;
-pub const GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES: usize = 512;
+pub const GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES: usize = 192;
 pub const DEFAULT_OBSERVE_JOBS_TAIL_LINES: usize = 40;
 pub const STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS: u64 = 60;
 
