@@ -1395,7 +1395,7 @@ async fn run_process_slow_handoff_is_queryable_once_and_keeps_the_original_budge
     let handoff = task.await.unwrap();
     assert!(started.elapsed() < Duration::from_secs(1));
     assert!(handoff.success, "{:?}", handoff.error);
-    assert_eq!(handoff.output["promoted_to_job"], true);
+    assert!(handoff.output.get("promoted_to_job").is_none());
     assert_eq!(handoff.output["terminal"], false);
     assert_eq!(handoff.output["execution_state"], "running");
     assert_eq!(handoff.output["command_started"], true);
@@ -1600,7 +1600,7 @@ async fn stop_job_stops_the_promoted_process_without_starting_a_replacement() {
     .await;
     let handoff = task.await.unwrap();
     let job_id = handoff.output["job_id"].as_str().unwrap().to_string();
-    assert_eq!(handoff.output["promoted_to_job"], true);
+    assert!(handoff.output.get("promoted_to_job").is_none());
 
     let stopped = runtime
         .dispatch_with_auth(

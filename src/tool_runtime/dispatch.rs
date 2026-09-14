@@ -269,6 +269,7 @@ impl SearchModelProjection {
 
 enum ModelFacingProjection {
     None,
+    JobHandoff,
     Read(super::read_files::ReadModelProjection),
     Search(SearchModelProjection),
 }
@@ -284,6 +285,11 @@ pub(super) struct ModelFacingProjectionPlan {
 impl ModelFacingProjectionPlan {
     pub(super) fn capture(call: &ToolCall) -> Self {
         let projection = match call {
+            ToolCall::RunJob { .. }
+            | ToolCall::RunProcess { .. }
+            | ToolCall::RunScript { .. }
+            | ToolCall::RunShell { .. }
+            | ToolCall::RunDetachedProcess { .. } => ModelFacingProjection::JobHandoff,
             ToolCall::ReadFiles { .. } => {
                 ModelFacingProjection::Read(super::read_files::ReadModelProjection::capture(call))
             }
@@ -307,6 +313,9 @@ impl ModelFacingProjectionPlan {
     pub(super) fn project(self, result: &mut ToolResult) {
         match self.projection {
             ModelFacingProjection::None => {}
+            ModelFacingProjection::JobHandoff => {
+                super::jobs::sparsify_job_handoff_model_result(result)
+            }
             ModelFacingProjection::Read(projection) => {
                 let super::read_files::ReadModelProjection::Batch {
                     max_result_bytes, ..

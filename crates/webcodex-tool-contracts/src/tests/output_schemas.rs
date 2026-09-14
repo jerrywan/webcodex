@@ -51,10 +51,13 @@ fn structured_execution_output(
         });
     }
     if promoted_to_job {
-        instance["output"]["continuation_semantics"] = serde_json::json!({
-            "kind": "observe",
-            "carrier": "observation_token"
-        });
+        for key in [
+            "promoted_to_job",
+            "observation_token",
+            "async_handoff_available",
+        ] {
+            instance["output"].as_object_mut().unwrap().remove(key);
+        }
     }
     instance
 }
@@ -1127,21 +1130,21 @@ fn key_tool_output_schemas_include_expected_fields() {
                     Some("completed"),
                 ),
             ),
-            ("non-promoted execution with continuation semantics", {
+            ("handoff without its observation token", {
                 let mut instance = structured_execution_output(
                     execution_source,
-                    "completed",
-                    true,
+                    "running",
                     true,
                     false,
                     true,
-                    None,
-                    None,
+                    false,
+                    Some("job-1"),
+                    Some("running"),
                 );
-                instance["output"]["continuation_semantics"] = serde_json::json!({
-                    "kind": "observe",
-                    "carrier": "observation_token"
-                });
+                instance["output"]["continuation"]["arguments"]["items"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("after_observation_token");
                 instance
             }),
             (
