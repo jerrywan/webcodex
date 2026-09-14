@@ -1982,6 +1982,60 @@ fn computer_recovery_output_schemas_use_canonical_action_shapes() {
     }
 }
 
+#[test]
+fn skill_recovery_output_schema_accepts_canonical_shapes_and_declares_legacy_rejection() {
+    let schema = output_schema_for_tool("skill_install");
+    let actionable = json!({
+        "success": false,
+        "output": {
+            "error_kind": "skill_store_outcome_unknown",
+            "project": "agent:test:demo",
+            "skill_key": "demo",
+            "outcome_unknown": true,
+            "state_changed": null,
+            "recovery_kind": "reconcile",
+            "suggested_call": {
+                "tool": "skill_versions",
+                "arguments": {
+                    "project": "agent:test:demo",
+                    "skill_key": "demo"
+                }
+            },
+            "retry_same_idempotency_key": true
+        },
+        "error": "skill_store_outcome_unknown"
+    });
+    test_support::validate_schema_instance(&actionable, &schema).unwrap();
+
+    let mut family_only = actionable.clone();
+    family_only["output"]
+        .as_object_mut()
+        .unwrap()
+        .remove("suggested_call");
+    family_only["output"]["reconcile_with"] = json!("skill_versions");
+    test_support::validate_schema_instance(&family_only, &schema).unwrap();
+
+    let recovery_constraints = schema["properties"]["output"]["allOf"]
+        .as_array()
+        .expect("Skill recovery constraints");
+    assert!(recovery_constraints
+        .iter()
+        .any(|constraint| constraint["not"]["required"] == json!(["recovery_tool"])));
+    assert!(recovery_constraints.iter().any(|constraint| {
+        constraint["if"]["required"] == json!(["suggested_call"])
+            && constraint["then"]["not"]["required"] == json!(["reconcile_with"])
+    }));
+    assert!(recovery_constraints.iter().any(|constraint| {
+        constraint["if"]["required"] == json!(["reconcile_with"])
+            && constraint["then"]["not"]["required"] == json!(["suggested_call"])
+    }));
+
+    let mut guessed_extra = actionable;
+    guessed_extra["output"]["suggested_call"]["arguments"]["package_revision"] =
+        json!("wc_skillpkg_deadbeef");
+    assert!(test_support::validate_schema_instance(&guessed_extra, &schema).is_err());
+}
+
 fn default_output_schema_field_names() -> BTreeSet<&'static str> {
     BTreeSet::from([
         "session_hint",

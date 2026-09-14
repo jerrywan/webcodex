@@ -1955,6 +1955,13 @@ async fn tool_manifest_operator_extensions_require_explicit_family_capabilities(
     };
     assert!(manifest("skill_install", management_only).await.success);
     assert!(!manifest("skill_list", management_only).await.success);
+    let versions = manifest("skill_versions", management_only).await;
+    assert!(versions.success, "{:?}", versions.error);
+    assert_eq!(versions.output["contract"]["availability"], "gateway");
+    assert_eq!(
+        versions.output["contract"]["gateway_tool"],
+        "call_runtime_tool"
+    );
 }
 
 #[tokio::test]

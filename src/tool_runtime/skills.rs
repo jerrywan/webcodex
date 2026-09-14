@@ -6,7 +6,7 @@ use super::runtime_metrics::{
 use super::startup_brief::{
     bounded_extension_description, StartupSkillEntry, StartupSkillsCatalog,
 };
-use super::{ToolResult, ToolRuntime};
+use super::{SuggestedToolCall, ToolResult, ToolRuntime};
 use crate::auth::AuthContext;
 use crate::runner_http::{EnqueueRunnerSkillError, RunnerFeature};
 use crate::runner_protocol::{ShellFileOpRequest, ShellRunResponse};
@@ -1962,12 +1962,31 @@ fn skill_error_dynamic(
         target.extend(extra);
     }
     if outcome_unknown || kind == "skill_install_reconcile_required" {
+        let recovery_skill_key = output
+            .get("skill_key")
+            .and_then(Value::as_str)
+            .filter(|skill_key| valid_skill_key(skill_key))
+            .map(str::to_string);
         let target = output
             .as_object_mut()
             .expect("Skill store error projection is always an object");
         target.insert("recovery_kind".to_string(), json!("reconcile"));
-        target.insert("recovery_tool".to_string(), json!("skill_versions"));
-        target.insert("reconcile_with".to_string(), json!("skill_versions"));
+        if !project.is_empty() {
+            if let Some(skill_key) = recovery_skill_key.as_deref() {
+                target.insert(
+                    "suggested_call".to_string(),
+                    SuggestedToolCall::new(
+                        "skill_versions",
+                        json!({"project": project, "skill_key": skill_key}),
+                    )
+                    .to_value(),
+                );
+            } else {
+                target.insert("reconcile_with".to_string(), json!("skill_versions"));
+            }
+        } else {
+            target.insert("reconcile_with".to_string(), json!("skill_versions"));
+        }
         if outcome_unknown {
             target.insert("retry_same_idempotency_key".to_string(), json!(true));
         }
@@ -2322,6 +2341,22 @@ mod tests {
 
     #[test]
     fn uncertain_skill_store_errors_have_same_key_reconciliation_path() {
+        let assert_actionable = |result: &ToolResult| {
+            let suggested = &result.output["suggested_call"];
+            assert_eq!(suggested["tool"], "skill_versions");
+            assert_eq!(
+                suggested["arguments"],
+                json!({"project": "agent:test:demo", "skill_key": "demo"})
+            );
+            assert!(crate::tool_runtime::ToolCall::from_tool_name(
+                suggested["tool"].as_str().expect("suggested Skill tool"),
+                suggested["arguments"].clone(),
+            )
+            .is_ok());
+            assert!(result.output.get("recovery_tool").is_none());
+            assert!(result.output.get("reconcile_with").is_none());
+        };
+
         let unknown = skill_error_dynamic(
             "skill_store_outcome_unknown",
             "agent:test:demo",
@@ -2330,8 +2365,7 @@ mod tests {
         );
         assert_eq!(unknown.output["outcome_unknown"], true);
         assert_eq!(unknown.output["recovery_kind"], "reconcile");
-        assert_eq!(unknown.output["recovery_tool"], "skill_versions");
-        assert_eq!(unknown.output["reconcile_with"], "skill_versions");
+        assert_actionable(&unknown);
         assert_eq!(unknown.output["retry_same_idempotency_key"], true);
         assert!(!unknown.output.to_string().contains("new key"));
 
@@ -2345,7 +2379,7 @@ mod tests {
             true,
         );
         assert_eq!(commit_failed.output["outcome_unknown"], true);
-        assert_eq!(commit_failed.output["recovery_tool"], "skill_versions");
+        assert_actionable(&commit_failed);
         assert_eq!(commit_failed.output["retry_same_idempotency_key"], true);
 
         assert!(!uncertain_skill_store_error(
@@ -2370,8 +2404,16 @@ mod tests {
         );
         assert_eq!(claimed.output["outcome_unknown"], false);
         assert_eq!(claimed.output["recovery_kind"], "reconcile");
-        assert_eq!(claimed.output["recovery_tool"], "skill_versions");
+        assert_actionable(&claimed);
         assert!(claimed.output.get("retry_same_idempotency_key").is_none());
+
+        let family_only =
+            skill_error_dynamic("skill_store_outcome_unknown", "agent:test:demo", None, true);
+        assert_eq!(family_only.output["recovery_kind"], "reconcile");
+        assert_eq!(family_only.output["reconcile_with"], "skill_versions");
+        assert!(family_only.output.get("suggested_call").is_none());
+        assert!(family_only.output.get("recovery_tool").is_none());
+        assert_eq!(family_only.output["retry_same_idempotency_key"], true);
     }
 
     #[test]
