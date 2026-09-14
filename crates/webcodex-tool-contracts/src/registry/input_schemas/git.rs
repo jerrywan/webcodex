@@ -132,7 +132,7 @@ pub fn git_diff_hunks_input_schema() -> Value {
         (
             "max_page_bytes",
             "integer",
-            "Raw producer page budget in bytes, independent of the final serialized model result. Defaults to 64 KiB and is bounded to 16..192 KiB so ordinary Runner result retention retains framing headroom.",
+            "Raw producer page budget in bytes, independent of the final serialized model result. Defaults to 64 KiB. Any recognized nonnegative integer is accepted and runtime-clamped to the fixed 16..192 KiB producer bounds so ordinary Runner result retention retains framing headroom.",
             false,
         ),
         (
@@ -160,10 +160,10 @@ pub fn git_diff_hunks_input_schema() -> Value {
             false,
         ),
     ]));
-    schema["properties"]["max_page_bytes"]["minimum"] =
-        Value::from(webcodex_core::runtime_contract::MIN_GIT_DIFF_HUNKS_PAGE_BYTES);
-    schema["properties"]["max_page_bytes"]["maximum"] =
-        Value::from(webcodex_core::runtime_contract::MAX_GIT_DIFF_HUNKS_PAGE_BYTES);
+    // Negative byte budgets are not meaningful and cannot be represented by
+    // the runtime's usize input. Zero and other sub-minimum nonnegative values
+    // intentionally reach the authoritative runtime clamp.
+    schema["properties"]["max_page_bytes"]["minimum"] = Value::from(0);
     schema["properties"]["max_page_bytes"]["default"] =
         Value::from(webcodex_core::runtime_contract::DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES);
     for field in ["base_commit", "head_commit"] {
@@ -178,18 +178,21 @@ pub fn git_diff_hunks_input_schema() -> Value {
             "if": { "required": ["base_commit"] },
             "then": {
                 "required": ["head_commit"],
-                "not": { "required": ["cached"] }
+                "properties": { "cached": { "const": false } }
             }
         },
         {
             "if": { "required": ["head_commit"] },
             "then": {
                 "required": ["base_commit"],
-                "not": { "required": ["cached"] }
+                "properties": { "cached": { "const": false } }
             }
         },
         {
-            "if": { "required": ["cached"] },
+            "if": {
+                "required": ["cached"],
+                "properties": { "cached": { "const": true } }
+            },
             "then": {
                 "not": {
                     "anyOf": [
