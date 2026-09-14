@@ -950,8 +950,8 @@ impl ToolRuntime {
             .output
             .as_object()
             .is_some_and(|output| output.contains_key("workflow_recording_attention"))
-            && serde_json::to_vec(&result).is_ok_and(|bytes| {
-                bytes.len() > webcodex_workspace::file_read_range::MAX_SERIALIZED_OUTPUT_BYTES
+            && crate::json_measurement::serialized_json_len(&result).is_ok_and(|bytes| {
+                bytes > webcodex_workspace::file_read_range::MAX_SERIALIZED_OUTPUT_BYTES
             })
         {
             if let Some(output) = result.output.as_object_mut() {
