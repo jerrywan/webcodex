@@ -741,6 +741,7 @@ fn stateless_workflow_recorder_metadata_does_not_expand_project_connector_or_loc
             ["session_continuity"]["properties"];
         assert!(continuity.get("recovery_tool").is_none());
         assert!(continuity.get("recovery_session_id").is_none());
+        assert!(continuity.get("recovery_required").is_none());
         assert!(properties.contains_key(
             crate::tool_runtime::context_projection::TOOL_CALL_CONTEXT_REQUEST_FIELD
         ));
@@ -762,6 +763,9 @@ fn stateless_workflow_recorder_metadata_does_not_expand_project_connector_or_loc
         .find(|tool| tool["name"] == "read_files")
         .expect("full-operator read_files schema");
     let read_files_output = serde_json::to_string(&read_files["outputSchema"]).unwrap();
+    assert!(!serde_json::to_string(&full)
+        .unwrap()
+        .contains("\"recovery_required\""));
     assert!(read_files_output.contains("context_projection"));
     assert!(read_files_output.contains("post_tool"));
     let list_tools = full["tools"]

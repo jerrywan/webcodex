@@ -456,8 +456,7 @@ fn add_context_projection_to_output_shape(
                 properties.insert("session_continuity".to_string(), json!({
                     "type": "object",
                     "properties": {
-                        "status": {"type": "string", "enum": ["exact", "behind", "unacknowledged", "invalid", "recovered"]},
-                        "recovery_required": {"type": "boolean"},
+                        "status": {"type": "string", "enum": ["exact", "behind", "unacknowledged", "invalid", "recovered"], "description": "Observed Context continuity state only; it is not authority, retry permission, or an action."},
                         "suggested_call": webcodex_tool_contracts::suggested_tool_call_schema(
                             "session_handoff_summary",
                             json!({
@@ -468,7 +467,7 @@ fn add_context_projection_to_output_shape(
                                 "required": ["session_id"],
                                 "additionalProperties": false
                             }),
-                            "Parser-ready advisory recovery call for re-observing bounded Session context. It grants no authority and is not an ACK token."
+                            "Parser-ready advisory recovery call for re-observing bounded Session context. Its presence is the sole machine representation that explicit handoff recovery is actionable; it grants no authority and is not an ACK token."
                         )
                     },
                     "required": ["status"]

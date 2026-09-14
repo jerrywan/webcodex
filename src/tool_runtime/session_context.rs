@@ -422,7 +422,6 @@ fn require_context_recovery(output: &mut Value, status: &str, session_id: &str) 
         .remove("session_context_continuation");
     output["session_continuity"] = json!({
         "status": status,
-        "recovery_required": true,
         "suggested_call": context_recovery_suggested_call(session_id),
     });
 }
@@ -569,7 +568,6 @@ pub(crate) fn add_session_context_continuity(
         output.remove("session_context_revision");
         output.remove("session_context_continuation");
         let continuity = output.get_mut("session_continuity").unwrap();
-        continuity["recovery_required"] = json!(true);
         continuity["suggested_call"] = context_recovery_suggested_call(&recorded.session_id);
     }
     result.output = Value::Object(output);

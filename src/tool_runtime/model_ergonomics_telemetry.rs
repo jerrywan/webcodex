@@ -461,6 +461,13 @@ struct ContinuityFacts {
     history_lost: Option<bool>,
 }
 
+fn has_context_handoff_recovery_call(output: &Value) -> bool {
+    output
+        .pointer("/session_continuity/suggested_call/tool")
+        .and_then(Value::as_str)
+        == Some("session_handoff_summary")
+}
+
 fn continuity_facts(ack_shape: ContextAckShape, output: &Value) -> ContinuityFacts {
     let eligible = !matches!(ack_shape, ContextAckShape::Unsupported);
     if !eligible {
@@ -532,11 +539,7 @@ fn continuity_facts(ack_shape: ContextAckShape, output: &Value) -> ContinuityFac
         .or_else(|| status.as_ref().map(|_| false));
     let recovery_kind = if status.as_deref() == Some("recovered") {
         ContextRecoveryKind::CurrentState
-    } else if output
-        .pointer("/session_continuity/recovery_required")
-        .and_then(Value::as_bool)
-        == Some(true)
-    {
+    } else if has_context_handoff_recovery_call(output) {
         ContextRecoveryKind::CompactHint
     } else if recovery_event_count.is_some_and(|count| count > 0) {
         ContextRecoveryKind::Delta
@@ -1063,7 +1066,7 @@ mod tests {
         )
         .unwrap()
         .finish_after(Duration::ZERO)
-        .record_for_tool_result(&ToolResult::ok(json!({"session_continuity": {"status": "unacknowledged", "recovery_required": true, "suggested_call": {"tool": "session_handoff_summary", "arguments": {"session_id": "wc_sess_test"}}}})))
+        .record_for_tool_result(&ToolResult::ok(json!({"session_continuity": {"status": "unacknowledged", "suggested_call": {"tool": "session_handoff_summary", "arguments": {"session_id": "wc_sess_test"}}}})))
         .unwrap();
         assert!(missing.context_continuity_eligible);
         assert_eq!(missing.context_ack_present, Some(false));
@@ -1117,7 +1120,13 @@ mod tests {
         .unwrap()
         .finish_after(Duration::ZERO)
         .record_for_tool_result(&ToolResult::ok(json!({
-            "session_continuity": {"status": "invalid", "recovery_required": true}
+            "session_continuity": {
+                "status": "invalid",
+                "suggested_call": {
+                    "tool": "session_handoff_summary",
+                    "arguments": {"session_id": "wc_sess_invalid"}
+                }
+            }
         })))
         .unwrap();
         assert_eq!(invalid.context_ack_present, Some(true));
@@ -1125,8 +1134,15 @@ mod tests {
             invalid.context_continuity_status.as_deref(),
             Some("invalid")
         );
+        assert_eq!(
+            invalid.context_recovery_kind,
+            ContextRecoveryKind::CompactHint
+        );
         assert_eq!(invalid.session_recovery_event_count, Some(0));
         assert_eq!(invalid.session_history_lost, Some(false));
+        assert!(!serde_json::to_string(&invalid)
+            .unwrap()
+            .contains("wc_sess_invalid"));
     }
 
     #[test]
@@ -1151,7 +1167,6 @@ mod tests {
                     projection["session_context_revision"] = json!(123456789)
                 }
                 ContextRecoveryKind::CompactHint => {
-                    projection["session_continuity"]["recovery_required"] = json!(true);
                     projection["session_continuity"]["suggested_call"] = json!({
                         "tool": "session_handoff_summary",
                         "arguments": {"session_id": private}
@@ -1164,6 +1179,9 @@ mod tests {
                 }
                 ContextRecoveryKind::None => unreachable!(),
             }
+            assert!(!serde_json::to_string(&projection)
+                .unwrap()
+                .contains("\"recovery_required\""));
             let expected_bytes = serde_json::to_vec(&projection).unwrap().len() as u64;
             let mut output = projection;
             output["business_payload"] = json!(private.repeat(100));

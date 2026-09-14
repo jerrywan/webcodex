@@ -1409,6 +1409,14 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
     let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
     let service = Service::new(build_test_router(config, db.clone(), runtime.clone()));
 
+    fn assert_no_recovery_required(value: &Value) {
+        let serialized = serde_json::to_string(value).unwrap();
+        assert!(
+            !serialized.contains("\"recovery_required\""),
+            "model-facing Context projection retained duplicate recovery_required: {serialized}"
+        );
+    }
+
     let (status, session_body) = stateless_2026_tool_call(
         &service,
         "secret",
@@ -1495,6 +1503,7 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
         stateless_2026_tool_call(&service, "secret", 231, "start_session", stale_args, None).await;
     assert_eq!(status, StatusCode::OK, "{stale_body}");
     let stale = stateless_tool_output(&stale_body);
+    assert_no_recovery_required(&stale);
     assert_eq!(stale["session_context_revision"], 2);
     assert_eq!(stale["session_continuity"]["status"], "behind");
     assert_eq!(stale["session_continuity"]["ack_revision"], 0);
@@ -1517,7 +1526,7 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
     let future = stateless_tool_output(&future_body);
     assert!(future.get("session_context_revision").is_none());
     assert_eq!(future["session_continuity"]["status"], "invalid");
-    assert_eq!(future["session_continuity"]["recovery_required"], true);
+    assert_no_recovery_required(&future);
     assert!(future.get("session_recovery").is_none());
     assert!(future["session_continuity"].get("recovery_tool").is_none());
     assert!(future["session_continuity"]
@@ -1535,6 +1544,7 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
             .await;
     assert_eq!(status, StatusCode::OK, "{missing_body}");
     let missing = stateless_tool_output(&missing_body);
+    assert_no_recovery_required(&missing);
     assert!(missing.get("session_context_revision").is_none());
     assert_eq!(missing["session_continuity"]["status"], "unacknowledged");
     assert!(missing.get("session_recovery").is_none());
@@ -1563,6 +1573,7 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
     .await;
     assert_eq!(status, StatusCode::OK, "{recovered_body}");
     let recovered = stateless_tool_output(&recovered_body);
+    assert_no_recovery_required(&recovered);
     assert_eq!(recovered["session_context_revision"], 4);
     assert_eq!(recovered["session_continuity"]["status"], "recovered");
     assert!(recovered["validation"].is_object());
@@ -1591,7 +1602,8 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
         assert_eq!(status, StatusCode::OK, "{body}");
         let output = stateless_tool_output(&body);
         assert!(output.get("session_context_revision").is_none());
-        assert_eq!(output["session_continuity"]["recovery_required"], true);
+        assert_no_recovery_required(&output);
+        assert!(output["session_continuity"]["suggested_call"].is_object());
         assert!(output.get("session_recovery").is_none());
     }
 
@@ -1637,6 +1649,7 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
     .await;
     assert_eq!(status, StatusCode::OK, "{after_missing_body}");
     let after_missing = stateless_tool_output(&after_missing_body);
+    assert_no_recovery_required(&after_missing);
     assert_eq!(after_missing["session_context_revision"], 5);
     assert!(after_missing.get("session_continuity").is_none());
     assert!(after_missing.get("session_recovery").is_none());
@@ -1655,6 +1668,7 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
     .await;
     assert_eq!(status, StatusCode::OK, "{malformed_body}");
     let malformed = stateless_tool_output(&malformed_body);
+    assert_no_recovery_required(&malformed);
     assert!(
         malformed["session_id"].is_string(),
         "business Session creation must execute"
