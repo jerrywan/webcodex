@@ -612,7 +612,6 @@ fn git_diff_hunks_tool_is_known_and_schema_is_bounded() {
         "truncated",
         "truncation_reasons",
         "has_more",
-        "next_continuation",
         "recovery",
         "exit_code",
         "stderr",
@@ -620,20 +619,11 @@ fn git_diff_hunks_tool_is_known_and_schema_is_bounded() {
         assert!(output_props.contains_key(field), "missing {}", field);
     }
     let recovery = &output_props["recovery"];
-    assert!(recovery["properties"]["arguments"]["anyOf"].is_array());
-    let omitted_lines = &recovery["properties"]["omitted_lines"];
-    for field in [
-        "present",
-        "recoverable",
-        "reason_code",
-        "path_provenance",
-        "paths",
-        "next_call",
-    ] {
-        assert!(
-            omitted_lines["properties"].get(field).is_some(),
-            "missing omitted_lines recovery field {field}"
-        );
+    assert!(output_props.get("next_continuation").is_none());
+    assert!(recovery["properties"]["later_hunks"].is_object());
+    let current_hunk = &recovery["properties"]["current_hunk"];
+    for field in ["reason_code", "next_call"] {
+        assert!(current_hunk["properties"].get(field).is_some());
     }
 }
 
@@ -1853,36 +1843,47 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
     assert_eq!(first.output["has_more"], true);
     assert!(first_bytes < 48 * 1024);
     assert_eq!(first_scripts.len(), 2);
-    let token = first.output["next_continuation"]
+    let token = first.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
         .as_str()
         .expect("first committed page continuation")
         .to_string();
     assert!(token.starts_with("wcdh2."));
     let recovery = &first.output["recovery"];
-    assert_eq!(recovery["kind"], "page");
+    assert!(recovery["later_hunks"].is_object());
     assert_eq!(
-        recovery["continuation"]["continuation_semantics"]["kind"],
-        "page"
+        recovery["later_hunks"]["next_call"]["arguments"]["project"],
+        project
     );
     assert_eq!(
-        recovery["continuation"]["continuation_semantics"]["carrier"],
-        "opaque_token"
+        recovery["later_hunks"]["next_call"]["arguments"]["paths"],
+        json!(["large.txt"])
     );
     assert_eq!(
-        recovery["omitted_lines"]["continuation_semantics"],
-        Value::Null
+        recovery["later_hunks"]["next_call"]["arguments"]["base_commit"],
+        base
     );
-    assert_eq!(recovery["arguments"]["project"], project);
-    assert_eq!(recovery["arguments"]["paths"], json!(["large.txt"]));
-    assert_eq!(recovery["arguments"]["base_commit"], base);
-    assert_eq!(recovery["arguments"]["head_commit"], head);
-    assert_eq!(recovery["arguments"]["max_hunks"], 1);
-    assert_eq!(recovery["arguments"]["max_hunk_lines"], 120);
-    assert_eq!(recovery["arguments"]["continuation"], token);
-    assert!(recovery["arguments"].get("cached").is_none());
-    assert_git_diff_hunks_recovery_call_parses(recovery);
     assert_eq!(
-        recovery["arguments"]["max_page_bytes"],
+        recovery["later_hunks"]["next_call"]["arguments"]["head_commit"],
+        head
+    );
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["max_hunks"],
+        1
+    );
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["max_hunk_lines"],
+        120
+    );
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["continuation"],
+        token
+    );
+    assert!(recovery["later_hunks"]["next_call"]["arguments"]
+        .get("cached")
+        .is_none());
+    assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["max_page_bytes"],
         DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES
     );
     let (page_budget_mismatch, _, mismatch_scripts) =
@@ -1955,12 +1956,13 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
     assert!(second_again.success);
     assert_eq!(second_again.output["files"], second.output["files"]);
     assert_eq!(
-        second_again.output["next_continuation"],
-        second.output["next_continuation"]
+        second_again.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"],
+        second.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
     );
 
     let mut seen = vec![first_diff, second_diff];
-    let mut next = second.output["next_continuation"]
+    let mut next = second.output["recovery"]["later_hunks"]["next_call"]["arguments"]
+        ["continuation"]
         .as_str()
         .map(str::to_string);
     while let Some(current) = next {
@@ -1986,7 +1988,7 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
             assert!(!seen.contains(&diff), "hunk page replayed: {diff}");
             seen.push(diff);
         }
-        next = page.output["next_continuation"]
+        next = page.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
             .as_str()
             .map(str::to_string);
     }
@@ -2118,7 +2120,8 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
     )
     .await;
     assert!(worktree_page.success);
-    let worktree_token = worktree_page.output["next_continuation"]
+    let worktree_token = worktree_page.output["recovery"]["later_hunks"]["next_call"]["arguments"]
+        ["continuation"]
         .as_str()
         .expect("worktree continuation")
         .to_string();
@@ -2190,14 +2193,10 @@ async fn git_diff_hunks_committed_hunk_fragment_continuation_is_mac_bound_and_mo
     .await;
     assert!(first.success, "{:?}", first.error);
     assert_eq!(
-        first.output["recovery"]["safe_continuation_for_omitted_lines"],
-        true
-    );
-    assert_eq!(
-        first.output["recovery"]["omitted_lines"]["reason_code"],
+        first.output["recovery"]["current_hunk"]["reason_code"],
         "hunk_fragment_continuation_available"
     );
-    let fragment_token = first.output["recovery"]["omitted_lines"]["next_call"]["arguments"]
+    let fragment_token = first.output["recovery"]["current_hunk"]["next_call"]["arguments"]
         ["continuation"]
         .as_str()
         .expect("committed fragment token")
@@ -2319,7 +2318,7 @@ async fn git_diff_hunks_committed_hunk_fragment_continuation_is_mac_bound_and_mo
         next_fragment = page
             .output
             .get("recovery")
-            .and_then(|recovery| recovery.get("omitted_lines"))
+            .and_then(|recovery| recovery.get("current_hunk"))
             .and_then(|omitted| omitted.get("next_call"))
             .and_then(|call| call.get("arguments"))
             .and_then(|arguments| arguments.get("continuation"))
@@ -2346,7 +2345,7 @@ async fn git_diff_hunks_committed_hunk_fragment_continuation_is_mac_bound_and_mo
     )
     .await;
     assert!(worktree_first.success, "{:?}", worktree_first.error);
-    let worktree_fragment = worktree_first.output["recovery"]["omitted_lines"]["next_call"]
+    let worktree_fragment = worktree_first.output["recovery"]["current_hunk"]["next_call"]
         ["arguments"]["continuation"]
         .as_str()
         .expect("worktree fragment token")
@@ -2481,6 +2480,27 @@ fn git_test_command_ok(repo: &Path, command: &str) {
     );
 }
 
+fn assert_git_diff_hunks_sparse_recovery_calls_parse(recovery: &Value) {
+    assert!(recovery
+        .as_object()
+        .unwrap()
+        .keys()
+        .all(|key| matches!(key.as_str(), "current_hunk" | "later_hunks")));
+    for lane in ["current_hunk", "later_hunks"] {
+        if let Some(value) = recovery.get(lane) {
+            assert!(value
+                .as_object()
+                .unwrap()
+                .keys()
+                .all(|key| key == "next_call" || (lane == "current_hunk" && key == "reason_code")));
+            if let Some(call) = value.get("next_call") {
+                ToolCall::from_tool_name(call["tool"].as_str().unwrap(), call["arguments"].clone())
+                    .expect("each recovery lane must parse directly");
+            }
+        }
+    }
+}
+
 fn assert_git_diff_hunks_recovery_call_parses(recovery: &Value) {
     let tool = recovery["tool"]
         .as_str()
@@ -2557,31 +2577,43 @@ async fn git_diff_hunks_stable_multi_page_traversal_has_no_duplicate_or_missing_
             }
         }
         if result.output["has_more"] == false {
-            assert_eq!(result.output["next_continuation"], Value::Null);
+            assert!(result.output["recovery"].get("later_hunks").is_none());
             finished = true;
             break;
         }
-        let next = result.output["next_continuation"]
+        let next = result.output["recovery"]["later_hunks"]["next_call"]["arguments"]
+            ["continuation"]
             .as_str()
             .expect("non-final page continuation")
             .to_string();
         let recovery = &result.output["recovery"];
-        assert_eq!(recovery["kind"], "page");
-        assert_eq!(recovery["safe_continuation_for_omitted_lines"], Value::Null);
-        assert_eq!(recovery["continuation"]["available"], true);
-        assert_eq!(recovery["continuation"]["recovers_later_hunks"], true);
-        assert_eq!(recovery["continuation"]["recovers_omitted_lines"], false);
-        assert_eq!(recovery["arguments"]["project"], project);
-        assert_eq!(recovery["arguments"]["paths"], json!([]));
-        assert_eq!(recovery["arguments"]["cached"], false);
-        assert_eq!(recovery["arguments"]["max_hunks"], 2);
-        assert_eq!(recovery["arguments"]["max_hunk_lines"], 400);
-        assert_eq!(recovery["arguments"]["continuation"], next);
+        assert!(recovery["later_hunks"].is_object());
+        assert!(recovery["later_hunks"]["next_call"].is_object());
         assert_eq!(
-            recovery["continuation"]["next_call"]["arguments"],
-            recovery["arguments"]
+            recovery["later_hunks"]["next_call"]["arguments"]["project"],
+            project
         );
-        assert_git_diff_hunks_recovery_call_parses(recovery);
+        assert_eq!(
+            recovery["later_hunks"]["next_call"]["arguments"]["paths"],
+            json!([])
+        );
+        assert_eq!(
+            recovery["later_hunks"]["next_call"]["arguments"]["cached"],
+            false
+        );
+        assert_eq!(
+            recovery["later_hunks"]["next_call"]["arguments"]["max_hunks"],
+            2
+        );
+        assert_eq!(
+            recovery["later_hunks"]["next_call"]["arguments"]["max_hunk_lines"],
+            400
+        );
+        assert_eq!(
+            recovery["later_hunks"]["next_call"]["arguments"]["continuation"],
+            next
+        );
+        assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
         assert!(
             seen_tokens.insert(next.clone()),
             "continuation did not advance"
@@ -2658,47 +2690,45 @@ async fn git_diff_hunks_large_raw_diff_is_bounded_before_runner_result_retention
     );
     assert_eq!(result.output["files"][0]["path"], "large-0.txt");
     assert_eq!(result.output["has_more"], true);
-    assert!(result.output["next_continuation"].as_str().is_some());
+    assert!(
+        result.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
+            .as_str()
+            .is_some()
+    );
     let reasons = result.output["truncation_reasons"].as_array().unwrap();
     assert!(!reasons.iter().any(|reason| reason == "page_hunk_limit"));
     assert!(reasons.iter().any(|reason| reason == "hunk_line_limit"));
     assert!(!reasons.iter().any(|reason| reason == "page_byte_budget"));
     let recovery = &result.output["recovery"];
-    assert_eq!(recovery["kind"], "mixed");
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
-    assert_eq!(recovery["omitted_lines"]["present"], true);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert!(recovery["current_hunk"].is_object());
+    assert!(recovery["current_hunk"]["next_call"].is_object());
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "hunk_fragment_continuation_available"
     );
-    assert_eq!(recovery["omitted_lines"]["path_provenance"], "exact");
-    assert_eq!(recovery["omitted_lines"]["paths"], json!(["large-0.txt"]));
-    assert!(recovery["omitted_lines"]["next_call"].is_object());
-    assert_eq!(recovery["continuation"]["available"], true);
-    assert_eq!(
-        recovery["arguments"],
-        recovery["omitted_lines"]["next_call"]["arguments"]
-    );
+    assert!(recovery["later_hunks"]["next_call"].is_object());
     assert_ne!(
-        recovery["arguments"]["continuation"],
-        recovery["continuation"]["next_call"]["arguments"]["continuation"]
-    );
-    assert_eq!(recovery["arguments"]["paths"], json!([]));
-    assert_eq!(recovery["arguments"]["max_hunk_lines"], 12);
-    assert_eq!(
-        recovery["arguments"]["max_page_bytes"],
-        DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES
+        recovery["current_hunk"]["next_call"]["arguments"]["continuation"],
+        recovery["later_hunks"]["next_call"]["arguments"]["continuation"]
     );
     assert_eq!(
-        recovery["continuation"]["next_call"]["arguments"]["max_hunk_lines"],
+        recovery["current_hunk"]["next_call"]["arguments"]["paths"],
+        json!([])
+    );
+    assert_eq!(
+        recovery["current_hunk"]["next_call"]["arguments"]["max_hunk_lines"],
         12
     );
     assert_eq!(
-        recovery["continuation"]["next_call"]["arguments"]["continuation"],
-        result.output["next_continuation"]
+        recovery["current_hunk"]["next_call"]["arguments"]["max_page_bytes"],
+        DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES
     );
-    assert_git_diff_hunks_recovery_call_parses(recovery);
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["max_hunk_lines"],
+        12
+    );
+
+    assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
     assert!(
         serde_json::to_vec(&result).unwrap().len() <= MODEL_INSPECTION_MAX_RESULT_BYTES,
         "serialized result exceeded explicit model-inspection ceiling"
@@ -2746,12 +2776,12 @@ async fn git_diff_hunks_page_budget_is_configurable_bounded_and_scope_bound() {
     );
     assert!(small_stdout_bytes <= MIN_GIT_DIFF_HUNKS_PAGE_BYTES + 4096);
     assert_eq!(small.output["has_more"], true);
-    let token = small.output["next_continuation"]
+    let token = small.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
         .as_str()
         .expect("small producer page must continue")
         .to_string();
     assert_eq!(
-        small.output["recovery"]["arguments"]["max_page_bytes"],
+        small.output["recovery"]["later_hunks"]["next_call"]["arguments"]["max_page_bytes"],
         MIN_GIT_DIFF_HUNKS_PAGE_BYTES
     );
 
@@ -2831,7 +2861,7 @@ async fn git_diff_hunks_worktree_continuation_fails_stale_after_relevant_change(
     )
     .await;
     assert!(page.success, "{:?}", page.error);
-    let token = page.output["next_continuation"]
+    let token = page.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
         .as_str()
         .expect("first page continuation")
         .to_string();
@@ -2852,7 +2882,7 @@ async fn git_diff_hunks_worktree_continuation_fails_stale_after_relevant_change(
     assert!(!stale.success);
     assert_eq!(stale.output["reason_code"], "stale_continuation");
     assert_eq!(stale.output["files"], json!([]));
-    assert_eq!(stale.output["next_continuation"], Value::Null);
+    assert!(stale.output["recovery"].get("later_hunks").is_none());
     assert_eq!(stale.output["state_changed"], false);
 }
 
@@ -2882,7 +2912,7 @@ async fn git_diff_hunks_cached_continuation_fails_stale_after_index_change() {
     )
     .await;
     assert!(page.success, "{:?}", page.error);
-    let token = page.output["next_continuation"]
+    let token = page.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
         .as_str()
         .expect("cached continuation")
         .to_string();
@@ -2904,7 +2934,7 @@ async fn git_diff_hunks_cached_continuation_fails_stale_after_index_change() {
     assert!(!stale.success);
     assert_eq!(stale.output["reason_code"], "stale_continuation");
     assert_eq!(stale.output["files"], json!([]));
-    assert_eq!(stale.output["next_continuation"], Value::Null);
+    assert!(stale.output["recovery"].get("later_hunks").is_none());
 }
 
 #[tokio::test]
@@ -2934,7 +2964,7 @@ async fn git_diff_hunks_scoped_fence_ignores_outside_change_and_rejects_scope_mi
     )
     .await;
     assert!(page.success, "{:?}", page.error);
-    let token = page.output["next_continuation"]
+    let token = page.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
         .as_str()
         .expect("scoped continuation")
         .to_string();
@@ -3039,7 +3069,7 @@ async fn git_diff_hunks_worktree_hunk_fragment_continuation_fails_stale_after_sc
     )
     .await;
     assert!(first.success, "{:?}", first.error);
-    let token = first.output["recovery"]["omitted_lines"]["next_call"]["arguments"]["continuation"]
+    let token = first.output["recovery"]["current_hunk"]["next_call"]["arguments"]["continuation"]
         .as_str()
         .expect("fragment continuation")
         .to_string();
@@ -3060,7 +3090,7 @@ async fn git_diff_hunks_worktree_hunk_fragment_continuation_fails_stale_after_sc
     assert!(!stale.success);
     assert_eq!(stale.output["reason_code"], "stale_continuation");
     assert_eq!(stale.output["files"], json!([]));
-    assert_eq!(stale.output["next_continuation"], Value::Null);
+    assert!(stale.output["recovery"].get("later_hunks").is_none());
     assert!(!script.contains(&token));
 }
 
@@ -3095,7 +3125,7 @@ async fn git_diff_hunks_cached_hunk_fragment_continuation_fails_stale_after_inde
     )
     .await;
     assert!(first.success, "{:?}", first.error);
-    let token = first.output["recovery"]["omitted_lines"]["next_call"]["arguments"]["continuation"]
+    let token = first.output["recovery"]["current_hunk"]["next_call"]["arguments"]["continuation"]
         .as_str()
         .expect("cached fragment continuation")
         .to_string();
@@ -3150,7 +3180,7 @@ async fn git_diff_hunks_scoped_hunk_fragment_continuation_ignores_outside_change
     )
     .await;
     assert!(first.success, "{:?}", first.error);
-    let token = first.output["recovery"]["omitted_lines"]["next_call"]["arguments"]["continuation"]
+    let token = first.output["recovery"]["current_hunk"]["next_call"]["arguments"]["continuation"]
         .as_str()
         .expect("scoped fragment continuation")
         .to_string();
@@ -3222,7 +3252,7 @@ async fn git_diff_hunks_binary_records_advance_across_byte_bounded_pages() {
             returned.push(file["path"].as_str().unwrap().to_string());
         }
         if page.output["has_more"] == false {
-            assert_eq!(page.output["next_continuation"], Value::Null);
+            assert!(page.output["recovery"].get("later_hunks").is_none());
             finished = true;
             break;
         }
@@ -3232,18 +3262,23 @@ async fn git_diff_hunks_binary_records_advance_across_byte_bounded_pages() {
             .iter()
             .any(|reason| reason == "page_byte_budget"));
         let recovery = &page.output["recovery"];
-        assert_eq!(recovery["kind"], "page");
-        assert_eq!(recovery["safe_continuation_for_omitted_lines"], Value::Null);
-        assert_eq!(recovery["arguments"]["cached"], false);
-        assert_eq!(recovery["arguments"]["max_hunks"], 1);
-        assert_eq!(recovery["arguments"]["max_hunk_lines"], 20);
+        assert!(recovery["later_hunks"].is_object());
         assert_eq!(
-            recovery["arguments"]["continuation"],
-            page.output["next_continuation"]
+            recovery["later_hunks"]["next_call"]["arguments"]["cached"],
+            false
         );
-        assert_git_diff_hunks_recovery_call_parses(recovery);
+        assert_eq!(
+            recovery["later_hunks"]["next_call"]["arguments"]["max_hunks"],
+            1
+        );
+        assert_eq!(
+            recovery["later_hunks"]["next_call"]["arguments"]["max_hunk_lines"],
+            20
+        );
+
+        assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
         continuation = Some(
-            page.output["next_continuation"]
+            page.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
                 .as_str()
                 .unwrap()
                 .to_string(),
@@ -3286,7 +3321,7 @@ async fn git_diff_hunks_hunk_line_limit_does_not_create_fake_continuation() {
     assert!(page.success, "{:?}", page.error);
     assert_eq!(page.output["hunk_count"], 1);
     assert_eq!(page.output["has_more"], false);
-    assert_eq!(page.output["next_continuation"], Value::Null);
+    assert!(page.output["recovery"].get("later_hunks").is_none());
     assert_eq!(page.output["files"][0]["hunks"][0]["truncated"], true);
     assert!(page.output["truncation_reasons"]
         .as_array()
@@ -3299,45 +3334,36 @@ async fn git_diff_hunks_hunk_line_limit_does_not_create_fake_continuation() {
         .iter()
         .any(|reason| reason == "page_hunk_limit"));
     let recovery = &page.output["recovery"];
-    assert_eq!(recovery["kind"], "hunk_lines");
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], false);
-    assert_eq!(recovery["continuation"]["available"], false);
-    assert_eq!(recovery["continuation"]["next_call"], Value::Null);
+    assert!(recovery["current_hunk"].is_object());
+    assert!(recovery.get("later_hunks").is_none());
+    assert!(recovery["current_hunk"]["next_call"].is_object());
     assert_eq!(
-        recovery["continuation"]["continuation_semantics"],
-        Value::Null
-    );
-    assert_eq!(recovery["omitted_lines"]["present"], true);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
-    assert_eq!(
-        recovery["omitted_lines"]["continuation_semantics"]["kind"],
-        "refine"
-    );
-    assert_eq!(
-        recovery["omitted_lines"]["continuation_semantics"]["carrier"],
-        "none"
-    );
-    assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "larger_max_hunk_lines_available"
     );
-    assert_eq!(recovery["omitted_lines"]["path_provenance"], "exact");
-    assert_eq!(recovery["omitted_lines"]["paths"], json!(["long.txt"]));
-    assert_eq!(recovery["arguments"]["paths"], json!(["long.txt"]));
-    assert_eq!(recovery["arguments"]["max_hunk_lines"], 400);
-    assert!(recovery["arguments"].get("continuation").is_none());
-    assert_git_diff_hunks_recovery_call_parses(recovery);
+    assert_eq!(
+        recovery["current_hunk"]["next_call"]["arguments"]["paths"],
+        json!(["long.txt"])
+    );
+    assert_eq!(
+        recovery["current_hunk"]["next_call"]["arguments"]["max_hunk_lines"],
+        400
+    );
+    assert!(recovery["current_hunk"]["next_call"]["arguments"]
+        .get("continuation")
+        .is_none());
+    assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
     let recovered = run_parser_ready_worktree_git_diff_hunks_call(
         &runtime,
         client_id,
         repo.path(),
-        &recovery["omitted_lines"]["next_call"],
+        &recovery["current_hunk"]["next_call"],
     )
     .await;
     assert!(recovered.success, "{:?}", recovered.error);
     assert_eq!(recovered.output["truncated"], false);
     assert_eq!(recovered.output["has_more"], false);
-    assert_eq!(recovered.output["next_continuation"], Value::Null);
+    assert!(recovered.output["recovery"].get("later_hunks").is_none());
     assert!(recovered.output.get("recovery").is_none());
     assert_eq!(recovered.output["files"][0]["hunks"][0]["truncated"], false);
     assert!(recovered.output["files"][0]["hunks"][0]["diff"]
@@ -3400,27 +3426,24 @@ async fn git_diff_hunks_hunk_fragment_continuation_reconstructs_over_400_line_hu
             <= MAX_MAX_HUNK_LINES
     );
     let recovery = &first.output["recovery"];
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert!(recovery["current_hunk"]["next_call"].is_object());
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "hunk_fragment_continuation_available"
     );
     assert_eq!(
-        recovery["omitted_lines"]["continuation_semantics"],
-        json!({"kind":"page","carrier":"opaque_token"})
-    );
-    assert_eq!(
-        recovery["omitted_lines"]["next_call"]["tool"],
+        recovery["current_hunk"]["next_call"]["tool"],
         "git_diff_hunks"
     );
     assert_eq!(
-        recovery["arguments"],
-        recovery["omitted_lines"]["next_call"]["arguments"]
+        recovery["current_hunk"]["next_call"]["arguments"]["paths"],
+        json!(["fragment.txt"])
     );
-    assert_eq!(recovery["arguments"]["paths"], json!(["fragment.txt"]));
-    assert_eq!(recovery["arguments"]["max_hunk_lines"], 400);
-    assert_git_diff_hunks_recovery_call_parses(recovery);
+    assert_eq!(
+        recovery["current_hunk"]["next_call"]["arguments"]["max_hunk_lines"],
+        400
+    );
+    assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
 
     let header = first.output["files"][0]["hunks"][0]["header"]
         .as_str()
@@ -3436,15 +3459,15 @@ async fn git_diff_hunks_hunk_fragment_continuation_reconstructs_over_400_line_hu
         let Some(current_recovery) = current.output.get("recovery") else {
             break;
         };
-        if current_recovery["omitted_lines"]["present"] != true {
+        if current_recovery.get("current_hunk").is_none() {
             break;
         }
-        assert_eq!(current_recovery["omitted_lines"]["recoverable"], true);
+        assert!(current_recovery["current_hunk"]["next_call"].is_object());
         assert_eq!(
-            current_recovery["omitted_lines"]["reason_code"],
+            current_recovery["current_hunk"]["reason_code"],
             "hunk_fragment_continuation_available"
         );
-        let next_call = &current_recovery["omitted_lines"]["next_call"];
+        let next_call = &current_recovery["current_hunk"]["next_call"];
         let parsed = ToolCall::from_tool_name(
             next_call["tool"].as_str().unwrap(),
             next_call["arguments"].clone(),
@@ -3494,7 +3517,7 @@ async fn git_diff_hunks_hunk_fragment_continuation_reconstructs_over_400_line_hu
     );
     assert_eq!(reconstructed, authoritative_hunk);
     assert_eq!(current.output["has_more"], false);
-    assert_eq!(current.output["next_continuation"], Value::Null);
+    assert!(current.output["recovery"].get("later_hunks").is_none());
     assert!(current.output.get("recovery").is_none());
 }
 
@@ -3523,7 +3546,7 @@ async fn git_diff_hunks_complete_model_projection_keeps_scope_and_drops_derived_
     assert!(page.success, "{:?}", page.error);
     assert_eq!(page.output["truncated"], false);
     assert_eq!(page.output["has_more"], false);
-    assert_eq!(page.output["next_continuation"], Value::Null);
+    assert!(page.output["recovery"].get("later_hunks").is_none());
     assert!(page.output.get("recovery").is_none());
     assert!(page.output["files"][0]["hunks"][0]
         .get("line_count")
@@ -3542,7 +3565,6 @@ async fn git_diff_hunks_complete_model_projection_keeps_scope_and_drops_derived_
         "truncated",
         "truncation_reasons",
         "has_more",
-        "next_continuation",
         "exit_code",
         "stderr",
     ] {
@@ -3599,19 +3621,35 @@ async fn git_diff_hunks_page_recovery_replays_cached_path_filtered_scope() {
     assert_eq!(page.output["files"][0]["path"], "a.txt");
     assert_eq!(page.output["has_more"], true);
     let recovery = &page.output["recovery"];
-    assert_eq!(recovery["kind"], "page");
-    assert_eq!(recovery["arguments"]["project"], project);
-    assert_eq!(recovery["arguments"]["cached"], true);
-    assert_eq!(recovery["arguments"]["paths"], json!(["a.txt"]));
-    assert_eq!(recovery["arguments"]["max_hunks"], 1);
-    assert_eq!(recovery["arguments"]["max_hunk_lines"], 400);
+    assert!(recovery["later_hunks"].is_object());
     assert_eq!(
-        recovery["arguments"]["continuation"],
-        page.output["next_continuation"]
+        recovery["later_hunks"]["next_call"]["arguments"]["project"],
+        project
     );
-    assert!(recovery["arguments"].get("base_commit").is_none());
-    assert!(recovery["arguments"].get("head_commit").is_none());
-    assert_git_diff_hunks_recovery_call_parses(recovery);
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["cached"],
+        true
+    );
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["paths"],
+        json!(["a.txt"])
+    );
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["max_hunks"],
+        1
+    );
+    assert_eq!(
+        recovery["later_hunks"]["next_call"]["arguments"]["max_hunk_lines"],
+        400
+    );
+
+    assert!(recovery["later_hunks"]["next_call"]["arguments"]
+        .get("base_commit")
+        .is_none());
+    assert!(recovery["later_hunks"]["next_call"]["arguments"]
+        .get("head_commit")
+        .is_none());
+    assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
 }
 
 #[tokio::test]
@@ -3641,7 +3679,7 @@ async fn git_diff_hunks_byte_truncated_final_hunk_is_omitted_evidence_without_fa
 
     assert!(page.success, "{:?}", page.error);
     assert_eq!(page.output["has_more"], false);
-    assert_eq!(page.output["next_continuation"], Value::Null);
+    assert!(page.output["recovery"].get("later_hunks").is_none());
     assert!(page.output["truncation_reasons"]
         .as_array()
         .unwrap()
@@ -3654,20 +3692,13 @@ async fn git_diff_hunks_byte_truncated_final_hunk_is_omitted_evidence_without_fa
         .any(|reason| reason == "hunk_line_limit"));
     assert_eq!(page.output["files"][0]["hunks"][0]["truncated"], true);
     let recovery = &page.output["recovery"];
-    assert_eq!(recovery["kind"], "mixed");
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], false);
-    assert_eq!(recovery["continuation"]["available"], false);
-    assert_eq!(recovery["continuation"]["next_call"], Value::Null);
-    assert_eq!(recovery["omitted_lines"]["present"], true);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], false);
+    assert!(recovery["current_hunk"].is_object());
+    assert!(recovery.get("later_hunks").is_none());
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "page_byte_budget_prevents_proven_recovery"
     );
-    assert_eq!(recovery["omitted_lines"]["path_provenance"], "exact");
-    assert_eq!(recovery["omitted_lines"]["paths"], json!(["huge.txt"]));
-    assert_eq!(recovery["omitted_lines"]["next_call"], Value::Null);
-    assert_eq!(recovery["arguments"], Value::Null);
+    assert!(recovery["current_hunk"].get("next_call").is_none());
 }
 
 #[tokio::test]
@@ -3709,21 +3740,13 @@ async fn git_diff_hunks_fragment_recovery_requires_only_next_bounded_window_to_f
     assert!(reasons.iter().any(|reason| reason == "hunk_line_limit"));
     assert!(!reasons.iter().any(|reason| reason == "page_byte_budget"));
     let recovery = &page.output["recovery"];
-    assert_eq!(recovery["kind"], "hunk_lines");
-    assert_eq!(recovery["omitted_lines"]["present"], true);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert!(recovery["current_hunk"].is_object());
+    assert!(recovery["current_hunk"]["next_call"].is_object());
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "hunk_fragment_continuation_available"
     );
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
-    assert_eq!(recovery["omitted_lines"]["path_provenance"], "exact");
-    assert!(recovery["omitted_lines"]["next_call"].is_object());
-    assert_eq!(
-        recovery["arguments"],
-        recovery["omitted_lines"]["next_call"]["arguments"]
-    );
-    assert_git_diff_hunks_recovery_call_parses(recovery);
+    assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
 }
 
 #[tokio::test]
@@ -3762,15 +3785,14 @@ async fn git_diff_hunks_line_ceiling_uses_fragment_pagination_without_raising_ce
         .iter()
         .any(|reason| reason == "hunk_line_limit"));
     let recovery = &bounded.output["recovery"];
-    assert_eq!(recovery["kind"], "hunk_lines");
-    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert!(recovery["current_hunk"].is_object());
+    assert!(recovery["current_hunk"]["next_call"].is_object());
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "hunk_fragment_continuation_available"
     );
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
     assert_eq!(
-        recovery["omitted_lines"]["next_call"]["arguments"]["max_hunk_lines"],
+        recovery["current_hunk"]["next_call"]["arguments"]["max_hunk_lines"],
         5
     );
 
@@ -3788,18 +3810,17 @@ async fn git_diff_hunks_line_ceiling_uses_fragment_pagination_without_raising_ce
     .await;
     assert!(at_ceiling.success, "{:?}", at_ceiling.error);
     let recovery = &at_ceiling.output["recovery"];
-    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert!(recovery["current_hunk"]["next_call"].is_object());
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "hunk_fragment_continuation_available"
     );
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
     assert_eq!(
-        recovery["omitted_lines"]["next_call"]["arguments"]["max_hunk_lines"],
+        recovery["current_hunk"]["next_call"]["arguments"]["max_hunk_lines"],
         MAX_MAX_HUNK_LINES
     );
     assert!(
-        recovery["omitted_lines"]["next_call"]["arguments"]["continuation"]
+        recovery["current_hunk"]["next_call"]["arguments"]["continuation"]
             .as_str()
             .is_some()
     );
@@ -3843,14 +3864,12 @@ async fn git_diff_hunks_fragment_recovery_fails_closed_when_next_complete_line_c
         .iter()
         .any(|reason| reason == "hunk_line_limit"));
     let recovery = &page.output["recovery"];
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], false);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], false);
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "page_byte_budget_prevents_proven_recovery"
     );
-    assert_eq!(recovery["omitted_lines"]["next_call"], Value::Null);
-    assert_eq!(recovery["arguments"], Value::Null);
+    assert!(recovery["current_hunk"].get("next_call").is_none());
+    assert!(recovery.get("later_hunks").is_none());
 }
 
 #[tokio::test]
@@ -3887,23 +3906,26 @@ async fn git_diff_hunks_mixed_hunk_fragment_and_later_record_continuations_remai
     assert_eq!(first.output["files"][0]["path"], "a-huge.txt");
     assert_eq!(first.output["has_more"], true);
     let recovery = &first.output["recovery"];
-    assert_eq!(recovery["kind"], "mixed");
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], true);
-    assert_eq!(recovery["continuation"]["available"], true);
-    assert_eq!(recovery["continuation"]["recovers_later_hunks"], true);
-    assert_eq!(recovery["continuation"]["recovers_omitted_lines"], false);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], true);
+    assert!(recovery["current_hunk"].is_object());
+    assert!(recovery["later_hunks"]["next_call"].is_object());
+    assert!(recovery["current_hunk"]["next_call"].is_object());
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "hunk_fragment_continuation_available"
     );
-    let fragment_call = recovery["omitted_lines"]["next_call"].clone();
-    let later_call = recovery["continuation"]["next_call"].clone();
-    assert_eq!(recovery["arguments"], fragment_call["arguments"]);
-    assert_eq!(
-        later_call["arguments"]["continuation"],
-        first.output["next_continuation"]
-    );
+    let fragment_call = recovery["current_hunk"]["next_call"].clone();
+    let later_call = recovery["later_hunks"]["next_call"].clone();
+    assert!(first.output.get("next_continuation").is_none());
+    let serialized = serde_json::to_string(&first.output).unwrap();
+    for call in [&fragment_call, &later_call] {
+        let token = call["arguments"]["continuation"].as_str().unwrap();
+        assert_eq!(
+            serialized.matches(token).count(),
+            1,
+            "each continuation identity has one projection"
+        );
+    }
+
     assert_ne!(
         fragment_call["arguments"]["continuation"],
         later_call["arguments"]["continuation"]
@@ -3936,7 +3958,7 @@ async fn git_diff_hunks_mixed_hunk_fragment_and_later_record_continuations_remai
         let Some(next_call) = page
             .output
             .get("recovery")
-            .and_then(|value| value.get("omitted_lines"))
+            .and_then(|value| value.get("current_hunk"))
             .and_then(|value| value.get("next_call"))
             .filter(|value| !value.is_null())
             .cloned()
@@ -3996,30 +4018,26 @@ async fn git_diff_hunks_mixed_byte_omission_keeps_later_hunk_continuation_action
     .await;
     assert!(page.success, "{:?}", page.error);
     assert_eq!(page.output["has_more"], true);
-    assert!(page.output["next_continuation"].as_str().is_some());
+    assert!(
+        page.output["recovery"]["later_hunks"]["next_call"]["arguments"]["continuation"]
+            .as_str()
+            .is_some()
+    );
     let recovery = &page.output["recovery"];
-    assert_eq!(recovery["kind"], "mixed");
-    assert_eq!(recovery["safe_continuation_for_omitted_lines"], false);
-    assert_eq!(recovery["omitted_lines"]["recoverable"], false);
+    assert!(recovery["current_hunk"].is_object());
     assert_eq!(
-        recovery["omitted_lines"]["reason_code"],
+        recovery["current_hunk"]["reason_code"],
         "page_byte_budget_prevents_proven_recovery"
     );
-    assert_eq!(recovery["omitted_lines"]["next_call"], Value::Null);
-    assert_eq!(recovery["continuation"]["available"], true);
-    assert_eq!(recovery["continuation"]["recovers_later_hunks"], true);
-    assert_eq!(recovery["continuation"]["recovers_omitted_lines"], false);
-    assert_eq!(
-        recovery["arguments"],
-        recovery["continuation"]["next_call"]["arguments"]
-    );
-    assert_git_diff_hunks_recovery_call_parses(recovery);
+    assert!(recovery["current_hunk"].get("next_call").is_none());
+    assert!(recovery["later_hunks"]["next_call"].is_object());
+    assert_git_diff_hunks_sparse_recovery_calls_parse(recovery);
 
     let continued = run_parser_ready_worktree_git_diff_hunks_call(
         &runtime,
         client_id,
         repo.path(),
-        &recovery["continuation"]["next_call"],
+        &recovery["later_hunks"]["next_call"],
     )
     .await;
     assert!(continued.success, "{:?}", continued.error);
@@ -4052,7 +4070,7 @@ async fn git_diff_hunks_malformed_continuation_fails_before_runner_dispatch() {
     assert!(!result.success);
     assert_eq!(result.output["reason_code"], "invalid_continuation");
     assert_eq!(result.output["files"], json!([]));
-    assert_eq!(result.output["next_continuation"], Value::Null);
+    assert!(result.output["recovery"].get("later_hunks").is_none());
     assert!(probe_patch_agent_request(&runtime, client_id)
         .await
         .is_none());
@@ -4902,12 +4920,11 @@ fn show_changes_diff_respects_max_hunks() {
         .any(|action| action == "review workspace changes with show_changes"));
     assert!(actions.iter().any(|action| action
         == "continue the diff review with git_diff_hunks; use paths to narrow scope when useful"));
-    assert!(actions
-        .iter()
-        .any(|action| action == "follow git_diff_hunks.next_continuation while has_more=true"));
+    assert!(actions.iter().any(|action| action
+        == "follow git_diff_hunks recovery.later_hunks.next_call while has_more=true"));
     assert!(!actions.iter().any(|action| action
         .as_str()
-        .is_some_and(|action| action.contains("recovery.omitted_lines.next_call"))));
+        .is_some_and(|action| action.contains("recovery.current_hunk.next_call"))));
     assert_show_changes_envelope_value_matches_schema(&output, "hunk count handoff");
 }
 
@@ -4961,10 +4978,9 @@ fn show_changes_diff_respects_max_hunk_lines() {
     assert_git_diff_hunks_recovery_call_parses(recovery);
     let actions = output["suggested_next_actions"].as_array().unwrap();
     assert!(actions.iter().any(|action| action
-        == "follow git_diff_hunks recovery.omitted_lines.next_call; after the fresh handoff observation it may use bounded refinement or an exact hunk-fragment continuation"));
-    assert!(!actions
-        .iter()
-        .any(|action| action == "follow git_diff_hunks.next_continuation while has_more=true"));
+        == "follow git_diff_hunks recovery.current_hunk.next_call; after the fresh handoff observation it may use bounded refinement or an exact hunk-fragment continuation"));
+    assert!(!actions.iter().any(|action| action
+        == "follow git_diff_hunks recovery.later_hunks.next_call while has_more=true"));
     assert_show_changes_envelope_value_matches_schema(&output, "hunk line handoff");
 }
 
@@ -5017,12 +5033,11 @@ fn show_changes_combined_hunk_count_and_line_truncation_keeps_both_guidance_path
     assert_eq!(recovery["safe_continuation_for_omitted_lines"], false);
     assert_git_diff_hunks_recovery_call_parses(recovery);
     let actions = output["suggested_next_actions"].as_array().unwrap();
-    assert!(actions
-        .iter()
-        .any(|action| action == "follow git_diff_hunks.next_continuation while has_more=true"));
+    assert!(actions.iter().any(|action| action
+        == "follow git_diff_hunks recovery.later_hunks.next_call while has_more=true"));
     assert!(actions.iter().any(|action| action
         .as_str()
-        .is_some_and(|action| action.contains("recovery.omitted_lines.next_call"))));
+        .is_some_and(|action| action.contains("recovery.current_hunk.next_call"))));
     assert_show_changes_envelope_value_matches_schema(&output, "combined diff handoff");
 }
 
@@ -7804,9 +7819,8 @@ fn show_changes_long_path_diff_budgets_complete_preambles_and_bytes() {
     );
     assert_git_diff_hunks_recovery_call_parses(&output["diff_review_handoff"]["recovery"]);
     let actions = output["suggested_next_actions"].as_array().unwrap();
-    assert!(actions
-        .iter()
-        .any(|action| action == "follow git_diff_hunks.next_continuation while has_more=true"));
+    assert!(actions.iter().any(|action| action
+        == "follow git_diff_hunks recovery.later_hunks.next_call while has_more=true"));
     assert_show_changes_envelope_value_matches_schema(&output, "diff byte handoff");
 
     let mut rejected_seen = false;

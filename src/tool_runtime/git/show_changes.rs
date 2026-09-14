@@ -2204,13 +2204,13 @@ fn set_show_changes_verdict(output: &mut Value) {
         if page_truncated {
             push_unique_action(
                 &mut actions,
-                "follow git_diff_hunks.next_continuation while has_more=true",
+                "follow git_diff_hunks recovery.later_hunks.next_call while has_more=true",
             );
         }
         if hunk_line_truncated {
             push_unique_action(
                 &mut actions,
-                "follow git_diff_hunks recovery.omitted_lines.next_call; after the fresh handoff observation it may use bounded refinement or an exact hunk-fragment continuation",
+                "follow git_diff_hunks recovery.current_hunk.next_call; after the fresh handoff observation it may use bounded refinement or an exact hunk-fragment continuation",
             );
         }
     } else if let Some(object) = output.as_object_mut() {

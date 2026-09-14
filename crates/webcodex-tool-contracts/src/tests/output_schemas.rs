@@ -105,132 +105,79 @@ fn t2_continuation_output_schemas_distinguish_cursor_kinds_and_carriers() {
         ["continuation_semantics"]["properties"];
     assert_eq!(session_semantics["kind"]["const"], "observe");
     assert_eq!(session_semantics["carrier"]["const"], "observation_token");
-
-    let git = spec_named(&specs, "git_diff_hunks");
-    let recovery = &git.output_schema["properties"]["output"]["properties"]["recovery"];
-    let page_semantics = &recovery["properties"]["continuation"]["properties"]
-        ["continuation_semantics"]["anyOf"][0]["properties"];
-    assert_eq!(page_semantics["kind"]["const"], "page");
-    assert_eq!(page_semantics["carrier"]["const"], "opaque_token");
-    let refine_semantics = &recovery["properties"]["omitted_lines"]["properties"]
-        ["continuation_semantics"]["anyOf"][0]["properties"];
-    assert_eq!(refine_semantics["kind"]["const"], "refine");
-    assert_eq!(refine_semantics["carrier"]["const"], "none");
-    let fragment_semantics = &recovery["properties"]["omitted_lines"]["properties"]
-        ["continuation_semantics"]["anyOf"][1]["properties"];
-    assert_eq!(fragment_semantics["kind"]["const"], "page");
-    assert_eq!(fragment_semantics["carrier"]["const"], "opaque_token");
 }
 
 #[test]
-fn git_diff_hunks_omitted_line_recovery_schema_accepts_only_canonical_refine_or_fragment_shapes() {
+fn git_diff_hunks_recovery_schema_accepts_only_sparse_actionable_lanes() {
     let specs = registered_tool_specs();
     let git = spec_named(&specs, "git_diff_hunks");
-    let recovery_schema = &git.output_schema["properties"]["output"]["properties"]["recovery"];
-    let continuation_lane = json!({
-        "available": false,
-        "recovers_later_hunks": false,
-        "recovers_omitted_lines": false,
-        "continuation_semantics": null,
-        "next_call": null
+    let schema = &git.output_schema["properties"]["output"]["properties"]["recovery"];
+    let arguments = json!({
+        "project": "agent:special:webcodex", "paths": ["a.txt"],
+        "max_hunks": 10, "max_hunk_lines": 400, "max_page_bytes": 65536, "cached": false
     });
-    let refine_arguments = json!({
-        "project": "agent:special:webcodex",
-        "paths": ["a.txt"],
-        "max_hunks": 10,
-        "max_hunk_lines": 400,
-        "max_page_bytes": 65536,
-        "cached": false
-    });
-    let fragment_arguments = json!({
-        "project": "agent:special:webcodex",
-        "paths": ["a.txt"],
-        "max_hunks": 10,
-        "max_hunk_lines": 400,
-        "max_page_bytes": 65536,
-        "cached": false,
-        "continuation": "wcdh2.fragment"
-    });
-    let refine = json!({
-        "kind": "hunk_lines",
-        "tool": "git_diff_hunks",
-        "arguments": refine_arguments.clone(),
-        "safe_continuation_for_omitted_lines": false,
-        "continuation": continuation_lane.clone(),
-        "omitted_lines": {
-            "present": true,
-            "recoverable": true,
-            "reason_code": "larger_max_hunk_lines_available",
-            "path_provenance": "exact",
-            "paths": ["a.txt"],
-            "continuation_semantics": {"kind": "refine", "carrier": "none"},
-            "next_call": {"tool": "git_diff_hunks", "arguments": refine_arguments}
-        }
-    });
-    test_support::validate_schema_instance(&refine, recovery_schema).unwrap();
+    let refine = json!({"current_hunk": {
+        "reason_code": "larger_max_hunk_lines_available",
+        "next_call": {"tool": "git_diff_hunks", "arguments": arguments}
+    }});
+    test_support::validate_schema_instance(&refine, schema).unwrap();
+    let mut fragment = refine.clone();
+    fragment["current_hunk"]["reason_code"] = json!("hunk_fragment_continuation_available");
+    assert!(test_support::validate_schema_instance(&fragment, schema).is_err());
+    fragment["current_hunk"]["next_call"]["arguments"]["continuation"] = json!("wcdh2.fragment");
+    test_support::validate_schema_instance(&fragment, schema).unwrap();
+    let mut mixed = fragment.clone();
+    mixed["later_hunks"] = json!({"next_call": fragment["current_hunk"]["next_call"]});
+    mixed["later_hunks"]["next_call"]["arguments"]["continuation"] = json!("wcdh2.page");
+    test_support::validate_schema_instance(&mixed, schema).unwrap();
+    mixed.as_object_mut().unwrap().remove("current_hunk");
+    test_support::validate_schema_instance(&mixed, schema).unwrap();
 
-    let fragment = json!({
-        "kind": "hunk_lines",
-        "tool": "git_diff_hunks",
-        "arguments": fragment_arguments.clone(),
-        "safe_continuation_for_omitted_lines": true,
-        "continuation": continuation_lane,
-        "omitted_lines": {
-            "present": true,
-            "recoverable": true,
-            "reason_code": "hunk_fragment_continuation_available",
-            "path_provenance": "exact",
-            "paths": ["a.txt"],
-            "continuation_semantics": {"kind": "page", "carrier": "opaque_token"},
-            "next_call": {"tool": "git_diff_hunks", "arguments": fragment_arguments}
-        }
-    });
-    test_support::validate_schema_instance(&fragment, recovery_schema).unwrap();
-
-    let mut fragment_with_refine_semantics = fragment.clone();
-    fragment_with_refine_semantics["omitted_lines"]["continuation_semantics"] =
-        json!({"kind": "refine", "carrier": "none"});
-    assert!(test_support::validate_schema_instance(
-        &fragment_with_refine_semantics,
-        recovery_schema,
-    )
-    .is_err());
-
-    let mut fragment_without_safe_cursor = fragment.clone();
-    fragment_without_safe_cursor["safe_continuation_for_omitted_lines"] = json!(false);
-    assert!(
-        test_support::validate_schema_instance(&fragment_without_safe_cursor, recovery_schema,)
-            .is_err()
-    );
-
-    let mut fragment_without_call = fragment.clone();
-    fragment_without_call["omitted_lines"]["next_call"] = Value::Null;
-    assert!(
-        test_support::validate_schema_instance(&fragment_without_call, recovery_schema).is_err()
-    );
-
-    let mut refine_with_fragment_semantics = refine.clone();
-    refine_with_fragment_semantics["omitted_lines"]["continuation_semantics"] =
-        json!({"kind": "page", "carrier": "opaque_token"});
-    assert!(test_support::validate_schema_instance(
-        &refine_with_fragment_semantics,
-        recovery_schema,
-    )
-    .is_err());
-
-    let mut unrecoverable = fragment;
-    unrecoverable["arguments"] = Value::Null;
-    unrecoverable["safe_continuation_for_omitted_lines"] = json!(false);
-    unrecoverable["omitted_lines"]["recoverable"] = json!(false);
-    unrecoverable["omitted_lines"]["reason_code"] =
-        json!("page_byte_budget_prevents_proven_recovery");
-    unrecoverable["omitted_lines"]["continuation_semantics"] = Value::Null;
-    unrecoverable["omitted_lines"]["next_call"] = Value::Null;
-    test_support::validate_schema_instance(&unrecoverable, recovery_schema).unwrap();
-
-    unrecoverable["omitted_lines"]["continuation_semantics"] =
-        json!({"kind": "page", "carrier": "opaque_token"});
-    assert!(test_support::validate_schema_instance(&unrecoverable, recovery_schema).is_err());
+    for reason in [
+        "page_byte_budget_prevents_proven_recovery",
+        "max_hunk_lines_ceiling_reached",
+        "max_hunk_lines_ceiling_insufficient",
+        "bounded_recovery_unavailable",
+    ] {
+        let mut blocked = json!({"current_hunk": {"reason_code": reason}});
+        test_support::validate_schema_instance(&blocked, schema).unwrap();
+        blocked["current_hunk"]["next_call"] = fragment["current_hunk"]["next_call"].clone();
+        assert!(test_support::validate_schema_instance(&blocked, schema).is_err());
+    }
+    for field in [
+        "kind",
+        "arguments",
+        "tool",
+        "safe_continuation_for_omitted_lines",
+        "continuation",
+        "omitted_lines",
+    ] {
+        let mut duplicate = fragment.clone();
+        duplicate[field] = Value::Null;
+        assert!(test_support::validate_schema_instance(&duplicate, schema).is_err());
+    }
+    for field in [
+        "present",
+        "recoverable",
+        "continuation_semantics",
+        "paths",
+        "path_provenance",
+    ] {
+        let mut duplicate = fragment.clone();
+        duplicate["current_hunk"][field] = Value::Null;
+        assert!(test_support::validate_schema_instance(&duplicate, schema).is_err());
+    }
+    for invalid in [
+        json!({}),
+        json!({"later_hunks": {"next_call": null}}),
+        json!({"current_hunk": {"reason_code": "hunk_fragment_continuation_available"}}),
+    ] {
+        assert!(test_support::validate_schema_instance(&invalid, schema).is_err());
+    }
+    let mut invalid_refine = refine;
+    invalid_refine["current_hunk"]["next_call"]["arguments"]["continuation"] =
+        json!("wcdh2.fragment");
+    assert!(test_support::validate_schema_instance(&invalid_refine, schema).is_err());
 }
 
 #[test]
@@ -428,8 +375,8 @@ fn git_diff_hunks_output_schema_keeps_page_and_model_budgets_distinct() {
         .as_str()
         .unwrap()
         .contains("producer-page"));
-    let recovery = &output["recovery"]["properties"]["continuation"]["properties"]["next_call"]
-        ["anyOf"][0]["properties"]["arguments"];
+    let recovery = &output["recovery"]["properties"]["later_hunks"]["properties"]["next_call"]
+        ["properties"]["arguments"];
     assert_eq!(
         recovery["properties"]["max_page_bytes"]["minimum"],
         16 * 1024

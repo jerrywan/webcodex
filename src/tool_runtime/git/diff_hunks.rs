@@ -17,9 +17,7 @@ use super::super::helpers::{
 };
 use super::super::shell::{command_execution_state_name, ProjectCommandOutput};
 use super::super::tool_result::ToolResult;
-use super::super::{
-    ContinuationCarrier, ContinuationKind, ContinuationSemantics, SuggestedToolCall, ToolRuntime,
-};
+use super::super::{SuggestedToolCall, ToolRuntime};
 use super::shared::{
     is_git_object_hex, parse_fixed_decimal, parse_optional_bool, parse_optional_usize,
     parse_status_result_field, strip_wire_lf,
@@ -118,7 +116,6 @@ pub(super) fn sparsify_complete_git_diff_hunks_output(output: &mut serde_json::M
             .and_then(Value::as_array)
             .is_some_and(Vec::is_empty)
         && output.get("has_more").and_then(Value::as_bool) == Some(false)
-        && output.get("next_continuation").is_some_and(Value::is_null)
         && output.get("recovery").is_none()
         && output.get("exit_code").and_then(Value::as_i64) == Some(0)
         && output.get("stderr").and_then(Value::as_str) == Some("")
@@ -135,7 +132,6 @@ pub(super) fn sparsify_complete_git_diff_hunks_output(output: &mut serde_json::M
         "truncated",
         "truncation_reasons",
         "has_more",
-        "next_continuation",
         "exit_code",
         "stderr",
     ] {
@@ -617,7 +613,6 @@ fn git_diff_hunks_failure(
             "truncated": false,
             "truncation_reasons": [],
             "has_more": false,
-            "next_continuation": null,
             "exit_code": exit_code,
             "stderr": bounded_git_diff_hunks_stderr(stderr),
             "error_kind": "git_diff_hunks_failed",
@@ -649,7 +644,6 @@ fn git_diff_hunks_source_failure(
             "truncated": false,
             "truncation_reasons": [],
             "has_more": false,
-            "next_continuation": null,
             "exit_code": output.and_then(|output| output.exit_code),
             "stderr": stderr,
             "error_kind": "git_diff_hunks_failed",
@@ -763,12 +757,6 @@ fn git_diff_hunks_recovery_value(
         return None;
     }
 
-    let kind = match (page_truncated, omitted_lines_present) {
-        (true, true) => "mixed",
-        (true, false) => "page",
-        (false, true) => "hunk_lines",
-        (false, false) => unreachable!(),
-    };
     let continuation_call = next_continuation.map(|continuation| {
         SuggestedToolCall::new(
             "git_diff_hunks",
@@ -822,7 +810,6 @@ fn git_diff_hunks_recovery_value(
         && hunk_line_limit
         && !refinement_recoverable
         && hunk_fragment_continuation.is_some();
-    let omitted_lines_recoverable = refinement_recoverable || fragment_recoverable;
     let omitted_lines_reason = if !omitted_lines_present {
         Value::Null
     } else if refinement_recoverable {
@@ -873,56 +860,18 @@ fn git_diff_hunks_recovery_value(
         .to_value()
     });
     let omitted_lines_call = refinement_call.as_ref().or(fragment_call.as_ref());
-    let primary_call = omitted_lines_call.or(continuation_call.as_ref());
-
-    let page_semantics = continuation_call.as_ref().map(|_| {
-        ContinuationSemantics::new(ContinuationKind::Page, ContinuationCarrier::OpaqueToken)
-            .to_value()
-    });
-    let omitted_lines_semantics = if refinement_call.is_some() {
-        Some(
-            ContinuationSemantics::new(ContinuationKind::Refine, ContinuationCarrier::None)
-                .to_value(),
-        )
-    } else if fragment_call.is_some() {
-        Some(
-            ContinuationSemantics::new(ContinuationKind::Page, ContinuationCarrier::OpaqueToken)
-                .to_value(),
-        )
-    } else {
-        None
-    };
-
-    Some(json!({
-        "kind": kind,
-        "tool": "git_diff_hunks",
-        "arguments": primary_call
-            .map(|call| call["arguments"].clone())
-            .unwrap_or(Value::Null),
-        "safe_continuation_for_omitted_lines": if !omitted_lines_present {
-            Value::Null
-        } else if fragment_call.is_some() {
-            Value::Bool(true)
-        } else {
-            Value::Bool(false)
-        },
-        "continuation": {
-            "available": continuation_call.is_some(),
-            "recovers_later_hunks": continuation_call.is_some(),
-            "recovers_omitted_lines": false,
-            "continuation_semantics": page_semantics,
-            "next_call": continuation_call,
-        },
-        "omitted_lines": {
-            "present": omitted_lines_present,
-            "recoverable": omitted_lines_recoverable,
-            "reason_code": omitted_lines_reason,
-            "path_provenance": path_provenance,
-            "paths": omitted_line_paths,
-            "continuation_semantics": omitted_lines_semantics,
-            "next_call": omitted_lines_call,
-        },
-    }))
+    let mut recovery = serde_json::Map::new();
+    if omitted_lines_present {
+        let mut current_hunk = json!({"reason_code": omitted_lines_reason});
+        if let Some(call) = omitted_lines_call {
+            current_hunk["next_call"] = call.clone();
+        }
+        recovery.insert("current_hunk".to_string(), current_hunk);
+    }
+    if let Some(call) = continuation_call {
+        recovery.insert("later_hunks".to_string(), json!({"next_call": call}));
+    }
+    Some(Value::Object(recovery))
 }
 
 fn git_diff_hunks_committed_failure(
@@ -2286,7 +2235,6 @@ impl ToolRuntime {
             "truncated": !truncation_reasons.is_empty(),
             "truncation_reasons": truncation_reasons,
             "has_more": wire.has_more,
-            "next_continuation": next_continuation,
             "exit_code": wire.diff_exit,
             "stderr": stderr,
         });
