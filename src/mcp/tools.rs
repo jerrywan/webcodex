@@ -816,16 +816,31 @@ fn mcp_tool_spec_json(mut spec: ToolSpec, compact: bool, app_enabled: bool) -> V
             " Over MCP, set as_image=true to return one complete PNG, JPEG, or WebP as native image content; ordinary calls keep the existing chunked base64 response.",
         );
     }
+    let ToolSpec {
+        name,
+        description,
+        input_schema,
+        output_schema,
+        annotations,
+    } = spec;
     let mut value = if compact {
         json!({
-            "name": spec.name,
-            "description": spec.description,
-            "inputSchema": spec.input_schema,
-            "annotations": spec.annotations,
+            "name": name,
+            "description": description,
+            "inputSchema": input_schema,
+            "annotations": annotations,
         })
     } else {
-        // Match ToolSpec's camelCase serde so default behavior is unchanged.
-        serde_json::to_value(spec).unwrap_or_else(|_| json!({}))
+        // Move the already-built schema DOMs directly into the MCP projection.
+        // ToolSpec's serde shape is exactly these five camelCase fields; routing,
+        // authorization, and capability admission have already run before here.
+        json!({
+            "name": name,
+            "description": description,
+            "inputSchema": input_schema,
+            "outputSchema": output_schema,
+            "annotations": annotations,
+        })
     };
     if !compact && tool_name == crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME {
         if let Some(object) = value.as_object_mut() {
