@@ -899,7 +899,11 @@ mod tests {
     }
 
     #[test]
-    fn search_result_budget_clamps_to_existing_hard_cap() {
+    fn search_result_budget_clamps_to_existing_hard_bounds() {
+        assert_eq!(
+            normalized_result_budget(Some(MIN_SEARCH_PROJECT_TEXTS_RESULT_BYTES / 2)),
+            MIN_SEARCH_PROJECT_TEXTS_RESULT_BYTES
+        );
         assert_eq!(
             normalized_result_budget(Some(MAX_SERIALIZED_OUTPUT_BYTES * 2)),
             MAX_SERIALIZED_OUTPUT_BYTES

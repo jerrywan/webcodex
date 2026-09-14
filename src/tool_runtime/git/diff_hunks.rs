@@ -656,13 +656,13 @@ fn git_diff_hunks_committed_failure(
 fn normalize_git_diff_hunks_committed_range(
     base_commit: Option<&str>,
     head_commit: Option<&str>,
-    cached_present: bool,
+    cached: bool,
 ) -> Result<Option<(String, String)>, &'static str> {
     match (base_commit, head_commit) {
         (None, None) => Ok(None),
         (Some(_), None) | (None, Some(_)) => Err("committed_range_requires_base_and_head"),
         (Some(base), Some(head)) => {
-            if cached_present {
+            if cached {
                 return Err("committed_range_conflicts_with_cached");
             }
             Ok(Some((
@@ -1399,20 +1399,14 @@ impl ToolRuntime {
             Ok(paths) => paths,
             Err(e) => return ToolResult::err(e),
         };
+        let cached = cached.unwrap_or(false);
         if git_diff_hunks_paths_include_secret(&paths) {
-            return git_diff_hunks_failure(
-                &project,
-                &paths,
-                cached.unwrap_or(false),
-                "sensitive_path",
-                None,
-                "",
-            );
+            return git_diff_hunks_failure(&project, &paths, cached, "sensitive_path", None, "");
         }
         let committed_range = match normalize_git_diff_hunks_committed_range(
             base_commit.as_deref(),
             head_commit.as_deref(),
-            cached.is_some(),
+            cached,
         ) {
             Ok(range) => range,
             Err(reason) => {
@@ -1436,7 +1430,6 @@ impl ToolRuntime {
             .unwrap_or(DEFAULT_MAX_HUNK_LINES)
             .min(MAX_MAX_HUNK_LINES);
         let max_page_bytes = normalize_git_diff_hunks_page_bytes(max_page_bytes);
-        let cached = cached.unwrap_or(false);
         if continuation
             .as_ref()
             .is_some_and(|value| value.len() > GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES)

@@ -546,13 +546,14 @@ fn search_project_texts_schema_and_parser_enforce_strict_batch_contract() {
         schema["properties"]["max_result_bytes"]["default"],
         64 * 1024
     );
-    assert_eq!(
-        schema["properties"]["max_result_bytes"]["maximum"],
-        512 * 1024
-    );
+    assert_eq!(schema["properties"]["max_result_bytes"]["minimum"], 0);
+    assert!(schema["properties"]["max_result_bytes"]
+        .get("maximum")
+        .is_none());
     let budget_description = schema["properties"]["max_result_bytes"]["description"]
         .as_str()
         .unwrap();
+    assert!(budget_description.contains("runtime-clamped"));
     assert!(budget_description.contains("whole-query"));
     assert!(budget_description.contains("narrow"));
     let removed_input_cursor = ["match", "offset"].join("_");
@@ -568,10 +569,22 @@ fn search_project_texts_schema_and_parser_enforce_strict_batch_contract() {
         .unwrap()
         .insert(removed_input_cursor, json!(1));
     assert!(!validates(&removed_cursor_input));
+    for max_result_bytes in [0, 1, 512 * 1024 + 1, 1024 * 1024] {
+        assert!(validates(&json!({
+            "project": "demo",
+            "queries": [{"pattern": "needle"}],
+            "max_result_bytes": max_result_bytes
+        })));
+    }
     assert!(!validates(&json!({
         "project": "demo",
         "queries": [{"pattern": "needle"}],
-        "max_result_bytes": 512 * 1024 + 1
+        "max_result_bytes": -1
+    })));
+    assert!(!validates(&json!({
+        "project": "demo",
+        "queries": [{"pattern": "needle"}],
+        "max_result_bytes": "65536"
     })));
     assert!(
         schema["properties"].get("session_id").is_some(),

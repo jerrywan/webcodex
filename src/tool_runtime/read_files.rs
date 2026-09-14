@@ -52,7 +52,8 @@ impl ReadModelProjection {
                 items: items.clone(),
                 session_id: session_id.clone(),
                 with_line_numbers: *with_line_numbers,
-                max_result_bytes: *max_result_bytes,
+                max_result_bytes: max_result_bytes
+                    .map(|bytes| normalized_result_budget(Some(bytes))),
             },
             _ => Self::None,
         }
@@ -1549,10 +1550,41 @@ mod tests {
     }
 
     #[test]
-    fn result_budget_clamps_to_existing_hard_cap() {
+    fn result_budget_clamps_to_existing_hard_bounds() {
+        assert_eq!(
+            normalized_result_budget(Some(MIN_READ_FILES_RESULT_BYTES / 2)),
+            MIN_READ_FILES_RESULT_BYTES
+        );
         assert_eq!(
             normalized_result_budget(Some(MAX_SERIALIZED_OUTPUT_BYTES * 2)),
             MAX_SERIALIZED_OUTPUT_BYTES
         );
+    }
+
+    #[test]
+    fn model_projection_canonicalizes_explicit_result_budget() {
+        for (requested, effective) in [
+            (MIN_READ_FILES_RESULT_BYTES / 2, MIN_READ_FILES_RESULT_BYTES),
+            (MAX_SERIALIZED_OUTPUT_BYTES * 2, MAX_SERIALIZED_OUTPUT_BYTES),
+        ] {
+            let call = ToolCall::ReadFiles {
+                project: "demo".to_string(),
+                items: vec![ReadFilesItem {
+                    path: "src/lib.rs".to_string(),
+                    start_line: None,
+                    limit: None,
+                }],
+                session_id: None,
+                with_line_numbers: None,
+                max_result_bytes: Some(requested),
+            };
+            let ReadModelProjection::Batch {
+                max_result_bytes, ..
+            } = ReadModelProjection::capture(&call)
+            else {
+                panic!("read_files projection must capture batch call");
+            };
+            assert_eq!(max_result_bytes, Some(effective));
+        }
     }
 }

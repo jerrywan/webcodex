@@ -211,7 +211,7 @@ pub fn search_project_texts_input_schema() -> Value {
         (
             "max_result_bytes",
             "integer",
-            "Optional primary model-facing batch projection budget in bytes. Defaults to 64 KiB and caps at 512 KiB. Continuation is whole-query via next_index; if the first remaining query cannot fit, raise this budget or narrow that query's limit/context/path. Independently bounded Session/continuity overlays remain outside this budget.",
+            "Optional primary model-facing batch projection budget in bytes. Defaults to 64 KiB. Any recognized nonnegative integer is accepted and runtime-clamped to the fixed 8..512 KiB inspection bounds. Continuation is whole-query via next_index; if the first remaining query cannot fit, raise this budget or narrow that query's limit/context/path. Independently bounded Session/continuity overlays remain outside this budget.",
             false,
         ),
     ]));
@@ -227,10 +227,7 @@ pub fn search_project_texts_input_schema() -> Value {
             "properties": query_properties,
         }
     });
-    schema["properties"]["max_result_bytes"]["minimum"] =
-        json!(webcodex_core::runtime_contract::MIN_SEARCH_PROJECT_TEXTS_RESULT_BYTES);
-    schema["properties"]["max_result_bytes"]["maximum"] =
-        json!(webcodex_core::runtime_contract::MODEL_INSPECTION_MAX_RESULT_BYTES);
+    schema["properties"]["max_result_bytes"]["minimum"] = json!(0);
     schema["properties"]["max_result_bytes"]["default"] =
         json!(webcodex_core::runtime_contract::DEFAULT_SEARCH_PROJECT_TEXTS_RESULT_BYTES);
     schema
@@ -254,7 +251,7 @@ pub fn read_files_input_schema() -> Value {
         (
             "max_result_bytes",
             "integer",
-            "Optional primary model-facing batch projection budget in bytes. Defaults to 64 KiB; raise only for explicit broad/deep reads, up to 512 KiB. If the current budget cannot return any part of the first remaining item, the result supplies a bounded increase_result_budget suggested call; otherwise batch continuation reuses the current budget. Independently bounded Session/continuity protocol overlays are preserved outside this budget.",
+            "Optional primary model-facing batch projection budget in bytes. Defaults to 64 KiB. Any recognized nonnegative integer is accepted and runtime-clamped to the fixed 8..512 KiB inspection bounds; raise the effective budget only for explicit broad/deep reads. If the current budget cannot return any part of the first remaining item, the result supplies a bounded increase_result_budget suggested call; otherwise batch continuation reuses the current effective budget. Independently bounded Session/continuity protocol overlays are preserved outside this budget.",
             false,
         ),
     ]));
@@ -284,10 +281,7 @@ pub fn read_files_input_schema() -> Value {
             }
         }
     });
-    schema["properties"]["max_result_bytes"]["minimum"] =
-        json!(webcodex_core::runtime_contract::MIN_READ_FILES_RESULT_BYTES);
-    schema["properties"]["max_result_bytes"]["maximum"] =
-        json!(webcodex_core::runtime_contract::MODEL_INSPECTION_MAX_RESULT_BYTES);
+    schema["properties"]["max_result_bytes"]["minimum"] = json!(0);
     schema["properties"]["max_result_bytes"]["default"] =
         json!(webcodex_core::runtime_contract::DEFAULT_READ_FILES_RESULT_BYTES);
     schema

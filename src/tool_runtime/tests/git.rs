@@ -537,18 +537,16 @@ fn git_diff_hunks_tool_is_known_and_schema_is_bounded() {
         props["continuation"]["maxLength"],
         GIT_DIFF_HUNKS_CONTINUATION_MAX_BYTES
     );
-    assert_eq!(
-        props["max_page_bytes"]["minimum"],
-        MIN_GIT_DIFF_HUNKS_PAGE_BYTES
-    );
+    assert_eq!(props["max_page_bytes"]["minimum"], 0);
     assert_eq!(
         props["max_page_bytes"]["default"],
         DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES
     );
-    assert_eq!(
-        props["max_page_bytes"]["maximum"],
-        MAX_GIT_DIFF_HUNKS_PAGE_BYTES
-    );
+    assert!(props["max_page_bytes"].get("maximum").is_none());
+    assert!(props["max_page_bytes"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("runtime-clamped"));
     for field in ["base_commit", "head_commit"] {
         assert_eq!(props[field]["minLength"], 40);
         assert_eq!(props[field]["maxLength"], 40);
@@ -573,6 +571,25 @@ fn git_diff_hunks_tool_is_known_and_schema_is_bounded() {
             cached: None,
             ..
         } if base == "A".repeat(40) && head == "b".repeat(40)
+    ));
+    let committed_false_call = ToolCall::from_tool_name(
+        "git_diff_hunks",
+        json!({
+            "project": "agent:oe:webcodex",
+            "base_commit": "A".repeat(40),
+            "head_commit": "b".repeat(40),
+            "cached": false,
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        committed_false_call,
+        ToolCall::GitDiffHunks {
+            base_commit: Some(_),
+            head_commit: Some(_),
+            cached: Some(false),
+            ..
+        }
     ));
     assert!(ToolCall::from_tool_name(
         "git_diff_hunks",
@@ -970,6 +987,37 @@ async fn run_runner_git_diff_hunks_committed_page_with_budget(
     head_commit: String,
     continuation: Option<String>,
 ) -> (ToolResult, usize, Vec<String>) {
+    run_runner_git_diff_hunks_committed_page_with_options(
+        runtime,
+        client_id,
+        project,
+        repo,
+        paths,
+        max_hunks,
+        max_hunk_lines,
+        max_page_bytes,
+        None,
+        base_commit,
+        head_commit,
+        continuation,
+    )
+    .await
+}
+
+async fn run_runner_git_diff_hunks_committed_page_with_options(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    project: &str,
+    repo: &Path,
+    paths: Option<Vec<String>>,
+    max_hunks: usize,
+    max_hunk_lines: usize,
+    max_page_bytes: Option<usize>,
+    cached: Option<bool>,
+    base_commit: String,
+    head_commit: String,
+    continuation: Option<String>,
+) -> (ToolResult, usize, Vec<String>) {
     let task = tokio::spawn({
         let runtime = runtime.clone();
         let project = project.to_string();
@@ -981,7 +1029,7 @@ async fn run_runner_git_diff_hunks_committed_page_with_budget(
                     Some(max_hunks),
                     Some(max_hunk_lines),
                     max_page_bytes,
-                    None,
+                    cached,
                     Some(base_commit),
                     Some(head_commit),
                     continuation,
@@ -1386,7 +1434,7 @@ async fn git_diff_hunks_committed_range_validation_and_merge_base_fail_closed() 
         (
             Some(base.clone()),
             Some(head.clone()),
-            Some(false),
+            Some(true),
             "committed_range_conflicts_with_cached",
         ),
     ] {
@@ -1640,19 +1688,25 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
     )
     .await;
     let paths = Some(vec!["large.txt".to_string()]);
-    let (first, first_bytes, first_scripts) = run_runner_git_diff_hunks_committed_page(
-        &runtime,
-        "committed-continuation",
-        &project,
-        tmp.path(),
-        paths.clone(),
-        1,
-        120,
-        base.clone(),
-        head.clone(),
-        None,
-    )
-    .await;
+    // Explicit cached=false is the same committed-range mode as omission. Start
+    // with the explicit spelling, then replay the returned continuation through
+    // the ordinary omitted-cached helper below to prove canonical identity.
+    let (first, first_bytes, first_scripts) =
+        run_runner_git_diff_hunks_committed_page_with_options(
+            &runtime,
+            "committed-continuation",
+            &project,
+            tmp.path(),
+            paths.clone(),
+            1,
+            120,
+            None,
+            Some(false),
+            base.clone(),
+            head.clone(),
+            None,
+        )
+        .await;
     assert!(first.success, "{:?}", first.error);
     assert_eq!(first.output["has_more"], true);
     assert!(first_bytes < 48 * 1024);
@@ -2311,7 +2365,7 @@ async fn git_diff_hunks_page_budget_is_configurable_bounded_and_scope_bound() {
         None,
         100,
         100,
-        Some(MIN_GIT_DIFF_HUNKS_PAGE_BYTES),
+        Some(1),
         false,
         None,
     )
