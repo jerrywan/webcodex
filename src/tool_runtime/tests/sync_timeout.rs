@@ -255,42 +255,24 @@ async fn structured_validation_sync_wait_rejects_zero_before_enqueue() {
     }
 }
 
-#[tokio::test]
-async fn cargo_fmt_mutating_rejects_sync_wait_before_enqueue_or_job_creation() {
-    let client_id = "sync-wait-fmt-mutating";
-    let runtime = runtime_with_agent_project(client_id);
-    register_agent(&runtime, client_id, None, RunnerCapabilities::default()).await;
-    let project = agent_test_project_id(client_id);
-    let auth = auth_context(None, true);
-
+#[test]
+fn cargo_fmt_mutating_accepts_sync_wait_as_inert_compatibility_input() {
     for args in [
-        json!({"project": project, "check": false, "timeout_secs": 120, "sync_wait_secs": 1}),
-        json!({"project": project, "timeout_secs": 120, "sync_wait_secs": 1}),
+        json!({"project": "agent:demo:repo", "check": false, "timeout_secs": 120, "sync_wait_secs": 1}),
+        json!({"project": "agent:demo:repo", "timeout_secs": 120, "sync_wait_secs": 60}),
     ] {
-        let error = ToolCall::from_tool_name("cargo_fmt", args)
-            .expect_err("mutating cargo_fmt sync_wait_secs must fail in the typed parser");
-        assert!(error.contains("check=true"), "{error}");
-        assert_no_pending_shell_request(&runtime, client_id).await;
-        assert!(runtime.runner_registry.list_jobs(Some(10)).await.is_empty());
+        ToolCall::from_tool_name("cargo_fmt", args)
+            .expect("ensure-format cargo_fmt should accept inert sync_wait_secs");
     }
 
-    // Runtime callers cannot background a mutating formatter even when they do
-    // not pass through the model-facing parser.
-    let result = runtime
-        .cargo_fmt_with_context(
-            project,
-            None,
-            Some(false),
-            Some(120),
-            Some(1),
-            None,
-            None,
-            Some(&auth),
-        )
-        .await;
-    assert_sync_wait_rejected(&result, "cargo_fmt");
-    assert_no_pending_shell_request(&runtime, client_id).await;
-    assert!(runtime.runner_registry.list_jobs(Some(10)).await.is_empty());
+    for args in [
+        json!({"project": "agent:demo:repo", "check": false, "sync_wait_secs": 0}),
+        json!({"project": "agent:demo:repo", "sync_wait_secs": 0}),
+    ] {
+        let error = ToolCall::from_tool_name("cargo_fmt", args)
+            .expect_err("zero sync_wait_secs remains invalid in every cargo_fmt mode");
+        assert!(error.contains("sync_wait_secs"), "{error}");
+    }
 }
 
 #[tokio::test]

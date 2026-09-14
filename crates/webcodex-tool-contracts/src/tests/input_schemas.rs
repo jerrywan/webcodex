@@ -300,10 +300,22 @@ fn sync_validation_and_run_shell_timeout_schema_defers_upper_bounds_to_runtime()
             .get("maximum")
             .is_none()
     );
-    assert_eq!(
-        cargo_fmt.input_schema["allOf"][0]["else"]["properties"]["sync_wait_secs"]["type"],
-        "null"
-    );
+    for valid in [
+        serde_json::json!({"project": "agent:demo:repo", "check": false, "sync_wait_secs": 1}),
+        serde_json::json!({"project": "agent:demo:repo", "sync_wait_secs": 60}),
+    ] {
+        test_support::validate_schema_instance(&valid, &cargo_fmt.input_schema)
+            .unwrap_or_else(|error| panic!("valid ensure-format input rejected: {valid}: {error}"));
+    }
+    for invalid in [
+        serde_json::json!({"project": "agent:demo:repo", "check": false, "sync_wait_secs": 0}),
+        serde_json::json!({"project": "agent:demo:repo", "sync_wait_secs": 0}),
+    ] {
+        assert!(
+            test_support::validate_schema_instance(&invalid, &cargo_fmt.input_schema).is_err(),
+            "invalid ensure-format sync_wait_secs passed schema: {invalid}"
+        );
+    }
 
     let run_shell = spec_named(&specs, "run_shell");
     let timeout = &run_shell.input_schema["properties"]["timeout_secs"];

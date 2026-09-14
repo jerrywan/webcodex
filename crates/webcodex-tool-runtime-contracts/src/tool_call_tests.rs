@@ -657,6 +657,14 @@ fn structured_validation_sync_wait_parser_enforces_lifecycle_bounds() {
             json!({"project": "demo", "check": true, "timeout_secs": 60, "sync_wait_secs": 60}),
         ),
         (
+            "cargo_fmt",
+            json!({"project": "demo", "check": false, "timeout_secs": 60, "sync_wait_secs": 1}),
+        ),
+        (
+            "cargo_fmt",
+            json!({"project": "demo", "timeout_secs": 60, "sync_wait_secs": 60}),
+        ),
+        (
             "cargo_test",
             json!({"project": "demo", "timeout_secs": 600, "sync_wait_secs": 61}),
         ),
@@ -676,15 +684,15 @@ fn structured_validation_sync_wait_parser_enforces_lifecycle_bounds() {
         ),
         (
             "cargo_fmt",
-            json!({"project": "demo", "check": false, "timeout_secs": 60, "sync_wait_secs": 1}),
+            json!({"project": "demo", "check": false, "timeout_secs": 60, "sync_wait_secs": 0}),
         ),
         (
             "cargo_fmt",
-            json!({"project": "demo", "timeout_secs": 60, "sync_wait_secs": 1}),
+            json!({"project": "demo", "timeout_secs": 60, "sync_wait_secs": 0}),
         ),
     ] {
-        let error = ToolCall::from_tool_name(name, arguments)
-            .expect_err("zero or semantically unavailable sync wait must fail closed");
+        let error =
+            ToolCall::from_tool_name(name, arguments).expect_err("zero sync wait must fail closed");
         assert!(error.contains("sync_wait_secs"), "{name}: {error}");
     }
 }

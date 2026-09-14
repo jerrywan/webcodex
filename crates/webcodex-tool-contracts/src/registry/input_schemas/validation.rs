@@ -43,7 +43,8 @@ fn with_optional_result_expectation(mut schema: Value) -> Value {
 pub fn cargo_fmt_input_schema() -> Value {
     // `cargo_fmt(check=false)` synchronously ensures formatting: a read-only
     // precheck avoids mutation when already formatted, and a proven rustfmt diff
-    // triggers `cargo fmt`. Only `check=true` accepts the long read-only budget.
+    // triggers `cargo fmt`. `sync_wait_secs` is accepted in both modes for a stable
+    // caller shape, but only `check=true` uses it for read-only Job handoff.
     let mut schema = object_schema(with_optional_session_id(vec![
         ("project", "string", "Runner-registered project id.", true),
         (
@@ -67,7 +68,7 @@ pub fn cargo_fmt_input_schema() -> Value {
         (
             "sync_wait_secs",
             "integer",
-            VALIDATION_SYNC_WAIT_SECS_DESCRIPTION,
+            "Optional synchronous grace in seconds. With check=true it controls same-execution Job handoff and never extends timeout_secs. With check=false it is accepted for caller-shape compatibility but ignored; ensure-format remains synchronous and timeout_secs remains the full precheck-plus-mutation budget.",
             false,
         ),
     ]));
@@ -86,8 +87,7 @@ pub fn cargo_fmt_input_schema() -> Value {
         },
         "else": {
             "properties": {
-                "timeout_secs": { "type": "integer", "minimum": 1 },
-                "sync_wait_secs": { "type": "null" }
+                "timeout_secs": { "type": "integer", "minimum": 1 }
             }
         }
     }, {

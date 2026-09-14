@@ -365,13 +365,9 @@ impl ToolRuntime {
         auth: Option<&AuthContext>,
     ) -> ToolResult {
         let check = check.unwrap_or(false);
-        if !check && sync_wait_secs.is_some() {
-            return validation_sync_wait_rejection(
-                "cargo_fmt",
-                "cargo_fmt sync_wait_secs is available only with check=true",
-                "remove sync_wait_secs for mutating cargo_fmt, or use check=true for read-only validation handoff.",
-            );
-        }
+        // `sync_wait_secs` controls read-only Job handoff only. Ensure-format accepts
+        // the field for caller-shape compatibility but intentionally ignores it:
+        // mutation remains synchronous and `timeout_secs` remains the full budget.
         // Both read-only and mutating structured Cargo formatting reject named
         // SSH resources before selecting an execution path. In particular, the
         // mutating sync path must never fall back to the Runner project root.

@@ -2563,7 +2563,7 @@ async fn terminal_validation_result_fields_are_consistent_between_executors() {
 /// `cargo_fmt(check=false)` first checks formatting and avoids a mutating
 /// subprocess entirely when the workspace is already formatted.
 #[tokio::test]
-async fn cargo_fmt_ensure_formatted_skips_mutation_when_already_formatted() {
+async fn cargo_fmt_ensure_formatted_ignores_sync_wait_and_skips_mutation_when_already_formatted() {
     let client_id = "vhandoff-fmt-mutate";
     let runtime = runtime_with_agent_project(client_id);
     let caps = RunnerCapabilities {
@@ -2578,7 +2578,16 @@ async fn cargo_fmt_ensure_formatted_skips_mutation_when_already_formatted() {
         let runtime = runtime.clone();
         async move {
             runtime
-                .cargo_fmt(project, None, Some(false), Some(120))
+                .cargo_fmt_with_context(
+                    project,
+                    None,
+                    Some(false),
+                    Some(120),
+                    Some(1),
+                    None,
+                    None,
+                    None,
+                )
                 .await
         }
     });
@@ -2620,7 +2629,16 @@ async fn cargo_fmt_ensure_formatted_mutates_only_after_stable_format_diff() {
         let runtime = runtime.clone();
         async move {
             runtime
-                .cargo_fmt(project, None, Some(false), Some(120))
+                .cargo_fmt_with_context(
+                    project,
+                    None,
+                    Some(false),
+                    Some(120),
+                    Some(1),
+                    None,
+                    None,
+                    None,
+                )
                 .await
         }
     });
