@@ -903,6 +903,126 @@ async fn run_runner_git_diff_hunks_page_with_budget(
     (task.await.unwrap(), stdout_bytes, script)
 }
 
+async fn run_git_diff_hunks_with_faulted_source(
+    client_id: &str,
+    mutate: impl FnOnce(i32, String, String) -> (i32, String, String, bool, bool),
+) -> ToolResult {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    write_git_review_fixture_file(repo.path(), "src/a.rs", "pub fn a() -> u8 { 1 }\n");
+    commit_git_review_fixture(repo.path(), "base");
+    write_git_review_fixture_file(repo.path(), "src/a.rs", "pub fn a() -> u8 { 2 }\n");
+
+    let runtime = test_runtime();
+    let project =
+        register_structured_git_agent_at_path(&runtime, client_id, "repo", repo.path()).await;
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let project = project.clone();
+        async move {
+            runtime
+                .git_diff_hunks_continued_with_range_and_page_bytes(
+                    project,
+                    Some(vec!["src/a.rs".to_string()]),
+                    Some(10),
+                    Some(120),
+                    None,
+                    Some(false),
+                    None,
+                    None,
+                    None,
+                )
+                .await
+        }
+    });
+    let request = wait_for_patch_agent_request(&runtime, client_id).await;
+    let (exit_code, stdout, stderr) = run_runner_shell_request_locally(&request);
+    let (exit_code, stdout, stderr, stdout_truncated, stderr_truncated) =
+        mutate(exit_code, stdout, stderr);
+    complete_patch_agent_request_with_truncation(
+        &runtime,
+        client_id,
+        &request.request_id,
+        exit_code,
+        &stdout,
+        &stderr,
+        stdout_truncated,
+        stderr_truncated,
+    )
+    .await;
+    task.await.unwrap()
+}
+
+#[tokio::test]
+async fn git_diff_hunks_source_failures_report_diagnostic_stage() {
+    let truncated =
+        run_git_diff_hunks_with_faulted_source("git-source-truncated", |exit, stdout, stderr| {
+            (exit, stdout, stderr, true, false)
+        })
+        .await;
+    assert_eq!(truncated.output["reason_code"], "source_output_truncated");
+    assert_eq!(truncated.output["source_stage"], "runner_output");
+    assert_eq!(truncated.output["stdout_truncated"], true);
+    assert!(truncated.output.get("stdout").is_none());
+
+    let malformed = run_git_diff_hunks_with_faulted_source(
+        "git-source-frame-invalid",
+        |_exit, _stdout, stderr| (0, "not-a-wcdh-frame".to_string(), stderr, false, false),
+    )
+    .await;
+    assert_eq!(malformed.output["reason_code"], "source_frame_invalid");
+    assert_eq!(malformed.output["source_stage"], "frame_parse");
+    assert_eq!(malformed.output["exit_code"], 0);
+
+    let execution = run_git_diff_hunks_with_faulted_source(
+        "git-source-execution-failed",
+        |_exit, _stdout, stderr| (2, String::new(), stderr, false, false),
+    )
+    .await;
+    assert_eq!(execution.output["reason_code"], "source_execution_failed");
+    assert_eq!(execution.output["source_stage"], "source_execution");
+
+    let fence = run_git_diff_hunks_with_faulted_source(
+        "git-source-fence-invalid",
+        |exit, stdout, stderr| {
+            let start = stdout.find("pre_fence=").unwrap() + "pre_fence=".len();
+            let end = stdout[start..].find('\n').unwrap() + start;
+            let mut invalid = stdout;
+            invalid.replace_range(start..end, &"z".repeat(end - start));
+            (exit, invalid, stderr, false, false)
+        },
+    )
+    .await;
+    assert_eq!(fence.output["reason_code"], "source_fence_unavailable");
+    assert_eq!(fence.output["source_stage"], "source_fence");
+
+    let page_filter =
+        run_git_diff_hunks_with_faulted_source("git-source-page-filter", |exit, stdout, stderr| {
+            let mutated = stdout.replacen("page_filter_exit=0", "page_filter_exit=1", 1);
+            assert_ne!(mutated, stdout);
+            (exit, mutated, stderr, false, false)
+        })
+        .await;
+    assert_eq!(
+        page_filter.output["reason_code"],
+        "source_page_filter_failed"
+    );
+    assert_eq!(page_filter.output["source_stage"], "page_filter");
+
+    let projection =
+        run_git_diff_hunks_with_faulted_source("git-source-projection", |exit, stdout, stderr| {
+            let mutated = stdout.replacen("returned_hunks=1", "returned_hunks=2", 1);
+            assert_ne!(mutated, stdout);
+            (exit, mutated, stderr, false, false)
+        })
+        .await;
+    assert_eq!(
+        projection.output["reason_code"],
+        "source_projection_inconsistent"
+    );
+    assert_eq!(projection.output["source_stage"], "projection");
+}
+
 async fn run_parser_ready_worktree_git_diff_hunks_call(
     runtime: &ToolRuntime,
     client_id: &str,
@@ -1715,7 +1835,7 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
         .as_str()
         .expect("first committed page continuation")
         .to_string();
-    assert!(token.starts_with("wcdh1."));
+    assert!(token.starts_with("wcdh2."));
     let recovery = &first.output["recovery"];
     assert_eq!(recovery["kind"], "page");
     assert_eq!(
@@ -1921,14 +2041,12 @@ async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state(
 
     {
         use base64::{engine::general_purpose, Engine as _};
-        let encoded = token.strip_prefix("wcdh1.").unwrap();
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(encoded).unwrap();
-        let mut state: Value = serde_json::from_slice(&decoded).unwrap();
-        state["next"] = json!(999u64);
-        let forged_next = format!(
-            "wcdh1.{}",
-            general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&state).unwrap())
-        );
+        let encoded = token.strip_prefix("wcdh2.").unwrap();
+        let mut decoded = general_purpose::URL_SAFE_NO_PAD.decode(encoded).unwrap();
+        let fence_len = decoded[33] as usize;
+        let cursor_last = 34 + fence_len + 7;
+        decoded[cursor_last] ^= 1;
+        let forged_next = format!("wcdh2.{}", general_purpose::URL_SAFE_NO_PAD.encode(decoded));
         let (forged_result, _, forged_scripts) = run_runner_git_diff_hunks_committed_page(
             &runtime,
             "committed-continuation",
@@ -2104,14 +2222,12 @@ async fn git_diff_hunks_committed_hunk_fragment_continuation_is_mac_bound_and_mo
 
     {
         use base64::{engine::general_purpose, Engine as _};
-        let encoded = fragment_token.strip_prefix("wcdh1.").unwrap();
-        let decoded = general_purpose::URL_SAFE_NO_PAD.decode(encoded).unwrap();
-        let mut state: Value = serde_json::from_slice(&decoded).unwrap();
-        state["line"] = json!(state["line"].as_u64().unwrap() + 1);
-        let tampered = format!(
-            "wcdh1.{}",
-            general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&state).unwrap())
-        );
+        let encoded = fragment_token.strip_prefix("wcdh2.").unwrap();
+        let mut decoded = general_purpose::URL_SAFE_NO_PAD.decode(encoded).unwrap();
+        let fence_len = decoded[33] as usize;
+        let line_last = 34 + fence_len + 8 + 7;
+        decoded[line_last] ^= 1;
+        let tampered = format!("wcdh2.{}", general_purpose::URL_SAFE_NO_PAD.encode(decoded));
         let (tampered_result, _, _) = run_runner_git_diff_hunks_committed_page(
             &runtime,
             client_id,
@@ -5716,6 +5832,8 @@ async fn show_changes_accepts_unique_short_id() {
             exit_code: Some(0),
             stdout: Some(stdout),
             stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: Some(1),
             error: None,
         })

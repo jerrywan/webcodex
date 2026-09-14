@@ -149,7 +149,7 @@ fn git_diff_hunks_omitted_line_recovery_schema_accepts_only_canonical_refine_or_
         "max_hunk_lines": 400,
         "max_page_bytes": 65536,
         "cached": false,
-        "continuation": "wcdh1.fragment"
+        "continuation": "wcdh2.fragment"
     });
     let refine = json!({
         "kind": "hunk_lines",
