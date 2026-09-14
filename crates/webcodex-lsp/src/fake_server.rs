@@ -284,7 +284,7 @@ fn run() -> io::Result<()> {
                     ),
                 )?,
                 "call_hierarchy_shared_deadline" if method == "callHierarchy/incomingCalls" => {
-                    thread::sleep(Duration::from_millis(1600));
+                    thread::sleep(Duration::from_millis(1150));
                     write_result(&mut writer, id, method, &body)?;
                     if let Some(marker) = &marker {
                         append_marker(
@@ -307,9 +307,10 @@ fn run() -> io::Result<()> {
                     )?
                 }
                 "workspace_slow_success" if method == "workspace/symbol" => {
-                    thread::sleep(Duration::from_millis(3500));
+                    thread::sleep(Duration::from_millis(600));
                     write_result(&mut writer, id, method, &body)?;
                 }
+                "workspace_operation_deadline" if method == "workspace/symbol" => {}
                 "workspace_readiness_restart" if method == "workspace/symbol" => {
                     if start_count(marker.as_deref()) <= 1 {
                         return Ok(());
