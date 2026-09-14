@@ -845,7 +845,7 @@ impl LspSupervisor {
         count
     }
 
-    #[cfg(all(test, feature = "runner-real-process-tests"))]
+    #[cfg(all(test, feature = "real-process-tests"))]
     pub(crate) fn shutdown(&self) {
         let _ = self.shutdown_until(Instant::now() + self.inner.config.shutdown_timeout);
     }

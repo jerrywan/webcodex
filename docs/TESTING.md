@@ -20,7 +20,7 @@ waits, and the cost of each test lane.
 | fast unit | Pure parsing, validation, helpers, local state machines, small fixtures. | No network, no global env mutation, no long sleeps. | `cargo test -p webcodex --lib tool_call` |
 | contract/schema | Keep metadata, registry, MCP `tools/list`, OpenAPI, and runtime tool names synchronized. | No external network; in-process services are preferred. | `cargo test -p webcodex --lib metadata`; `cargo test -p webcodex --lib mcp`; `cargo test -p webcodex --lib openapi` |
 | local integration | Exercise HTTP handlers, runtime dispatch, sessions, local agent registry, temp dirs, loopback listeners, and database fixtures. | Loopback only, isolated temp dirs, bounded waits, no shared mutable state without a lock. | `cargo test -p webcodex --lib runtime_http -- --nocapture`; `cargo test -p webcodex --lib session -- --nocapture` |
-| Runner real-process | Process-tree ownership, real shell timeout/stop, polling dispatch timing, Plugin startup, validation/Git `ManagedChild`, and JobManager descendant cleanup. These tests are gated behind the `runner-real-process-tests` feature, ignored by default execution, and share the `runner_real_process_` name prefix. | Real local child processes only; no external network. Run serially because the assertions intentionally exercise OS scheduling and process teardown. | `cargo test --locked -p webcodex-runner --features runner-real-process-tests runner_real_process -- --ignored --test-threads=1` |
+| Runner/LSP real-process | Process-tree ownership, real shell timeout/stop, polling dispatch timing, Plugin startup, validation/Git `ManagedChild`, JobManager descendant cleanup, and native LSP child lifecycle. Runner coverage is gated by `runner-real-process-tests`, which also enables the LSP crate's `real-process-tests` feature; these tests are ignored by default execution and share the `runner_real_process_` name prefix. | Real local child processes only; no external network. Run serially because the assertions intentionally exercise OS scheduling and process teardown. | `cargo test --locked -p webcodex-runner -p webcodex-lsp --features runner-real-process-tests runner_real_process -- --ignored --test-threads=1` |
 | Process lifecycle real-process | `ManagedChild` ownership, graceful/forced termination, descendants, EOF, liveness, and reaping. Most lifecycle tests in the integration target are ignored; pure type/spawn-error smoke remains ordinary. | Real local helper processes and OS liveness probes. | `cargo test --locked -p webcodex-process --test managed_child -- --ignored --test-threads=1` |
 | Persistent-shell timing | Timeout, concurrent busy-state, close-vs-exec, idle expiry, descendant teardown, and heavy adversarial PowerShell timing/status coverage. Fast state/error/exit smoke remains ordinary. | Real shell processes; serial execution only. | `cargo test --locked -p webcodex-persistent-shell -- --ignored --test-threads=1` |
 | Desktop Windows real-process | Windows Desktop stdin-EOF shutdown and bounded-command process-tree reclamation. These tests are ignored by the ordinary Desktop suite and share the `desktop_real_process_windows_` name prefix. | Real local child processes only; no external network. Run serially so PowerShell startup and process teardown do not compete with the ordinary Desktop libtest pool. | `cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml desktop_real_process_windows_ -- --ignored --test-threads=1` |
@@ -49,7 +49,7 @@ Ordinary `cargo test` and ordinary CI intentionally skip ignored timing/real-pro
 coverage. Run the smallest relevant group locally when changing one of these boundaries:
 
 ```bash
-cargo test --locked -p webcodex-runner --features runner-real-process-tests runner_real_process -- --ignored --test-threads=1
+cargo test --locked -p webcodex-runner -p webcodex-lsp --features runner-real-process-tests runner_real_process -- --ignored --test-threads=1
 cargo test --locked -p webcodex-process --test managed_child -- --ignored --test-threads=1
 cargo test --locked -p webcodex-persistent-shell -- --ignored --test-threads=1
 cargo test --locked -p webcodex --lib tool_runtime_real_process_ -- --ignored --test-threads=1
@@ -96,21 +96,21 @@ The lanes above define test semantics; workflows decide when to run them.
   lane is `success` when required or `skipped` when not required, avoiding a skipped
   required-check context that could leave branch protection pending.
 - Linux Rust execution remains package-sharded: the server package `webcodex`, the
-  Runner package `webcodex-runner`, and the remaining workspace crates run in
-  parallel. The Runner shard compiles with `--features runner-real-process-tests` to
-  prevent bitrot while ordinary local runs skip compiling manual real-process test
-  bodies; ordinary libtest execution does not execute ignored tests. The remainder shard uses
-  `--workspace --exclude webcodex --exclude webcodex-runner`, so newly added
-  workspace members enter CI automatically rather than depending on a hand-maintained
-  package list. The split changes scheduling, not process-ownership coverage.
+  Runner/LSP packages, and the remaining workspace crates run in parallel. The
+  Runner/LSP shard compiles with `--features runner-real-process-tests` to prevent
+  bitrot while ordinary local runs skip compiling manual real-process test bodies;
+  ordinary libtest execution does not execute ignored tests. The remainder shard uses
+  `--workspace --exclude webcodex --exclude webcodex-runner --exclude webcodex-lsp`,
+  so newly added workspace members enter CI automatically rather than depending on a
+  hand-maintained package list. The split changes scheduling, not process-ownership coverage.
 - Linux tooling runs in parallel with the Rust shards and retains
   release-verification tooling, Markdown-link validation, and npm package-smoke
   tooling on every PR. The complete `cargo check --workspace --all-targets` pass is
   reserved for pushes to `main`, external-contributor PRs, and explicit `run-ci` PRs;
   ordinary owner PRs already pay for the package-sharded Rust test compilation and do
-  not repeat that broad compile-only pass. macOS and Windows native jobs compile with
-  `--features runner-real-process-tests` and keep deterministic Runner/Computer/Desktop
-  coverage, but they do not execute ignored real-process groups. Process-tree,
+  not repeat that broad compile-only pass. macOS and Windows native jobs compile Runner,
+  LSP, and Computer with `--features runner-real-process-tests` and keep deterministic
+  native coverage, but they do not execute ignored real-process groups. Process-tree,
   detached-supervisor, shell timeout/stop, PowerShell stdin EOF, fake-SSH lifecycle,
   selected Plugin shutdown, and similar OS-scheduling-sensitive coverage is retained
   as explicit local evidence. The local-`sshd` SSH integration fixture remains

@@ -5,6 +5,10 @@ license.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = []
+real-process-tests = []
+
 [dependencies]
 webcodex-core = { path = "../webcodex-core" }
 webcodex-process = { path = "../webcodex-process" }

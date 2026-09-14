@@ -17,7 +17,7 @@ struct Fixture {
     _temp: TempDir,
     root: PathBuf,
     marker: PathBuf,
-    #[cfg(feature = "runner-real-process-tests")]
+    #[cfg(feature = "real-process-tests")]
     exit_marker: PathBuf,
 }
 
@@ -80,7 +80,7 @@ impl Fixture {
             _temp: temp,
             root,
             marker,
-            #[cfg(feature = "runner-real-process-tests")]
+            #[cfg(feature = "real-process-tests")]
             exit_marker,
         }
     }
@@ -103,7 +103,7 @@ impl Fixture {
             .collect()
     }
 
-    #[cfg(feature = "runner-real-process-tests")]
+    #[cfg(feature = "real-process-tests")]
     fn descendant_pids(&self) -> Vec<u32> {
         fs::read_to_string(&self.marker)
             .unwrap_or_default()
@@ -1259,7 +1259,7 @@ fn lsp_default_args_apply_to_env_and_path_but_not_configured() {
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: crashed LSP child reap latency"]
 fn runner_real_process_lsp_crashed_connection_reaps_immediately_without_full_shutdown_deadline() {
     let _serial = super::super::serialize_fake_lsp_test();
@@ -1320,7 +1320,7 @@ fn lsp_stderr_capture_is_bounded() {
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: LSP graceful leader exit reaps surviving descendant"]
 fn runner_real_process_lsp_graceful_leader_exit_still_reaps_surviving_descendant() {
     let _serial = super::super::serialize_fake_lsp_test();
@@ -1361,7 +1361,7 @@ fn runner_real_process_lsp_graceful_leader_exit_still_reaps_surviving_descendant
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: LSP shutdown and Drop reap child process"]
 fn runner_real_process_lsp_shutdown_and_drop_reap_the_child_process() {
     let _serial = super::super::serialize_fake_lsp_test();
@@ -1398,7 +1398,7 @@ fn runner_real_process_lsp_shutdown_and_drop_reap_the_child_process() {
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: hanging LSP shutdown honors one deadline"]
 fn runner_real_process_lsp_shutdown_uses_single_deadline_against_hanging_server() {
     let _serial = super::super::serialize_fake_lsp_test();
@@ -1450,7 +1450,7 @@ fn runner_real_process_lsp_shutdown_uses_single_deadline_against_hanging_server(
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: multiple hanging LSP children share one shutdown deadline"]
 fn runner_real_process_lsp_multiple_hanging_servers_share_one_supervisor_deadline() {
     let _serial = super::super::serialize_fake_lsp_test();
@@ -1574,7 +1574,7 @@ fn lsp_reaper_timeout_does_not_rearm_supervisor_drop_budget() {
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: LSP initialize-timeout child cleanup budget"]
 fn runner_real_process_lsp_initialize_timeout_cleanup_uses_configured_shutdown_budget() {
     let _serial = super::super::serialize_fake_lsp_test();
@@ -1635,7 +1635,7 @@ fn runner_real_process_lsp_initialize_timeout_cleanup_uses_configured_shutdown_b
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: explicit idle LSP cleanup reaps child"]
 fn runner_real_process_lsp_idle_cleanup_is_explicit_and_bounded() {
     let _serial = super::super::serialize_fake_lsp_test();
@@ -1678,7 +1678,7 @@ fn lsp_idle_cleanup_skips_active_pending_requests() {
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: idle cleanup reaps crashed-but-live LSP child"]
 fn runner_real_process_lsp_idle_cleanup_reaps_crashed_alive_server_immediately() {
     let _serial = super::super::serialize_fake_lsp_test();
@@ -1703,7 +1703,7 @@ fn runner_real_process_lsp_idle_cleanup_reaps_crashed_alive_server_immediately()
 }
 
 #[test]
-#[cfg(feature = "runner-real-process-tests")]
+#[cfg(feature = "real-process-tests")]
 #[ignore = "runner real-process lane: background LSP reaper reclaims idle child capacity"]
 fn runner_real_process_lsp_background_reaper_reclaims_idle_capacity_without_explicit_cleanup() {
     let _serial = super::super::serialize_fake_lsp_test();
