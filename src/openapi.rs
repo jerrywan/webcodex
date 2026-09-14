@@ -88,7 +88,7 @@ pub(crate) fn build_openapi_spec() -> Value {
 fn direct_operation(definition: &ToolDefinition, spec: &ToolSpec) -> Value {
     let description = action_operation_description(definition, spec);
     let request_schema = action_request_schema(definition.name, spec.input_schema.clone());
-    let response_schema = action_tool_result_schema(spec.output_schema.clone());
+    let response_schema = project_action_tool_result_schema(spec.output_schema.clone());
     json!({
         "operationId": definition.name,
         "description": description,
@@ -141,6 +141,27 @@ fn gateway_operation() -> Value {
         },
         "responses": standard_responses(response_schema)
     })
+}
+
+fn project_action_tool_result_schema(canonical_schema: Value) -> Value {
+    let mut schema = project_schema_descriptions(canonical_schema);
+    let object = schema
+        .as_object_mut()
+        .expect("canonical ToolSpec output schema must be an object");
+    object.insert("type".to_string(), json!("object"));
+    object.insert("additionalProperties".to_string(), json!(false));
+    let properties = object
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .expect("canonical ToolSpec output schema must expose ToolResult properties");
+    assert!(
+        properties.contains_key("output"),
+        "canonical ToolSpec output schema must expose ToolResult.output"
+    );
+    properties.insert("success".to_string(), json!({"type": "boolean"}));
+    properties.insert("error".to_string(), json!({"type": "string"}));
+    object.insert("required".to_string(), json!(["success", "output"]));
+    schema
 }
 
 fn action_tool_result_schema(output_schema: Value) -> Value {
@@ -458,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_response_schemas_wrap_canonical_output_in_tool_result() {
+    fn direct_response_schemas_project_one_canonical_tool_result_envelope() {
         let generated = build_openapi_spec();
         let specs = registered_tool_specs()
             .into_iter()
@@ -468,6 +489,8 @@ mod tests {
             let schema = &generated["paths"]
                 [format!("{GPT_ACTION_PATH_PREFIX}{}", definition.name)]["post"]["responses"]
                 ["200"]["content"]["application/json"]["schema"];
+            let canonical =
+                project_schema_descriptions(specs[definition.name].output_schema.clone());
             assert_eq!(schema["type"], "object", "{}", definition.name);
             assert_eq!(schema["additionalProperties"], false, "{}", definition.name);
             assert_eq!(
@@ -488,8 +511,8 @@ mod tests {
             );
             assert_eq!(
                 schema["properties"]["output"],
-                project_schema_descriptions(specs[definition.name].output_schema.clone()),
-                "{}",
+                canonical["properties"]["output"],
+                "{} Action response must preserve canonical ToolSpec.output without a second ToolResult envelope",
                 definition.name
             );
         }
