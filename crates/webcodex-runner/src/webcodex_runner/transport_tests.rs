@@ -102,11 +102,14 @@ fn inventory_status(
     }
 }
 
+/// Write synthetic project registry TOML records. Synthetic project roots
+/// intentionally do not create target directories on disk: project registry
+/// scanning discovers the records faithfully while avoiding spawning hundreds
+/// of extraneous Git subprocesses during transport tests.
 fn write_synthetic_project_configs(project_registry_dir: &Path, root: &Path, count: usize) {
     std::fs::create_dir_all(project_registry_dir).unwrap();
     for index in 0..count {
         let path = root.join(format!("project-{index:04}"));
-        std::fs::create_dir_all(&path).unwrap();
         std::fs::write(
             project_registry_dir.join(format!("project-{index:04}.toml")),
             format!(
@@ -4166,7 +4169,6 @@ async fn streaming_stale_generation_resnapshots_current_projects_for_websocket_a
         // eagerly create generation B before the Server-side dynamic projection
         // has retired A, so B alone is not sufficient for correctness.
         let added_root = project_root.join("new-project");
-        std::fs::create_dir_all(&added_root).unwrap();
         std::fs::write(
             project_registry_dir.join("new-project.toml"),
             format!(
