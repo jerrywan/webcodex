@@ -201,6 +201,23 @@ async fn read_files_returns_ordered_normalized_successes_after_out_of_order_comp
     assert_eq!(result.output["output_truncated"], false);
     assert!(result.output["next_index"].is_null());
 
+    let mut result = result;
+    let projection =
+        super::super::dispatch::ModelFacingProjectionPlan::capture(&ToolCall::ReadFiles {
+            project: runtime_project,
+            items: vec![
+                item("src/lib.rs", Some(2), Some(2)),
+                item("src/main.rs", None, Some(1)),
+            ],
+            session_id: None,
+            with_line_numbers: Some(true),
+            max_result_bytes: None,
+        });
+    projection.project(&mut result);
+    assert_eq!(
+        result.output["suggested_call"]["arguments"]["items"][0]["start_line"],
+        4
+    );
     let schema = crate::tool_runtime::registry::output_schema_for_tool("read_files");
     let serialized = serde_json::to_value(&result).unwrap();
     crate::tool_runtime::startup_brief::validate_schema_instance_for_test(&serialized, &schema)
@@ -414,29 +431,20 @@ async fn read_file_dispatch_partial_success_keeps_full_range_cursor() {
     assert_eq!(item["output"]["returned_lines"], 1);
     assert_eq!(item["output"]["end_line"], 2);
     assert_eq!(item["output"]["has_more"], true);
-    assert_eq!(item["output"]["next_start_line"], 3);
-    let continuation = &item["continuation"];
-    assert_eq!(continuation["kind"], "read_range");
-    assert_eq!(continuation["safe_cursor"], true);
-    assert_eq!(continuation["snapshot_stable"], false);
-    assert_eq!(continuation["continuation_semantics"]["kind"], "page");
     assert_eq!(
-        continuation["continuation_semantics"]["carrier"],
-        "position"
+        result.output["suggested_call"]["arguments"]["items"][0]["start_line"],
+        3
     );
+    let suggested = &result.output["suggested_call"];
     let read_revision = item["output"]["read_revision"]
         .as_u64()
         .expect("successful read must expose read_revision");
     assert!((1..=9_007_199_254_740_991).contains(&read_revision));
-    assert_eq!(continuation["source_read_revision"], read_revision);
-    assert_eq!(continuation["suggested_call"]["tool"], "read_files");
-    assert_eq!(
-        continuation["suggested_call"]["arguments"]["session_id"],
-        session_id
-    );
+    assert_eq!(suggested["tool"], "read_files");
+    assert_eq!(suggested["arguments"]["session_id"], session_id);
     let next_call = ToolCall::from_tool_name(
-        continuation["suggested_call"]["tool"].as_str().unwrap(),
-        continuation["suggested_call"]["arguments"].clone(),
+        suggested["tool"].as_str().unwrap(),
+        suggested["arguments"].clone(),
     )
     .expect("read_files continuation suggested_call must parse");
     assert!(matches!(
@@ -502,7 +510,7 @@ async fn read_files_continuation_is_positional_not_snapshot_stable() {
     let first_revision = first_item["output"]["read_revision"]
         .as_u64()
         .expect("first read revision");
-    let suggested = &first_item["continuation"]["suggested_call"];
+    let suggested = &first.output["suggested_call"];
     let next_call = ToolCall::from_tool_name(
         suggested["tool"].as_str().unwrap(),
         suggested["arguments"].clone(),
@@ -529,11 +537,6 @@ async fn read_files_continuation_is_positional_not_snapshot_stable() {
         .as_u64()
         .expect("second read revision");
     assert_ne!(second_revision, first_revision);
-    assert_eq!(
-        first_item["continuation"]["source_read_revision"],
-        first_revision
-    );
-    assert_eq!(first_item["continuation"]["snapshot_stable"], false);
 }
 
 #[tokio::test]
@@ -691,7 +694,7 @@ async fn read_files_dispatch_complete_batch_is_sparse_and_schema_valid() {
 }
 
 #[tokio::test]
-async fn read_files_partial_item_has_actionable_item_continuation() {
+async fn read_files_partial_item_has_one_invocation_follow_up() {
     let root = tempfile::tempdir().unwrap();
     let runtime = ToolRuntime::new_for_tests();
     let client_id = "read-batch-item-continuation";
@@ -741,11 +744,7 @@ async fn read_files_partial_item_has_actionable_item_continuation() {
     assert_eq!(result.output["output_truncated"], false);
     assert!(result.output.get("continuation").is_none());
     let items = result.output["items"].as_array().unwrap();
-    let continuation = &items[0]["continuation"];
-    assert_eq!(continuation["kind"], "read_range");
-    assert_eq!(continuation["safe_cursor"], true);
-    assert_eq!(continuation["snapshot_stable"], false);
-    let suggested = &continuation["suggested_call"];
+    let suggested = &result.output["suggested_call"];
     assert_eq!(suggested["arguments"]["session_id"], session_id);
     let next_call = ToolCall::from_tool_name(
         suggested["tool"].as_str().unwrap(),
@@ -880,9 +879,11 @@ async fn read_files_dispatch_mixed_batch_keeps_outer_and_failure_semantics() {
     assert_eq!(items[0]["path"], "good.txt");
     assert_eq!(items[0]["output"]["text"], "ok");
     assert_eq!(items[0]["output"]["has_more"], true);
-    assert_eq!(items[0]["output"]["next_start_line"], 2);
-    assert_eq!(items[0]["continuation"]["kind"], "read_range");
-    let suggested = &items[0]["continuation"]["suggested_call"];
+    assert_eq!(
+        result.output["suggested_call"]["arguments"]["items"][0]["start_line"],
+        2
+    );
+    let suggested = &result.output["suggested_call"];
     ToolCall::from_tool_name(
         suggested["tool"].as_str().unwrap(),
         suggested["arguments"].clone(),
@@ -1361,9 +1362,9 @@ async fn read_files_outer_recorder_observes_canonical_batch_before_primary_proje
     assert_eq!(result.output["output_truncated"], true);
     assert_eq!(result.output["truncation_reason"], "batch_response_budget");
     assert_eq!(result.output["returned_count"], 1);
-    assert_eq!(result.output["next_index"], 1);
+    assert!(result.output.get("next_index").is_none());
     assert_eq!(
-        result.output["continuation"]["suggested_call"]["arguments"]["session_id"],
+        result.output["suggested_call"]["arguments"]["session_id"],
         business_session.session_id,
         "model continuation must preserve the concrete business Session rather than inherit the outer recorder"
     );
@@ -1663,9 +1664,14 @@ async fn read_files_outer_recording_session_keeps_final_response_under_hard_cap(
     assert_eq!(result.output["output_truncated"], true);
     assert_eq!(result.output["truncation_reason"], "hard_result_cap");
     let returned_count = result.output["returned_count"].as_u64().unwrap();
-    let next_index = result.output["next_index"].as_u64().unwrap();
     assert!(returned_count < 4);
-    assert_eq!(next_index, returned_count);
+    assert_eq!(
+        result.output["suggested_call"]["arguments"]["items"]
+            .as_array()
+            .unwrap()
+            .len() as u64,
+        4 - returned_count
+    );
     let serialized_len = serde_json::to_vec(&result).unwrap().len();
     assert!(
         serialized_len <= MAX_SERIALIZED_OUTPUT_BYTES,

@@ -140,9 +140,9 @@ pub(super) const READ_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE.review(super::ToolReviewEvidence::ReadOnlyInspection).exploration(super::ToolExplorationEvidence::ReadBatch),
             ),
-            "Adaptive Runtime preferred batch-capable inspect tool, including when only one known range is needed. Reads 1..8 UTF-8 ranges. Successful items expose read_revision for the exact full-file snapshot; partial read_range recovery carries source_read_revision. Complete a current partial item before batch_items recovery. next_index is evidence, not a read_files input. Recovery binds the exact resolved Project and business session_id. increase_result_budget is used only when needed; the 512 KiB hard cap exposes no fake continuation.",
+            "Adaptive Runtime preferred batch-capable inspect tool, including when only one known range is needed. Reads 1..8 UTF-8 ranges. Successful items expose read_revision for the exact full-file snapshot. Follow the single output-level suggested_call: it combines unread returned ranges in original order with unreturned original items. These positions are not snapshot-stable; compare each file's read_revision across calls before joining ranges. The call binds the exact resolved Project and business session_id. Zero progress may suggest a larger max_result_bytes; the 512 KiB hard cap exposes no fake continuation.",
             read_files_input_schema,
-        ).with_gpt_action_description("Batch-read 1..8 UTF-8 project ranges. Successful reads expose read_revision for the full-file snapshot; compare source_read_revision before joining partial ranges. Complete a partial current item before later batch continuation and raise result budget only when recovery explicitly suggests it.")),
+        ).with_gpt_action_description("Batch-read 1..8 UTF-8 project ranges. Follow the single suggested_call for unread ranges and remaining items. Positions are not snapshot-stable: compare each file's read_revision across calls before joining. Zero progress may suggest a larger budget; the hard cap exposes no fake call.")),
         50,
     ),
 ];

@@ -42,18 +42,13 @@ fn tool_specs_describe_default_coding_loop_preferences() {
     for phrase in [
         "adaptive runtime preferred batch-capable inspect tool",
         "only one known range",
-        "read_range",
-        "batch_items",
-        "next_index",
-        "not a read_files input",
-        "increase_result_budget",
         "no fake continuation",
-        "complete a current partial item",
         "512 kib",
         "exact resolved project",
         "business session_id",
         "read_revision",
-        "source_read_revision",
+        "single output-level suggested_call",
+        "not snapshot-stable",
     ] {
         assert!(
             read_files_desc.contains(phrase),

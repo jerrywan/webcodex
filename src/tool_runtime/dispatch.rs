@@ -748,6 +748,17 @@ pub(crate) fn sparsify_complete_read_success(tool_name: &str, result: &mut ToolR
             output.remove(key);
         }
     }
+    // The output-level call is the sole machine representation of follow-up
+    // positions. Completeness and snapshot identity remain on each item.
+    output.remove("next_index");
+    if let Some(items) = output.get_mut("items").and_then(Value::as_array_mut) {
+        for item in items {
+            if let Some(read) = item.get_mut("output").and_then(Value::as_object_mut) {
+                read.remove("next_start_line");
+                read.remove("budget_next_limit");
+            }
+        }
+    }
 }
 
 /// Snapshot of the activity-relevant request facts, captured before the

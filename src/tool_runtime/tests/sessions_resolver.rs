@@ -162,7 +162,7 @@ async fn read_files_short_id_continuation_binds_resolved_project_across_registry
         .unwrap();
     let first = first.await.unwrap();
     assert!(first.success, "{:?}", first.error);
-    let suggested = &first.output["items"][0]["continuation"]["suggested_call"];
+    let suggested = &first.output["suggested_call"];
     assert_eq!(
         suggested["arguments"]["project"],
         "agent:workstation:other-repo"
@@ -286,14 +286,12 @@ async fn read_files_short_id_item_continuation_uses_resolved_project_id() {
     let result = task.await.unwrap();
     assert!(result.success, "{:?}", result.error);
     assert_eq!(
-        result.output["items"][0]["continuation"]["suggested_call"]["arguments"]["project"],
+        result.output["suggested_call"]["arguments"]["project"],
         "agent:workstation:other-repo"
     );
-    assert!(
-        result.output["items"][0]["continuation"]["suggested_call"]["arguments"]
-            .get("session_id")
-            .is_none()
-    );
+    assert!(result.output["suggested_call"]["arguments"]
+        .get("session_id")
+        .is_none());
 }
 
 #[tokio::test]

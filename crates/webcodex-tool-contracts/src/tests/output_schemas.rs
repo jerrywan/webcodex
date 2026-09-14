@@ -63,37 +63,6 @@ fn structured_execution_output(
 fn t2_continuation_output_schemas_distinguish_cursor_kinds_and_carriers() {
     let specs = registered_tool_specs();
 
-    let read_files = spec_named(&specs, "read_files");
-    let read_full = &read_files.output_schema["properties"]["output"]["anyOf"][0]["anyOf"][0];
-    let range_semantics = &read_full["properties"]["items"]["items"]["properties"]["continuation"]
-        ["properties"]["continuation_semantics"]["properties"];
-    assert_eq!(range_semantics["kind"]["const"], "page");
-    assert_eq!(range_semantics["carrier"]["const"], "position");
-
-    let variants = read_full["properties"]["continuation"]["oneOf"]
-        .as_array()
-        .unwrap();
-    let mut seen = std::collections::BTreeSet::new();
-    for variant in variants {
-        let kind = variant["properties"]["kind"]["const"].as_str().unwrap();
-        let semantics = &variant["properties"]["continuation_semantics"]["properties"];
-        seen.insert((
-            kind.to_string(),
-            semantics["kind"]["const"].as_str().unwrap().to_string(),
-            semantics["carrier"]["const"].as_str().unwrap().to_string(),
-        ));
-    }
-    assert!(seen.contains(&(
-        "batch_items".to_string(),
-        "batch".to_string(),
-        "index".to_string()
-    )));
-    assert!(seen.contains(&(
-        "increase_result_budget".to_string(),
-        "refine".to_string(),
-        "none".to_string()
-    )));
-
     let coding = spec_named(&specs, "coding_agent_observe");
     let coding_semantics = &coding.output_schema["properties"]["output"]["properties"]
         ["continuation_semantics"]["properties"];
@@ -671,128 +640,51 @@ fn observe_jobs_failure_item_schema_closes_recovery_metadata() {
 }
 
 #[test]
-fn read_continuation_output_schemas_accept_actionable_recovery_shapes() {
-    let read_files = output_schema_for_tool("read_files");
-    test_support::validate_schema_instance(
-        &json!({
-            "success": true,
-            "output": {
-                "project": "agent:oe:demo",
-                "requested_count": 3,
-                "returned_count": 1,
-                "succeeded_count": 1,
-                "failed_count": 0,
-                "items": [{
-                    "index": 0,
-                    "path": "src/0.rs",
-                    "success": true,
-                    "output": {
-                        "text": "first",
-                        "format": "plain",
-                        "path": "src/0.rs",
-                        "sha256": "b".repeat(64),
-                        "read_revision": 3817291045227_u64,
-                        "start_line": 1,
-                        "limit": 100,
-                        "total_lines": 200,
-                        "returned_lines": 50,
-                        "end_line": 50,
-                        "has_more": true,
-                        "next_start_line": 51,
-                        "budget_truncated": true,
-                        "budget_next_limit": 50
-                    },
-                    "error": null,
-                    "continuation": {
-                        "kind": "read_range",
-                        "safe_cursor": true,
-                        "source_read_revision": 3817291045227_u64,
-                        "snapshot_stable": false,
-                        "continuation_semantics": {
-                            "kind": "page",
-                            "carrier": "position"
-                        },
-                        "suggested_call": {
-                            "tool": "read_files",
-                            "arguments": {
-                                "project": "agent:oe:demo",
-                                "items": [{
-                                    "path": "src/0.rs",
-                                    "start_line": 51,
-                                    "limit": 50
-                                }]
-                            }
-                        }
-                    }
-                }],
-                "output_truncated": true,
-                "next_index": 0,
-                "truncation_reason": "batch_response_budget",
-                "continuation": {
-                    "kind": "batch_items",
-                    "safe_cursor": true,
-                    "next_index": 1,
-                    "recommended_order": "after_partial_item",
-                    "continuation_semantics": {
-                        "kind": "batch",
-                        "carrier": "index"
-                    },
-                    "suggested_call": {
-                        "tool": "read_files",
-                        "arguments": {
-                            "project": "agent:oe:demo",
-                            "session_id": "wc_sess_demo",
-                            "items": [
-                                {"path": "src/1.rs"},
-                                {"path": "src/2.rs", "start_line": 4, "limit": 20}
-                            ]
-                        }
-                    }
-                }
-            },
-            "error": null
-        }),
-        &read_files,
-    )
-    .unwrap();
-
-    test_support::validate_schema_instance(
-        &json!({
-            "success": true,
-            "output": {
-                "project": "agent:oe:demo",
-                "requested_count": 1,
-                "returned_count": 0,
-                "succeeded_count": 0,
-                "failed_count": 0,
-                "items": [],
-                "output_truncated": true,
-                "next_index": 0,
-                "truncation_reason": "batch_response_budget",
-                "continuation": {
-                    "kind": "increase_result_budget",
-                    "safe_cursor": false,
-                    "next_index": 0,
-                    "suggested_max_result_bytes": 524288,
-                    "continuation_semantics": {
-                        "kind": "refine",
-                        "carrier": "none"
-                    },
-                    "suggested_call": {
-                        "tool": "read_files",
-                        "arguments": {
-                            "project": "agent:oe:demo",
-                            "items": [{"path": "src/0.rs"}],
-                            "max_result_bytes": 524288
-                        }
-                    }
-                }
-            },
-            "error": null
-        }),
-        &read_files,
-    )
-    .unwrap();
+fn read_continuation_output_schemas_accept_one_action_and_snapshot_truth() {
+    let schema = output_schema_for_tool("read_files");
+    let mut result = json!({"success": true, "output": {
+        "project": "agent:oe:demo", "requested_count": 3, "returned_count": 1,
+        "succeeded_count": 1, "failed_count": 0,
+        "items": [{"index": 0, "path": "src/0.rs", "success": true, "error": null,
+            "output": {"text": "first", "format": "plain", "path": "src/0.rs", "sha256": "b".repeat(64),
+                "read_revision": 3817291045227_u64, "start_line": 1, "limit": 100, "total_lines": 200,
+                "returned_lines": 50, "end_line": 50, "has_more": true, "budget_truncated": true}}],
+        "output_truncated": true, "truncation_reason": "batch_response_budget",
+        "suggested_call": {"tool": "read_files", "arguments": {"project": "agent:oe:demo", "session_id": "wc_sess_demo",
+            "items": [{"path": "src/0.rs", "start_line": 51, "limit": 50}, {"path": "src/1.rs"}, {"path": "src/2.rs", "start_line": 4, "limit": 20}]}}
+    }});
+    test_support::validate_schema_instance(&result, &schema).unwrap();
+    for field in [
+        "continuation",
+        "next_index",
+        "recommended_order",
+        "safe_cursor",
+        "continuation_semantics",
+    ] {
+        let mut duplicate = result.clone();
+        duplicate["output"][field] = Value::Null;
+        assert!(test_support::validate_schema_instance(&duplicate, &schema).is_err());
+    }
+    let mut duplicate = result.clone();
+    duplicate["output"]["items"][0]["continuation"] = result["output"]["suggested_call"].clone();
+    assert!(test_support::validate_schema_instance(&duplicate, &schema).is_err());
+    let mut missing_snapshot = result.clone();
+    missing_snapshot["output"]["items"][0]["output"]
+        .as_object_mut()
+        .unwrap()
+        .remove("read_revision");
+    assert!(test_support::validate_schema_instance(&missing_snapshot, &schema).is_err());
+    result["output"]["items"] = json!([]);
+    result["output"]["returned_count"] = json!(0);
+    result["output"]["succeeded_count"] = json!(0);
+    result["output"]["suggested_call"]["arguments"]["max_result_bytes"] = json!(524288);
+    test_support::validate_schema_instance(&result, &schema).unwrap();
+    result["output"]
+        .as_object_mut()
+        .unwrap()
+        .remove("suggested_call");
+    result["output"]["truncation_reason"] = json!("hard_result_cap");
+    test_support::validate_schema_instance(&result, &schema).unwrap();
 }
 
 #[test]
