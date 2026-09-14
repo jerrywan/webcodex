@@ -211,16 +211,45 @@ fn handoff_brief_schema_is_shared_strict_and_absent_from_startup() {
         .to_string()
         .find("\"handoff_brief\"")
         .is_none());
+    fn strip_descriptions(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                object.remove("description");
+                for nested in object.values_mut() {
+                    strip_descriptions(nested);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    strip_descriptions(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
     let openapi = crate::openapi::build_openapi_spec();
+    let mut canonical_handoff_shape = handoff_schema.clone();
+    let mut finish_action_shape = openapi["paths"]["/api/actions/finish_coding_task"]["post"]
+        ["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["output"]
+        ["properties"]["handoff_brief"]
+        .clone();
+    let mut handoff_action_shape = openapi["paths"]["/api/actions/session_handoff_summary"]["post"]
+        ["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["output"]
+        ["properties"]["handoff_brief"]
+        .clone();
+    strip_descriptions(&mut canonical_handoff_shape);
+    strip_descriptions(&mut finish_action_shape);
+    strip_descriptions(&mut handoff_action_shape);
     assert_eq!(
-        &openapi["components"]["schemas"]["HandoffBrief"], handoff_schema,
-        "REST/OpenAPI and GPT Actions must reuse the MCP/runtime handoff schema"
+        finish_action_shape, canonical_handoff_shape,
+        "finish_coding_task Action response must preserve the canonical handoff schema"
     );
     assert_eq!(
-        openapi["components"]["schemas"]["ToolResult"]["properties"]["output"]["oneOf"][0]
-            ["properties"]["handoff_brief"]["$ref"],
-        "#/components/schemas/HandoffBrief"
+        handoff_action_shape, canonical_handoff_shape,
+        "session_handoff_summary Action response must preserve the canonical handoff schema"
     );
+    assert!(openapi["components"].get("schemas").is_none());
 
     let store = store_with_limit(200);
     let session_id = start_session(&store, "schema");
