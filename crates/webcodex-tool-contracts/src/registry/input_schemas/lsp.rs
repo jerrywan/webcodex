@@ -231,7 +231,7 @@ pub fn call_hierarchy_input_schema() -> Value {
         (
             "limit",
             "integer",
-            "Global flattened edge limit (default 50, maximum 100).",
+            "Global flattened edge result ceiling (default 50). Positive values above 100 are accepted and clamped to 100.",
             false,
         ),
     ]));
@@ -243,7 +243,6 @@ pub fn call_hierarchy_input_schema() -> Value {
     schema["properties"]["depth"]["maximum"] = json!(2);
     schema["properties"]["depth"]["default"] = json!(1);
     schema["properties"]["limit"]["minimum"] = json!(1);
-    schema["properties"]["limit"]["maximum"] = json!(100);
     schema["properties"]["limit"]["default"] = json!(50);
     schema
 }

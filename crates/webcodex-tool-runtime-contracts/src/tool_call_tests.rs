@@ -300,6 +300,46 @@ fn from_tool_name_parses_bounded_list_tools_options() {
 }
 
 #[test]
+fn call_hierarchy_parser_preserves_default_and_oversized_positive_limit_for_runtime_normalization()
+{
+    let omitted = ToolCall::from_tool_name(
+        "call_hierarchy",
+        json!({
+            "project": "agent:test:demo",
+            "path": "src/main.rs",
+            "line": 1,
+            "column": 1
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        omitted,
+        ToolCall::CallHierarchy {
+            direction: webcodex_core::lsp_bridge::CallHierarchyDirection::Both,
+            depth: 1,
+            limit: 50,
+            ..
+        }
+    ));
+
+    let oversized = ToolCall::from_tool_name(
+        "call_hierarchy",
+        json!({
+            "project": "agent:test:demo",
+            "path": "src/main.rs",
+            "line": 1,
+            "column": 1,
+            "limit": 500
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        oversized,
+        ToolCall::CallHierarchy { limit: 500, .. }
+    ));
+}
+
+#[test]
 fn from_tool_name_records_and_strips_testing_metadata_before_parsing() {
     let (call, metadata) = ToolCall::from_tool_name_with_recorder_metadata(
         "list_jobs",

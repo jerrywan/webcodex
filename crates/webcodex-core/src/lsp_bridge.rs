@@ -539,10 +539,25 @@ pub fn clamp_workspace_symbols_limit(limit: Option<usize>) -> usize {
         .clamp(MIN_WORKSPACE_SYMBOLS_LIMIT, MAX_WORKSPACE_SYMBOLS_LIMIT)
 }
 
-pub fn validate_call_hierarchy_bounds(depth: usize, limit: usize) -> Result<(), &'static str> {
+pub fn validate_call_hierarchy_depth(depth: usize) -> Result<(), &'static str> {
     if !(MIN_CALL_HIERARCHY_DEPTH..=MAX_CALL_HIERARCHY_DEPTH).contains(&depth) {
         return Err("call hierarchy depth must be 1..=2");
     }
+    Ok(())
+}
+
+/// Resolve the model-facing flattened edge result ceiling. Positive values
+/// above the hard maximum are safely clamped downward; zero remains invalid
+/// because raising a caller-declared result ceiling would change its meaning.
+pub fn effective_call_hierarchy_limit(limit: usize) -> Result<usize, &'static str> {
+    if limit < MIN_CALL_HIERARCHY_LIMIT {
+        return Err("call hierarchy limit must be >= 1");
+    }
+    Ok(limit.min(MAX_CALL_HIERARCHY_LIMIT))
+}
+
+pub fn validate_call_hierarchy_bounds(depth: usize, limit: usize) -> Result<(), &'static str> {
+    validate_call_hierarchy_depth(depth)?;
     if !(MIN_CALL_HIERARCHY_LIMIT..=MAX_CALL_HIERARCHY_LIMIT).contains(&limit) {
         return Err("call hierarchy limit must be 1..=100");
     }
@@ -764,10 +779,21 @@ mod tests {
     fn call_hierarchy_bounds_are_stable() {
         assert!(validate_call_hierarchy_bounds(1, 1).is_ok());
         assert!(validate_call_hierarchy_bounds(2, 100).is_ok());
+        for depth in [0, 3] {
+            assert_eq!(
+                validate_call_hierarchy_depth(depth),
+                Err("call hierarchy depth must be 1..=2")
+            );
+        }
         assert_eq!(
-            validate_call_hierarchy_bounds(0, 50),
-            Err("call hierarchy depth must be 1..=2")
+            effective_call_hierarchy_limit(0),
+            Err("call hierarchy limit must be >= 1")
         );
+        assert_eq!(effective_call_hierarchy_limit(1), Ok(1));
+        assert_eq!(effective_call_hierarchy_limit(25), Ok(25));
+        assert_eq!(effective_call_hierarchy_limit(100), Ok(100));
+        assert_eq!(effective_call_hierarchy_limit(500), Ok(100));
+        assert_eq!(effective_call_hierarchy_limit(usize::MAX), Ok(100));
         assert_eq!(
             validate_call_hierarchy_bounds(1, 101),
             Err("call hierarchy limit must be 1..=100")

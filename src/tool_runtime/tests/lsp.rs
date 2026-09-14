@@ -529,6 +529,21 @@ fn call_hierarchy_result_with_edge(path: &str) -> CallHierarchyResult {
     result
 }
 
+fn call_hierarchy_result_with_edge_count(path: &str, count: usize) -> CallHierarchyResult {
+    let mut result = call_hierarchy_result_with_edge(path);
+    let template = result.edges[0].clone();
+    result.edges = (0..count)
+        .map(|index| {
+            let mut edge = template.clone();
+            edge.from.name = format!("caller{index}");
+            edge.from.path = format!("src/caller{index}.rs");
+            edge
+        })
+        .collect();
+    result.returned_count = count;
+    result
+}
+
 async fn dispatch_call_hierarchy_result(
     client_id: &str,
     result: CallHierarchyResult,
@@ -558,6 +573,54 @@ async fn dispatch_call_hierarchy_result(
     });
     complete_lsp_agent_request(&runtime, client_id, result).await;
     task.await.unwrap()
+}
+
+async fn dispatch_call_hierarchy_with_limit(
+    client_id: &str,
+    requested_limit: Option<usize>,
+    result: CallHierarchyResult,
+) -> (RunnerLspRequest, ToolResult) {
+    let runtime = test_runtime();
+    let tmp = tempfile::tempdir().unwrap();
+    let project = register_lsp_agent(&runtime, client_id, "demo", tmp.path(), true).await;
+    let mut arguments = json!({
+        "project": project,
+        "path": "src/main.rs",
+        "line": 1,
+        "column": 4,
+        "direction": "both",
+        "depth": 1
+    });
+    if let Some(limit) = requested_limit {
+        arguments["limit"] = json!(limit);
+    }
+    let call = ToolCall::from_tool_name("call_hierarchy", arguments).unwrap();
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .dispatch_with_auth(call, Some(&auth_context(None, true)))
+                .await
+        }
+    });
+    let request = wait_for_patch_agent_request(&runtime, client_id).await;
+    let sent = request
+        .lsp
+        .as_ref()
+        .expect("call_hierarchy Runner request")
+        .request
+        .clone();
+    let envelope = RunnerLspResultEnvelope::ok(result);
+    complete_patch_agent_request(
+        &runtime,
+        client_id,
+        &request.request_id,
+        0,
+        &envelope.to_stdout_json(),
+        "",
+    )
+    .await;
+    (sent, task.await.unwrap())
 }
 
 fn assert_malformed_call_hierarchy(case: &str, result: &ToolResult) {
@@ -694,7 +757,7 @@ async fn call_hierarchy_dispatch_uses_typed_bridge_and_validates_bounds() {
     assert!(result.success, "{result:?}");
     assert_eq!(result.output["project"], project);
 
-    for (depth, limit) in [(0, 50), (1, 101)] {
+    for (depth, limit) in [(0, 50), (3, 50), (1, 0)] {
         let invalid = runtime
             .dispatch_with_auth(
                 ToolCall::CallHierarchy {
@@ -712,6 +775,60 @@ async fn call_hierarchy_dispatch_uses_typed_bridge_and_validates_bounds() {
             .await;
         assert!(!invalid.success, "{depth}/{limit}: {invalid:?}");
     }
+}
+
+#[tokio::test]
+async fn call_hierarchy_result_limit_is_normalized_before_runner_and_result_validation() {
+    for (index, (requested_limit, effective_limit)) in [
+        (None, 50),
+        (Some(25), 25),
+        (Some(500), 100),
+        (Some(1_000_000_000), 100),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let client_id = format!("hierarchy-budget-{index}");
+        let (request, result) = dispatch_call_hierarchy_with_limit(
+            &client_id,
+            requested_limit,
+            call_hierarchy_result("src/main.rs"),
+        )
+        .await;
+        assert!(result.success, "requested={requested_limit:?}: {result:?}");
+        assert!(matches!(
+            request,
+            RunnerLspRequest::CallHierarchy {
+                depth: 1,
+                limit,
+                ..
+            } if limit == effective_limit
+        ));
+    }
+
+    let (request, accepted) = dispatch_call_hierarchy_with_limit(
+        "hierarchy-budget-result-ok",
+        Some(500),
+        call_hierarchy_result_with_edge_count("src/main.rs", 100),
+    )
+    .await;
+    assert!(matches!(
+        request,
+        RunnerLspRequest::CallHierarchy { limit: 100, .. }
+    ));
+    assert!(accepted.success, "{accepted:?}");
+
+    let (request, rejected) = dispatch_call_hierarchy_with_limit(
+        "hierarchy-budget-result-overflow",
+        Some(500),
+        call_hierarchy_result_with_edge_count("src/main.rs", 101),
+    )
+    .await;
+    assert!(matches!(
+        request,
+        RunnerLspRequest::CallHierarchy { limit: 100, .. }
+    ));
+    assert_malformed_call_hierarchy("effective-limit-overflow", &rejected);
 }
 
 #[tokio::test]

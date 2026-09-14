@@ -605,6 +605,7 @@ fn model_preference_upper_bounds_are_clamped_by_runtime_not_rejected_by_schema()
         ("workspace_symbols", &["limit"]),
         ("goto_definition", &["limit"]),
         ("find_references", &["limit"]),
+        ("call_hierarchy", &["limit"]),
         ("computer_list_windows", &["limit"]),
         ("computer_list_displays", &["limit"]),
         ("computer_list_applications", &["limit"]),
@@ -636,6 +637,26 @@ fn model_preference_upper_bounds_are_clamped_by_runtime_not_rejected_by_schema()
             );
         }
     }
+}
+
+#[test]
+fn call_hierarchy_schema_keeps_traversal_strict_and_result_budget_clamped() {
+    let specs = registered_tool_specs();
+    let spec = spec_named(&specs, "call_hierarchy");
+    let properties = spec.input_schema["properties"].as_object().unwrap();
+
+    assert_eq!(properties["depth"]["minimum"], 1);
+    assert_eq!(properties["depth"]["maximum"], 2);
+    assert_eq!(properties["depth"]["default"], 1);
+
+    assert_eq!(properties["limit"]["minimum"], 1);
+    assert!(properties["limit"].get("maximum").is_none());
+    assert_eq!(properties["limit"]["default"], 50);
+    let description = properties["limit"]["description"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(description.contains("above 100"), "{description}");
+    assert!(description.contains("clamped to 100"), "{description}");
 }
 
 #[test]
