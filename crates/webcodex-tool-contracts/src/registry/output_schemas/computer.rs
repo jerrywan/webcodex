@@ -1,4 +1,4 @@
-use super::common::wrapped_output_schema;
+use super::common::{suggested_tool_call_schema, wrapped_output_schema};
 use serde_json::{json, Value};
 
 fn strict_computer_output_schema(output_properties: Vec<(&str, Value)>) -> Value {
@@ -23,18 +23,6 @@ fn strict_computer_output_schema(output_properties: Vec<(&str, Value)>) -> Value
     properties
         .entry("state_changed".to_string())
         .or_insert_with(|| json!({"type": "boolean"}));
-    properties
-        .entry("reconcile_with".to_string())
-        .or_insert_with(|| {
-            json!({
-                "type": "string",
-                "enum": [
-                    "computer_list_windows",
-                    "computer_snapshot_display",
-                    "read_project_artifact_metadata"
-                ]
-            })
-        });
     schema["properties"]["output"]["additionalProperties"] = json!(false);
     schema
 }
@@ -171,7 +159,7 @@ fn snapshot_region_schema() -> Value {
     })
 }
 
-pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
+fn raw_output_schema_for_tool(name: &str) -> Option<Value> {
     match name {
         "computer_list_targets" => Some(wrapped_output_schema(vec![
             (
@@ -615,12 +603,130 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 ),
                 ("state_changed", json!({"type": "boolean"})),
                 ("error_kind", json!({"type": "string", "maxLength": 128})),
-                (
-                    "reconcile_with",
-                    json!({"type": "string", "const": "computer_snapshot_display"}),
-                ),
             ]))
         }
         _ => None,
     }
+}
+
+fn computer_suggested_recovery_schema() -> Value {
+    let client_arguments = || {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "client_id": {"type": "string", "minLength": 1, "maxLength": 128}
+            },
+            "required": ["client_id"]
+        })
+    };
+    json!({
+        "oneOf": [
+            suggested_tool_call_schema(
+                "computer_list_windows",
+                client_arguments(),
+                "Parser-ready advisory window re-observation using the exact Runner already owned by the failed Computer request. It grants no authority and is not an effect retry."
+            ),
+            suggested_tool_call_schema(
+                "computer_list_applications",
+                client_arguments(),
+                "Parser-ready advisory application re-observation using the exact Runner already owned by the failed Computer request. It grants no authority and is not an effect retry."
+            ),
+            suggested_tool_call_schema(
+                "computer_list_displays",
+                client_arguments(),
+                "Parser-ready advisory display re-observation using the exact Runner already owned by the failed Computer request. It grants no authority and is not an effect retry."
+            ),
+            suggested_tool_call_schema(
+                "computer_snapshot_display",
+                json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "display_id": {"type": "string", "pattern": "^display_[0-9a-f]{32}$", "maxLength": 128}
+                    },
+                    "required": ["client_id", "display_id"]
+                }),
+                "Parser-ready advisory display snapshot re-observation. It intentionally omits the spent snapshot_generation and grants no retry authority."
+            ),
+            suggested_tool_call_schema(
+                "read_project_artifact_metadata",
+                json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "project": {"type": "string", "minLength": 1},
+                        "path": {"type": "string", "minLength": 1, "maxLength": 4096}
+                    },
+                    "required": ["project", "path"]
+                }),
+                "Parser-ready advisory artifact reconciliation using only the exact project/path already owned by the snapshot-save request. It grants no authority."
+            )
+        ]
+    })
+}
+
+fn apply_computer_recovery_contract(schema: &mut Value) {
+    let properties = schema["properties"]["output"]["properties"]
+        .as_object_mut()
+        .expect("wrapped Computer output properties");
+    properties.remove("recovery_tool");
+    properties.insert(
+        "reconcile_with".to_string(),
+        json!({
+            "type": "string",
+            "enum": [
+                "computer_find_elements",
+                "computer_list_windows",
+                "computer_list_applications",
+                "computer_list_displays",
+                "computer_snapshot_display",
+                "read_project_artifact_metadata"
+            ],
+            "description": "Non-actionable recovery family hint used only when a complete safe invocation cannot be proven. It is not execution authority."
+        }),
+    );
+    properties.insert(
+        "suggested_call".to_string(),
+        computer_suggested_recovery_schema(),
+    );
+    let output_all_of = schema["properties"]["output"]
+        .as_object_mut()
+        .expect("wrapped Computer output schema")
+        .entry("allOf".to_string())
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .expect("Computer output allOf");
+    output_all_of.extend([
+        json!({"not": {"required": ["recovery_tool"]}}),
+        json!({
+            "if": {"required": ["suggested_call"]},
+            "then": {"not": {"required": ["reconcile_with"]}}
+        }),
+        json!({
+            "if": {"required": ["reconcile_with"]},
+            "then": {"not": {"required": ["suggested_call"]}}
+        }),
+        json!({
+            "if": {"required": ["suggested_call"]},
+            "then": {
+                "required": ["recovery_kind"],
+                "properties": {"recovery_kind": {"enum": ["reobserve", "reconcile"]}}
+            }
+        }),
+        json!({
+            "if": {"required": ["reconcile_with"]},
+            "then": {
+                "required": ["recovery_kind"],
+                "properties": {"recovery_kind": {"enum": ["reobserve", "reconcile"]}}
+            }
+        }),
+    ]);
+}
+
+pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
+    let mut schema = raw_output_schema_for_tool(name)?;
+    apply_computer_recovery_contract(&mut schema);
+    Some(schema)
 }

@@ -29,12 +29,30 @@ fn computer_launch_application_output_schema_has_closed_native_platforms() {
                 "state_changed": false,
                 "execution_state": "not_started",
                 "recovery_kind": "reobserve",
-                "recovery_tool": "computer_list_applications"
+                "suggested_call": {
+                    "tool": "computer_list_applications",
+                    "arguments": {"client_id": "msi"}
+                }
             }),
         ),
     )
     .unwrap();
     validate(&stale).unwrap();
+    let mut legacy_recovery_tool = stale.clone();
+    legacy_recovery_tool["output"]["recovery_tool"] = json!("computer_list_applications");
+    assert!(validate(&legacy_recovery_tool).is_err());
+    assert!(schema["properties"]["output"]["properties"]
+        .get("recovery_tool")
+        .is_none());
+    let serialized_schema = serde_json::to_string(&schema).unwrap();
+    assert!(serialized_schema.contains("suggested_call"));
+    assert!(serialized_schema.contains("reconcile_with"));
+    assert!(serialized_schema.contains("recovery_tool"));
+    assert!(serialized_schema.contains("not"));
+    let mut inferred_argument = stale.clone();
+    inferred_argument["output"]["suggested_call"]["arguments"]["surface_id"] =
+        json!("surface_should_not_be_inferred");
+    assert!(validate(&inferred_argument).is_err());
     let mut invalid_recovery = stale.clone();
     invalid_recovery["output"]["recovery_kind"] = json!("blind_retry");
     assert!(validate(&invalid_recovery).is_err());

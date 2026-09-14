@@ -1929,6 +1929,59 @@ fn cleanup_and_compatibility_write_output_schemas_do_not_advertise_broad_exfiltr
     }
 }
 
+#[test]
+fn computer_recovery_output_schemas_use_canonical_action_shapes() {
+    let specs = registered_tool_specs();
+    for spec in specs
+        .iter()
+        .filter(|spec| spec.name.starts_with("computer_"))
+    {
+        let props = spec.output_schema["properties"]["output"]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{} output properties", spec.name));
+        assert!(
+            !props.contains_key("recovery_tool"),
+            "{} still declares legacy recovery_tool",
+            spec.name
+        );
+        assert!(
+            props.contains_key("suggested_call"),
+            "{} suggested_call",
+            spec.name
+        );
+        assert!(
+            props.contains_key("reconcile_with"),
+            "{} reconcile_with",
+            spec.name
+        );
+    }
+
+    let suggested = output_schema_property(&specs, "computer_launch_application", "suggested_call");
+    let variants = suggested["oneOf"]
+        .as_array()
+        .expect("Computer suggested_call oneOf");
+    for (tool, required) in [
+        ("computer_list_windows", vec!["client_id"]),
+        ("computer_list_applications", vec!["client_id"]),
+        ("computer_list_displays", vec!["client_id"]),
+        ("computer_snapshot_display", vec!["client_id", "display_id"]),
+        ("read_project_artifact_metadata", vec!["project", "path"]),
+    ] {
+        let variant = variants
+            .iter()
+            .find(|variant| variant["properties"]["tool"]["const"] == tool)
+            .unwrap_or_else(|| panic!("missing Computer recovery target {tool}"));
+        assert_eq!(
+            variant["properties"]["arguments"]["required"],
+            serde_json::json!(required)
+        );
+        assert_eq!(
+            variant["properties"]["arguments"]["additionalProperties"],
+            false
+        );
+    }
+}
+
 fn default_output_schema_field_names() -> BTreeSet<&'static str> {
     BTreeSet::from([
         "session_hint",

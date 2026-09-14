@@ -148,8 +148,8 @@ pub use tool_inputs::{
 };
 pub use tool_result::ToolResult;
 pub(crate) use tool_result::{
-    ContinuationCarrier, ContinuationKind, ContinuationSemantics, RecoveryKind, RecoveryTool,
-    SuggestedToolCall, RECOVERY_KIND_VALUES,
+    ContinuationCarrier, ContinuationKind, ContinuationSemantics, RecoveryKind, SuggestedToolCall,
+    RECOVERY_KIND_VALUES,
 };
 pub use tool_spec::ToolSpec;
 
