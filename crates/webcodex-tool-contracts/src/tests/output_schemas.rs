@@ -2476,3 +2476,39 @@ fn assert_outcome_model_schema_fields(output_props: &serde_json::Map<String, Val
     );
     assert_eq!(output_props["informational_notes"]["type"], "array");
 }
+
+#[test]
+fn agent_wait_model_schema_separates_matches_from_durable_bookkeeping() {
+    let specs = registered_tool_specs();
+    let wait_id = format!("wc_agent_wait_{}", "1".repeat(32));
+    let matched = serde_json::json!({
+        "task_id": format!("wc_agent_task_{}", "2".repeat(32)),
+        "task_attempt_id": format!("wc_agent_task_attempt_{}", "3".repeat(32)),
+        "terminal_task_state": "succeeded"
+    });
+    for tool in [
+        "wait_for_agent_events",
+        "read_agent_wait",
+        "cancel_agent_wait",
+    ] {
+        let schema = &spec_named(&specs, tool).output_schema["properties"]["output"]["properties"]
+            ["agent_wait"];
+        for state in ["waiting", "triggered", "resumed", "cancelled"] {
+            let mut wait = serde_json::json!({"wait_id": wait_id, "state": state});
+            if matches!(state, "triggered" | "resumed") {
+                wait["matches"] = serde_json::json!([matched]);
+            }
+            test_support::validate_schema_instance(&wait, schema).unwrap();
+            let mut duplicate = wait.clone();
+            duplicate["match_count"] = serde_json::json!(1);
+            assert!(test_support::validate_schema_instance(&duplicate, schema).is_err());
+            if matches!(state, "triggered" | "resumed") {
+                let mut missing = wait.clone();
+                missing.as_object_mut().unwrap().remove("matches");
+                assert!(test_support::validate_schema_instance(&missing, schema).is_err());
+                wait["matches"][0]["sequence"] = serde_json::json!(1);
+                assert!(test_support::validate_schema_instance(&wait, schema).is_err());
+            }
+        }
+    }
+}

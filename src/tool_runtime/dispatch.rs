@@ -270,6 +270,7 @@ impl SearchModelProjection {
 enum ModelFacingProjection {
     None,
     JobHandoff,
+    AgentWait,
     Read(super::read_files::ReadModelProjection),
     Search(SearchModelProjection),
 }
@@ -285,6 +286,9 @@ pub(super) struct ModelFacingProjectionPlan {
 impl ModelFacingProjectionPlan {
     pub(super) fn capture(call: &ToolCall) -> Self {
         let projection = match call {
+            ToolCall::WaitForAgentEvents { .. }
+            | ToolCall::ReadAgentWait { .. }
+            | ToolCall::CancelAgentWait { .. } => ModelFacingProjection::AgentWait,
             ToolCall::RunJob { .. }
             | ToolCall::RunProcess { .. }
             | ToolCall::RunScript { .. }
@@ -313,6 +317,9 @@ impl ModelFacingProjectionPlan {
     pub(super) fn project(self, result: &mut ToolResult) {
         match self.projection {
             ModelFacingProjection::None => {}
+            ModelFacingProjection::AgentWait => {
+                super::agent_wait::agent_wait_model_projection(result)
+            }
             ModelFacingProjection::JobHandoff => {
                 super::jobs::sparsify_job_handoff_model_result(result)
             }
@@ -920,7 +927,7 @@ impl ToolRuntime {
 
     /// Kernel-only companion that returns the terminal model-facing projection
     /// plan after the same authoritative Project resolution used for execution.
-    /// The returned ToolResult is still canonical with respect to read/search
+    /// The returned ToolResult is still canonical with respect to domain-local
     /// budgeting and sparse projection so an outer recorder can consume it first.
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn dispatch_with_auth_transport_options_and_metadata_with_recording_mode_and_context_with_result_projection(
