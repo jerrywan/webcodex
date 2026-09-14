@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// already resident. Checking file metadata first fails fast before the
 /// allocation. A racing writer can still grow a file between check and read;
 /// the wire cap remains the backstop.
-pub(super) const MAX_LSP_DOCUMENT_BYTES: u64 = MAX_LSP_MESSAGE_BYTES as u64;
+pub const MAX_LSP_DOCUMENT_BYTES: u64 = MAX_LSP_MESSAGE_BYTES as u64;
 
 /// Request-local cache of file text used for position conversion.
 #[derive(Default)]

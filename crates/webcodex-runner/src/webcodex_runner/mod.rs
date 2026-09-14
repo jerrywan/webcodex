@@ -30,8 +30,13 @@ pub(crate) mod shell;
 pub(crate) mod shutdown;
 pub(crate) mod skill_store;
 pub(crate) mod ssh;
+mod string_match;
 pub(crate) mod transport;
-pub(crate) mod util;
+pub(crate) mod util {
+    pub(crate) use webcodex_process::{
+        find_executable_in_path, is_executable_file, resolve_program_in_path, ResolvedProgram,
+    };
+}
 pub(crate) mod validation;
 
 pub(crate) use artifacts::handle_artifact_file_operation;
@@ -99,6 +104,7 @@ pub(crate) use shell::{
 #[cfg(test)]
 pub(crate) use shell::{run_shell, run_shell_with_profiles};
 pub(crate) use ssh::{is_transport_failure, run_ssh_shell_with_execution_state, SshConnectionPool};
+pub(crate) use string_match::contains_any;
 #[cfg(all(test, unix))]
 pub(crate) use transport::install_reload_listener;
 #[cfg(test)]
@@ -108,4 +114,3 @@ pub(crate) use transport::{
     websocket_session, ResultSubmission, RunnerRuntimeState, WS_OUTGOING_CAPACITY,
 };
 pub(crate) use transport::{run_runner, HttpSendConfig, RunnerSink, SubmitResultError};
-pub(crate) use util::contains_any;

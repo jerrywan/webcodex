@@ -1,6 +1,3 @@
-#[cfg(windows)]
-use super::super::util::resolve_program_in_path;
-use super::super::util::{find_executable_in_path, is_executable_file};
 use super::language::{profile_for_kind, LanguageProfile};
 use super::protocol::{read_message, write_message, FramingError, MAX_LSP_MESSAGE_BYTES};
 use serde_json::{json, Value};
@@ -18,6 +15,9 @@ use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use url::Url;
+#[cfg(windows)]
+use webcodex_process::resolve_program_in_path;
+use webcodex_process::{find_executable_in_path, is_executable_file};
 
 pub(crate) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const DEFAULT_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -35,7 +35,7 @@ pub(crate) const MAX_DIAGNOSTICS_PER_DOCUMENT: usize = 500;
 /// no behavior of its own, so adding a language is one variant plus one
 /// profile entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum LspServerKind {
+pub enum LspServerKind {
     RustAnalyzer,
     Pyright,
     TypeScriptLanguageServer,
@@ -169,14 +169,14 @@ impl fmt::Display for LspError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LspCommand {
+pub struct LspCommand {
     program: OsString,
     args: Vec<OsString>,
     env: Vec<(OsString, OsString)>,
 }
 
 impl LspCommand {
-    pub(crate) fn new(program: impl Into<OsString>) -> Self {
+    pub fn new(program: impl Into<OsString>) -> Self {
         Self {
             program: program.into(),
             args: Vec::new(),
@@ -184,7 +184,7 @@ impl LspCommand {
         }
     }
 
-    pub(crate) fn arg(mut self, value: impl Into<OsString>) -> Self {
+    pub fn arg(mut self, value: impl Into<OsString>) -> Self {
         self.args.push(value.into());
         self
     }
@@ -239,22 +239,22 @@ impl LspCommand {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LspSupervisorConfig {
+pub struct LspSupervisorConfig {
     /// Explicitly configured server commands, keyed by server kind. A
     /// configured command wins over the profile env override and `PATH`
     /// lookup for that kind only.
-    pub(crate) commands: HashMap<LspServerKind, LspCommand>,
-    pub(crate) max_servers_per_project: usize,
-    pub(crate) max_servers_per_agent: usize,
-    pub(crate) request_timeout: Duration,
-    pub(crate) initialize_timeout: Duration,
-    pub(crate) shutdown_timeout: Duration,
-    pub(crate) idle_ttl: Duration,
+    pub commands: HashMap<LspServerKind, LspCommand>,
+    pub max_servers_per_project: usize,
+    pub max_servers_per_agent: usize,
+    pub request_timeout: Duration,
+    pub initialize_timeout: Duration,
+    pub shutdown_timeout: Duration,
+    pub idle_ttl: Duration,
     /// Reap idle/unusable servers from a background thread so `idle_ttl` and
     /// capacity recovery work in long-lived agents without explicit
     /// `cleanup_idle` calls. Tests that pin manual `cleanup_idle` semantics
     /// disable this to stay deterministic.
-    pub(crate) background_reaper: bool,
+    pub background_reaper: bool,
 }
 
 impl Default for LspSupervisorConfig {
@@ -302,15 +302,15 @@ struct SupervisorInner {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct LspShutdownOutcome {
-    pub(crate) servers: usize,
-    pub(crate) timed_out: usize,
-    pub(crate) failures: usize,
-    pub(crate) reaper_timed_out: bool,
+pub struct LspShutdownOutcome {
+    pub servers: usize,
+    pub timed_out: usize,
+    pub failures: usize,
+    pub reaper_timed_out: bool,
 }
 
 #[derive(Clone)]
-pub(crate) struct LspSupervisor {
+pub struct LspSupervisor {
     inner: Arc<SupervisorInner>,
 }
 
@@ -321,7 +321,7 @@ impl Default for LspSupervisor {
 }
 
 impl LspSupervisor {
-    pub(crate) fn new(config: LspSupervisorConfig) -> Self {
+    pub fn new(config: LspSupervisorConfig) -> Self {
         Self {
             inner: Arc::new(SupervisorInner {
                 config,
@@ -857,7 +857,7 @@ impl LspSupervisor {
         }
     }
 
-    pub(crate) fn begin_shutdown_until(&self, deadline: Instant) {
+    pub fn begin_shutdown_until(&self, deadline: Instant) {
         {
             let mut stored = lock_unpoison(&self.inner.shutdown_deadline);
             *stored = Some(stored.map_or(deadline, |current| current.min(deadline)));
@@ -865,7 +865,7 @@ impl LspSupervisor {
         self.begin_shutdown();
     }
 
-    pub(crate) fn shutdown_until(&self, deadline: Instant) -> LspShutdownOutcome {
+    pub fn shutdown_until(&self, deadline: Instant) -> LspShutdownOutcome {
         self.begin_shutdown_until(deadline);
         if self.inner.shutdown_started.swap(true, Ordering::SeqCst) {
             let mut result = lock_unpoison(&self.inner.shutdown_result);

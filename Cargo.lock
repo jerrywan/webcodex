@@ -5243,6 +5243,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "webcodex-lsp"
+version = "0.4.1"
+dependencies = [
+ "libc",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tracing",
+ "url",
+ "webcodex-core",
+ "webcodex-process",
+ "webcodex-runner-config",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "webcodex-persistent-shell"
 version = "0.4.1"
 dependencies = [
@@ -5290,6 +5306,7 @@ dependencies = [
  "uuid",
  "webcodex-computer",
  "webcodex-core",
+ "webcodex-lsp",
  "webcodex-persistent-shell",
  "webcodex-process",
  "webcodex-runner-config",

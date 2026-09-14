@@ -15,7 +15,7 @@ pub(super) fn fake_server_path() -> &'static Path {
     &BINARY
         .get_or_init(|| {
             let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let source = manifest.join("src/webcodex_runner/lsp/fake_server.rs");
+            let source = manifest.join("../webcodex-lsp/src/fake_server.rs");
             let temp = tempfile::tempdir().unwrap();
             let path = temp
                 .path()

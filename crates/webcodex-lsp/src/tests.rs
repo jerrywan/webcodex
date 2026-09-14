@@ -775,7 +775,7 @@ fn lsp_initialize_pre_exit_with_stderr_surfaces_component_missing_diagnostic() {
 #[cfg(unix)]
 #[test]
 fn lsp_rustup_proxy_without_component_is_not_available() {
-    let _env_lock = crate::tests::test_env_lock();
+    let _env_lock = crate::test_support::test_env_lock();
     let _serial = super::super::serialize_fake_lsp_test();
     let temp = tempfile::tempdir().unwrap();
     let bin = temp.path().join("bin");
@@ -801,7 +801,7 @@ fn lsp_rustup_proxy_without_component_is_not_available() {
 
     let command = LspCommand::new(bin.join("rust-analyzer"));
     // Point detection at the fixture rustup home without spawning anything.
-    let _env = crate::tests::EnvGuard::new()
+    let _env = crate::test_support::EnvGuard::new()
         .set("RUSTUP_HOME", &rustup_home)
         .remove("RUSTUP_TOOLCHAIN");
     let available_missing = command.is_available(LspServerKind::RustAnalyzer);
@@ -836,10 +836,10 @@ fn lsp_rustup_proxy_without_component_is_not_available() {
 #[cfg(windows)]
 #[test]
 fn rustup_home_falls_back_to_userprofile_on_windows() {
-    let _env_lock = crate::tests::test_env_lock();
+    let _env_lock = crate::test_support::test_env_lock();
     let _serial = super::super::serialize_fake_lsp_test();
     let temp = tempfile::tempdir().unwrap();
-    let _env = crate::tests::EnvGuard::new()
+    let _env = crate::test_support::EnvGuard::new()
         .remove("RUSTUP_HOME")
         .remove("HOME")
         .set("USERPROFILE", temp.path());

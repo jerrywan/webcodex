@@ -1,13 +1,9 @@
-//! Runner-side read-only LSP navigation operations.
+//! Native read-only LSP navigation operations.
 //!
-//! Resolves project roots under policy, talks to `LspSupervisor`, normalizes
-//! locations to project-relative paths, and never returns absolute paths,
-//! file URIs, or executable paths to the model.
+//! The caller supplies an already authorized canonical Project root. This
+//! module talks to `LspSupervisor`, normalizes locations to project-relative
+//! paths, and never returns absolute paths, file URIs, or executable paths.
 
-use super::super::config::RunnerPolicy;
-use super::super::output::CommandResult;
-use super::super::projects::load_runner_project_summaries_from_dir;
-use super::super::shell::cwd_allowed;
 use super::language::{
     detected_profiles, primary_profile, route_extension, supported_extensions_label,
     LanguageProfile, LANGUAGES,
@@ -17,9 +13,13 @@ use super::supervisor::{
     classify_uri_against_project_root, LspError, LspServerStatus, LspSupervisor, PositionEncoding,
     ProjectUriClassification,
 };
-#[cfg(test)]
-use crate::lsp_bridge::AGENT_LSP_REQUEST_KIND;
-use crate::lsp_bridge::{
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+use url::Url;
+use webcodex_core::lsp_bridge::{
     bound_error_message, error_codes, redact_absolute_paths, validate_call_hierarchy_bounds,
     CallHierarchyDirection, CallHierarchyEdgeDirection, CallHierarchyResult,
     DocumentDiagnosticsResult, DocumentDiagnosticsStatus, DocumentSymbolsResult, HoverResult,
@@ -31,14 +31,6 @@ use crate::lsp_bridge::{
     MAX_CALL_HIERARCHY_PREPARE_ITEMS_INSPECTED,
     MAX_CALL_HIERARCHY_RAW_CALL_SITE_RANGES_INSPECTED_PER_ENTRY, MAX_CALL_HIERARCHY_ROOTS,
 };
-#[cfg(test)]
-use crate::runner_protocol::RunnerRequest;
-use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
-use url::Url;
 
 const MAX_SYMBOL_NAME_CHARS: usize = 256;
 const MAX_SYMBOL_DETAIL_CHARS: usize = 512;
@@ -49,80 +41,23 @@ const MAX_DIAGNOSTIC_TOTAL_TEXT_CHARS: usize = 64 * 1024;
 const DIAGNOSTICS_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_HOVER_VALUE_CHARS: usize = 16 * 1024;
 const MAX_WORKSPACE_SYMBOL_FIELD_CHARS: usize = 256;
-#[cfg(test)]
-pub(crate) fn is_lsp_request_kind(kind: &str) -> bool {
-    kind == AGENT_LSP_REQUEST_KIND
-}
-
-pub(crate) fn handle_lsp_operation(
-    policy: &RunnerPolicy,
-    project_registry_dir: &Path,
+pub fn execute_lsp_operation(
+    project_root: PathBuf,
     supervisor: &LspSupervisor,
     payload: &RunnerLspPayload,
-    timeout_secs: u64,
-) -> CommandResult {
-    let start = Instant::now();
-    let operation_deadline = start
-        .checked_add(Duration::from_secs(timeout_secs.max(1)))
-        .unwrap_or(start);
-    match execute_lsp(
-        policy,
-        project_registry_dir,
-        supervisor,
-        payload,
-        operation_deadline,
-    ) {
-        Ok(envelope) => CommandResult {
-            // Always exit 0 for structured envelopes so the server can parse
-            // success/failure from the versioned JSON rather than shell status.
-            exit_code: Some(0),
-            stdout: Some(envelope.to_stdout_json()),
-            stderr: Some(String::new()),
-            duration_ms: Some(start.elapsed().as_millis() as u64),
-            error: None,
-        },
-        Err(envelope) => CommandResult {
-            exit_code: Some(0),
-            stdout: Some(envelope.to_stdout_json()),
-            stderr: Some(String::new()),
-            duration_ms: Some(start.elapsed().as_millis() as u64),
-            error: None,
-        },
+    operation_deadline: Instant,
+) -> RunnerLspResultEnvelope {
+    match execute_lsp(project_root, supervisor, payload, operation_deadline) {
+        Ok(envelope) | Err(envelope) => envelope,
     }
 }
 
-#[cfg(test)]
-pub(crate) fn handle_lsp_request(
-    policy: &RunnerPolicy,
-    project_registry_dir: &Path,
-    supervisor: &LspSupervisor,
-    request: &RunnerRequest,
-) -> CommandResult {
-    let Some(payload) = request.lsp.as_ref() else {
-        return lsp_error_cmd(
-            Instant::now(),
-            error_codes::MISSING_LSP_PAYLOAD,
-            "LSP request missing typed payload",
-        );
-    };
-    handle_lsp_operation(
-        policy,
-        project_registry_dir,
-        supervisor,
-        payload,
-        request.timeout_secs,
-    )
-}
-
 fn execute_lsp(
-    policy: &RunnerPolicy,
-    project_registry_dir: &Path,
+    project_root: PathBuf,
     supervisor: &LspSupervisor,
     payload: &RunnerLspPayload,
     operation_deadline: Instant,
 ) -> Result<RunnerLspResultEnvelope, RunnerLspResultEnvelope> {
-    let project = resolve_runner_project(project_registry_dir, &payload.project_id)?;
-    let project_root = validate_project_root(policy, &project.path)?;
     match &payload.request {
         RunnerLspRequest::Status => Ok(RunnerLspResultEnvelope::ok(lsp_status(
             &payload.project_id,
@@ -220,48 +155,6 @@ fn execute_lsp(
             Ok(RunnerLspResultEnvelope::ok(result))
         }
     }
-}
-
-struct ResolvedProject {
-    path: PathBuf,
-}
-
-fn resolve_runner_project(
-    project_registry_dir: &Path,
-    project_id: &str,
-) -> Result<ResolvedProject, RunnerLspResultEnvelope> {
-    let id = project_id.trim();
-    if id.is_empty() {
-        return Err(RunnerLspResultEnvelope::err(
-            error_codes::UNKNOWN_PROJECT,
-            "project_id cannot be empty",
-        ));
-    }
-    let projects = load_runner_project_summaries_from_dir(project_registry_dir);
-    let project = projects.into_iter().find(|p| p.id == id).ok_or_else(|| {
-        RunnerLspResultEnvelope::err(error_codes::UNKNOWN_PROJECT, "unknown agent project")
-    })?;
-    Ok(ResolvedProject {
-        path: PathBuf::from(project.path),
-    })
-}
-
-fn validate_project_root(
-    policy: &RunnerPolicy,
-    path: &Path,
-) -> Result<PathBuf, RunnerLspResultEnvelope> {
-    cwd_allowed(policy, path).map_err(|message| {
-        RunnerLspResultEnvelope::err(
-            error_codes::INVALID_PROJECT_PATH,
-            sanitize_path_message(message),
-        )
-    })?;
-    fs::canonicalize(path).map_err(|_| {
-        RunnerLspResultEnvelope::err(
-            error_codes::INVALID_PROJECT_PATH,
-            "project root is not accessible",
-        )
-    })
 }
 
 fn lsp_status(
@@ -2167,16 +2060,4 @@ fn sanitize_path_message(message: impl Into<String>) -> String {
     // characters, and truncates. Kept as a named wrapper so agent call sites
     // state intent.
     bound_error_message(message.into())
-}
-
-#[cfg(test)]
-fn lsp_error_cmd(start: Instant, code: &str, message: &str) -> CommandResult {
-    let envelope = RunnerLspResultEnvelope::err(code, message);
-    CommandResult {
-        exit_code: Some(0),
-        stdout: Some(envelope.to_stdout_json()),
-        stderr: Some(String::new()),
-        duration_ms: Some(start.elapsed().as_millis() as u64),
-        error: None,
-    }
 }

@@ -1,4 +1,4 @@
-//! Small transport-agnostic helpers shared across the runner crate.
+//! Cross-platform executable resolution shared by WebCodex process consumers.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 /// [`ResolvedProgram::Native`]. An extensionless POSIX shim (npm-style) must
 /// never be selected in place of a valid native program or batch script.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ResolvedProgram {
+pub enum ResolvedProgram {
     /// Native executable (`.exe`, `.com`, or an extensionless PE image).
     Native(PathBuf),
     /// Batch script (`.cmd` / `.bat`), which requires shell/script semantics.
@@ -24,7 +24,7 @@ pub(crate) enum ResolvedProgram {
 
 impl ResolvedProgram {
     #[cfg(windows)]
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         match self {
             ResolvedProgram::Native(path) | ResolvedProgram::Batch(path) => path,
         }
@@ -53,7 +53,7 @@ impl ResolvedProgram {
 ///   shims are never selected and later fail with `ERROR_BAD_EXE_FORMAT`.
 ///   `.cmd` / `.bat` resolve to [`ResolvedProgram::Batch`]; unsupported
 ///   extensions never resolve.
-pub(crate) fn resolve_program_in_path(name: &str, path: &OsStr) -> Option<ResolvedProgram> {
+pub fn resolve_program_in_path(name: &str, path: &OsStr) -> Option<ResolvedProgram> {
     resolve_program_in_path_with_pathext(name, path, None)
 }
 
@@ -124,7 +124,7 @@ fn resolve_program_in_path_with_pathext(
 /// `PATH` lookup and profile-path resolution) with the validation executor's
 /// `which_in_path`. Callers that need the ambient `PATH` should read
 /// `std::env::var_os("PATH")` and pass it here.
-pub(crate) fn find_executable_in_path(name: &str, path: &OsStr) -> Option<PathBuf> {
+pub fn find_executable_in_path(name: &str, path: &OsStr) -> Option<PathBuf> {
     #[cfg(windows)]
     {
         resolve_program_in_path(name, path).map(|program| program.path().to_path_buf())
@@ -221,17 +221,6 @@ fn is_pe_image(path: &Path) -> bool {
     file.read_exact(&mut magic).is_ok() && magic == *b"MZ"
 }
 
-/// Return `true` if `haystack` contains any of `needles` as a substring.
-///
-/// Used by the error-classification helpers in [`crate::main`] (proxy/gateway
-/// detection, connection-refused detection, TLS/auth failure detection) and
-/// by the agent-transport error classifier in [`crate::webcodex_runner::transport`].
-/// Both sites previously carried a byte-identical private copy of this one
-/// liner; it has no behavioral coupling to either caller, so it lives here.
-pub(crate) fn contains_any(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| haystack.contains(needle))
-}
-
 /// True when `path` is a regular file that is executable.
 ///
 /// On Unix this requires any execute bit (`& 0o111`); on other platforms any
@@ -241,7 +230,7 @@ pub(crate) fn contains_any(haystack: &str, needles: &[&str]) -> bool {
 /// each carried a private copy that differed only in `path.metadata()` vs
 /// `std::fs::metadata()` — `Path::metadata` is a thin wrapper over
 /// `fs::metadata`, so the two were observationally identical.
-pub(crate) fn is_executable_file(path: &Path) -> bool {
+pub fn is_executable_file(path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
     };

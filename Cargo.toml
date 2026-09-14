@@ -6,6 +6,7 @@ members = [
     "crates/webcodex-runner-config",
     "crates/webcodex-cli",
     "crates/webcodex-core",
+    "crates/webcodex-lsp",
     "crates/webcodex-persistent-shell",
     "crates/webcodex-process",
     "crates/webcodex-runner",

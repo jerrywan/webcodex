@@ -2,6 +2,7 @@ use super::config::{
     max_concurrent_jobs, project_registry_dir, validate_quic_config, QuicClientConfig,
     ReloadableRunnerConfig, RunnerConfig,
 };
+use super::contains_any;
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 use super::detached_job::DetachedJobStore;
 #[cfg(windows)]
@@ -13,7 +14,6 @@ use super::shutdown::{
     ShutdownReport, BACKGROUND_JOIN_BUDGET, DEFAULT_SHUTDOWN_BUDGET, JOB_DRAIN_BUDGET,
     LSP_SHUTDOWN_BUDGET, PROVIDER_SHUTDOWN_BUDGET,
 };
-use super::util::contains_any;
 use super::PersistentShellManager;
 use crate::runner_config::{
     TRANSPORT_AUTO, TRANSPORT_POLLING, TRANSPORT_QUIC, TRANSPORT_WEBSOCKET,

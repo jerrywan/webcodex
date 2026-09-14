@@ -1,7 +1,5 @@
-use super::navigation::{handle_lsp_request, is_lsp_request_kind};
-use super::position::MAX_LSP_DOCUMENT_BYTES;
-use super::supervisor::{LspCommand, LspServerKind, LspSupervisor, LspSupervisorConfig};
-use super::test_support::{fake_server_path, wait_until};
+use super::adapter::{handle_lsp_request, is_lsp_request_kind};
+use super::navigation_test_support::{fake_server_path, wait_until};
 use crate::lsp_bridge::{
     parse_runner_lsp_result_envelope, CallHierarchyDirection, RunnerLspPayload, RunnerLspRequest,
     AGENT_LSP_REQUEST_KIND, MAX_CALL_HIERARCHY_CALL_ENTRIES_INSPECTED_PER_RPC,
@@ -17,6 +15,9 @@ use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::process::Command;
 use std::time::{Duration, Instant};
+use webcodex_lsp::{
+    LspCommand, LspServerKind, LspSupervisor, LspSupervisorConfig, MAX_LSP_DOCUMENT_BYTES,
+};
 
 /// Minimal agent shell request carrying a typed LSP payload.
 fn shell_lsp_request(payload: RunnerLspPayload) -> RunnerRequest {
