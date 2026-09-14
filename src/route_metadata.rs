@@ -9,12 +9,10 @@ mod connector;
 mod consoles;
 mod mcp;
 mod oauth;
-mod openapi;
 mod operations;
 mod runner_transport;
 mod runtime;
 
-pub(crate) use openapi::{OpenApiExampleSet, OpenApiOperationSpec};
 use webcodex_core::authority::OAuthRouteScopePolicy;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,8 +71,6 @@ pub(crate) enum RouteSurface {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum RouteOpenApiProjection {
     Hidden,
-    /// Dedicated operation on the normal server `/openapi.json` GPT Actions surface.
-    PublicAction(OpenApiOperationSpec),
     /// Project Connector capability identity; semantic ToolSpec data stays in the
     /// canonical Connector capability registry.
     ConnectorCapability(&'static str),
@@ -168,6 +164,7 @@ pub(crate) enum RouteId {
     AdminProjectsUnregister,
     ToolsList,
     ToolsCall,
+    GptActionsInvoke,
     ArtifactsImport,
     JobsStop,
     JobsList,
@@ -353,7 +350,18 @@ pub(crate) fn shared_root_path(first: RouteId, second: RouteId) -> &'static str 
 
 pub(crate) fn lookup(method: &str, path: &str) -> Option<&'static RouteSpec> {
     let path = normalize_path(path);
-    iter_routes().find(|spec| spec.method.matches(method) && spec.path == path)
+    iter_routes().find(|spec| {
+        spec.method.matches(method)
+            && (spec.path == path
+                || (spec.id == RouteId::GptActionsInvoke && gpt_action_runtime_path_matches(&path)))
+    })
+}
+
+fn gpt_action_runtime_path_matches(path: &str) -> bool {
+    let Some(tool_name) = path.strip_prefix("/api/actions/") else {
+        return false;
+    };
+    !tool_name.is_empty() && !tool_name.contains('/')
 }
 
 /// Exact path-only lookup for consumers whose historical contract was an
@@ -489,31 +497,12 @@ mod tests {
     }
 
     #[test]
-    fn openapi_projection_is_closed_unique_and_connector_bijective() {
-        let mut public_operation_ids = BTreeSet::new();
+    fn openapi_projection_is_connector_bijective_and_runtime_routes_are_hidden() {
         let mut connector_capabilities = BTreeSet::new();
 
         for route_spec in iter_routes() {
             match route_spec.openapi_projection {
                 Hidden => {}
-                PublicAction(operation) => {
-                    assert_eq!(route_spec.method, RouteMethod::Post, "{:?}", route_spec.id);
-                    assert_eq!(route_spec.surface, RuntimeApi, "{:?}", route_spec.id);
-                    assert_eq!(
-                        route_spec.auth,
-                        RouteAuth::AuthMiddleware,
-                        "{:?} Public Action OpenAPI declares bearer security and must stay behind AuthMiddleware",
-                        route_spec.id
-                    );
-                    assert!(!operation.operation_id.is_empty(), "{:?}", route_spec.id);
-                    assert!(!operation.request_schema.is_empty(), "{:?}", route_spec.id);
-                    assert!(!operation.response_schema.is_empty(), "{:?}", route_spec.id);
-                    assert!(
-                        public_operation_ids.insert(operation.operation_id),
-                        "duplicate public OpenAPI operationId: {}",
-                        operation.operation_id
-                    );
-                }
                 ConnectorCapability(name) => {
                     assert_eq!(route_spec.method, RouteMethod::Post, "{:?}", route_spec.id);
                     assert_eq!(route_spec.surface, Connector, "{:?}", route_spec.id);
@@ -532,11 +521,6 @@ mod tests {
             }
         }
 
-        assert!(
-            public_operation_ids.len() < 30,
-            "GPT Actions operation budget exceeded: {}",
-            public_operation_ids.len()
-        );
         let canonical_connector_capabilities =
             webcodex_connector_runtime::surface::CAPABILITY_NAMES
                 .iter()
@@ -546,6 +530,27 @@ mod tests {
             connector_capabilities, canonical_connector_capabilities,
             "RouteSpec Connector bindings must be a bijection with the canonical capability registry"
         );
+        assert_eq!(spec(GptActionsInvoke).openapi_projection, Hidden);
+        for id in [
+            ToolsList,
+            ToolsCall,
+            ArtifactsImport,
+            JobsList,
+            JobsTail,
+            ProjectsList,
+            ProjectsRegister,
+            ProjectsCreate,
+            ProjectsGitStatus,
+            ProjectsListFiles,
+            ProjectsApplyUnifiedDiff,
+            ProjectsRunShell,
+            ProjectsGitRestorePaths,
+            ProjectsDiscardUntracked,
+            ProjectsRunJob,
+            RuntimeStatus,
+        ] {
+            assert_eq!(spec(id).openapi_projection, Hidden, "{id:?}");
+        }
     }
 
     #[test]
@@ -559,6 +564,11 @@ mod tests {
         assert!(lookup("GET", "/api/runtime/status").is_none());
         assert!(lookup("POST", "/api/future/authenticated-route").is_none());
         assert!(lookup("POST", "/api/runtime/status/extra").is_none());
+        assert_eq!(
+            lookup("POST", "/api/actions/read_files").unwrap().id,
+            GptActionsInvoke
+        );
+        assert!(lookup("POST", "/api/actions/read_files/extra").is_none());
 
         // Path-only surface/audit consumers replaced exact historical
         // allowlists and must not inherit the scope lookup's normalization.

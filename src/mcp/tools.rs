@@ -125,42 +125,33 @@ fn adaptive_runtime_gateway_tool_spec() -> ToolSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AdaptiveRuntimeGatewayTargetRoute {
-    Gateway,
-    Direct,
-    Recursive,
-    Unknown,
-}
-
-fn adaptive_runtime_gateway_target_route(
+fn mcp_adaptive_runtime_gateway_target_route(
     target: &str,
     stateless_2026: bool,
-) -> AdaptiveRuntimeGatewayTargetRoute {
-    if target == ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME {
-        return AdaptiveRuntimeGatewayTargetRoute::Recursive;
-    }
-    let operator_extension_admitted = stateless_2026
+) -> crate::model_surface::AdaptiveRuntimeGatewayTargetRoute {
+    use crate::model_surface::AdaptiveRuntimeGatewayTargetRoute;
+
+    if stateless_2026
         && crate::tool_runtime::stateless_operator_extension_tool_specs()
             .iter()
-            .any(|spec| spec.name == target);
-    let (availability, gateway_tool) = if operator_extension_admitted {
-        ModelSurface::AdaptiveRuntime
-            .runtime_tool_invocation_route_with_operator_extension(target, true)
-    } else {
-        ModelSurface::AdaptiveRuntime.runtime_tool_invocation_route(target)
-    };
-    match (availability, gateway_tool) {
-        (crate::model_surface::TOOL_SURFACE_AVAILABILITY_DIRECT, None) => {
-            return AdaptiveRuntimeGatewayTargetRoute::Direct;
-        }
-        (
-            crate::model_surface::TOOL_SURFACE_AVAILABILITY_GATEWAY,
-            Some(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME),
-        ) => {
-            return AdaptiveRuntimeGatewayTargetRoute::Gateway;
-        }
-        _ => {}
+            .any(|spec| spec.name == target)
+    {
+        let (availability, gateway_tool) = ModelSurface::AdaptiveRuntime
+            .runtime_tool_invocation_route_with_operator_extension(target, true);
+        return match (availability, gateway_tool) {
+            (crate::model_surface::TOOL_SURFACE_AVAILABILITY_DIRECT, None) => {
+                AdaptiveRuntimeGatewayTargetRoute::Direct
+            }
+            (
+                crate::model_surface::TOOL_SURFACE_AVAILABILITY_GATEWAY,
+                Some(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME),
+            ) => AdaptiveRuntimeGatewayTargetRoute::Gateway,
+            _ => AdaptiveRuntimeGatewayTargetRoute::Unknown,
+        };
+    }
+    let route = crate::model_surface::adaptive_runtime_gateway_target_route(target);
+    if route != AdaptiveRuntimeGatewayTargetRoute::Unknown {
+        return route;
     }
     // The MCP adapter's own gateway remains a specialized protocol route. It is
     // not part of the runtime ToolSpec extension universe.
@@ -176,8 +167,9 @@ pub(crate) fn adaptive_runtime_gateway_target_admitted_for_test(
     stateless_2026: bool,
 ) -> bool {
     matches!(
-        adaptive_runtime_gateway_target_route(target, stateless_2026),
-        AdaptiveRuntimeGatewayTargetRoute::Gateway | AdaptiveRuntimeGatewayTargetRoute::Direct
+        mcp_adaptive_runtime_gateway_target_route(target, stateless_2026),
+        crate::model_surface::AdaptiveRuntimeGatewayTargetRoute::Gateway
+            | crate::model_surface::AdaptiveRuntimeGatewayTargetRoute::Direct
     )
 }
 
@@ -1087,7 +1079,7 @@ pub(super) fn mcp_host_file_import_trust_decision_from_state(
     }
     match db.get_oauth_client_by_client_id(client_id) {
         Ok(Some(client)) if client.client_id == client_id => HostFileImportTrustDecision {
-            trust: HostFileImportTrust::TrustedOAuthClient,
+            trust: HostFileImportTrust::TrustedMcpHostFile,
             reason: HostFileImportTrustReason::Trusted,
             client_id_configured: Some(true),
             active_client_registration_found: Some(true),
@@ -1555,13 +1547,13 @@ pub(super) async fn handle_call(
                     return McpOutcome::BadRequest(rpc_error(id, -32602, message));
                 }
             };
-        match adaptive_runtime_gateway_target_route(&target, stateless_2026) {
-            AdaptiveRuntimeGatewayTargetRoute::Gateway
-            | AdaptiveRuntimeGatewayTargetRoute::Direct => {
+        match mcp_adaptive_runtime_gateway_target_route(&target, stateless_2026) {
+            crate::model_surface::AdaptiveRuntimeGatewayTargetRoute::Gateway
+            | crate::model_surface::AdaptiveRuntimeGatewayTargetRoute::Direct => {
                 params.name = target;
                 params.arguments = arguments;
             }
-            AdaptiveRuntimeGatewayTargetRoute::Unknown => {
+            crate::model_surface::AdaptiveRuntimeGatewayTargetRoute::Unknown => {
                 if let Some(lc) = lifecycle.as_deref() {
                     lc.dispatch_failed("unknown_tool");
                     lc.dispatch_finished(false, Some(false), "unknown_tool");
@@ -1578,7 +1570,7 @@ pub(super) async fn handle_call(
                     },
                 ));
             }
-            AdaptiveRuntimeGatewayTargetRoute::Recursive => {
+            crate::model_surface::AdaptiveRuntimeGatewayTargetRoute::Recursive => {
                 return McpOutcome::BadRequest(rpc_error(
                     id,
                     -32602,

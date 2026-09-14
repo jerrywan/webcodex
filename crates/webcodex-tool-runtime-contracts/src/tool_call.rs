@@ -421,11 +421,29 @@ where
 #[serde(deny_unknown_fields)]
 pub struct OpenAiHostFileRef {
     pub download_url: String,
-    pub file_id: String,
+    #[serde(default)]
+    pub file_id: Option<String>,
     #[serde(default)]
     pub mime_type: Option<String>,
     #[serde(default)]
     pub file_name: Option<String>,
+}
+
+/// Adapter-derived provenance for host file references. This is deliberately
+/// skipped by serde on ToolCall: caller/model JSON can never grant either trust
+/// path, and the two host mechanisms cannot impersonate one another.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HostFileImportProvenance {
+    #[default]
+    Untrusted,
+    GptActionOpenAiHost,
+    TrustedMcpHostFile,
+}
+
+impl HostFileImportProvenance {
+    pub fn is_trusted(self) -> bool {
+        !matches!(self, Self::Untrusted)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1861,11 +1879,11 @@ pub enum ToolCall {
         overwrite: Option<bool>,
         #[serde(default)]
         session_id: Option<String>,
-        /// Internal provenance bit set only by the MCP HTTP adapter after
-        /// authenticating the OAuth client registration. Never deserialized
-        /// from model/caller arguments and never serialized back out.
+        /// Internal host-file provenance set only by a trusted protocol
+        /// adapter. Never deserialized from model/caller arguments and never
+        /// serialized back out.
         #[serde(skip)]
-        trusted_mcp_host_file_import: bool,
+        host_file_import_provenance: HostFileImportProvenance,
     },
 
     /// Prepare one project artifact for standards-native MCP resource export.

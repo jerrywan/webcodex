@@ -380,6 +380,10 @@ only for local/trusted-network demos."
                 .post(runtime_http::tools_call),
         )
         .push(
+            Router::with_path(route_metadata::api_path(RouteId::GptActionsInvoke))
+                .post(runtime_http::gpt_action_invoke),
+        )
+        .push(
             Router::with_path(route_metadata::api_path(RouteId::ArtifactsImport))
                 .post(runtime_http::import_conversation_files_to_project),
         )
