@@ -2398,6 +2398,7 @@ mod tests {
             .is_ok());
             assert!(result.output.get("recovery_tool").is_none());
             assert!(result.output.get("reconcile_with").is_none());
+            assert!(result.output.get("recovery_kind").is_none());
         };
 
         let unknown = skill_error_dynamic(
@@ -2407,7 +2408,6 @@ mod tests {
             true,
         );
         assert_eq!(unknown.output["outcome_unknown"], true);
-        assert_eq!(unknown.output["recovery_kind"], "reconcile");
         assert_actionable(&unknown);
         assert_eq!(unknown.output["retry_same_idempotency_key"], true);
         assert!(!unknown.output.to_string().contains("new key"));
@@ -2446,7 +2446,6 @@ mod tests {
             false,
         );
         assert_eq!(claimed.output["outcome_unknown"], false);
-        assert_eq!(claimed.output["recovery_kind"], "reconcile");
         assert_actionable(&claimed);
         assert!(claimed.output.get("retry_same_idempotency_key").is_none());
 

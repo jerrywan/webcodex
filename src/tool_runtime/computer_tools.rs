@@ -1926,7 +1926,11 @@ fn computer_error_with_client(kind: &str, message: &str, client_id: Option<&str>
                 "computer_list_windows",
                 json!({"client_id": client_id}),
             ),
-            None => computer_reconcile_recovery(result, "computer_list_windows"),
+            None => computer_reconcile_recovery(
+                result,
+                RecoveryKind::Reobserve,
+                "computer_list_windows",
+            ),
         },
         "stale_application" => match client_id {
             Some(client_id) => computer_suggested_recovery(
@@ -1934,7 +1938,11 @@ fn computer_error_with_client(kind: &str, message: &str, client_id: Option<&str>
                 "computer_list_applications",
                 json!({"client_id": client_id}),
             ),
-            None => computer_reconcile_recovery(result, "computer_list_applications"),
+            None => computer_reconcile_recovery(
+                result,
+                RecoveryKind::Reobserve,
+                "computer_list_applications",
+            ),
         },
         "stale_display" => match client_id {
             Some(client_id) => computer_suggested_recovery(
@@ -1942,7 +1950,11 @@ fn computer_error_with_client(kind: &str, message: &str, client_id: Option<&str>
                 "computer_list_displays",
                 json!({"client_id": client_id}),
             ),
-            None => computer_reconcile_recovery(result, "computer_list_displays"),
+            None => computer_reconcile_recovery(
+                result,
+                RecoveryKind::Reobserve,
+                "computer_list_displays",
+            ),
         },
         "invalid_request" => result.with_recovery(RecoveryKind::FixInput),
         "permission_denied" => result.with_recovery(RecoveryKind::UserAction),
@@ -1991,7 +2003,6 @@ fn computer_pointer_effect_not_started(
     match error_kind {
         "stale_display" => computer_suggested_recovery(
             result,
-            RecoveryKind::Reobserve,
             "computer_list_displays",
             json!({"client_id": context.client_id}),
         ),
@@ -2024,7 +2035,6 @@ fn computer_pointer_effect_spent_not_started(
     if valid_display_id(&context.display_id) {
         computer_suggested_recovery(
             result,
-            RecoveryKind::Reobserve,
             "computer_snapshot_display",
             json!({"client_id": context.client_id, "display_id": context.display_id}),
         )
@@ -2054,7 +2064,6 @@ fn computer_pointer_effect_outcome_unknown(
     if valid_display_id(&context.display_id) {
         computer_suggested_recovery(
             result,
-            RecoveryKind::Reobserve,
             "computer_snapshot_display",
             json!({"client_id": context.client_id, "display_id": context.display_id}),
         )
@@ -2246,7 +2255,6 @@ fn computer_application_effect_not_started(
     match error_kind {
         "stale_application" => computer_suggested_recovery(
             result,
-            RecoveryKind::Reobserve,
             "computer_list_applications",
             json!({"client_id": client_id}),
         ),
