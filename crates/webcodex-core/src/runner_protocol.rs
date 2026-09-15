@@ -3672,6 +3672,7 @@ mod envelope_tests {
                 "artifact_export_streaming_metadata",
                 "structured_file_delete",
                 "apply_text_edit_occurrence",
+                "apply_text_edit_local_guard_without_sha",
                 "apply_text_edit_line_scope",
                 "apply_patch",
                 "apply_patch_match_metadata",
