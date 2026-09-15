@@ -188,17 +188,15 @@ fn inspection_truthfulness_schemas_keep_typed_missing_and_canonical_diff_recover
         hunk["properties"]["source_completeness"]["enum"],
         json!(["complete", "unknown"])
     );
-    let handoff = &properties["diff_review_handoff"]["properties"];
-    assert!(handoff.get("tool").is_none());
-    assert!(handoff.get("suggested_call").is_none());
+    let handoff = &properties["diff_review_handoff"];
+    assert_eq!(handoff["required"], json!(["next_call"]));
     assert_eq!(
-        handoff["recovery"]["properties"]["tool"]["const"],
+        handoff["properties"]["next_call"]["properties"]["tool"]["const"],
         "git_diff_hunks"
     );
-    assert!(handoff["recovery"]["description"]
-        .as_str()
-        .unwrap()
-        .contains("Canonical parser-ready"));
+    for legacy in ["scope", "reason", "truncation_reasons", "recovery"] {
+        assert!(handoff["properties"].get(legacy).is_none(), "{legacy}");
+    }
 }
 
 fn continuation_feedback_subschema(specs: &[ToolSpec], tool: &str) -> Value {
@@ -649,7 +647,7 @@ fn read_continuation_output_schemas_accept_one_action_and_snapshot_truth() {
         "project": "agent:oe:demo", "requested_count": 3, "returned_count": 1,
         "succeeded_count": 1, "failed_count": 0,
         "items": [{"index": 0, "path": "src/0.rs", "success": true, "error": null,
-            "output": {"text": "first", "format": "plain", "path": "src/0.rs", "sha256": "b".repeat(64),
+            "output": {"text": "first", "format": "plain", "path": "src/0.rs",
                 "read_revision": 3817291045227_u64, "start_line": 1, "limit": 100, "total_lines": 200,
                 "returned_lines": 50, "end_line": 50, "has_more": true, "budget_truncated": true}}],
         "output_truncated": true, "truncation_reason": "batch_response_budget",
@@ -657,6 +655,9 @@ fn read_continuation_output_schemas_accept_one_action_and_snapshot_truth() {
             "items": [{"path": "src/0.rs", "start_line": 51, "limit": 50}, {"path": "src/1.rs"}, {"path": "src/2.rs", "start_line": 4, "limit": 20}]}}
     }});
     test_support::validate_schema_instance(&result, &schema).unwrap();
+    let mut digest_leak = result.clone();
+    digest_leak["output"]["items"][0]["output"]["sha256"] = json!("b".repeat(64));
+    assert!(test_support::validate_schema_instance(&digest_leak, &schema).is_err());
     for field in [
         "continuation",
         "next_index",

@@ -410,14 +410,7 @@ fn search_project_text_model_projection_compacts_files_count_and_guides_truncati
     assert_eq!(truncated_sparse.output["result_mode"], "matches");
     assert_eq!(truncated_sparse.output["truncated"], true);
     assert_eq!(truncated_sparse.output["truncation_reason"], "limit");
-    assert_eq!(
-        truncated_sparse.output["continuation"]["kind"],
-        "refine_query"
-    );
-    assert_eq!(
-        truncated_sparse.output["continuation"]["safe_cursor"],
-        false
-    );
+    assert!(truncated_sparse.output.get("continuation").is_none());
     assert!(truncated_sparse.output.get("next_index").is_none());
     assert!(truncated_sparse.output.get("match_offset").is_none());
     assert!(truncated_sparse.output.get("next_match").is_none());

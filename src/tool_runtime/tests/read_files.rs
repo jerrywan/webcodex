@@ -325,10 +325,8 @@ async fn read_file_dispatch_complete_success_is_sparse_after_session_recording()
     let item = &result.output["items"][0];
     assert_eq!(item["output"]["text"], "one\ntwo");
     assert_eq!(item["path"], "src/lib.rs");
-    assert_eq!(
-        item["output"]["sha256"],
-        format!("{:x}", Sha256::digest(content.as_bytes()))
-    );
+    assert!(item["output"].get("sha256").is_none());
+    assert!(item["output"]["read_revision"].as_u64().is_some());
     assert_eq!(item["output"]["total_lines"], 2);
     for omitted in [
         "format",
@@ -439,6 +437,7 @@ async fn read_file_dispatch_partial_success_keeps_full_range_cursor() {
     let read_revision = item["output"]["read_revision"]
         .as_u64()
         .expect("successful read must expose read_revision");
+    assert!(item["output"].get("sha256").is_none());
     assert!((1..=9_007_199_254_740_991).contains(&read_revision));
     assert_eq!(suggested["tool"], "read_files");
     assert_eq!(suggested["arguments"]["session_id"], session_id);
@@ -664,7 +663,8 @@ async fn read_files_dispatch_complete_batch_is_sparse_and_schema_valid() {
         assert!(item["error"].is_null());
         assert_eq!(item["output"]["format"], "numbered");
         assert!(item["output"].get("path").is_none());
-        assert!(item["output"]["sha256"].as_str().is_some());
+        assert!(item["output"].get("sha256").is_none());
+        assert!(item["output"]["read_revision"].as_u64().is_some());
         assert_eq!(item["output"]["total_lines"], 1);
         for omitted in [
             "start_line",

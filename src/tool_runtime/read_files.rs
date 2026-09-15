@@ -279,6 +279,13 @@ fn projected_read_item_len(item: &Value) -> usize {
             projected.get_mut("output").and_then(Value::as_object_mut),
         ) {
             super::dispatch::sparsify_complete_file_read_output(output, Some(&outer_path));
+            if output
+                .get("read_revision")
+                .and_then(Value::as_u64)
+                .is_some()
+            {
+                output.remove("sha256");
+            }
         }
     }
     serialized_value_len(&projected)

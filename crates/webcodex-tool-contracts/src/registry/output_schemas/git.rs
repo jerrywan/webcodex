@@ -581,44 +581,16 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 "diff_review_handoff",
                 json!({
                     "type": "object",
-                    "description": "Present only when bounded show_changes diff hunks are incomplete; identifies the canonical focused/paged review tool without starting it or inventing a continuation.",
+                    "description": "Present only when bounded show_changes diff hunks are incomplete. next_call is the sole model-facing handoff action; top-level truncation_reasons retain the diagnostic cause.",
                     "additionalProperties": false,
                     "properties": {
-                        "scope": {
-                            "type": "string",
-                            "const": "worktree"
-                        },
-                        "reason": {
-                            "type": "string",
-                            "const": "show_changes_diff_truncated"
-                        },
-                        "truncation_reasons": {
-                            "type": "array",
-                            "description": "Actual show_changes diff bounds that caused this handoff.",
-                            "items": {
-                                "type": "string",
-                                "enum": [
-                                    "diff_hunk_count_limit",
-                                    "diff_hunk_line_limit",
-                                    "diff_byte_budget",
-                                    "diff_hunk_byte_budget"
-                                ]
-                            }
-                        },
-                        "recovery": {
-                            "type": "object",
-                            "description": "Canonical parser-ready first recovery call is the exact tool + arguments pair here; kind and safety fields classify the recovery. For line or mixed truncation, continuation is explicitly unsafe for omitted current-hunk lines.",
-                            "additionalProperties": false,
-                            "properties": {
-                                "kind": {"type": "string", "enum": ["page", "hunk_lines", "mixed"]},
-                                "tool": {"type": "string", "const": "git_diff_hunks"},
-                                "arguments": show_changes_handoff_arguments_schema(),
-                                "safe_continuation_for_omitted_lines": nullable_schema("boolean", "False when show_changes omitted current-hunk content because this handoff starts a fresh git_diff_hunks observation and carries no exact hunk-fragment identity; null for page-only truncation. The resulting git_diff_hunks observation may itself return a safe fragment continuation.")
-                            },
-                            "required": ["kind", "tool", "arguments", "safe_continuation_for_omitted_lines"]
-                        }
+                        "next_call": suggested_tool_call_schema(
+                            "git_diff_hunks",
+                            show_changes_handoff_arguments_schema(),
+                            "Parser-ready first focused diff-review call. It starts a fresh git_diff_hunks observation and carries no invented continuation identity.",
+                        )
                     },
-                    "required": ["scope", "reason", "truncation_reasons", "recovery"]
+                    "required": ["next_call"]
                 }),
             ),
             (

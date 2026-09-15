@@ -8,7 +8,7 @@ use super::session_context::{
 use super::{permissions, session_context, sessions, ToolCall, ToolResult, ToolRuntime};
 use crate::auth::AuthContext;
 use crate::tool_runtime::project_resolution::{ProjectResolverError, ResolvedProject};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 /// Add the Phase A lifecycle tuple to a definite pre-execution structured
 /// execution denial without changing generic denial helpers used by unrelated
@@ -390,24 +390,6 @@ fn sparsify_search_match_items(output: &mut serde_json::Map<String, Value>) {
     }
 }
 
-fn add_search_refinement_continuation(output: &mut serde_json::Map<String, Value>) {
-    if output.get("truncated").and_then(Value::as_bool) != Some(true)
-        || !matches!(
-            output.get("truncation_reason").and_then(Value::as_str),
-            Some("limit" | "output_bytes")
-        )
-    {
-        return;
-    }
-    output.entry("continuation".to_string()).or_insert_with(|| {
-        json!({
-            "kind": "refine_query",
-            "safe_cursor": false,
-            "refine_with": ["path", "include_globs", "pattern", "result_mode", "limit"]
-        })
-    });
-}
-
 /// Project successful text-search presentation after Session/event consumers
 /// have seen canonical evidence. Complete rg results keep only mode-relevant
 /// records and explicit non-default controls. Fallback/truncated successes retain
@@ -420,8 +402,6 @@ pub(crate) fn sparsify_search_output_for_model(
     allow_batch_deadline_reduction: bool,
 ) -> bool {
     sparsify_search_match_items(output);
-    add_search_refinement_continuation(output);
-
     let exit_code = output.get("exit_code").and_then(Value::as_i64);
     let result_mode = output
         .get("result_mode")
@@ -619,8 +599,8 @@ pub(crate) fn sparsify_search_batch_success_for_model(
 }
 
 /// Remove range bookkeeping only when the returned text is provably the complete
-/// file. `sha256` and `total_lines` remain explicit freshness/content-shape
-/// evidence. Partial reads and every real continuation keep the canonical full
+/// file. `read_revision` remains the model-facing snapshot identity and
+/// `total_lines` remains content-shape evidence. Partial reads and every real continuation keep the canonical full
 /// range tuple. In a batch, the outer item path remains the navigation identity,
 /// so an identical inner path is redundant.
 pub(crate) fn sparsify_complete_file_read_output(
@@ -671,6 +651,9 @@ pub(crate) fn sparsify_complete_file_read_output(
         return false;
     }
 
+    // The digest has already served canonical snapshot registration. The model
+    // uses the bounded read_revision handle for this exact snapshot.
+    output.remove("sha256");
     for key in [
         "start_line",
         "limit",
@@ -756,13 +739,17 @@ pub(crate) fn sparsify_complete_read_success(tool_name: &str, result: &mut ToolR
         }
     }
     // The output-level call is the sole machine representation of follow-up
-    // positions. Completeness and snapshot identity remain on each item.
+    // positions. `read_revision` is the sole model-facing snapshot identity;
+    // the underlying digest remains canonical/internal evidence only.
     output.remove("next_index");
     if let Some(items) = output.get_mut("items").and_then(Value::as_array_mut) {
         for item in items {
             if let Some(read) = item.get_mut("output").and_then(Value::as_object_mut) {
                 read.remove("next_start_line");
                 read.remove("budget_next_limit");
+                if read.get("read_revision").and_then(Value::as_u64).is_some() {
+                    read.remove("sha256");
+                }
             }
         }
     }

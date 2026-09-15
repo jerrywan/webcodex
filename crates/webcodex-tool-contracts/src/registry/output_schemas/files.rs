@@ -137,29 +137,6 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
     }
 }
 
-fn search_refinement_continuation_schema() -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "description": "Model-facing recovery hint for a single truncated query. Search match order is not a stable cursor, so this requires query refinement rather than offset paging.",
-        "properties": {
-            "kind": {"type": "string", "const": "refine_query"},
-            "safe_cursor": {"type": "boolean", "const": false},
-            "refine_with": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 5,
-                "uniqueItems": true,
-                "items": {
-                    "type": "string",
-                    "enum": ["path", "include_globs", "pattern", "result_mode", "limit"]
-                }
-            }
-        },
-        "required": ["kind", "safe_cursor", "refine_with"]
-    })
-}
-
 fn search_project_texts_output_schema() -> Value {
     let search_success_properties = json!({
         "path": schema_type("string", "Effective project-relative search root; omitted for the default project root in sparse complete matches success."),
@@ -183,8 +160,7 @@ fn search_project_texts_output_schema() -> Value {
                 {"type": "string", "enum": ["limit", "output_bytes", "timeout", "transport"]},
                 {"type": "null"}
             ]
-        },
-        "continuation": search_refinement_continuation_schema()
+        }
     });
     let search_success_full = json!({
         "type": "object",
@@ -423,7 +399,6 @@ fn read_files_output_schema() -> Value {
         "text": schema_type("string", "The single primary text representation."),
         "format": {"type": "string", "enum": ["plain", "numbered"]},
         "path": schema_type("string", "Project-relative path; omitted from a sparse complete item when identical to the outer item path."),
-        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "read_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991_u64, "description": "Model-facing handle for this exact full-file Project/path/Runner snapshot."},
         "start_line": {"type": "integer", "minimum": 1},
         "limit": {"type": "integer", "minimum": 1, "maximum": 2000},
@@ -438,7 +413,7 @@ fn read_files_output_schema() -> Value {
         "additionalProperties": false,
         "properties": read_success_properties.clone(),
         "required": [
-            "text", "format", "path", "sha256", "read_revision", "start_line", "limit",
+            "text", "format", "path", "read_revision", "start_line", "limit",
             "total_lines", "returned_lines", "end_line", "has_more"
         ]
     });
@@ -478,7 +453,7 @@ fn read_files_output_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": read_success_sparse_properties,
-        "required": ["text", "sha256", "read_revision", "total_lines"],
+        "required": ["text", "read_revision", "total_lines"],
         "description": "Sparse model-facing item form for a provably complete default full-file read. The outer item path is the only navigation identity; inner path and range fields are omitted, and no continuation exists."
     });
     let read_success = json!({
