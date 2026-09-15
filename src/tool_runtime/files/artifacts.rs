@@ -198,6 +198,17 @@ fn artifact_policy_rejected_result(path: &str, message: String) -> ToolResult {
     )
 }
 
+fn artifact_snapshot_changed_result(path: &str) -> ToolResult {
+    ToolResult::err_with_output(
+        "artifact snapshot changed",
+        json!({
+            "path": path,
+            "error_kind": "snapshot_changed",
+            "state_changed": false,
+        }),
+    )
+}
+
 fn validate_artifact_upload_id(upload_id: &str) -> Result<(), String> {
     if !upload_id.starts_with("wc_upload_") {
         return Err("upload_id must start with wc_upload_".to_string());
@@ -731,6 +742,9 @@ impl ToolRuntime {
             Ok(v) => v,
             Err(e) => return ToolResult::err(e),
         };
+        if obj.get("error_kind").and_then(Value::as_str) == Some("snapshot_changed") {
+            return artifact_snapshot_changed_result(&path);
+        }
         if let Some(err) = obj
             .get("error")
             .and_then(|e| e.as_str())
@@ -744,15 +758,7 @@ impl ToolRuntime {
         }
         if let Some(expected_sha256) = expected_sha256.as_deref() {
             if obj.get("sha256").and_then(Value::as_str) != Some(expected_sha256) {
-                return ToolResult::err_with_output(
-                    "artifact snapshot changed",
-                    json!({
-                        "path": path,
-                        "error_kind": "snapshot_changed",
-                        "expected_sha256": expected_sha256,
-                        "actual_sha256": obj.get("sha256").and_then(Value::as_str),
-                    }),
-                );
+                return artifact_snapshot_changed_result(&path);
             }
         }
         if as_image {
