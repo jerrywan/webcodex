@@ -176,16 +176,15 @@ fn assert_builtin_workflow(output: &Value) {
         "instead of reproducing rustfmt edits manually",
         "simplest reliable primitive",
         "correctness, authority, evidence, durability, recovery, and portability",
-        "Native commands are first-class for small bounded work",
-        "bounded deterministic Python through run_shell",
-        "repetitive mechanical transforms",
-        "Respect path/permission policy and network authority",
+        "Native commands are first-class for bounded work",
+        "bounded deterministic Python/run_shell transforms",
+        "Respect path/permission/network authority",
         "Always inspect the resulting diff and validate final source",
-        "independent read-only inspection",
+        "read-only inspection",
         "short sync_wait_secs",
         "same-execution Job handoff",
-        "do not fan out heavy validations",
-        "stale/cache-warmup",
+        "avoid validation fanout",
+        "stales prior results",
         "final source needs fresh validation",
     ] {
         assert!(defaults.contains(phrase), "workflow guidance: {phrase}");
@@ -193,15 +192,13 @@ fn assert_builtin_workflow(output: &Value) {
     let persistent_shell_guidance = workflow["model_protocol"]["persistent_shell"]
         .as_str()
         .expect("persistent shell guidance");
-    assert!(persistent_shell_guidance.contains("repeated remote commands"));
-    assert!(persistent_shell_guidance.contains("one named SSH resource"));
-    assert!(persistent_shell_guidance.contains("cwd/env/exports/functions/umask"));
     for phrase in [
-        "run_process for literal argv",
-        "run_shell for shell grammar/short chains",
-        "run_script for program-like scripts",
-        "specialized Runtime tools when added semantics matter",
-        "local only for same-process state",
+        "run_process=literal argv",
+        "run_shell=shell grammar/short chains",
+        "run_script=program-like scripts",
+        "specialize for added semantics",
+        "repeated named-SSH state",
+        "local same-process state",
     ] {
         assert!(
             persistent_shell_guidance.contains(phrase),
