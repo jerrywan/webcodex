@@ -211,7 +211,7 @@ pub fn search_project_texts_input_schema() -> Value {
         (
             "max_result_bytes",
             "integer",
-            "Optional primary model-facing batch projection budget in bytes. Defaults to 64 KiB. Any recognized nonnegative integer is accepted and runtime-clamped to the fixed 8..512 KiB inspection bounds. Continuation is whole-query via next_index; if the first remaining query cannot fit, raise this budget or narrow that query's limit/context/path. Independently bounded Session/continuity overlays remain outside this budget.",
+            "Optional primary model-facing batch projection budget in bytes. Defaults to 64 KiB. Any recognized nonnegative integer is accepted and runtime-clamped to the fixed 8..512 KiB inspection bounds. Whole-query batch follow-up is returned as one parser-ready suggested_call; if the first remaining query cannot fit, Runtime may raise this budget, while hard-cap zero progress requires narrowing that query's limit/context/path. Independently bounded Session/continuity overlays remain outside this budget.",
             false,
         ),
     ]));

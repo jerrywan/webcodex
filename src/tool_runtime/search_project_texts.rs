@@ -2,7 +2,7 @@
 
 use super::files::{SearchOptions, SearchRequest};
 use super::project_resolution::ResolvedProject;
-use super::{SearchProjectTextsQuery, ToolResult, ToolRuntime};
+use super::{SearchProjectTextsQuery, SuggestedToolCall, ToolResult, ToolRuntime};
 use crate::json_measurement::serialized_json_len;
 use futures_util::{stream, StreamExt};
 use serde_json::{json, Value};
@@ -53,7 +53,7 @@ fn search_request_and_pattern_mode(
     )
 }
 
-fn normalized_result_budget(max_result_bytes: Option<usize>) -> usize {
+pub(crate) fn normalized_result_budget(max_result_bytes: Option<usize>) -> usize {
     max_result_bytes
         .unwrap_or(DEFAULT_SEARCH_PROJECT_TEXTS_RESULT_BYTES)
         .clamp(
@@ -83,8 +83,10 @@ fn batch_output(
         "failed_count": returned_count - succeeded_count,
         "items": items,
         "output_truncated": output_truncated,
-        "next_index": next_index,
     });
+    if let Some(next_index) = next_index {
+        output["next_index"] = json!(next_index);
+    }
     if let Some(reason) = truncation_reason {
         output["truncation_reason"] = json!(reason);
     }
@@ -381,6 +383,94 @@ fn batch_item(index: usize, mut result: ToolResult) -> Value {
         "output": output,
         "error": format!("search_project_text failed: {reason_code}"),
     })
+}
+
+fn search_query_argument_value(query: &SearchProjectTextsQuery) -> Value {
+    let mut value =
+        serde_json::to_value(query).expect("SearchProjectTextsQuery serialization is infallible");
+    if let Some(object) = value.as_object_mut() {
+        object.retain(|_, value| !value.is_null());
+    }
+    value
+}
+
+fn search_suggested_arguments(
+    project: &str,
+    queries: &[SearchProjectTextsQuery],
+    session_id: Option<&str>,
+    max_result_bytes: Option<usize>,
+) -> Value {
+    let mut arguments = json!({
+        "project": project,
+        "queries": queries.iter().map(search_query_argument_value).collect::<Vec<_>>(),
+    });
+    if let Some(session_id) = session_id {
+        arguments["session_id"] = json!(session_id);
+    }
+    if let Some(max_result_bytes) = max_result_bytes {
+        arguments["max_result_bytes"] = json!(max_result_bytes);
+    }
+    arguments
+}
+
+/// Compile producer-only whole-query next_index bookkeeping into one directly
+/// reusable suffix rerun. Individual query match positions remain deliberately
+/// non-resumable because backend order is not a stable cursor.
+pub(crate) fn add_actionable_search_continuation(
+    result: &mut ToolResult,
+    project: &str,
+    original_queries: &[SearchProjectTextsQuery],
+    session_id: Option<&str>,
+    max_result_bytes: Option<usize>,
+) {
+    if !result.success {
+        return;
+    }
+    let Some(output) = result.output.as_object_mut() else {
+        return;
+    };
+    let truncated = output.get("output_truncated").and_then(Value::as_bool) == Some(true);
+    let next_index = output
+        .get("next_index")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize);
+    if !truncated {
+        output.remove("next_index");
+        return;
+    }
+    let Some(next_index) = next_index else {
+        return;
+    };
+    let returned_count = output
+        .get("returned_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let mut next_budget = max_result_bytes;
+    if returned_count == 0 && next_index == 0 {
+        let reason = output.get("truncation_reason").and_then(Value::as_str);
+        let current_budget = normalized_result_budget(max_result_bytes);
+        if reason == Some("hard_result_cap") || current_budget >= MAX_SERIALIZED_OUTPUT_BYTES {
+            // No bounded parameter change can prove progress. Preserve the
+            // truncation reason, but never manufacture a looping next call.
+            output.remove("next_index");
+            return;
+        }
+        next_budget = Some(MAX_SERIALIZED_OUTPUT_BYTES);
+    }
+    if let Some(remaining) = original_queries
+        .get(next_index..)
+        .filter(|queries| !queries.is_empty())
+    {
+        output.insert(
+            "suggested_call".to_string(),
+            SuggestedToolCall::new(
+                "search_project_texts",
+                search_suggested_arguments(project, remaining, session_id, next_budget),
+            )
+            .to_value(),
+        );
+    }
+    output.remove("next_index");
 }
 
 pub(crate) fn apply_model_facing_output_budget(
@@ -883,6 +973,74 @@ mod tests {
             assert!(output["next_index"].is_null());
             assert_eq!(output["items"][0], expected);
         }
+    }
+
+    #[test]
+    fn actionable_search_continuation_is_parser_ready_and_hard_cap_fails_closed() {
+        let query = SearchProjectTextsQuery {
+            pattern: "needle".to_string(),
+            pattern_mode: None,
+            path: None,
+            limit: Some(120),
+            context_before: None,
+            context_after: None,
+            include_globs: None,
+            exclude_globs: None,
+            result_mode: None,
+            timeout_secs: None,
+        };
+        let mut soft = ToolResult::ok(apply_output_budget(
+            "agent:resolved:demo",
+            1,
+            vec![default_matches_item(0, 120, 900)],
+            &[true],
+            None,
+        ));
+        assert_eq!(soft.output["next_index"], 0);
+        add_actionable_search_continuation(
+            &mut soft,
+            "agent:resolved:demo",
+            std::slice::from_ref(&query),
+            Some("wc_sess_demo"),
+            None,
+        );
+        assert!(soft.output.get("next_index").is_none());
+        let suggested = &soft.output["suggested_call"];
+        assert_eq!(suggested["tool"], "search_project_texts");
+        assert_eq!(suggested["arguments"]["project"], "agent:resolved:demo");
+        assert_eq!(suggested["arguments"]["session_id"], "wc_sess_demo");
+        assert_eq!(
+            suggested["arguments"]["max_result_bytes"],
+            MAX_SERIALIZED_OUTPUT_BYTES
+        );
+        assert_eq!(suggested["arguments"]["queries"][0]["pattern"], "needle");
+        assert!(suggested["arguments"]["queries"][0]
+            .get("pattern_mode")
+            .is_none());
+        crate::tool_runtime::ToolCall::from_tool_name(
+            suggested["tool"].as_str().unwrap(),
+            suggested["arguments"].clone(),
+        )
+        .expect("whole-query search follow-up must be parser-ready");
+
+        let mut hard = ToolResult::ok(apply_output_budget(
+            "agent:resolved:demo",
+            1,
+            vec![matches_item(0, 199, 3_000)],
+            &[false],
+            Some(MAX_SERIALIZED_OUTPUT_BYTES),
+        ));
+        assert_eq!(hard.output["next_index"], 0);
+        assert_eq!(hard.output["truncation_reason"], "hard_result_cap");
+        add_actionable_search_continuation(
+            &mut hard,
+            "agent:resolved:demo",
+            &[query],
+            None,
+            Some(MAX_SERIALIZED_OUTPUT_BYTES),
+        );
+        assert!(hard.output.get("next_index").is_none());
+        assert!(hard.output.get("suggested_call").is_none());
     }
 
     #[test]

@@ -85,7 +85,7 @@ fn observation_schemas_do_not_repeat_static_continuation_semantics() {
         .expect("observe_jobs output variants");
     let full = variants
         .iter()
-        .find(|variant| variant["properties"].get("next_index").is_some())
+        .find(|variant| variant["properties"].get("suggested_call").is_some())
         .expect("observe_jobs full batch output");
     let item_output = &full["properties"]["items"]["items"]["properties"]["output"]["anyOf"][0];
     assert!(
@@ -95,9 +95,17 @@ fn observation_schemas_do_not_repeat_static_continuation_semantics() {
         "observe_jobs items must rely on observation_token -> after_observation_token"
     );
     assert!(
-        full["properties"].get("continuation_semantics").is_some(),
-        "observe_jobs must retain dynamic outer batch/index disambiguation"
+        full["properties"].get("continuation_semantics").is_none()
+            && full["properties"].get("next_index").is_none(),
+        "observe_jobs must keep aggregate packing indices private"
     );
+    let suggested = &full["properties"]["suggested_call"];
+    assert_eq!(suggested["properties"]["tool"]["const"], "observe_jobs");
+    let arguments = &suggested["properties"]["arguments"]["properties"];
+    assert!(arguments.get("items").is_some());
+    assert!(arguments.get("tail_lines").is_some());
+    assert!(arguments.get("wait_secs").is_none());
+    assert!(arguments.get("wake_on").is_none());
 }
 
 #[test]
@@ -635,8 +643,7 @@ fn observe_jobs_failure_item_schema_closes_recovery_metadata() {
             },
             "changed_count": 0,
             "terminal_count": 0,
-            "output_truncated": false,
-            "next_index": null
+            "output_truncated": false
         },
         "error": null
     });

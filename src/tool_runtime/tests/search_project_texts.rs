@@ -547,7 +547,7 @@ fn search_project_texts_schema_and_parser_enforce_strict_batch_contract() {
         .as_str()
         .unwrap();
     assert!(budget_description.contains("runtime-clamped"));
-    assert!(budget_description.contains("whole-query"));
+    assert!(budget_description.to_lowercase().contains("whole-query"));
     assert!(budget_description.contains("narrow"));
     let removed_input_cursor = ["match", "offset"].join("_");
     assert!(schema["properties"]["queries"]["items"]["properties"]

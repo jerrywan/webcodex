@@ -204,8 +204,7 @@ fn canonical_batch(items: Vec<Value>, wait_outcome: &str, waited_ms: u64) -> Too
         "wait": {"outcome": wait_outcome, "waited_ms": waited_ms},
         "changed_count": changed_count,
         "terminal_count": terminal_count,
-        "output_truncated": false,
-        "next_index": null
+        "output_truncated": false
     }))
 }
 

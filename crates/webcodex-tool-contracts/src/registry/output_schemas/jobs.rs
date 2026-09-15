@@ -1,12 +1,10 @@
 use serde_json::{json, Value};
 
 use super::common::{
-    array_schema, cargo_test_count_assertion_schema, continuation_semantics_schema,
-    job_activity_schema, nullable_schema, observe_job_continuation_schema,
-    permission_decision_schema, recovery_kind_schema, schema_type, session_hint_schema,
-    suggested_tool_call_schema, wrapped_output_schema,
+    array_schema, cargo_test_count_assertion_schema, job_activity_schema, nullable_schema,
+    observe_job_continuation_schema, permission_decision_schema, recovery_kind_schema, schema_type,
+    session_hint_schema, suggested_tool_call_schema, wrapped_output_schema,
 };
-use webcodex_core::runtime_contract::{ContinuationCarrier, ContinuationKind};
 
 fn validation_job_projection_schema() -> Value {
     json!({
@@ -418,6 +416,15 @@ fn list_jobs_recovery_call_schema(project: bool) -> Value {
     )
 }
 
+fn observe_jobs_batch_followup_arguments_schema() -> Value {
+    let mut schema = crate::registry::input_schemas::observe_jobs_input_schema();
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.remove("wait_secs");
+        properties.remove("wake_on");
+    }
+    schema
+}
+
 fn observe_jobs_output_schema() -> Value {
     let job_observation = json!({
         "type": "object",
@@ -636,11 +643,10 @@ fn observe_jobs_output_schema() -> Value {
             "changed_count": {"type": "integer", "minimum": 0, "maximum": 8},
             "terminal_count": {"type": "integer", "minimum": 0, "maximum": 8},
             "output_truncated": {"type": "boolean"},
-            "next_index": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 7}, {"type": "null"}]},
-            "continuation_semantics": continuation_semantics_schema(
-                ContinuationKind::Batch,
-                ContinuationCarrier::Index,
-                "Present only when aggregate output packing stops at a later input item. next_index is an aggregate batch boundary, not an observation token.",
+            "suggested_call": suggested_tool_call_schema(
+                "observe_jobs",
+                observe_jobs_batch_followup_arguments_schema(),
+                "Parser-ready immediate observation of only the whole input suffix omitted by aggregate result packing. It preserves the caller's original Job tokens and intentionally omits wait_secs/wake_on so response-size continuation never starts a second long wait."
             ),
             "session_hint": session_hint_schema(),
             "permission": permission_decision_schema()
@@ -648,15 +654,18 @@ fn observe_jobs_output_schema() -> Value {
         "required": [
             "requested_count", "returned_count", "succeeded_count", "failed_count",
             "items", "wait", "changed_count", "terminal_count",
-            "output_truncated", "next_index"
+            "output_truncated"
         ],
-        "allOf": [{
-            "if": {
-                "properties": {"next_index": {"type": "integer"}},
-                "required": ["next_index"]
+        "allOf": [
+            {
+                "if": {"properties": {"output_truncated": {"const": true}}, "required": ["output_truncated"]},
+                "then": {"required": ["suggested_call"]}
             },
-            "then": {"required": ["continuation_semantics"]}
-        }]
+            {
+                "if": {"properties": {"output_truncated": {"const": false}}, "required": ["output_truncated"]},
+                "then": {"not": {"required": ["suggested_call"]}}
+            }
+        ]
     });
     let sparse_success_output = json!({
         "type": "object",
