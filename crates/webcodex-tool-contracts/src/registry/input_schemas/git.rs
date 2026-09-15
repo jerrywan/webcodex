@@ -132,7 +132,7 @@ pub fn git_diff_hunks_input_schema() -> Value {
         (
             "max_page_bytes",
             "integer",
-            "Raw producer page budget in bytes, independent of the final serialized model result. Defaults to 64 KiB. Any recognized nonnegative integer is accepted and runtime-clamped to the fixed 16..192 KiB producer bounds so ordinary Runner result retention retains framing headroom.",
+            "Raw producer page budget in bytes, independent of the final serialized model result. Defaults to the safe producer maximum (192 KiB). Any recognized nonnegative integer is accepted and runtime-clamped to the fixed 16..192 KiB producer bounds so ordinary Runner result retention retains framing headroom.",
             false,
         ),
         (

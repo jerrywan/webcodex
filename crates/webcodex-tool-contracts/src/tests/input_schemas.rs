@@ -214,6 +214,8 @@ fn git_diff_hunks_page_budget_schema_defers_bounds_to_runtime_clamp() {
     assert!(description.contains("producer page"));
     assert!(description.contains("final serialized model result"));
     assert!(description.contains("runtime-clamped"));
+    assert!(description.contains("192 kib"));
+    assert!(!description.contains("defaults to 64 kib"));
     for bytes in [0, 1, 16 * 1024, 64 * 1024, 192 * 1024, 300_000] {
         assert!(test_support::validate_schema_instance(
             &json!({"project":"demo","max_page_bytes":bytes}),
