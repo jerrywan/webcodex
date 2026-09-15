@@ -1942,6 +1942,8 @@ pub enum ToolCall {
         #[serde(default)]
         length: Option<usize>,
         #[serde(default)]
+        expected_sha256: Option<String>,
+        #[serde(default)]
         as_image: Option<bool>,
     },
 
@@ -2689,6 +2691,34 @@ fn reject_unknown_bounded_computer_fields(
     }
 }
 
+fn validate_read_project_artifact_expected_sha256(
+    name: &str,
+    arguments: &Value,
+) -> Result<(), String> {
+    if name != "read_project_artifact" {
+        return Ok(());
+    }
+    let Some(object) = arguments.as_object() else {
+        return Ok(());
+    };
+    let Some(value) = object.get("expected_sha256") else {
+        return Ok(());
+    };
+    let valid = value.as_str().is_some_and(|value| {
+        value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    });
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "invalid arguments for tool '{name}': expected_sha256 must be exactly 64 lowercase hexadecimal characters"
+        ))
+    }
+}
+
 fn validate_structured_validation_sync_wait(name: &str, arguments: &Value) -> Result<(), String> {
     if !matches!(name, "cargo_fmt" | "cargo_check" | "cargo_test" | "go_test") {
         return Ok(());
@@ -2761,6 +2791,7 @@ impl ToolCall {
         validate_model_facing_assertion_name(name, &arguments)?;
         validate_model_facing_result_expectation(name, &arguments)?;
         validate_structured_validation_sync_wait(name, &arguments)?;
+        validate_read_project_artifact_expected_sha256(name, &arguments)?;
         if name == "apply_patch"
             && arguments
                 .as_object()

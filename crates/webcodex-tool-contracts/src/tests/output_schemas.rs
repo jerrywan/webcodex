@@ -1550,12 +1550,41 @@ fn key_tool_output_schemas_include_expected_fields() {
         "next_offset",
         "truncated",
         "eof",
+        "suggested_call",
     ] {
         assert!(
             has_output_field("read_project_artifact", field),
             "read_project_artifact missing {field}"
         );
     }
+    let artifact_specs = registered_tool_specs();
+    let artifact_next = &spec_named(&artifact_specs, "read_project_artifact").output_schema
+        ["properties"]["output"]["properties"]["suggested_call"]["properties"]["arguments"];
+    assert_eq!(
+        artifact_next["required"],
+        json!([
+            "project",
+            "path",
+            "encoding",
+            "offset",
+            "length",
+            "expected_sha256"
+        ])
+    );
+    assert_eq!(artifact_next["properties"]["encoding"]["const"], "base64");
+    assert_eq!(
+        artifact_next["properties"]["expected_sha256"]["minLength"],
+        64
+    );
+    assert_eq!(
+        artifact_next["properties"]["expected_sha256"]["maxLength"],
+        64
+    );
+    assert_eq!(
+        artifact_next["properties"]["expected_sha256"]["pattern"],
+        "^[0-9a-f]{64}$"
+    );
+
     let upload_progress_fields = [
         "path",
         "upload_id",

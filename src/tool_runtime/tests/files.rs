@@ -4674,6 +4674,8 @@ async fn read_project_artifact_rejects_sensitive_path_before_resolving_project()
             None,
             None,
             None,
+            None,
+            None,
         )
         .await;
     assert!(!out.success);
@@ -4690,10 +4692,31 @@ async fn read_project_artifact_rejects_invalid_length_before_resolving_project()
             None,
             Some(crate::tool_runtime::files::MAX_READ_PROJECT_ARTIFACT_LENGTH + 1),
             None,
+            None,
+            None,
         )
         .await;
     assert!(!out.success);
     assert!(out.error.unwrap().contains("length too large"));
+}
+
+#[tokio::test]
+async fn read_project_artifact_rejects_invalid_expected_sha256_before_resolving_project() {
+    let out = test_runtime()
+        .read_project_artifact(
+            "agent:missing:missing".to_string(),
+            "docs/assets/file.bin".to_string(),
+            None,
+            None,
+            Some(4),
+            Some("A".repeat(64)),
+            None,
+            None,
+        )
+        .await;
+    assert!(!out.success);
+    assert_eq!(out.output["error_kind"], "invalid_expected_sha256");
+    assert!(out.error.unwrap().contains("expected_sha256"));
 }
 
 #[tokio::test]

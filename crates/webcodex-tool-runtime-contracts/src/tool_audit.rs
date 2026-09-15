@@ -4579,6 +4579,7 @@ impl ToolCall {
                 encoding,
                 offset,
                 length,
+                expected_sha256,
                 as_image,
                 ..
             } => serde_json::json!({
@@ -4587,6 +4588,7 @@ impl ToolCall {
                 "encoding": encoding,
                 "offset": offset,
                 "length": length,
+                "expected_sha256_present": expected_sha256.as_ref().is_some_and(|v| !v.is_empty()),
                 "as_image": as_image,
             }),
             Self::ArtifactUploadBegin {

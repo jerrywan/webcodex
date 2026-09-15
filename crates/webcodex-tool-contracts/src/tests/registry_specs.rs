@@ -141,6 +141,10 @@ fn tool_specs_describe_default_coding_loop_preferences() {
     let read_artifact_desc = desc("read_project_artifact");
     for phrase in [
         "bounded chunk inspection api",
+        "parser-ready suggested_call",
+        "expected_sha256",
+        "snapshot_changed",
+        "do not manually translate",
         "do not loop over base64 chunks",
         "export_project_artifact",
     ] {
