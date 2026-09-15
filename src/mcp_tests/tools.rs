@@ -133,7 +133,10 @@ async fn mcp_tools_list_returns_same_names_as_runtime() {
                     panic!("stateless recorder metadata missing for {}", tool["name"])
                 });
             assert_eq!(recorder["type"], "string");
-            assert_eq!(recorder["pattern"], "^wc_sess_[A-Za-z0-9_]+$");
+            assert_eq!(
+                recorder["pattern"],
+                "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
+            );
             let description = recorder["description"].as_str().unwrap();
             assert!(description.contains("record this call"));
             assert!(description.contains("trusted collaboration provenance"));

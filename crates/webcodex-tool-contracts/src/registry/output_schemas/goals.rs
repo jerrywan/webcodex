@@ -45,7 +45,7 @@ fn correlation_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "kind": {"type": "string", "enum": ["agent_task", "workflow_session"]},
-            "reference_id": {"type": "string", "pattern": "^(wc_agent_task_[0-9a-f]{32}|wc_sess_[0-9a-f]{32})$", "maxLength": 46, "description": "Exact correlated durable identity. It is not a credential and cannot be dereferenced without that domain's normal authorization."},
+            "reference_id": {"type": "string", "pattern": "^(wc_agent_task_[0-9a-f]{32}|wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32}))$", "maxLength": 46, "description": "Exact correlated durable identity. It is not a credential and cannot be dereferenced without that domain's normal authorization."},
             "created_at_unix_ms": schema_type("integer", "Correlation creation time.")
         },
         "required": ["kind", "reference_id", "created_at_unix_ms"]

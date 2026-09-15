@@ -458,7 +458,7 @@ fn fenced_completion_replays_same_key_and_conflicts_on_same_key_body_change() {
     ));
 
     let mut different_author = input.clone();
-    different_author.author_session_id = Some("wc_sess_other_worker".to_string());
+    different_author.author_session_id = Some("wc_sess_aaaaaaaaaaaaaaaa".to_string());
     assert!(matches!(
         store.complete_message(different_author),
         Err(SessionMessageError::IdempotencyConflict)

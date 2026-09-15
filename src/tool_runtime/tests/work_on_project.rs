@@ -975,7 +975,10 @@ fn work_on_project_schema_and_registration() {
         crate::tool_runtime::sessions::MAX_CODING_INSTRUCTION_CHARS
     );
     assert_eq!(props["session_id"]["type"], "string");
-    assert_eq!(props["session_id"]["pattern"], "^wc_sess_[A-Za-z0-9_]+$");
+    assert_eq!(
+        props["session_id"]["pattern"],
+        "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
+    );
     assert_eq!(props["include_project_instructions"]["type"], "boolean");
     assert_eq!(props["include_project_instructions"]["default"], true);
     assert_eq!(props["include_workflow_guidance"]["type"], "boolean");

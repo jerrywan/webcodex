@@ -393,7 +393,7 @@ fn startup_session_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "session_id": {"type": "string", "pattern": "^wc_sess_[A-Za-z0-9_]+$"},
+            "session_id": {"type": "string", "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"},
             "mode": {"type": "string", "enum": ["normal", "read_only"]},
             "execution_context": session_execution_context_schema(
                 "Persistent execution defaults currently stored for this Workflow Session."

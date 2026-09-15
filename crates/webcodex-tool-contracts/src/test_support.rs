@@ -182,12 +182,9 @@ fn validate_schema_instance_at(instance: &Value, schema: &Value, path: &str) -> 
                             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                 })
             }
-            "^wc_sess_[A-Za-z0-9_]+$" => value.strip_prefix("wc_sess_").is_some_and(|tail| {
-                !tail.is_empty()
-                    && tail
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-            }),
+            "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$" => {
+                webcodex_core::workflow_session_contract::is_valid_session_id(value)
+            }
             "^[0-9a-f]{64}$" => {
                 value.len() == 64
                     && value

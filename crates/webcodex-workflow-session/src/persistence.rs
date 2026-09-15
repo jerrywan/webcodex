@@ -758,15 +758,7 @@ pub fn sanitize_persisted_event(mut event: SessionEvent, session_id: &str) -> Op
 }
 
 fn is_valid_persisted_message_id(message_id: &str) -> bool {
-    message_id
-        .strip_prefix(MESSAGE_ID_PREFIX)
-        .is_some_and(|suffix| {
-            !suffix.is_empty()
-                && suffix
-                    .as_bytes()
-                    .iter()
-                    .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-        })
+    webcodex_core::workflow_session_contract::is_valid_session_message_id(message_id)
 }
 
 pub fn sanitize_persisted_message(

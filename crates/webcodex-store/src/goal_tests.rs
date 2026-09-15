@@ -267,7 +267,7 @@ fn correlations_are_bounded_explicit_identity_only_and_replayed() {
             &owner,
             &goal_id,
             GoalCorrelationKind::WorkflowSession,
-            &format!("wc_sess_{}", "3".repeat(32)),
+            &format!("wc_sess_{}", webcodex_core::compact::random_suffix::<12>()),
             "session-link",
             T0 + 4,
         )

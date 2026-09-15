@@ -1,7 +1,7 @@
 use super::agent_task::AGENT_TASK_ID_PREFIX;
 use super::communication::{
     digest_json, digest_text, new_id, now_unix_ms, validate_communication_principal, validate_id,
-    CommunicationPrincipal,
+    CommunicationPrincipal, CommunicationStoreError,
 };
 use super::Database;
 use rusqlite::{
@@ -647,12 +647,7 @@ impl Database {
         session_id: &str,
         idempotency_key: &str,
     ) -> Result<GoalMutation, GoalStoreError> {
-        validate_id(
-            session_id,
-            WORKFLOW_SESSION_ID_PREFIX,
-            "invalid_workflow_session_id",
-        )
-        .map_err(map_communication_validation_error)?;
+        validate_workflow_session_id(session_id).map_err(map_communication_validation_error)?;
         self.associate_goal_reference(
             principal,
             goal_id,
@@ -678,12 +673,8 @@ impl Database {
                 validate_id(reference_id, AGENT_TASK_ID_PREFIX, "invalid_agent_task_id")
                     .map_err(map_communication_validation_error)?
             }
-            GoalCorrelationKind::WorkflowSession => validate_id(
-                reference_id,
-                WORKFLOW_SESSION_ID_PREFIX,
-                "invalid_workflow_session_id",
-            )
-            .map_err(map_communication_validation_error)?,
+            GoalCorrelationKind::WorkflowSession => validate_workflow_session_id(reference_id)
+                .map_err(map_communication_validation_error)?,
         }
         self.associate_goal_reference(principal, goal_id, kind, reference_id, idempotency_key, now)
     }
@@ -1004,11 +995,9 @@ fn validate_loaded_goal_detail(detail: &GoalDetail) -> Result<(), GoalStoreError
                 AGENT_TASK_ID_PREFIX,
                 "invalid_agent_task_id",
             ),
-            GoalCorrelationKind::WorkflowSession => validate_id(
-                &correlation.reference_id,
-                WORKFLOW_SESSION_ID_PREFIX,
-                "invalid_workflow_session_id",
-            ),
+            GoalCorrelationKind::WorkflowSession => {
+                validate_workflow_session_id(&correlation.reference_id)
+            }
         };
         if validation.is_err() {
             return Err(persisted_goal_state_error());
@@ -1161,5 +1150,16 @@ mod lifecycle_contract_tests {
             assert_eq!(serde_json::to_value(kind).unwrap(), db);
         }
         assert!(GoalCorrelationKind::from_db("job", 0).is_err());
+    }
+}
+
+fn validate_workflow_session_id(value: &str) -> Result<(), CommunicationStoreError> {
+    if webcodex_core::workflow_session_contract::is_valid_session_id(value) {
+        Ok(())
+    } else {
+        Err(CommunicationStoreError::new(
+            "invalid_workflow_session_id",
+            "Invalid Workflow Session identity",
+        ))
     }
 }

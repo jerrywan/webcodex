@@ -293,7 +293,7 @@ pub(crate) fn tool_spec(compact: bool) -> Value {
             "recording_session_id".to_string(),
             json!({
                 "type": "string",
-                "pattern": "^wc_sess_[A-Za-z0-9_]+$",
+                "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
                 "description": "Optional explicit Workflow Session used for authority, read-only/guard, permission, and audit governance. It is never inferred from MCP transport identity."
             }),
         );

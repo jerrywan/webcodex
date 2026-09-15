@@ -1990,7 +1990,7 @@ async fn tool_manifest_returns_sparse_static_plugin_tool_contract_without_runner
     }
     assert_eq!(
         stateless_gateway["inputSchema"]["properties"]["recording_session_id"]["pattern"],
-        "^wc_sess_[A-Za-z0-9_]+$"
+        "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
     );
 }
 

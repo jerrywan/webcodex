@@ -165,7 +165,7 @@ pub fn get_session_assignment_input_schema() -> Value {
         "properties": {
             "session_id": {
                 "type": "string",
-                "pattern": "^wc_sess_[A-Za-z0-9_]+$",
+                "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
                 "description": "Required coordinator/business Workflow Session containing the exact todo."
             },
             "message_id": {
@@ -185,7 +185,7 @@ pub fn observe_session_messages_input_schema() -> Value {
         "properties": {
             "session_id": {
                 "type": "string",
-                "pattern": "^wc_sess_[A-Za-z0-9_]+$",
+                "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
                 "description": "Required explicit Workflow Session whose message-state delta is observed."
             },
             "after_observation_token": {
@@ -313,7 +313,7 @@ pub fn update_session_context_input_schema() -> Value {
             },
             "session_id": {
                 "type": "string",
-                "pattern": "^wc_sess_[A-Za-z0-9_]+$",
+                "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
                 "description": "Required explicit active, project-scoped Workflow Session id. Unknown ids fail without creating a Session."
             },
             "execution_context": session_execution_context_schema(
@@ -363,7 +363,7 @@ pub fn work_result_input_schema() -> Value {
             },
             "session_id": {
                 "type": "string",
-                "pattern": "^wc_sess_[A-Za-z0-9_]+$",
+                "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
                 "description": "Required exact project-scoped Workflow Session id. Identity is never inferred from current/recent Session, Window, transport, or credential context."
             }
         },

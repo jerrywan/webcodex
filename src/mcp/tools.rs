@@ -472,7 +472,7 @@ fn add_context_projection_to_output_shape(
                             json!({
                                 "type": "object",
                                 "properties": {
-                                    "session_id": {"type": "string", "pattern": "^wc_sess_[A-Za-z0-9_]+$"}
+                                    "session_id": {"type": "string", "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"}
                                 },
                                 "required": ["session_id"],
                                 "additionalProperties": false
@@ -552,7 +552,7 @@ pub(super) fn add_stateless_workflow_recorder_metadata(
             crate::tool_runtime::sessions::TOOL_CALL_RECORDING_SESSION_ID_FIELD.to_string(),
             json!({
                 "type": "string",
-                "pattern": "^wc_sess_[A-Za-z0-9_]+$",
+                "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
                 "description": "Optional explicit Workflow Session used only to record this call and trusted collaboration provenance. Separate from any tool business Session input; grants no authority; removed before concrete parsing."
             }),
         );
