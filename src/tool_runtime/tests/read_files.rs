@@ -1279,6 +1279,10 @@ async fn read_files_outer_recording_session_preserves_complete_sparse_shape() {
     assert!(result.output.get("session_context_revision").is_none());
     assert!(result.output.get("session_continuity").is_none());
     assert!(result.output.get("session_recovery").is_none());
+    assert_eq!(
+        runtime.sessions.context_revision(&session.session_id),
+        Some(0)
+    );
     for omitted in [
         "project",
         "requested_count",

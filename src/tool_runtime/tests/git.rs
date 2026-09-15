@@ -1905,7 +1905,11 @@ async fn git_diff_hunks_same_file_multi_hunk_pages_preserve_projection_and_conti
     );
     let unique = headers.iter().collect::<std::collections::BTreeSet<_>>();
     assert_eq!(headers.len(), 3);
-    assert_eq!(unique.len(), 3, "pagination must not duplicate or skip hunk records");
+    assert_eq!(
+        unique.len(),
+        3,
+        "pagination must not duplicate or skip hunk records"
+    );
 
     let dirty_body = (0..1400)
         .map(|line| {
