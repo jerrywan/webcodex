@@ -2520,7 +2520,7 @@ async fn job_tail_reaches_job_logic_without_agent_auth() {
 #[tokio::test]
 async fn job_log_wait_rejects_invalid_wait_secs_before_execution() {
     let runtime = test_runtime();
-    for invalid in [0u64, 61u64] {
+    for invalid in [0u64, 101u64] {
         let result = runtime
             .job_log_for_auth(
                 "11111111-2222-3333-4444-555555555555".to_string(),
@@ -2539,6 +2539,23 @@ async fn job_log_wait_rejects_invalid_wait_secs_before_execution() {
         assert!(result.output.get("recovery_tool").is_none());
         assert!(result.error.as_deref().unwrap_or("").contains("wait_secs"));
     }
+}
+
+#[tokio::test]
+async fn job_log_wait_accepts_canonical_max_before_job_lookup() {
+    let runtime = test_runtime();
+    let result = runtime
+        .job_log_for_auth(
+            "11111111-2222-3333-4444-555555555555".to_string(),
+            None,
+            None,
+            None,
+            None,
+            Some(webcodex_core::runtime_contract::MAX_JOB_OBSERVATION_WAIT_SECS),
+        )
+        .await;
+    assert!(!result.success);
+    assert_eq!(result.output["error_kind"], "unknown_job");
 }
 
 #[test]

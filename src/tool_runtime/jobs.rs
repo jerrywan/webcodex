@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use webcodex_core::runner_job_lifecycle::RunnerJobLifecycle;
+use webcodex_core::runtime_contract::MAX_JOB_OBSERVATION_WAIT_SECS;
 use webcodex_core::workflow_session_contract::is_validation_like_execution_purpose;
 
 use super::helpers::{
@@ -676,7 +677,7 @@ pub(crate) fn observe_job_continuation(job_id: &str, observation_token: Option<&
         "observe_jobs",
         json!({
             "items": [item],
-            "wait_secs": 60,
+            "wait_secs": MAX_JOB_OBSERVATION_WAIT_SECS,
             "wake_on": "terminal",
         }),
     )
@@ -1365,10 +1366,10 @@ impl ToolRuntime {
     /// binding are validated before execution or waiting by the selected executor.
     fn validate_job_log_wait(wait_secs: Option<u64>) -> Result<(), String> {
         if let Some(secs) = wait_secs {
-            if secs == 0 || secs > 60 {
+            if secs == 0 || secs > MAX_JOB_OBSERVATION_WAIT_SECS {
                 return Err(format!(
-                    "invalid wait_secs: must be between 1 and 60, got {}",
-                    secs
+                    "invalid wait_secs: must be between 1 and {}, got {}",
+                    MAX_JOB_OBSERVATION_WAIT_SECS, secs
                 ));
             }
         }

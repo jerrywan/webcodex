@@ -11,12 +11,13 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::time::Duration;
 use tokio::time::Instant;
-use webcodex_core::runtime_contract::MODEL_INSPECTION_MAX_RESULT_BYTES;
+use webcodex_core::runtime_contract::{
+    MAX_JOB_OBSERVATION_WAIT_SECS, MODEL_INSPECTION_MAX_RESULT_BYTES,
+};
 use webcodex_workspace::file_read_normalize::MODEL_RESULT_ENVELOPE_RESERVE_BYTES;
 
 pub(crate) const MAX_OBSERVE_JOBS_ITEMS: usize = 8;
 pub(crate) const MAX_OBSERVE_JOBS_TAIL_LINES: usize = 200;
-const MAX_OBSERVE_JOBS_WAIT_SECS: u64 = 60;
 /// Final serialized model-facing budget for packing multiple already-bounded
 /// Job observations. This does not change any single Job stream/tail retention.
 const MAX_OBSERVE_JOBS_AGGREGATE_RESULT_BYTES: usize = MODEL_INSPECTION_MAX_RESULT_BYTES;
@@ -535,7 +536,7 @@ fn normalize_observe_jobs_preferences(
 ) -> (usize, Option<u64>) {
     (
         tail_lines.min(MAX_OBSERVE_JOBS_TAIL_LINES),
-        wait_secs.map(|wait_secs| wait_secs.min(MAX_OBSERVE_JOBS_WAIT_SECS)),
+        wait_secs.map(|wait_secs| wait_secs.min(MAX_JOB_OBSERVATION_WAIT_SECS)),
     )
 }
 
@@ -768,7 +769,7 @@ mod tests {
             normalize_observe_jobs_preferences(500, Some(120)),
             (
                 MAX_OBSERVE_JOBS_TAIL_LINES,
-                Some(MAX_OBSERVE_JOBS_WAIT_SECS)
+                Some(MAX_JOB_OBSERVATION_WAIT_SECS)
             )
         );
         assert_eq!(

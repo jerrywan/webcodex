@@ -947,6 +947,10 @@ fn observe_jobs_wake_policy_schema_is_closed_and_compatible() {
         .find(|spec| spec.name == "observe_jobs")
         .unwrap();
     let wake = &spec.input_schema["properties"]["wake_on"];
+    assert_eq!(
+        webcodex_core::runtime_contract::MAX_JOB_OBSERVATION_WAIT_SECS,
+        100
+    );
     assert_eq!(wake["enum"], serde_json::json!(["change", "terminal"]));
     assert_eq!(wake["default"], "change");
     assert!(!spec.input_schema["required"]
@@ -958,8 +962,14 @@ fn observe_jobs_wake_policy_schema_is_closed_and_compatible() {
         "no wait_secs",
         "wake_on=change",
         "wake_on=terminal",
+        "wait_secs=100",
         "changed=true",
     ] {
         assert!(spec.description.contains(phrase), "missing {phrase}");
     }
+    let wait_description = spec.input_schema["properties"]["wait_secs"]["description"]
+        .as_str()
+        .unwrap();
+    assert!(wait_description.contains("above 100 seconds"));
+    assert!(wait_description.contains("clamped to 100"));
 }

@@ -124,7 +124,12 @@ pub fn observe_job_continuation_schema() -> Value {
                         "required": ["job_id"]
                     }
                 },
-                "wait_secs": {"type": "integer", "const": 60, "minimum": 1, "maximum": 60},
+                "wait_secs": {
+                    "type": "integer",
+                    "const": webcodex_core::runtime_contract::MAX_JOB_OBSERVATION_WAIT_SECS,
+                    "minimum": 1,
+                    "maximum": webcodex_core::runtime_contract::MAX_JOB_OBSERVATION_WAIT_SECS
+                },
                 "wake_on": {"type": "string", "const": "terminal"}
             },
             "required": ["items", "wait_secs", "wake_on"]
