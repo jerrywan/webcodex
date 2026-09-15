@@ -58,8 +58,9 @@ impl ExecutionShell {
     }
 }
 
-/// Caller-declared execution intent used for evidence classification. It never
-/// grants authority or selects the command that Runtime executes.
+/// Execution intent used for evidence classification. Generic execution may
+/// declare it explicitly; structured validators derive it from tool identity.
+/// It never grants authority or selects the command that Runtime executes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionPurpose {

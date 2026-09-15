@@ -795,6 +795,8 @@ fn validation_event_schema() -> Value {
             },
             "tests_detected": { "type": "boolean" },
             "tests_run_count": { "type": "integer", "minimum": 0 },
+            "tests_passed": { "type": "integer", "minimum": 0 },
+            "tests_failed": { "type": "integer", "minimum": 0 },
             "zero_tests_run": { "type": "boolean" },
             "require_tests": { "type": "boolean" },
             "no_run": { "type": "boolean" },

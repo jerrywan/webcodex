@@ -2177,6 +2177,30 @@ fn validation_summary_schema_exposes_optional_recoverable_assertion_label_only()
         Value::Array(expected_purposes),
         "validation summary purpose vocabulary must derive from canonical ExecutionPurpose classification"
     );
+    assert!(properties.contains_key("tests_passed"));
+    assert!(properties.contains_key("tests_failed"));
+    let representative_test_event = json!({
+        "tool_name": "cargo_test",
+        "identity": "structured:demo",
+        "purpose": "test",
+        "validation_kind": "test",
+        "success": true,
+        "validation_passed": true,
+        "failure_class": "none",
+        "failure_kind": "unknown",
+        "unresolved_failure": false,
+        "cwd": ".",
+        "shell": "configured",
+        "execution_state": "completed",
+        "tests_detected": true,
+        "tests_run_count": 3,
+        "tests_passed": 3,
+        "tests_failed": 0,
+        "zero_tests_run": false,
+        "stdout_truncated": false,
+        "stderr_truncated": false
+    });
+    test_support::validate_schema_instance(&representative_test_event, event).unwrap();
     let assertion = &properties["assertion_name"];
     assert_eq!(assertion["type"], "string");
     assert_eq!(assertion["minLength"], 1);
