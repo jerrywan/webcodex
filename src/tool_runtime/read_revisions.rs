@@ -1,7 +1,9 @@
 //! Process-local model-facing handles for exact file-read snapshots.
 //!
-//! A read revision is ergonomics metadata only. Filesystem authority and the
-//! final stale-write decision stay with the owning Runner's SHA guards.
+//! A read revision is a process-local model-facing handle for one exact file
+//! snapshot. Runtime uses the same handle for guarded edits and for generated
+//! read_files continuations, while authoritative filesystem evidence remains the
+//! owning Runner's full-file SHA from reads and SHA guards on writes.
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};

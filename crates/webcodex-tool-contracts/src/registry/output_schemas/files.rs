@@ -377,7 +377,7 @@ fn suggested_read_files_arguments_schema() -> Value {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 9007199254740991_u64,
-                            "description": "Snapshot fence retained from an unreturned original item, or bound to the observed read_revision for a continued partial range."
+                            "description": "Machine-carried snapshot fence: retained only when the original item already supplied one, or bound by Runtime to the observed read_revision for a continued partial range. Copy the enclosing suggested_call as returned; do not retarget this value."
                         }
                     },
                     "required": ["path"]

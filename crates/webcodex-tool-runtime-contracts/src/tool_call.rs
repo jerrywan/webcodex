@@ -230,6 +230,8 @@ pub struct ReadFilesItem {
     pub start_line: Option<usize>,
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Exact full-file snapshot fence. Runtime-generated read continuations carry
+    /// this automatically; callers should not invent or retarget revisions.
     #[serde(default, deserialize_with = "deserialize_optional_read_revision")]
     pub expected_read_revision: Option<u64>,
 }

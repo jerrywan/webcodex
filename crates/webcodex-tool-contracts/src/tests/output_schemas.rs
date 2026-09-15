@@ -652,9 +652,13 @@ fn read_continuation_output_schemas_accept_one_action_and_snapshot_truth() {
                 "returned_lines": 50, "end_line": 50, "has_more": true, "budget_truncated": true}}],
         "output_truncated": true, "truncation_reason": "batch_response_budget",
         "suggested_call": {"tool": "read_files", "arguments": {"project": "agent:oe:demo", "session_id": "wc_sess_demo",
-            "items": [{"path": "src/0.rs", "start_line": 51, "limit": 50}, {"path": "src/1.rs"}, {"path": "src/2.rs", "start_line": 4, "limit": 20}]}}
+            "items": [{"path": "src/0.rs", "start_line": 51, "limit": 50, "expected_read_revision": 3817291045227_u64}, {"path": "src/1.rs"}, {"path": "src/2.rs", "start_line": 4, "limit": 20}]}}
     }});
     test_support::validate_schema_instance(&result, &schema).unwrap();
+    let mut invalid_fence = result.clone();
+    invalid_fence["output"]["suggested_call"]["arguments"]["items"][0]["expected_read_revision"] =
+        json!(0);
+    assert!(test_support::validate_schema_instance(&invalid_fence, &schema).is_err());
     let mut digest_leak = result.clone();
     digest_leak["output"]["items"][0]["output"]["sha256"] = json!("b".repeat(64));
     assert!(test_support::validate_schema_instance(&digest_leak, &schema).is_err());
