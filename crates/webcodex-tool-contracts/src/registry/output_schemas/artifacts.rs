@@ -24,7 +24,7 @@ fn read_project_artifact_suggested_call_schema() -> Value {
                     "maxLength": 64,
                     "pattern": "^[0-9a-f]{64}$"
                 },
-                "session_id": {"type": "string", "pattern": "^wc_sess_[A-Za-z0-9_]+$"}
+                "session_id": {"type": "string", "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"}
             },
             "required": [
                 "project",

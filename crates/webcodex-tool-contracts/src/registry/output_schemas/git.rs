@@ -22,7 +22,7 @@ fn git_log_suggested_call_schema() -> Value {
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                 "skip": {"type": "integer", "minimum": 0, "maximum": 10000},
-                "session_id": {"type": "string", "pattern": "^wc_sess_[A-Za-z0-9_]+$"}
+                "session_id": {"type": "string", "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"}
             },
             "required": ["project", "head_commit", "limit", "skip"]
         }),

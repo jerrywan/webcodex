@@ -151,7 +151,10 @@ async fn mcp_tools_list_returns_same_names_as_runtime() {
                 ack["maxItems"],
                 crate::tool_runtime::sessions::MAX_TOOL_CALL_ACK_MESSAGE_IDS
             );
-            assert_eq!(ack["items"]["pattern"], "^wc_msg_[A-Za-z0-9_]+$");
+            assert_eq!(
+                ack["items"]["pattern"],
+                "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
+            );
             let ack_description = ack["description"].as_str().unwrap();
             assert!(ack_description.contains("current model context still retains"));
             assert!(ack_description.contains("Repeat while retained"));

@@ -181,6 +181,9 @@ fn validate_schema_instance_at(instance: &Value, schema: &Value, path: &str) -> 
             "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$" => {
                 webcodex_core::workflow_session_contract::is_valid_session_id(value)
             }
+            "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$" => {
+                webcodex_core::workflow_session_contract::is_valid_session_message_id(value)
+            }
             "^[0-9a-f]{64}$" => {
                 value.len() == 64
                     && value

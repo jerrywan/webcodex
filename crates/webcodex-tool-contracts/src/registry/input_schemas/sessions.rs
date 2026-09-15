@@ -170,7 +170,7 @@ pub fn get_session_assignment_input_schema() -> Value {
             },
             "message_id": {
                 "type": "string",
-                "pattern": "^wc_msg_[A-Za-z0-9_]+$",
+                "pattern": "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
                 "description": "Required exact open todo id. No implicit or recent-message inference is used."
             }
         },
@@ -258,7 +258,7 @@ pub fn complete_session_message_input_schema() -> Value {
             },
             "expected_assignment_fence": {
                 "type": "string",
-                "minLength": 48,
+                "minLength": 27,
                 "maxLength": 27,
                 "pattern": "^wsa2_[A-Za-z0-9_-]{22}$",
                 "description": "Required semantic snapshot fence returned by get_session_assignment for this exact Session/todo. Pass it unchanged; assignment-local semantic changes fail closed before completion."

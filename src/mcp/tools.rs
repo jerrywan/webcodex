@@ -563,7 +563,7 @@ pub(super) fn add_stateless_workflow_recorder_metadata(
                 "maxItems": crate::tool_runtime::sessions::MAX_TOOL_CALL_ACK_MESSAGE_IDS,
                 "items": {
                     "type": "string",
-                    "pattern": "^wc_msg_[A-Za-z0-9_]+$"
+                    "pattern": "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
                 },
                 "description": "Proves the current model context still retains the listed open ACK-required Session messages. Repeat while retained. If later omitted, unresolved ACK-required guidance may be surfaced again. ACK neither resolves messages nor grants authority or gates execution."
             }),
@@ -576,7 +576,7 @@ pub(super) fn add_stateless_workflow_recorder_metadata(
                 "properties": {
                     "message_id": {
                         "type": "string",
-                        "pattern": "^wc_msg_[A-Za-z0-9_]+$"
+                        "pattern": "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
                     },
                     "resolution": {
                         "type": "string",
