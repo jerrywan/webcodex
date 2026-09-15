@@ -101,6 +101,20 @@ Host/protocol failures such as an unsupported nested tool, a forbidden target ov
 
 Use `Promise.all` only for observations that are independent. Result-dependent follow-ups remain sequential JavaScript control flow. For one simple observation, call the ordinary tool directly; Code Mode is useful only when local orchestration removes meaningful model/tool round trips.
 
+Code Mode should transform, select, filter, summarize, and aggregate nested observations. It should not merely concatenate complete raw `ToolResult` values. The 64 KiB output bound is intentional and is not a substitute for result selection. In particular, prefer:
+
+```text
+search -> choose relevant files/ranges -> read -> emit selected aggregate
+```
+
+over:
+
+```text
+search + many reads -> dump every raw result
+```
+
+This keeps Code Mode useful as a composition boundary rather than turning it into a larger transport envelope.
+
 ## Read-only allowlist
 
 E1 admits only this explicit set:
@@ -113,6 +127,8 @@ list_project_tracked_files
 git_status
 git_log
 git_diff_hunks
+git_review_summary
+show_changes
 ```
 
 Admission is not inferred from future tools. A canonical metadata regression test requires every admitted tool to remain `Observe`/read-only, non-shell-like, non-write-like, and free of mutation permission requirements.
@@ -205,6 +221,26 @@ A successful call returns only the emitted content plus small orchestration evid
 
 The stats are experimental diagnostic evidence, not performance telemetry and not proof of model-level speedup.
 
+## E1.5 composition observability
+
+Phase 2 dogfood adds a diagnostic-only parent/child composition view without changing execution authority. The outer canonical `code_mode_exec` invocation keeps its existing logical invocation identity. Nested calls receive only a short-lived child ordinal for tracing and still re-enter `ToolRuntime::call_tool_with_context` as independent canonical invocations. The parent relation is not a Project, Workflow Session, ClientWindow, Job, retry, idempotency, permission, OAuth, or Runner-routing identity.
+
+The ordinary model-facing result remains the sparse `content` + four-field `stats` shape above. Separately, RuntimeMetrics and the outer ActionAudit row may retain this bounded composition summary:
+
+```text
+nested_calls
+nested_successes
+nested_failures
+max_in_flight
+duration_ms
+returned_bytes
+nested_tool_counts
+```
+
+`nested_tool_counts` is limited to the explicit admitted tool set. Composition telemetry never stores JavaScript source, nested arguments, nested outputs, paths, queries, commands, credentials, raw Window identity, or arbitrary nested error text. RuntimeMetrics remains fail-open: metrics failure cannot change the `ToolResult`.
+
+Nested canonical calls deliberately use no fabricated `ClientWindow`. One host/model-visible `code_mode_exec` request therefore remains one meaningful outer Window call, while the Runtime Console can project the bounded child summary from that outer ActionAudit row. This lets operators distinguish WebCodex-owned outer service time, Code Mode internal time, and the following outside-WebCodex inter-call gap without reclassifying nested calls as host round trips.
+
 ## Validation evidence
 
 The E1 tests are intended to prove runtime capability, not real-model throughput:
@@ -220,6 +256,27 @@ The E1 tests are intended to prove runtime capability, not real-model throughput
 - only `text()` emissions are returned to the model by default.
 
 Actual model round-trip reduction and task wall-clock improvement require live dogfood after this branch is reviewed; unit/schema tests cannot establish those claims.
+
+## Phase 2 Direct Tools vs Code Mode dogfood protocol
+
+Use a real review task twice against the same repository state and comparable model context. The **Direct Tools trace is the control**; the Code Mode trace is the treatment. Record at least:
+
+| Evidence | Direct Tools | Code Mode | Interpretation |
+| --- | --- | --- | --- |
+| outer model-facing tool calls | count | count | primary round-trip surface |
+| canonical tool invocations | count | count | child work should not disappear |
+| nested tool invocations | 0 | count | composition work moved below the model boundary |
+| WebCodex-owned outer duration | per call / total | per call / total | service time owned by WebCodex |
+| Window inter-call gaps | bounded samples | bounded samples | outside-WebCodex gap, not reasoning time |
+| Code Mode internal duration | n/a | per outer call | V8 + nested orchestration interval |
+| returned model-facing bytes | total | total | transport/result pressure |
+| Runner requests | where currently provable | where currently provable | canonical backend work actually performed |
+| task end-to-end wall time | observed | observed | user-visible completion interval |
+| analysis/review findings quality | findings + evidence | findings + evidence | correctness/usefulness guardrail |
+
+Canonical child calls are expected to remain visible as canonical runtime and Session evidence; Code Mode is successful only if it reduces useful **outer model/tool round trips** without degrading review quality. Do not claim that an outside-WebCodex Window gap is model reasoning time: it can include inference, network latency, host scheduling, UI work, or user interaction. Likewise, a synthetic V8 microbenchmark can characterize runtime overhead but cannot establish model-level speedup.
+
+Prefer real ChatGPT dogfood traces over a bespoke benchmark runner while the existing telemetry is sufficient. If repeated real branch reviews do not show a meaningful round-trip, wall-time, or workflow-quality benefit, do not advance to effectful Code Mode merely because the local JavaScript runtime is fast.
 
 ## Known limitations / non-goals
 
