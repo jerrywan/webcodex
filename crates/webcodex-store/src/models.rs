@@ -130,6 +130,10 @@ pub struct WindowActivityEventRecord {
     pub meaningful: bool,
     pub recorder_gap_session_id: Option<String>,
     pub workflow_links: Vec<WindowWorkflowLinkRecord>,
+    /// Bounded Code Mode composition object extracted from sanitized ActionAudit
+    /// summary JSON. Internal only; Runtime Console applies its own typed projection.
+    #[serde(skip)]
+    pub code_mode_composition: Option<serde_json::Value>,
     /// Internal principal correlation is intentionally not serialized by the
     /// Runtime Console projection. It is used only to avoid cross-principal
     /// adjacency when an administrator reads a Window.

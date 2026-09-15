@@ -183,11 +183,56 @@ impl Database {
                 let sql = sql.replace("LIMIT ?4", "LIMIT ?2");
                 drop(stmt);
                 let mut stmt = conn.prepare(&sql)?;
-                let records = collect_window_events(&conn, &mut stmt, params![window_key, limit])?;
+                let records =
+                    collect_window_events(&conn, &mut stmt, params![window_key, limit], None)?;
                 return Ok(records);
             }
         };
-        collect_window_event_rows(&conn, &mut rows)
+        collect_window_event_rows(&conn, &mut rows, None)
+    }
+
+    /// Variant used only by feature-gated Code Mode Runtime Console dogfood.
+    /// The ordinary Window query above intentionally keeps its historical SQL
+    /// and does not read ActionAudit summary JSON.
+    pub fn list_window_activity_events_with_code_mode_composition(
+        &self,
+        window_key: &str,
+        principal: Option<(&str, &str)>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<WindowActivityEventRecord>> {
+        let conn = self.lock_connection(crate::StoreDomain::WindowActivity);
+        let (principal_sql, kind, id) = principal_predicate(principal);
+        let sql = format!(
+            "SELECT e.event_id, e.client_window_key, e.client_window_source,
+                    e.server_trace_id, e.window_started_at_ms, e.window_ended_at_ms,
+                    e.duration_ms, e.action_name, e.operation, e.project, e.status,
+                    e.window_meaningful, e.recorder_gap_session_id,
+                    e.principal_correlation_kind, e.principal_correlation_id,
+                    e.request_observed_at_ms, e.response_handed_at_ms,
+                    e.window_transition_kind, e.response_streaming,
+                    e.window_continuity_eligible, e.summary_json
+             FROM action_events e
+             WHERE e.client_window_key = ?1
+               AND e.window_started_at_ms IS NOT NULL
+               AND e.window_ended_at_ms IS NOT NULL
+               {principal_sql}
+             ORDER BY COALESCE(e.request_observed_at_ms, e.window_started_at_ms) DESC, e.event_id DESC
+             LIMIT ?4"
+        );
+        let limit = bounded_limit(limit, MAX_WINDOW_ACTIVITY_LIMIT);
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = match (kind, id) {
+            (Some(kind), Some(id)) => stmt.query(params![window_key, kind, id, limit])?,
+            _ => {
+                let sql = sql.replace("LIMIT ?4", "LIMIT ?2");
+                drop(stmt);
+                let mut stmt = conn.prepare(&sql)?;
+                let records =
+                    collect_window_events(&conn, &mut stmt, params![window_key, limit], Some(20))?;
+                return Ok(records);
+            }
+        };
+        collect_window_event_rows(&conn, &mut rows, Some(20))
     }
 
     /// Latest authoritative Window/Session relation for diagnostic continuity.
@@ -370,14 +415,16 @@ fn collect_window_events<P: rusqlite::Params>(
     conn: &Connection,
     stmt: &mut rusqlite::Statement<'_>,
     params: P,
+    code_mode_summary_column: Option<usize>,
 ) -> anyhow::Result<Vec<WindowActivityEventRecord>> {
     let mut rows = stmt.query(params)?;
-    collect_window_event_rows(conn, &mut rows)
+    collect_window_event_rows(conn, &mut rows, code_mode_summary_column)
 }
 
 fn collect_window_event_rows(
     conn: &Connection,
     rows: &mut rusqlite::Rows<'_>,
+    code_mode_summary_column: Option<usize>,
 ) -> anyhow::Result<Vec<WindowActivityEventRecord>> {
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
@@ -404,6 +451,15 @@ fn collect_window_event_rows(
             window_transition_kind: row.get(17)?,
             response_streaming: row.get(18)?,
             window_continuity_eligible: row.get(19)?,
+            code_mode_composition: match code_mode_summary_column {
+                Some(column) => row
+                    .get::<_, Option<String>>(column)?
+                    .and_then(|summary_json| {
+                        serde_json::from_str::<serde_json::Value>(&summary_json).ok()
+                    })
+                    .and_then(|summary| summary.get("code_mode_composition").cloned()),
+                None => None,
+            },
         });
     }
     Ok(out)
