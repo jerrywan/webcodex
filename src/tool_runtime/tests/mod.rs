@@ -10,6 +10,8 @@ mod builtin_coding_workflow;
 mod changes;
 #[cfg(feature = "workspace-checkpoints")]
 mod checkpoint;
+#[cfg(feature = "experimental-code-mode")]
+mod code_mode;
 mod coding_task;
 mod coding_task_semantic_navigation;
 mod collaboration;
