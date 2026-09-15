@@ -1,7 +1,7 @@
 use super::agent_task::AGENT_TASK_ID_PREFIX;
 use super::communication::{
-    digest_json, digest_text, new_id, now_unix_ms, validate_communication_principal, validate_id,
-    CommunicationPrincipal, CommunicationStoreError,
+    allocate_identity, digest_json, digest_text, now_unix_ms, validate_communication_principal,
+    validate_id, CommunicationPrincipal, CommunicationStoreError,
 };
 use super::Database;
 use rusqlite::{
@@ -309,7 +309,12 @@ impl Database {
             });
         }
 
-        let goal_id = new_id(GOAL_ID_PREFIX);
+        let goal_id = allocate_identity(
+            &transaction,
+            GOAL_ID_PREFIX,
+            "SELECT EXISTS(SELECT 1 FROM wc_goals WHERE goal_id = ?1)",
+        )
+        .map_err(map_communication_validation_error)?;
         transaction
             .execute(
                 "INSERT INTO wc_goals (

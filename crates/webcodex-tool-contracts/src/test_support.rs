@@ -174,14 +174,10 @@ fn validate_schema_instance_at(instance: &Value, schema: &Value, path: &str) -> 
         schema.get("pattern").and_then(Value::as_str),
     ) {
         let matches = match pattern {
-            "^wc_host_binding_[0-9a-f]{32}$" => {
-                value.strip_prefix("wc_host_binding_").is_some_and(|tail| {
-                    tail.len() == 32
-                        && tail
-                            .bytes()
-                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-                })
-            }
+            "^wc_host_binding_[A-Za-z0-9_-]{21}[AQgw]$" => value
+                .strip_prefix("wc_host_binding_")
+                .and_then(webcodex_core::compact::decode::<16>)
+                .is_some(),
             "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$" => {
                 webcodex_core::workflow_session_contract::is_valid_session_id(value)
             }

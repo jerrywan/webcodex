@@ -1600,11 +1600,11 @@ mod computer_privacy_tests {
     fn agent_continuation_app_audit_omits_host_binding_and_resume_secrets() {
         let args = json!({
             "agent_id": "wc_agent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "endpoint_id": "wc_endpoint_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "endpoint_id": "wc_endpoint_u7u7u7u7u7u7u7u7",
             "expected_controller_generation": 7,
             "binding_id": "wc_host_binding_PRIVATE_BINDING",
-            "wake_id": "wc_wake_cccccccccccccccccccccccccccccccc",
-            "attempt_id": "wc_wake_attempt_dddddddddddddddddddddddddddddddd"
+            "wake_id": "wc_wake_zMzMzMzMzMzMzMzM",
+            "attempt_id": "wc_wake_attempt_3d3d3d3d3d3d3d3d"
         });
         let arguments =
             session_log_arguments_for_tool_request("agent_continuation_wake_prepare", &args);
@@ -1867,14 +1867,12 @@ mod computer_privacy_tests {
         assert_eq!(create["idempotency_key_present"], true);
 
         let post = ToolCall::PostConversationMessage {
-            conversation_id: "wc_conv_0123456789abcdef0123456789abcdef".to_string(),
+            conversation_id: "wc_conv_iavN7wEjRWeJq83v".to_string(),
             body: PRIVATE_BODY.to_string(),
             author_agent_id: None,
             endpoint_id: None,
             expected_controller_generation: None,
-            recipient_agent_ids: Some(vec![
-                "wc_dagent_0123456789abcdef0123456789abcdef".to_string()
-            ]),
+            recipient_agent_ids: Some(vec!["wc_dagent_iavN7wEjRWeJq83v".to_string()]),
             reply_to: None,
             idempotency_key: Some(PRIVATE_KEY.to_string()),
             wake_reply_id: None,
@@ -1891,11 +1889,11 @@ mod computer_privacy_tests {
             "post_conversation_message",
             &json!({
                 "message": {
-                    "message_id": "wc_cmsg_0123456789abcdef0123456789abcdef",
-                    "conversation_id": "wc_conv_0123456789abcdef0123456789abcdef",
+                    "message_id": "wc_cmsg_iavN7wEjRWeJq83v",
+                    "conversation_id": "wc_conv_iavN7wEjRWeJq83v",
                     "seq": 4,
                     "body": PRIVATE_BODY,
-                    "deliveries": [{"delivery_id": "wc_delivery_0123456789abcdef0123456789abcdef"}]
+                    "deliveries": [{"delivery_id": "wc_delivery_iavN7wEjRWeJq83v"}]
                 },
                 "replayed": false,
                 "state_changed": true
@@ -1909,21 +1907,21 @@ mod computer_privacy_tests {
             "bootstrap_agent_conversation",
             &json!({
                 "acting_agent": {
-                    "agent_id": "wc_dagent_0123456789abcdef0123456789abcdef",
+                    "agent_id": "wc_dagent_iavN7wEjRWeJq83v",
                     "description": PRIVATE_DESCRIPTION,
                     "specialty_labels": [PRIVATE_LABEL]
                 },
                 "endpoint": {
-                    "endpoint_id": "wc_endpoint_0123456789abcdef0123456789abcdef",
+                    "endpoint_id": "wc_endpoint_iavN7wEjRWeJq83v",
                     "controller_generation": 4,
                     "client_attachment_id": "PRIVATE_HOST_ATTACHMENT"
                 },
                 "selected_conversation": {
-                    "conversation_id": "wc_conv_0123456789abcdef0123456789abcdef"
+                    "conversation_id": "wc_conv_iavN7wEjRWeJq83v"
                 },
                 "inbox": {"queued_delivery_count": 2},
                 "wake": {
-                    "wake_id": "wc_wake_0123456789abcdef0123456789abcdef",
+                    "wake_id": "wc_wake_iavN7wEjRWeJq83v",
                     "state": "pending",
                     "consume_token": "PRIVATE_CONSUME_TOKEN",
                     "message_body": PRIVATE_BODY
@@ -1935,8 +1933,8 @@ mod computer_privacy_tests {
                     "callback_secret": "PRIVATE_CALLBACK_SECRET"
                 },
                 "wake_activation": {
-                    "wake_id": "wc_wake_0123456789abcdef0123456789abcdef",
-                    "attempt_id": "wc_wake_attempt_0123456789abcdef0123456789abcdef",
+                    "wake_id": "wc_wake_iavN7wEjRWeJq83v",
+                    "attempt_id": "wc_wake_attempt_iavN7wEjRWeJq83v",
                     "consume_token": "PRIVATE_ACTIVATION_CONSUME_TOKEN",
                     "adapter_kind": "explicit_activation"
                 }
@@ -1961,11 +1959,11 @@ mod computer_privacy_tests {
         assert_eq!(bootstrap["queued_delivery_count"], 2);
 
         let activation_request = ToolCall::BootstrapAgentConversation {
-            agent_id: "wc_dagent_0123456789abcdef0123456789abcdef".to_string(),
-            endpoint_id: "wc_endpoint_0123456789abcdef0123456789abcdef".to_string(),
+            agent_id: "wc_dagent_iavN7wEjRWeJq83v".to_string(),
+            endpoint_id: "wc_endpoint_iavN7wEjRWeJq83v".to_string(),
             expected_controller_generation: 4,
             conversation_id: None,
-            wake_id: Some("wc_wake_0123456789abcdef0123456789abcdef".to_string()),
+            wake_id: Some("wc_wake_iavN7wEjRWeJq83v".to_string()),
             activation_idempotency_key: Some(PRIVATE_KEY.to_string()),
         }
         .session_log_arguments();
@@ -1980,9 +1978,9 @@ mod computer_privacy_tests {
         let request = session_log_arguments_for_tool_request(
             "heartbeat_agent_task_attempt",
             &json!({
-                "task_id": "wc_agent_task_0123456789abcdef0123456789abcdef",
-                "attempt_id": "wc_agent_task_attempt_0123456789abcdef0123456789abcdef",
-                "assignee_agent_id": "wc_dagent_0123456789abcdef0123456789abcdef",
+                "task_id": "wc_agent_task_iavN7wEjRWeJq83v",
+                "attempt_id": "wc_agent_task_attempt_iavN7wEjRWeJq83v",
+                "assignee_agent_id": "wc_dagent_iavN7wEjRWeJq83v",
                 "attempt_fence": PRIVATE_FENCE,
                 "attempt_controller_generation": 9,
                 "active_turn_wake_id": PRIVATE_WAKE,
@@ -2001,9 +1999,9 @@ mod computer_privacy_tests {
         }
 
         let typed = ToolCall::HeartbeatAgentTaskAttempt {
-            task_id: "wc_agent_task_0123456789abcdef0123456789abcdef".to_string(),
-            attempt_id: "wc_agent_task_attempt_0123456789abcdef0123456789abcdef".to_string(),
-            assignee_agent_id: "wc_dagent_0123456789abcdef0123456789abcdef".to_string(),
+            task_id: "wc_agent_task_iavN7wEjRWeJq83v".to_string(),
+            attempt_id: "wc_agent_task_attempt_iavN7wEjRWeJq83v".to_string(),
+            assignee_agent_id: "wc_dagent_iavN7wEjRWeJq83v".to_string(),
             attempt_fence: PRIVATE_FENCE.to_string(),
             attempt_controller_generation: 9,
             active_turn_wake_id: Some(PRIVATE_WAKE.to_string()),
@@ -2031,10 +2029,10 @@ mod computer_privacy_tests {
         let request = session_log_arguments_for_tool_request(
             "consume_agent_wake",
             &json!({
-                "agent_id": "wc_dagent_0123456789abcdef0123456789abcdef",
-                "endpoint_id": "wc_endpoint_0123456789abcdef0123456789abcdef",
+                "agent_id": "wc_dagent_iavN7wEjRWeJq83v",
+                "endpoint_id": "wc_endpoint_iavN7wEjRWeJq83v",
                 "expected_controller_generation": 7,
-                "wake_id": "wc_wake_0123456789abcdef0123456789abcdef",
+                "wake_id": "wc_wake_iavN7wEjRWeJq83v",
                 "consume_token": PRIVATE_TOKEN,
                 "body": PRIVATE_BODY,
                 "description": PRIVATE_DESCRIPTION,
@@ -2045,10 +2043,10 @@ mod computer_privacy_tests {
         assert_eq!(request["consume_token_present"], true);
         assert_eq!(request["expected_controller_generation"], 7);
         let typed_request = ToolCall::ConsumeAgentWake {
-            agent_id: "wc_dagent_0123456789abcdef0123456789abcdef".to_string(),
-            endpoint_id: "wc_endpoint_0123456789abcdef0123456789abcdef".to_string(),
+            agent_id: "wc_dagent_iavN7wEjRWeJq83v".to_string(),
+            endpoint_id: "wc_endpoint_iavN7wEjRWeJq83v".to_string(),
             expected_controller_generation: 7,
-            wake_id: "wc_wake_0123456789abcdef0123456789abcdef".to_string(),
+            wake_id: "wc_wake_iavN7wEjRWeJq83v".to_string(),
             consume_token: PRIVATE_TOKEN.to_string(),
         }
         .session_log_arguments();
@@ -2071,8 +2069,8 @@ mod computer_privacy_tests {
         let result = session_log_result_for_tool(
             "consume_agent_wake",
             &json!({
-                "wake_id": "wc_wake_0123456789abcdef0123456789abcdef",
-                "target_agent_id": "wc_dagent_0123456789abcdef0123456789abcdef",
+                "wake_id": "wc_wake_iavN7wEjRWeJq83v",
+                "target_agent_id": "wc_dagent_iavN7wEjRWeJq83v",
                 "state": "consumed",
                 "already_consumed": false,
                 "consumed_at_unix_ms": 123,

@@ -5362,6 +5362,7 @@ dependencies = [
 name = "webcodex-tool-contracts"
 version = "0.4.1"
 dependencies = [
+ "regex",
  "serde",
  "serde_json",
  "webcodex-core",
