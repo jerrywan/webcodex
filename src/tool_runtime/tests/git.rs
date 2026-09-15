@@ -1790,6 +1790,154 @@ async fn git_diff_hunks_committed_nonancestor_disconnected_and_ambiguous_merge_b
 }
 
 #[tokio::test]
+async fn git_diff_hunks_same_file_multi_hunk_pages_preserve_projection_and_continuation() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_git_repo(tmp.path());
+    let base_body = (0..1400)
+        .map(|line| format!("line-{line:04}\n"))
+        .collect::<String>();
+    write_git_review_fixture_file(tmp.path(), "multi.txt", &base_body);
+    let base = commit_git_review_fixture(tmp.path(), "base");
+    let head_body = (0..1400)
+        .map(|line| {
+            if line == 10 || (300..850).contains(&line) || line == 1200 {
+                format!("changed-{line:04}\n")
+            } else {
+                format!("line-{line:04}\n")
+            }
+        })
+        .collect::<String>();
+    write_git_review_fixture_file(tmp.path(), "multi.txt", &head_body);
+    let head = commit_git_review_fixture(tmp.path(), "head");
+
+    let runtime = test_runtime();
+    let client_id = "same-file-multi-hunk";
+    let project =
+        register_structured_git_agent_at_path(&runtime, client_id, "repo", tmp.path()).await;
+    let paths = Some(vec!["multi.txt".to_string()]);
+
+    let (one, _, _) = run_runner_git_diff_hunks_committed_page_with_budget(
+        &runtime,
+        client_id,
+        &project,
+        tmp.path(),
+        paths.clone(),
+        1,
+        400,
+        Some(196_608),
+        base.clone(),
+        head.clone(),
+        None,
+    )
+    .await;
+    assert!(one.success, "{one:?}");
+    assert_eq!(one.output["hunk_count"], 1);
+    assert_eq!(one.output["has_more"], true);
+    let one_next = &one.output["recovery"]["later_hunks"]["next_call"];
+    crate::tool_runtime::ToolCall::from_tool_name(
+        one_next["tool"].as_str().unwrap(),
+        one_next["arguments"].clone(),
+    )
+    .expect("max_hunks=1 later-record continuation must remain parser-ready");
+
+    let (two, _, _) = run_runner_git_diff_hunks_committed_page_with_budget(
+        &runtime,
+        client_id,
+        &project,
+        tmp.path(),
+        paths.clone(),
+        2,
+        400,
+        Some(196_608),
+        base.clone(),
+        head.clone(),
+        None,
+    )
+    .await;
+    assert!(two.success, "{two:?}");
+    assert_eq!(two.output["hunk_count"], 2);
+    assert_eq!(two.output["files"].as_array().unwrap().len(), 1);
+    let first_page_hunks = two.output["files"][0]["hunks"].as_array().unwrap();
+    assert_eq!(first_page_hunks.len(), 2);
+    assert_eq!(two.output["has_more"], true);
+    assert_eq!(
+        two.output["recovery"]["current_hunk"]["reason_code"],
+        "hunk_fragment_continuation_available"
+    );
+    let later = &two.output["recovery"]["later_hunks"]["next_call"];
+    crate::tool_runtime::ToolCall::from_tool_name(
+        later["tool"].as_str().unwrap(),
+        later["arguments"].clone(),
+    )
+    .expect("same-file multi-hunk later-record continuation must remain parser-ready");
+    let continuation = later["arguments"]["continuation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut headers = first_page_hunks
+        .iter()
+        .map(|hunk| hunk["header"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+
+    let (tail, _, _) = run_runner_git_diff_hunks_committed_page_with_budget(
+        &runtime,
+        client_id,
+        &project,
+        tmp.path(),
+        paths.clone(),
+        2,
+        400,
+        Some(196_608),
+        base.clone(),
+        head.clone(),
+        Some(continuation),
+    )
+    .await;
+    assert!(tail.success, "{tail:?}");
+    assert_eq!(tail.output["hunk_count"], 1);
+    assert_eq!(tail.output["has_more"], false);
+    assert!(tail.output.get("recovery").is_none());
+    headers.push(
+        tail.output["files"][0]["hunks"][0]["header"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+    );
+    let unique = headers.iter().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(headers.len(), 3);
+    assert_eq!(unique.len(), 3, "pagination must not duplicate or skip hunk records");
+
+    let dirty_body = (0..1400)
+        .map(|line| {
+            if line == 20 || (320..870).contains(&line) || line == 1250 {
+                format!("dirty-{line:04}\n")
+            } else if line == 10 || (300..850).contains(&line) || line == 1200 {
+                format!("changed-{line:04}\n")
+            } else {
+                format!("line-{line:04}\n")
+            }
+        })
+        .collect::<String>();
+    write_git_review_fixture_file(tmp.path(), "multi.txt", &dirty_body);
+    let (worktree, _, _) = run_runner_git_diff_hunks_page_with_budget(
+        &runtime,
+        client_id,
+        &project,
+        tmp.path(),
+        paths,
+        2,
+        400,
+        Some(196_608),
+        false,
+        None,
+    )
+    .await;
+    assert!(worktree.success, "{worktree:?}");
+    assert_eq!(worktree.output["hunk_count"], 2);
+    assert_eq!(worktree.output["files"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn git_diff_hunks_committed_continuation_binds_range_paths_mode_and_state() {
     let tmp = tempfile::tempdir().unwrap();
     init_git_repo(tmp.path());

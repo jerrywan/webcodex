@@ -2058,7 +2058,8 @@ impl ToolRuntime {
                 && (!wire.hunk_line_limit
                     || wire.fragment_candidate_record == 0
                     || wire.fragment_candidate_line == 0
-                    || wire.returned_hunks != 1))
+                    || wire.returned_hunks == 0
+                    || wire.fragment_candidate_record.saturating_add(1) != wire.next_position))
             || (!wire.fragment_candidate_safe
                 && (wire.fragment_candidate_record != 0 || wire.fragment_candidate_line != 0))
             || (fragment_requested
