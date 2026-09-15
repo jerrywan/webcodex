@@ -12,6 +12,17 @@ import {
 } from "./runtime_collaboration_state.js";
 import type { RuntimeLanguage } from "./runtime_i18n.js";
 
+export type RuntimeWindowAvailability = "idle" | "loading" | "available" | "stale" | "unavailable";
+
+export function runtimeWindowAvailabilityAfterHttpResponse(
+  status: number,
+  ok: boolean,
+  hasData: boolean,
+): RuntimeWindowAvailability {
+  if (status === 403) return "unavailable";
+  return ok && hasData ? "available" : "stale";
+}
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }

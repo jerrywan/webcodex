@@ -409,7 +409,7 @@ function withMockDom(fn) {
   }
 }
 
-test("renderProjectSelectorTree mounts windowPanel before sessionsPanel and adds WINDOW ACTIVE signal", () => {
+test("renderProjectSelectorTree mounts sessionsPanel before windowPanel and adds WINDOW ACTIVE signal", () => {
   withMockDom(() => {
     const deviceSelect = createMockElement("select");
     const projectList = createMockElement("div");

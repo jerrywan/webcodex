@@ -12,6 +12,7 @@ import {
 } from "../dist/runtime_window.js";
 import {
   runtimeWindowActivityLabel,
+  runtimeWindowAvailabilityAfterHttpResponse,
 } from "../dist/runtime_console_state.js";
 import {
   activityFacts,
@@ -299,6 +300,14 @@ test("formatWindowListStatusText covers stale with/without rows, available, and 
     formatWindowListStatusText("loading", 0, "principal", "zh-CN"),
     "正在加载窗口活动…",
   );
+});
+
+test("runtimeWindowAvailabilityAfterHttpResponse covers successful, stale, and permission outcomes", () => {
+  assert.equal(runtimeWindowAvailabilityAfterHttpResponse(200, true, true), "available");
+  assert.equal(runtimeWindowAvailabilityAfterHttpResponse(200, true, false), "stale");
+  assert.equal(runtimeWindowAvailabilityAfterHttpResponse(0, false, false), "stale");
+  assert.equal(runtimeWindowAvailabilityAfterHttpResponse(500, false, true), "stale");
+  assert.equal(runtimeWindowAvailabilityAfterHttpResponse(403, false, true), "unavailable");
 });
 
 test("runtimeWindowActivityLabel formats relative time in English and Chinese", () => {

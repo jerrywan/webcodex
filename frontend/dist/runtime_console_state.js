@@ -1,5 +1,10 @@
 import { initialWorkflowSessionState, selectWorkflowSession, refreshWorkflowSessionDetail, clearWorkflowSessionSelection, isCurrentWorkflowSessionDetailRequest, adoptWorkflowSessionDetail, } from "./workflow_session_state.js";
 import { emptyCollaborationState, resetCollaborationState, } from "./runtime_collaboration_state.js";
+export function runtimeWindowAvailabilityAfterHttpResponse(status, ok, hasData) {
+    if (status === 403)
+        return "unavailable";
+    return ok && hasData ? "available" : "stale";
+}
 function compareText(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
 }

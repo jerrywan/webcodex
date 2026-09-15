@@ -555,6 +555,11 @@ function resolveRuntimeContextFocusTransition(options) {
     return "none";
 }
 
+function runtimeWindowAvailabilityAfterHttpResponse(status, ok, hasData) {
+    if (status === 403)
+        return "unavailable";
+    return ok && hasData ? "available" : "stale";
+}
 function compareText(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -4098,29 +4103,30 @@ async function refreshWindows(refreshSelected = true) {
         renderWindowList();
     }
     const response = await api("windows", { limit: 100 }, controller.signal);
-    if (windowsAbort === controller)
-        windowsAbort = null;
-    if (!response) {
-        windowAvailability = "stale";
-        renderWindowList();
+    // A superseded or navigation-cancelled request must not overwrite the newer Window state.
+    if (windowsAbort !== controller)
         return;
-    }
+    windowsAbort = null;
+    // RuntimeApiClient returns null only for AbortError. Cancellation is not a refresh failure.
+    if (!response)
+        return;
     if (response.status === 401)
         return lock("Credential rejected.");
-    if (response.status === 403) {
+    const nextAvailability = runtimeWindowAvailabilityAfterHttpResponse(response.status, response.ok, !!response.data);
+    if (nextAvailability === "unavailable") {
         windowRows = [];
         selectedWindowKey = "";
-        windowAvailability = "unavailable";
+        windowAvailability = nextAvailability;
         renderWindowList();
         renderWindowDetail(null);
         return;
     }
-    if (!response.ok || !response.data) {
-        windowAvailability = "stale";
+    if (nextAvailability === "stale") {
+        windowAvailability = nextAvailability;
         renderWindowList();
         return;
     }
-    windowAvailability = "available";
+    windowAvailability = nextAvailability;
     if (response.data.visibility?.scope === "global" || response.data.visibility?.scope === "principal") {
         windowVisibilityScope = response.data.visibility.scope;
     }
