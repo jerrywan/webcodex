@@ -125,6 +125,7 @@ import {
   renderWindowCards,
   renderProjectWindowCards,
   formatWindowEmptyState,
+  formatWindowListStatusText,
 } from "./runtime_window.js";
 import {
   parseAgentIds,
@@ -353,6 +354,8 @@ function renderLanguageSensitiveUi(): void {
     renderSessionList(sessionRows, sessionListMetaSnapshot);
     renderProjectWindows();
   }
+  renderWindowList();
+  renderWindowDetail(selectedWindowDetail);
   const snapshot = state.workflow?.snapshot;
   if (snapshot) renderDetail(snapshot, false);
   else if (!state.workflow?.selectedSessionId) hideDetail();
@@ -435,7 +438,7 @@ function renderWorkspaceHeading(): void {
   }
   if (workspaceView === "windows") {
     setText("runtime-breadcrumb-runner", tr("Runtime workspace"));
-    setText("runtime-breadcrumb-project", tr("Windows"));
+    setText("runtime-breadcrumb-project", tr("Window Activity"));
     setText(
       "runtime-session-title",
       selectedWindowKey ? "Window " + runtimeWindowShortKey(selectedWindowKey) : tr("Window activity"),
@@ -817,13 +820,7 @@ function renderWindowList(): void {
   show("runtime-window-list-empty", windowRows.length === 0);
   setText(
     "runtime-window-list-status",
-    windowRows.length
-      ? runtimeCountLabel(windowRows.length, "Window")
-      : (windowAvailability === "unavailable"
-          ? tr("runtime:read required")
-          : (windowAvailability === "stale"
-              ? tr("Could not refresh Window activity.")
-              : emptyCopy)),
+    formatWindowListStatusText(windowAvailability, windowRows.length, windowVisibilityScope, runtimeLanguage),
   );
   renderWindowCards(node, windowRows, selectedWindowKey, (key) => void selectWindow(key), Date.now(), runtimeLanguage);
 }
@@ -908,10 +905,8 @@ async function refreshWindows(refreshSelected = true): Promise<void> {
   const response = await api("windows", { limit: 100 }, controller.signal);
   if (windowsAbort === controller) windowsAbort = null;
   if (!response) {
-    if (windowRows.length > 0) {
-      windowAvailability = "stale";
-      renderWindowList();
-    }
+    windowAvailability = "stale";
+    renderWindowList();
     return;
   }
   if (response.status === 401) return lock("Credential rejected.");
@@ -921,14 +916,10 @@ async function refreshWindows(refreshSelected = true): Promise<void> {
     windowAvailability = "unavailable";
     renderWindowList();
     renderWindowDetail(null);
-    setText("runtime-window-list-status", tr("runtime:read required"));
     return;
   }
   if (!response.ok || !response.data) {
-    if (windowRows.length > 0) {
-      windowAvailability = "stale";
-    }
-    setText("runtime-window-list-status", tr("Could not refresh Window activity."));
+    windowAvailability = "stale";
     renderWindowList();
     return;
   }
@@ -959,9 +950,15 @@ function renderSessionWindowCorrelation(detail: any): void {
   const linkedNode = el("runtime-linked-windows");
   clearNode(linkedNode);
   const links = available && Array.isArray(detail?.linked_windows) ? detail.linked_windows : [];
-  setText("runtime-linked-windows-status", available ? runtimeCountLabel(links.length, "Window") : "runtime:read unavailable");
+  setText("runtime-linked-windows-status", available ? runtimeCountLabel(links.length, "Window") : tr("runtime:read unavailable"));
   if (available) {
-    renderSessionWindowCorrelationLinks(linkedNode, links, (key) => openWindowInspector(key));
+    renderSessionWindowCorrelationLinks(
+      linkedNode,
+      links,
+      (key) => openWindowInspector(key),
+      Date.now(),
+      runtimeLanguage,
+    );
   }
   const gaps = available && Array.isArray(detail?.window_activity_after_last_session_record)
     ? detail.window_activity_after_last_session_record

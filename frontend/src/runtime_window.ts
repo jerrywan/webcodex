@@ -7,8 +7,12 @@ export function windowDateTimeLabel(timestampMs: unknown, language?: RuntimeLang
   return new Date(value).toLocaleString(language === "zh-CN" ? "zh-CN" : "en");
 }
 
-export function windowAgeLabel(timestampMs: unknown, now: number = Date.now()): string {
-  return runtimeWindowActivityLabel(timestampMs, now);
+export function windowAgeLabel(
+  timestampMs: unknown,
+  now: number = Date.now(),
+  language?: RuntimeLanguage,
+): string {
+  return runtimeWindowActivityLabel(timestampMs, now, language);
 }
 
 export function runtimeProjectClientId(project: unknown): string {
@@ -143,13 +147,13 @@ export function createWindowCard(
   const call = document.createElement("span");
   call.className = "muted small";
   call.textContent = row?.last_tool_call_at_ms
-    ? (language === "zh-CN" ? "最后调用 " : "Last WebCodex call ") + windowAgeLabel(row.last_tool_call_at_ms, now)
-    : (language === "zh-CN" ? "最后活动 " : "Last WebCodex activity ") + windowAgeLabel(row?.last_seen_at_ms, now);
+    ? (language === "zh-CN" ? "最后调用 " : "Last WebCodex call ") + windowAgeLabel(row.last_tool_call_at_ms, now, language)
+    : (language === "zh-CN" ? "最后活动 " : "Last WebCodex activity ") + windowAgeLabel(row?.last_seen_at_ms, now, language);
   button.appendChild(call);
   const meaningful = document.createElement("span");
   meaningful.className = "muted small";
   meaningful.textContent = row?.last_meaningful_activity_at_ms
-    ? (language === "zh-CN" ? "最后有效工作 " : "Last meaningful work ") + windowAgeLabel(row.last_meaningful_activity_at_ms, now)
+    ? (language === "zh-CN" ? "最后有效工作 " : "Last meaningful work ") + windowAgeLabel(row.last_meaningful_activity_at_ms, now, language)
     : (language === "zh-CN" ? "未记录到有效 WebCodex 工作" : "No meaningful WebCodex work recorded");
   button.appendChild(meaningful);
   const links = document.createElement("span");
@@ -191,7 +195,7 @@ export function renderWindowActiveRequests(
     meta.className = "muted small";
     const facts = [
       request?.project,
-      request?.started_at_ms ? (language === "zh-CN" ? "开始于 " : "started ") + windowAgeLabel(request.started_at_ms, now) : null,
+      request?.started_at_ms ? (language === "zh-CN" ? "开始于 " : "started ") + windowAgeLabel(request.started_at_ms, now, language) : null,
       typeof request?.elapsed_ms === "number" ? String(request.elapsed_ms) + (language === "zh-CN" ? " 毫秒已耗时" : " ms elapsed") : null,
     ].filter(Boolean).map(String);
     meta.textContent = facts.join(" · ");
@@ -267,7 +271,7 @@ export function renderSessionWindowCorrelationLinks(
     meta.className = "muted small";
     meta.textContent = [
       link?.source,
-      link?.last_seen_at_ms ? (language === "zh-CN" ? "最后活动 " : "last WebCodex activity ") + windowAgeLabel(link.last_seen_at_ms, now) : null,
+      link?.last_seen_at_ms ? (language === "zh-CN" ? "最后活动 " : "last WebCodex activity ") + windowAgeLabel(link.last_seen_at_ms, now, language) : null,
       Number(link?.recorder_gap_count || 0) ? String(link.recorder_gap_count) + (language === "zh-CN" ? " 个记录断层" : " recorder gap") : null,
     ].filter(Boolean).map(String).join(" · ");
     button.appendChild(title);
@@ -309,10 +313,10 @@ export function formatWindowDetailFields(
     source: String(detail.source || "—"),
     activeCount: String(Number(detail.active_count || 0)),
     lastCall: detail.last_tool_call_at_ms
-      ? windowAgeLabel(detail.last_tool_call_at_ms, now)
+      ? windowAgeLabel(detail.last_tool_call_at_ms, now, language)
       : translate("No completed tools/call activity", language),
     lastMeaningful: detail.last_meaningful_activity_at_ms
-      ? windowAgeLabel(detail.last_meaningful_activity_at_ms, now)
+      ? windowAgeLabel(detail.last_meaningful_activity_at_ms, now, language)
       : translate("No meaningful WebCodex work recorded", language),
     activeStatus: translate(Number(detail.active_count || 0) ? "Active request" : "No active request", language),
     linkedStatus:
@@ -334,10 +338,16 @@ export function formatWindowEmptyState(
     return translate("Window activity requires runtime:read.", language);
   }
   if (availability === "stale") {
-    return translate("Window activity could not be refreshed; showing previous data.", language);
+    return translate("Window activity could not be refreshed.", language);
   }
   if (availability === "available") {
     if (isProjectScoped) {
+      if (visibilityScope === "principal") {
+        return translate(
+          "No Window activity is visible for this Project to this credential.",
+          language,
+        );
+      }
       return translate("No Window activity has been observed for this Project.", language);
     }
     if (visibilityScope === "principal") {
@@ -346,6 +356,29 @@ export function formatWindowEmptyState(
     return translate("No Window activity is visible.", language);
   }
   return translate("Loading Window activity…", language);
+}
+
+export function formatWindowListStatusText(
+  availability: "idle" | "loading" | "available" | "stale" | "unavailable",
+  count: number,
+  visibilityScope: "global" | "principal" = "principal",
+  language?: RuntimeLanguage,
+): string {
+  if (availability === "unavailable") {
+    return translate("runtime:read required", language);
+  }
+  if (availability === "stale") {
+    if (count > 0) {
+      const countPart = localizedCountLabel(count, "Window", "Windows", language);
+      const stalePart = translate("refresh failed, showing previous data", language);
+      return countPart + " · " + stalePart;
+    }
+    return translate("Window activity could not be refreshed.", language);
+  }
+  if (count > 0) {
+    return localizedCountLabel(count, "Window", "Windows", language);
+  }
+  return formatWindowEmptyState(availability, visibilityScope, false, language);
 }
 
 export function renderWindowCards(

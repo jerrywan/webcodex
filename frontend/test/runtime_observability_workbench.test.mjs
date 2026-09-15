@@ -2,12 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   formatWindowEmptyState,
+  formatWindowListStatusText,
   formatWindowDetailFields,
   renderWindowCards,
   renderProjectWindowCards,
   renderWindowActivityRows,
   renderWindowActiveRequests,
+  renderSessionWindowCorrelationLinks,
 } from "../dist/runtime_window.js";
+import {
+  runtimeWindowActivityLabel,
+} from "../dist/runtime_console_state.js";
 import {
   activityFacts,
   activityDescription,
@@ -158,7 +163,7 @@ function withMockDom(run) {
   }
 }
 
-test("formatWindowEmptyState correctly covers all empty-state semantics", () => {
+test("formatWindowEmptyState correctly covers all empty-state semantics across 4 quadrants", () => {
   // 1. Permission unavailable (403)
   assert.equal(
     formatWindowEmptyState("unavailable", "principal", false, "en"),
@@ -169,27 +174,37 @@ test("formatWindowEmptyState correctly covers all empty-state semantics", () => 
     "查看窗口活动需要 runtime:read 权限。",
   );
 
-  // 2. Stale / refresh failed
+  // 2. Stale / refresh failed (empty state does not pretend to show previous data)
   assert.equal(
     formatWindowEmptyState("stale", "principal", false, "en"),
-    "Window activity could not be refreshed; showing previous data.",
+    "Window activity could not be refreshed.",
   );
   assert.equal(
     formatWindowEmptyState("stale", "principal", false, "zh-CN"),
-    "窗口活动无法刷新；正在显示之前的数据。",
+    "窗口活动无法刷新。",
   );
 
-  // 3. Available + Project scoped empty
+  // 3a. Available + Project scoped + Principal scope empty
   assert.equal(
     formatWindowEmptyState("available", "principal", true, "en"),
-    "No Window activity has been observed for this Project.",
+    "No Window activity is visible for this Project to this credential.",
   );
   assert.equal(
     formatWindowEmptyState("available", "principal", true, "zh-CN"),
+    "当前凭证范围内，此项目没有可见的窗口活动。",
+  );
+
+  // 3b. Available + Project scoped + Global scope empty
+  assert.equal(
+    formatWindowEmptyState("available", "global", true, "en"),
+    "No Window activity has been observed for this Project.",
+  );
+  assert.equal(
+    formatWindowEmptyState("available", "global", true, "zh-CN"),
     "此项目尚未观察到窗口活动。",
   );
 
-  // 4. Available + Principal scope empty (distinguishes from global empty)
+  // 4. Available + Principal scope empty (global view)
   assert.equal(
     formatWindowEmptyState("available", "principal", false, "en"),
     "No Window activity is visible to this credential.",
@@ -218,6 +233,128 @@ test("formatWindowEmptyState correctly covers all empty-state semantics", () => 
     formatWindowEmptyState("loading", "principal", false, "zh-CN"),
     "正在加载窗口活动…",
   );
+});
+
+test("formatWindowListStatusText covers stale with/without rows, available, and permission failure", () => {
+  // Stale with rows
+  assert.equal(
+    formatWindowListStatusText("stale", 14, "principal", "en"),
+    "14 Windows · refresh failed, showing previous data",
+  );
+  assert.equal(
+    formatWindowListStatusText("stale", 14, "principal", "zh-CN"),
+    "14 个窗口 · 刷新失败，正在显示之前的数据",
+  );
+  // Stale without rows
+  assert.equal(
+    formatWindowListStatusText("stale", 0, "principal", "en"),
+    "Window activity could not be refreshed.",
+  );
+  assert.equal(
+    formatWindowListStatusText("stale", 0, "principal", "zh-CN"),
+    "窗口活动无法刷新。",
+  );
+  // Available with rows
+  assert.equal(
+    formatWindowListStatusText("available", 14, "principal", "en"),
+    "14 Windows",
+  );
+  assert.equal(
+    formatWindowListStatusText("available", 14, "principal", "zh-CN"),
+    "14 个窗口",
+  );
+  // Available without rows (principal)
+  assert.equal(
+    formatWindowListStatusText("available", 0, "principal", "en"),
+    "No Window activity is visible to this credential.",
+  );
+  assert.equal(
+    formatWindowListStatusText("available", 0, "principal", "zh-CN"),
+    "当前凭证范围内没有可见的窗口活动。",
+  );
+  // Available without rows (global)
+  assert.equal(
+    formatWindowListStatusText("available", 0, "global", "en"),
+    "No Window activity is visible.",
+  );
+  assert.equal(
+    formatWindowListStatusText("available", 0, "global", "zh-CN"),
+    "当前没有可见的窗口活动。",
+  );
+  // Unavailable (403)
+  assert.equal(
+    formatWindowListStatusText("unavailable", 0, "principal", "en"),
+    "runtime:read required",
+  );
+  assert.equal(
+    formatWindowListStatusText("unavailable", 0, "principal", "zh-CN"),
+    "需要 runtime:read 权限",
+  );
+  // Loading
+  assert.equal(
+    formatWindowListStatusText("loading", 0, "principal", "en"),
+    "Loading Window activity…",
+  );
+  assert.equal(
+    formatWindowListStatusText("loading", 0, "principal", "zh-CN"),
+    "正在加载窗口活动…",
+  );
+});
+
+test("runtimeWindowActivityLabel formats relative time in English and Chinese", () => {
+  const now = 1_000_000_000;
+  // < 1s
+  assert.equal(runtimeWindowActivityLabel(now - 500, now, "en"), "just now");
+  assert.equal(runtimeWindowActivityLabel(now - 500, now, "zh-CN"), "刚刚");
+  // seconds (< 60s)
+  assert.equal(runtimeWindowActivityLabel(now - 15_000, now, "en"), "15s ago");
+  assert.equal(runtimeWindowActivityLabel(now - 15_000, now, "zh-CN"), "15 秒前");
+  // minutes (< 60m)
+  assert.equal(runtimeWindowActivityLabel(now - 180_000, now, "en"), "3m ago");
+  assert.equal(runtimeWindowActivityLabel(now - 180_000, now, "zh-CN"), "3 分钟前");
+  // hours (< 24h)
+  assert.equal(runtimeWindowActivityLabel(now - 7_200_000, now, "en"), "2h ago");
+  assert.equal(runtimeWindowActivityLabel(now - 7_200_000, now, "zh-CN"), "2 小时前");
+  // days (>= 24h)
+  assert.equal(runtimeWindowActivityLabel(now - 259_200_000, now, "en"), "3d ago");
+  assert.equal(runtimeWindowActivityLabel(now - 259_200_000, now, "zh-CN"), "3 天前");
+  // unavailable / non-positive
+  assert.equal(runtimeWindowActivityLabel(null, now, "en"), "No WebCodex activity");
+  assert.equal(runtimeWindowActivityLabel(null, now, "zh-CN"), "无 WebCodex 活动");
+  assert.equal(runtimeWindowActivityLabel(0, now, "en"), "No WebCodex activity");
+  assert.equal(runtimeWindowActivityLabel(0, now, "zh-CN"), "无 WebCodex 活动");
+});
+
+test("renderSessionWindowCorrelationLinks supports Chinese localization and relative time", () => {
+  withMockDom(() => {
+    const container = createMockElement("div");
+    let selectedKey = "";
+    const links = [
+      {
+        client_window_key: "abcdef0123456789abcdef0123456789",
+        source: "cli",
+        last_seen_at_ms: 9500,
+        recorder_gap_count: 2,
+      },
+    ];
+
+    renderSessionWindowCorrelationLinks(
+      container,
+      links,
+      (k) => {
+        selectedKey = k;
+      },
+      10000,
+      "zh-CN",
+    );
+    assert.equal(container.children.length, 1);
+    const card = container.children[0];
+    assert.ok(card.className.includes("recorder-gap"));
+    assert.match(
+      card.querySelector(".muted")?.textContent || "",
+      /cli · 最后活动 刚刚 · 2 个记录断层/,
+    );
+  });
 });
 
 test("activityFacts labels exit code as 'process exit N' so state=failed + exit_code=0 is unambiguous", () => {
