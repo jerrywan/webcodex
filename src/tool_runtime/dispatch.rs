@@ -640,6 +640,10 @@ pub(crate) fn sparsify_complete_file_read_output(
                         .bytes()
                         .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             })
+        && output
+            .get("read_revision")
+            .and_then(Value::as_u64)
+            .is_some()
         && output.get("start_line").and_then(Value::as_u64) == Some(1)
         && output.get("limit").and_then(Value::as_u64) == Some(default_limit)
         && returned_lines == total_lines
@@ -2740,5 +2744,41 @@ mod sparse_read_projection_tests {
             assert_eq!(result.output["items"][0]["output"]["path"], "a.rs");
             assert_eq!(result.output["items"][0]["output"]["start_line"], 1);
         }
+    }
+
+    #[test]
+    fn sparse_read_batch_requires_read_revision_before_hiding_digest() {
+        let mut without_revision = complete_batch_item(Some("a.rs"), "a.rs");
+        let mut result = ToolResult::ok(json!({
+            "project": "demo",
+            "requested_count": 1,
+            "returned_count": 1,
+            "succeeded_count": 1,
+            "failed_count": 0,
+            "items": [without_revision.clone()],
+            "output_truncated": false,
+            "next_index": null
+        }));
+        sparsify_complete_read_success("read_files", &mut result);
+        assert_eq!(result.output["requested_count"], 1);
+        assert!(result.output["items"][0]["output"]["sha256"]
+            .as_str()
+            .is_some());
+
+        without_revision["output"]["read_revision"] = json!(42);
+        let mut result = ToolResult::ok(json!({
+            "project": "demo",
+            "requested_count": 1,
+            "returned_count": 1,
+            "succeeded_count": 1,
+            "failed_count": 0,
+            "items": [without_revision],
+            "output_truncated": false,
+            "next_index": null
+        }));
+        sparsify_complete_read_success("read_files", &mut result);
+        assert!(result.output.get("requested_count").is_none());
+        assert_eq!(result.output["items"][0]["output"]["read_revision"], 42);
+        assert!(result.output["items"][0]["output"].get("sha256").is_none());
     }
 }
