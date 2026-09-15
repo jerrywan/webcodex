@@ -157,6 +157,7 @@ fn prepare_action_tools_call_response(
     project: Option<String>,
     result: crate::tool_runtime::ToolResult,
     model_ergonomics: Option<&ModelErgonomicsCompletion>,
+    correlation: &crate::tool_runtime::ToolCallCorrelation,
 ) -> (StatusCode, crate::tool_runtime::ToolResult) {
     let status = if result.success {
         StatusCode::OK
@@ -171,6 +172,9 @@ fn prepare_action_tools_call_response(
         .and_then(|record| serde_json::to_value(record).ok())
     {
         summary["model_ergonomics"] = telemetry;
+    }
+    if let Some(composition) = correlation.code_mode_composition_audit_summary() {
+        summary["code_mode_composition"] = composition;
     }
     let mut event = ActionAuditRecord::new(tool.to_string(), response.success, status)
         .error(response.error.clone())
@@ -416,6 +420,7 @@ pub async fn tools_call(req: &mut Request, depot: &mut Depot, res: &mut Response
                 outcome.project,
                 result,
                 model_ergonomics.as_ref(),
+                &outcome.correlation,
             );
             let response_value = guard
                 .enabled()
@@ -807,6 +812,7 @@ pub async fn gpt_action_invoke(req: &mut Request, depot: &mut Depot, res: &mut R
                 outcome.project,
                 result,
                 outcome.model_ergonomics.as_ref(),
+                &outcome.correlation,
             );
             // ActionAudit above records canonical ToolRuntime truth. Only the
             // response copy is projected to the callable Adaptive Action route.

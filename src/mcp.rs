@@ -501,6 +501,9 @@ pub async fn mcp_post(req: &mut Request, depot: &mut Depot, res: &mut Response) 
             {
                 summary["model_ergonomics"] = telemetry;
             }
+            if let Some(composition) = correlation.code_mode_composition_audit_summary() {
+                summary["code_mode_composition"] = composition;
+            }
             let mut event = ActionAuditRecord::new(tool.clone(), success, status)
                 .error(error)
                 .summary(summary)

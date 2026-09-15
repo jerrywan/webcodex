@@ -1644,6 +1644,7 @@ impl ToolRuntime {
         let activity_context =
             Self::capture_workspace_activity_context(&call, activity_project.as_deref());
         let validation_assertion_name = recorder_metadata.expectation.assertion_name.as_deref();
+        let logical_invocation_id = recorder_metadata.logical_invocation_id.as_deref();
         let tool_name = call.tool_name();
         let trusted_recording_session_id = recorder_metadata
             .recording_session_authorized
@@ -1674,6 +1675,7 @@ impl ToolRuntime {
                 project_resolution,
                 trusted_recording_session_id,
                 trusted_recording_session_project,
+                logical_invocation_id,
                 protocol_capabilities,
                 correlation,
             )
@@ -1777,6 +1779,7 @@ impl ToolRuntime {
         project_resolution: Option<Result<ResolvedProject, ProjectResolverError>>,
         trusted_recording_session_id: Option<&str>,
         trusted_recording_session_project: Option<&str>,
+        _logical_invocation_id: Option<&str>,
         protocol_capabilities: super::kernel::ToolProtocolCapabilities,
         correlation: &mut super::window_activity::ToolCallCorrelation,
     ) -> ToolResult {
@@ -1894,8 +1897,19 @@ impl ToolRuntime {
                     Some(Err(error)) => return error.into_tool_result(),
                     None => return ToolResult::err("code_mode_exec requires a resolved Project"),
                 };
-                self.code_mode_exec(project, session_id, source, timeout_ms, auth, transport)
-                    .await
+                let (result, composition) = self
+                    .code_mode_exec(
+                        project,
+                        session_id,
+                        source,
+                        timeout_ms,
+                        auth,
+                        transport,
+                        _logical_invocation_id.map(str::to_string),
+                    )
+                    .await;
+                correlation.code_mode_composition = Some(composition);
+                result
             }
 
             ToolCall::ComputerObserve(_) | ToolCall::ComputerControl(_) => ToolResult::err(

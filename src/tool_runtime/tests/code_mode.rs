@@ -145,12 +145,64 @@ async fn code_mode_binds_exact_project_and_session_through_real_canonical_reads(
     )
     .await;
     assert!(outcome.success, "{outcome:?}");
+    let composition = outcome
+        .correlation
+        .code_mode_composition
+        .clone()
+        .expect("outer Code Mode composition diagnostic");
+    assert_eq!(composition.nested_calls, 3);
+    assert_eq!(composition.nested_successes, 3);
+    assert_eq!(composition.nested_failures, 0);
+    assert!(composition.max_in_flight >= 2);
+    let mut nested_tools = composition
+        .nested_tool_counts
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    nested_tools.sort_unstable();
+    assert_eq!(
+        nested_tools,
+        ["git_status", "read_files", "search_project_texts"]
+    );
+    assert_eq!(composition.nested_tool_counts.values().sum::<usize>(), 3);
+    assert!(composition
+        .nested_tool_counts
+        .keys()
+        .all(|tool| super::super::code_mode::is_admitted_nested_tool(tool)));
+    let diagnostic = serde_json::to_string(&composition).unwrap();
+    for private in [
+        "ToolRuntime",
+        "README.md",
+        tmp.path().to_string_lossy().as_ref(),
+    ] {
+        assert!(
+            !diagnostic.contains(private),
+            "composition diagnostic leaked nested private text: {diagnostic}"
+        );
+    }
     let result = outcome.result.expect("code_mode_exec ToolResult");
     assert!(result.success, "{:?}", result.error);
     assert!(result.output.get("content").is_some(), "{result:?}");
     assert!(result.output.get("stats").is_some(), "{result:?}");
     assert!(result.output.get("nested_results").is_none(), "{result:?}");
     assert!(result.output.get("tool_results").is_none(), "{result:?}");
+    let mut stats_keys = result.output["stats"]
+        .as_object()
+        .expect("sparse Code Mode stats")
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    stats_keys.sort_unstable();
+    assert_eq!(
+        stats_keys,
+        [
+            "duration_ms",
+            "max_in_flight",
+            "returned_bytes",
+            "tool_calls"
+        ]
+    );
+    assert!(result.output.get("code_mode_composition").is_none());
     let emitted: Value = serde_json::from_str(
         result.output["content"][0]
             .as_str()
@@ -216,6 +268,27 @@ async fn code_mode_binds_exact_project_and_session_through_real_canonical_reads(
             );
         }
     }
+    let business_invocation_ids = summary
+        .events
+        .iter()
+        .filter(|event| {
+            event.kind == "tool_call_started"
+                && event.logical_invocation_role.as_deref() == Some("business")
+                && [
+                    "code_mode_exec",
+                    "git_status",
+                    "search_project_texts",
+                    "read_files",
+                ]
+                .contains(&event.tool_name.as_str())
+        })
+        .filter_map(|event| event.logical_invocation_id.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        business_invocation_ids.len(),
+        4,
+        "outer and each canonical child must retain independent invocation evidence"
+    );
     let outer_start = summary
         .events
         .iter()

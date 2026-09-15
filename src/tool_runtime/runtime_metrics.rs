@@ -94,6 +94,11 @@ pub(crate) trait RuntimeMetrics: std::fmt::Debug + Send + Sync {
     fn observe_mcp_call(&self, observation: McpCallMetricObservation);
     fn observe_skill_source(&self, observation: SkillSourceMetricObservation);
     fn observe_window_transition(&self, transition: WindowLoopTransition);
+    #[cfg(feature = "experimental-code-mode")]
+    fn observe_code_mode_composition(
+        &self,
+        observation: &super::code_mode::CodeModeCompositionSummary,
+    );
 }
 
 fn observe_fail_open(operation: &'static str, observe: impl FnOnce()) {
@@ -130,6 +135,16 @@ pub(crate) fn observe_window_transition(
 ) {
     observe_fail_open("window_transition", || {
         metrics.observe_window_transition(transition)
+    });
+}
+
+#[cfg(feature = "experimental-code-mode")]
+pub(crate) fn observe_code_mode_composition(
+    metrics: &dyn RuntimeMetrics,
+    observation: &super::code_mode::CodeModeCompositionSummary,
+) {
+    observe_fail_open("code_mode_composition", || {
+        metrics.observe_code_mode_composition(observation)
     });
 }
 
@@ -272,6 +287,60 @@ impl RuntimeMetrics for TracingRuntimeMetrics {
             WindowLoopTransition::Unavailable => {}
         }
     }
+
+    #[cfg(feature = "experimental-code-mode")]
+    fn observe_code_mode_composition(
+        &self,
+        observation: &super::code_mode::CodeModeCompositionSummary,
+    ) {
+        for (metric, value) in [
+            (
+                "code_mode_nested_calls_total",
+                observation.nested_calls as u64,
+            ),
+            (
+                "code_mode_nested_successes_total",
+                observation.nested_successes as u64,
+            ),
+            (
+                "code_mode_nested_failures_total",
+                observation.nested_failures as u64,
+            ),
+            (
+                "code_mode_max_nested_in_flight",
+                observation.max_in_flight as u64,
+            ),
+            (
+                "code_mode_returned_bytes",
+                observation.returned_bytes as u64,
+            ),
+        ] {
+            tracing::info!(
+                metric,
+                value,
+                tool = "code_mode_exec",
+                surface = "runtime",
+                "runtime_metric"
+            );
+        }
+        tracing::info!(
+            metric = "code_mode_runtime_duration_seconds",
+            value = observation.duration_ms as f64 / 1000.0,
+            tool = "code_mode_exec",
+            surface = "runtime",
+            "runtime_metric"
+        );
+        for (nested_tool, value) in &observation.nested_tool_counts {
+            tracing::info!(
+                metric = "code_mode_nested_tool_calls_total",
+                value = *value as u64,
+                tool = "code_mode_exec",
+                nested_tool,
+                surface = "runtime",
+                "runtime_metric"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -297,6 +366,14 @@ mod tests {
         fn observe_window_transition(&self, _transition: WindowLoopTransition) {
             panic!("test metrics sink failure");
         }
+
+        #[cfg(feature = "experimental-code-mode")]
+        fn observe_code_mode_composition(
+            &self,
+            _observation: &super::super::code_mode::CodeModeCompositionSummary,
+        ) {
+            panic!("test metrics sink failure");
+        }
     }
 
     #[test]
@@ -308,6 +385,21 @@ mod tests {
             streaming: true,
         };
         assert!(!observation.ordinary_completed_response());
+    }
+
+    #[cfg(feature = "experimental-code-mode")]
+    #[test]
+    fn code_mode_metrics_sink_failure_is_fail_open() {
+        let observation = super::super::code_mode::CodeModeCompositionSummary {
+            nested_calls: 1,
+            nested_successes: 1,
+            nested_failures: 0,
+            max_in_flight: 1,
+            duration_ms: 7,
+            returned_bytes: 3,
+            nested_tool_counts: std::collections::BTreeMap::from([("read_files".to_string(), 1)]),
+        };
+        observe_code_mode_composition(&PanicMetrics, &observation);
     }
 
     #[test]

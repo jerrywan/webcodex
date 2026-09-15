@@ -350,6 +350,166 @@ async fn http_mcp_work_on_project_preferences_persist_without_private_request_va
     }
 }
 
+#[cfg(feature = "experimental-code-mode")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_mcp_code_mode_persists_only_bounded_composition_telemetry() {
+    let config = test_config(Some("secret"));
+    let (_tmp, db) = test_db();
+    let runner_registry = Arc::new(crate::runner_http::RunnerRegistry::default());
+    runner_registry
+        .register(crate::test_support::current_runner_registration(
+            RunnerRegisterRequest {
+                process_started_at: None,
+                build: None,
+                job_concurrency_limit: None,
+                job_inventory: None,
+                coding_agent_providers: None,
+                coding_agent_inventory: None,
+                client_id: "code-mode-audit".to_string(),
+                runner_instance_id: "inst-code-mode-audit".to_string(),
+                runner_protocol_generation: crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
+                display_name: None,
+                owner: None,
+                hostname: None,
+                host_context: None,
+                capabilities: RunnerCapabilities::default(),
+                policy: None,
+            },
+        ))
+        .await
+        .unwrap();
+    crate::test_support::apply_project_inventory_snapshot(
+        &runner_registry,
+        "code-mode-audit",
+        "inst-code-mode-audit",
+        vec![RunnerProjectSummary {
+            id: "demo".to_string(),
+            name: Some("Code Mode audit".to_string()),
+            path: "/tmp/code-mode-audit".to_string(),
+            allow_patch: true,
+            kind: Some("repo".to_string()),
+            registration_source: None,
+            description: None,
+            hooks: Vec::new(),
+            disabled: false,
+            revision: None,
+            root_fingerprint: None,
+            lineage: None,
+            git_branch: None,
+            git_head: None,
+            git_dirty: None,
+            updated_at: 1,
+            shell_profile: None,
+        }],
+    )
+    .await;
+    let runtime = Arc::new(
+        ToolRuntime::new(
+            runner_registry,
+            Arc::new(crate::tool_runtime::RuntimeInfo::default()),
+        )
+        .with_runtime_exposure(RuntimeExposure::Runtime(ModelSurface::FullOperatorRuntime)),
+    );
+    let exact_project = "agent:code-mode-audit:demo";
+    let auth = crate::auth::AuthContext {
+        role: Some("admin".to_string()),
+        scopes: vec![crate::auth::SCOPE_ADMIN.to_string()],
+        is_bootstrap: true,
+        ..crate::auth::AuthContext::new(crate::auth::AuthKind::Bootstrap)
+    };
+    let fingerprint = crate::tool_runtime::workflow_session_authority_fingerprint(Some(&auth))
+        .expect("bootstrap test authority");
+    let session = runtime
+        .sessions
+        .start_session_with_options(
+            crate::tool_runtime::SessionCreateOptions::new(
+                Some(exact_project.to_string()),
+                Some("code mode ActionAudit privacy".to_string()),
+                crate::tool_runtime::SessionMode::ReadOnly,
+                crate::tool_runtime::SessionGuards::default(),
+            )
+            .with_owner_authority_fingerprint(Some(fingerprint)),
+        )
+        .unwrap();
+    let service = Service::new(build_test_router(config, db.clone(), runtime));
+    let private_source =
+        "const PRIVATE_SOURCE_SENTINEL = 'PRIVATE_OUTPUT_SENTINEL'; text(PRIVATE_SOURCE_SENTINEL);";
+
+    let mut response = TestClient::post("http://localhost/mcp")
+        .bearer_auth("secret")
+        .add_header("x-action-session-id", "code-mode-composition-audit", true)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 401,
+            "method": "tools/call",
+            "params": {
+                "name": "code_mode_exec",
+                "arguments": {
+                    "project": exact_project,
+                    "session_id": session.session_id,
+                    "source": private_source
+                }
+            }
+        }))
+        .send(&service)
+        .await;
+    let status = effective_status(&response);
+    let body: Value = response.take_json().await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["result"]["structuredContent"]["success"], true,
+        "{body}"
+    );
+
+    let events = db
+        .list_action_events("code-mode-composition-audit", 10)
+        .unwrap();
+    assert_eq!(events.len(), 1, "one outer call must create one audit row");
+    assert_eq!(events[0].operation.as_deref(), Some("code_mode_exec"));
+    let summary: Value = serde_json::from_str(&events[0].summary_json).unwrap();
+    let composition = &summary["code_mode_composition"];
+    assert_eq!(composition["nested_calls"], 0);
+    assert_eq!(composition["nested_successes"], 0);
+    assert_eq!(composition["nested_failures"], 0);
+    assert_eq!(composition["max_in_flight"], 0);
+    assert_eq!(composition["nested_tool_counts"], json!({}));
+    assert!(composition["duration_ms"].is_u64());
+    assert!(composition["returned_bytes"].is_u64());
+    let mut keys = composition
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "duration_ms",
+            "max_in_flight",
+            "nested_calls",
+            "nested_failures",
+            "nested_successes",
+            "nested_tool_counts",
+            "returned_bytes",
+        ]
+    );
+    let persisted = serde_json::to_string(&summary).unwrap();
+    for forbidden in [
+        "PRIVATE_SOURCE_SENTINEL",
+        "PRIVATE_OUTPUT_SENTINEL",
+        private_source,
+        "source",
+        "content",
+        "arguments",
+    ] {
+        assert!(
+            !persisted.contains(forbidden),
+            "durable Code Mode audit leaked private field/text {forbidden}: {persisted}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn http_mcp_tools_list_audit_sink_failure_is_non_blocking() {
     let config = test_config(Some("secret"));
