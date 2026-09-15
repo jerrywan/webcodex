@@ -1095,11 +1095,7 @@ fn is_safe_resource_name(value: &str) -> bool {
 }
 
 fn is_safe_session_id(value: &str) -> bool {
-    value.starts_with("wc_sess_")
-        && value.len() <= 128
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    webcodex_core::workflow_session_contract::is_valid_session_id(value)
 }
 
 // On non-Unix the body is a no-op, so the `command` parameter is unused there.
@@ -1481,6 +1477,15 @@ mod tests {
     #[cfg(target_os = "linux")]
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn session_id_validation_uses_canonical_compact_alphabet() {
+        assert!(super::is_safe_session_id("wc_sess_AAAAAAAA-AAAAAA_"));
+        assert!(super::is_safe_session_id(
+            "wc_sess_0123456789abcdef0123456789abcdef"
+        ));
+        assert!(!super::is_safe_session_id("wc_sess_not-canonical"));
+    }
 
     #[cfg(target_os = "linux")]
     fn test_ssh_server_start_lock() -> &'static Mutex<()> {

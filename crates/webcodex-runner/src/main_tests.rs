@@ -464,6 +464,18 @@ fn runner_recovery_context_accepts_server_validation_identity_metadata() {
 }
 
 #[test]
+fn runner_recovery_context_accepts_compact_session_base64url_alphabet() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut request = shell_job_request(temp.path(), "printf ok");
+    let context = request.job_context.as_mut().unwrap();
+    context.runtime_project_id = Some("agent:ws-client:demo".to_string());
+    context.workflow_session_id = Some("wc_sess_AAAAAAAA-AAAAAA_".to_string());
+    let context = context.clone();
+
+    validate_runner_job_context(&context, &request, "ws-client").unwrap();
+}
+
+#[test]
 fn runner_recovery_context_accepts_javascript_script_job() {
     let temp = tempfile::tempdir().unwrap();
     let script = runner_protocol::ShellScriptPayload {
