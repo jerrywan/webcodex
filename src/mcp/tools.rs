@@ -991,6 +991,8 @@ pub(super) async fn handle_list(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum HostFileImportTrustReason {
     Trusted,
+    TrustedLoopbackApiToken,
+    LoopbackApiTokenTrustRequiresLoopback,
     MissingConfig,
     MissingDatabase,
     MissingAuth,
@@ -1006,6 +1008,10 @@ impl HostFileImportTrustReason {
     fn as_str(self) -> &'static str {
         match self {
             Self::Trusted => "trusted",
+            Self::TrustedLoopbackApiToken => "trusted_loopback_api_token",
+            Self::LoopbackApiTokenTrustRequiresLoopback => {
+                "loopback_api_token_trust_requires_loopback"
+            }
             Self::MissingConfig => "missing_config",
             Self::MissingDatabase => "missing_database",
             Self::MissingAuth => "missing_auth",
@@ -1092,6 +1098,22 @@ pub(super) fn mcp_host_file_import_trust_decision_from_state(
     let Some(auth) = auth else {
         return base;
     };
+    if auth.kind == crate::auth::AuthKind::ApiToken
+        && auth.token_kind.as_deref() == Some("user")
+        && config.oauth2.trust_loopback_api_token_mcp_file_import
+    {
+        if config.is_loopback_bound() {
+            return HostFileImportTrustDecision {
+                trust: HostFileImportTrust::TrustedMcpHostFile,
+                reason: HostFileImportTrustReason::TrustedLoopbackApiToken,
+                ..base
+            };
+        }
+        return HostFileImportTrustDecision {
+            reason: HostFileImportTrustReason::LoopbackApiTokenTrustRequiresLoopback,
+            ..base
+        };
+    }
     if !auth.is_oauth_token() {
         return HostFileImportTrustDecision {
             reason: HostFileImportTrustReason::NotOAuthToken,

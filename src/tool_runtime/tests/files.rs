@@ -1076,7 +1076,7 @@ async fn conversation_import_durable_session_events_do_not_store_host_file_refs(
         .error
         .as_deref()
         .unwrap_or_default()
-        .contains("explicitly trusted OAuth MCP host-file rewrite"));
+        .contains("explicitly trusted MCP host-file rewrite"));
 
     let summary = runtime
         .sessions
