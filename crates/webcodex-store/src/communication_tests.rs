@@ -47,6 +47,7 @@ fn compact_identity_collision_retry_and_proof_strength() {
         "wc_agent_wait_",
         "wc_goal_",
         "wc_conv_",
+        "wc_participant_",
         "wc_cmsg_",
         "wc_delivery_",
         "wc_attention_event_",
@@ -459,6 +460,18 @@ fn conversation_transcript_delivery_replay_offline_and_restart_are_durable() {
         .conversation_id
         .starts_with(CONVERSATION_ID_PREFIX));
     assert_eq!(created.conversation.participants.len(), 3);
+    for participant in &created.conversation.participants {
+        assert_eq!(
+            participant.participant_id.len(),
+            CONVERSATION_PARTICIPANT_ID_PREFIX.len() + 16
+        );
+        validate_id(
+            &participant.participant_id,
+            CONVERSATION_PARTICIPANT_ID_PREFIX,
+            "invalid_participant_id",
+        )
+        .unwrap();
+    }
     assert_eq!(
         created.conversation.conversation.lifecycle,
         ConversationLifecycle::Open

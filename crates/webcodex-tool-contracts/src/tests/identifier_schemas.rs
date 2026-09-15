@@ -12,6 +12,7 @@ fn durable_identifier_schemas_accept_compact_and_reject_retired_hex() {
         "wc_agent_wait_",
         "wc_goal_",
         "wc_conv_",
+        "wc_participant_",
         "wc_cmsg_",
         "wc_delivery_",
         "wc_attention_event_",

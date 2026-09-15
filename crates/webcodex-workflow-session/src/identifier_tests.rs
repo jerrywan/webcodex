@@ -56,6 +56,29 @@ fn compact_session_and_message_allocators_retry_without_overwrite() {
 }
 
 #[test]
+fn persisted_message_ids_accept_only_compact_or_legacy_canonical_forms() {
+    let store = SessionStore::default();
+    let session = store.start_session(None, None);
+    let message = post(&store, &session.session_id, SessionMessageKind::Note);
+
+    let mut malformed_primary = message.clone();
+    malformed_primary.message_id = "wc_msg_garbage".to_string();
+    assert!(
+        crate::persistence::sanitize_persisted_message(malformed_primary, &session.session_id)
+            .is_none()
+    );
+
+    let mut malformed_links = message;
+    malformed_links.reply_to = Some("wc_msg_garbage".to_string());
+    malformed_links.resolved_by_message_id = Some("wc_msg_also_bad".to_string());
+    let sanitized =
+        crate::persistence::sanitize_persisted_message(malformed_links, &session.session_id)
+            .expect("canonical primary message id remains restorable");
+    assert!(sanitized.reply_to.is_none());
+    assert!(sanitized.resolved_by_message_id.is_none());
+}
+
+#[test]
 fn legacy_ledger_restores_all_links_and_resumes_with_compact_messages() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sessions.json");

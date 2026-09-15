@@ -10,7 +10,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::io::{self, Write};
-use uuid::Uuid;
 
 pub(crate) const DURABLE_AGENT_ID_PREFIX: &str = "wc_dagent_";
 pub(crate) const AGENT_ENDPOINT_ID_PREFIX: &str = "wc_endpoint_";
@@ -1890,10 +1889,11 @@ impl Database {
                     principal_kind, principal_digest, joined_at_unix_ms
                  ) VALUES (?1, ?2, 'human', NULL, ?3, ?4, ?5)",
                 params![
-                    format!(
-                        "{CONVERSATION_PARTICIPANT_ID_PREFIX}{}",
-                        Uuid::new_v4().simple()
-                    ),
+                    allocate_identity(
+                        &transaction,
+                        CONVERSATION_PARTICIPANT_ID_PREFIX,
+                        "SELECT EXISTS(SELECT 1 FROM wc_conversation_participants WHERE participant_id = ?1)",
+                    )?,
                     conversation_id,
                     principal.kind,
                     principal.digest,
@@ -1909,10 +1909,11 @@ impl Database {
                         principal_kind, principal_digest, joined_at_unix_ms
                      ) VALUES (?1, ?2, 'agent', ?3, NULL, NULL, ?4)",
                     params![
-                        format!(
-                            "{CONVERSATION_PARTICIPANT_ID_PREFIX}{}",
-                            Uuid::new_v4().simple()
-                        ),
+                        allocate_identity(
+                            &transaction,
+                            CONVERSATION_PARTICIPANT_ID_PREFIX,
+                            "SELECT EXISTS(SELECT 1 FROM wc_conversation_participants WHERE participant_id = ?1)",
+                        )?,
                         conversation_id,
                         agent_id,
                         now,
