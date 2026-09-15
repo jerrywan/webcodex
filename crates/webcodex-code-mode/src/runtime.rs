@@ -6,8 +6,8 @@
 use crate::{
     normalized_timeout_ms, CodeModeError, CodeModeErrorKind, CodeModeExecuteRequest,
     CodeModeExecution, CodeModeHost, CodeModeStats, CodeModeToolRequest, CodeModeToolResponse,
-    MAX_CONCURRENT_TOOL_CALLS, MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS, MAX_SOURCE_BYTES,
-    MAX_TOOL_CALLS,
+    MAX_CONCURRENT_EXECUTIONS, MAX_CONCURRENT_TOOL_CALLS, MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS,
+    MAX_SOURCE_BYTES, MAX_TOOL_CALLS,
 };
 use serde_json::{json, Value as JsonValue};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -15,13 +15,14 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 
 struct V8Initialization {
     _platform: v8::SharedRef<v8::Platform>,
 }
 
 static V8_INITIALIZATION: OnceLock<Result<V8Initialization, String>> = OnceLock::new();
+static EXECUTION_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_EXECUTIONS);
 
 fn ensure_v8_initialized() -> Result<(), String> {
     match V8_INITIALIZATION.get_or_init(|| {
@@ -99,6 +100,22 @@ pub async fn execute(
         stats: CodeModeStats::default(),
     })?;
     let timeout_ms = normalized_timeout_ms(request.timeout_ms);
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let execution_slot = tokio::select! {
+        permit = EXECUTION_SLOTS.acquire() => permit.map_err(|_| CodeModeError {
+            kind: CodeModeErrorKind::Runtime,
+            message: "code mode execution slots are unavailable".to_string(),
+            stats: CodeModeStats::default(),
+        })?,
+        _ = tokio::time::sleep_until(deadline) => {
+            return Err(CodeModeError {
+                kind: CodeModeErrorKind::Timeout,
+                message: format!("code mode execution exceeded {timeout_ms} ms while waiting for a runtime slot"),
+                stats: CodeModeStats::default(),
+            });
+        }
+    };
+    let _execution_slot = execution_slot;
     let mut runtime =
         spawn_runtime(request.source, request.allowed_tools).map_err(|message| CodeModeError {
             kind: CodeModeErrorKind::Runtime,
@@ -106,7 +123,6 @@ pub async fn execute(
             stats: CodeModeStats::default(),
         })?;
 
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     let mut deadline_sleep = Box::pin(tokio::time::sleep_until(deadline));
     let mut content = Vec::new();
     let mut returned_bytes = 0usize;

@@ -13,6 +13,9 @@ pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 pub const MAX_TIMEOUT_MS: u64 = 30_000;
 pub const MAX_TOOL_CALLS: usize = 32;
 pub const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
+/// Process-local cap for simultaneously active V8 cells. E1 runs V8 on the Server,
+/// so bound isolate/thread fanout independently from nested tool-call concurrency.
+pub const MAX_CONCURRENT_EXECUTIONS: usize = 2;
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 pub const MAX_OUTPUT_ITEMS: usize = 256;
 

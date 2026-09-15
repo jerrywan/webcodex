@@ -177,12 +177,15 @@ The current server-owned E1 limits are intentionally fixed and simple:
 | default wall clock | 5 s |
 | hard wall-clock maximum | 30 s |
 | nested tool calls | 32 |
-| nested calls concurrently in flight | 8 |
+| Code Mode executions concurrently active per Server process | 2 |
+| nested calls concurrently in flight per execution | 8 |
 | total `text()` output | 64 KiB UTF-8 |
 | `text()` emissions | 256 |
 | model-facing runtime failure detail | 16 KiB UTF-8 |
 
 The V8 runtime runs on its own OS thread. A Tokio timeout is not treated as proof that CPU-bound JavaScript stopped. At the deadline, the async driver calls `v8::IsolateHandle::terminate_execution()`, signals the runtime thread, joins it, and returns a bounded timeout failure. A regression test covers `while (true) {}`.
+
+E1 V8 execution is **Server-side**, not Runner-side. The process admits at most two simultaneously active Code Mode executions; waiting for a slot consumes the same wall-clock deadline. Nested Project observations still execute on the owning Runner through canonical ToolRuntime dispatch. Therefore dogfood requires a Server binary built with `--features experimental-code-mode`; existing compatible Runners do not need the feature or a protocol upgrade. Rebuilding a Runner from the same source commit is optional when exact source-alignment telemetry is desired.
 
 ## Outer result
 
