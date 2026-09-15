@@ -3518,14 +3518,22 @@ impl ToolCall {
             }
             Self::GitLog {
                 project,
+                head_commit,
                 limit,
                 skip,
                 ..
-            } => serde_json::json!({
-                "project": project,
-                "limit": limit,
-                "skip": skip,
-            }),
+            } => {
+                let head_commit = head_commit
+                    .as_deref()
+                    .and_then(normalized_exact_git_commit_for_audit);
+                serde_json::json!({
+                    "project": project,
+                    "head_commit_valid": head_commit.is_some(),
+                    "head_commit": head_commit,
+                    "limit": limit,
+                    "skip": skip,
+                })
+            }
             Self::GitDiffHunks {
                 project,
                 paths,

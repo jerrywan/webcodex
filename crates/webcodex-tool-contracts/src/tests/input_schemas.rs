@@ -684,6 +684,18 @@ fn tool_specs_optional_fields_are_not_required() {
 }
 
 #[test]
+fn git_log_head_commit_schema_requires_exact_40_hex() {
+    let specs = registered_tool_specs();
+    let spec = spec_named(&specs, "git_log");
+    let head = &spec.input_schema["properties"]["head_commit"];
+    assert_eq!(head["type"], "string");
+    assert_eq!(head["minLength"], 40);
+    assert_eq!(head["maxLength"], 40);
+    assert_eq!(head["pattern"], "^[0-9A-Fa-f]{40}$");
+    assert!(!required_fields(spec).contains(&"head_commit".to_string()));
+}
+
+#[test]
 fn tool_specs_covers_expected_tool_set() {
     let names = registered_tool_names();
     for expected in [

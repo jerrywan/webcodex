@@ -401,7 +401,15 @@ fn git_log_and_directory_listing_expose_parser_ready_next_pages() {
     assert!(git_log["next_skip"]["description"]
         .as_str()
         .unwrap()
-        .contains("Exact skip value"));
+        .contains("Domain metadata"));
+    let continuation = &git_log["suggested_call"]["properties"]["arguments"];
+    assert!(continuation["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|field| field == "head_commit"));
+    assert_eq!(continuation["properties"]["head_commit"]["minLength"], 40);
+    assert_eq!(continuation["properties"]["head_commit"]["maxLength"], 40);
 
     let files = &spec_named(&specs, "list_project_files").output_schema["properties"]["output"]
         ["properties"];

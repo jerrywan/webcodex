@@ -986,6 +986,8 @@ pub enum ToolCall {
     GitLog {
         project: String,
         #[serde(default)]
+        head_commit: Option<String>,
+        #[serde(default)]
         limit: Option<usize>,
         #[serde(default)]
         skip: Option<usize>,
