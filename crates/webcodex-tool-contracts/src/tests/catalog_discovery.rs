@@ -138,6 +138,15 @@ fn tool_recommended_flows_reference_visible_defined_tools() {
                 );
                 assert!(is_model_visible_tool_name(tool), "{}: {tool}", flow.name);
             }
+            for native in ["run_process", "run_script", "run_shell"] {
+                if flow.manifest_purpose.contains(native) {
+                    assert!(
+                        flow.tools.contains(&native),
+                        "{} purpose recommends {native} but its machine-readable tools omit it",
+                        flow.name
+                    );
+                }
+            }
             flow.summary
         })
         .collect::<Vec<_>>();

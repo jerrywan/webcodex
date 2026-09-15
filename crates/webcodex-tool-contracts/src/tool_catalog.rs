@@ -395,6 +395,7 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
             "apply_patch",
             "apply_unified_diff",
             "write_project_file",
+            "run_shell",
         ],
     },
     ToolRecommendedFlow {
@@ -474,6 +475,7 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
             "show_changes",
             "git_diff_hunks",
             "workspace_hygiene_check",
+            "run_process",
         ],
     },
     ToolRecommendedFlow {
