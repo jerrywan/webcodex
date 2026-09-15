@@ -200,7 +200,14 @@ fn git_diff_hunks_page_budget_schema_defers_bounds_to_runtime_clamp() {
     let schema = &spec_named(&specs, "git_diff_hunks").input_schema;
     let page = &schema["properties"]["max_page_bytes"];
     assert_eq!(page["type"], "integer");
-    assert_eq!(page["default"], 64 * 1024);
+    assert_eq!(
+        page["default"],
+        webcodex_core::runtime_contract::DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES
+    );
+    assert_eq!(
+        webcodex_core::runtime_contract::DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES,
+        webcodex_core::runtime_contract::MAX_GIT_DIFF_HUNKS_PAGE_BYTES
+    );
     assert_eq!(page["minimum"], 0);
     assert!(page.get("maximum").is_none());
     let description = page["description"].as_str().unwrap().to_ascii_lowercase();

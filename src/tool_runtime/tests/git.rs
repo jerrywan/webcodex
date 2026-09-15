@@ -2816,6 +2816,11 @@ async fn git_diff_hunks_large_raw_diff_is_bounded_before_runner_result_retention
         raw_diff.len()
     );
 
+    assert_eq!(
+        DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES, MAX_GIT_DIFF_HUNKS_PAGE_BYTES,
+        "default Git review page should use the full safe Runner-retention budget"
+    );
+
     let runtime = test_runtime();
     let client_id = "diff-hunks-large";
     let project = register_runner_project_at_path(&runtime, client_id, "repo", repo.path()).await;
