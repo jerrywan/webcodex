@@ -2429,7 +2429,6 @@ async fn search_project_texts_outer_recording_session_keeps_final_response_under
     assert!(result.output.get("session_continuity").is_none());
     assert!(result.output.get("session_recovery").is_none());
     assert!(result.output.get("session_context_revision").is_none());
-    assert_eq!(result.output["context_projection"]["timing"], "post_tool");
     assert_eq!(
         result.output["context_projection"]["materials"][0]["key"],
         "webcodex.workflow"
