@@ -259,8 +259,8 @@ pub fn complete_session_message_input_schema() -> Value {
             "expected_assignment_fence": {
                 "type": "string",
                 "minLength": 48,
-                "maxLength": 48,
-                "pattern": "^wsa1_[A-Za-z0-9_-]{43}$",
+                "maxLength": 27,
+                "pattern": "^wsa2_[A-Za-z0-9_-]{22}$",
                 "description": "Required semantic snapshot fence returned by get_session_assignment for this exact Session/todo. Pass it unchanged; assignment-local semantic changes fail closed before completion."
             },
             "tags": {

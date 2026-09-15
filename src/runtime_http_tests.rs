@@ -2026,7 +2026,7 @@ async fn session_tools_oauth_scope_policy() {
     assert_eq!(status, StatusCode::OK, "get_session_assignment: {body}");
     assert!(body["output"]["assignment_fence"]
         .as_str()
-        .is_some_and(|fence| fence.starts_with("wsa1_")));
+        .is_some_and(|fence| fence.starts_with("wsa2_")));
 
     let (status, body, challenge) = oauth_tools_call(
         &service,

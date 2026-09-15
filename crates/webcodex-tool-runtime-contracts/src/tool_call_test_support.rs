@@ -147,7 +147,7 @@ fn sample_field_value(field: &str) -> Value {
         "message" => json!("hello"),
         "answer" => json!("done"),
         "completion_key" => json!("sample-completion-key"),
-        "expected_assignment_fence" => json!(format!("wsa1_{}", "A".repeat(43))),
+        "expected_assignment_fence" => json!(format!("wsa2_{}", "A".repeat(22))),
         "message_id" => json!("wc_msg_0001"),
         "execution_context" => json!({}),
         other => panic!("missing sample value for required field {other}"),
