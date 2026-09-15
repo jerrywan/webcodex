@@ -1799,15 +1799,17 @@ async fn work_on_project_without_session_id_always_creates_fresh_session() {
     assert!(model_protocol["session_message_ack"]
         .as_str()
         .is_some_and(|value| value.contains("ack_session_message_ids")));
-    assert!(
-        result.output["workflow"]["roles"]["implementation_owner"]["guidance"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item
-                .as_str()
-                .is_some_and(|value| value.contains("reuse the same assertion_name")))
-    );
+    let workflow = &result.output["workflow"];
+    assert!(workflow["guidance"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item
+            .as_str()
+            .is_some_and(|value| value.contains("Reuse assertion_name"))));
+    assert!(workflow["roles"]
+        .as_object()
+        .is_some_and(|roles| !roles.contains_key("implementation_owner")));
     assert!(result.output["instructions"].is_object());
     for hidden in [
         "runtime_status",

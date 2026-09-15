@@ -523,11 +523,11 @@ fn startup_workflow_schema() -> Value {
             },
             "roles": {
                 "type": "object",
+                "description": "Optional named behavior that changes the default workflow. Ordinary implementation is fully described by guidance.",
                 "properties": {
-                    "implementation_owner": startup_workflow_role_schema(),
                     "independent_review": startup_workflow_role_schema()
                 },
-                "required": ["implementation_owner", "independent_review"],
+                "required": ["independent_review"],
                 "additionalProperties": false
             }
         },
