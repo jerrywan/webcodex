@@ -2826,7 +2826,7 @@ struct RunnerJobDelta {
 }
 
 fn observe_cargo_test_count_chunks(
-    accumulator: &mut Option<webcodex_validation::CargoTestRunMetadataAccumulator>,
+    accumulator: &mut Option<webcodex_core::cargo_test_count::CargoTestRunMetadataAccumulator>,
     stdout: &str,
     stderr: &str,
 ) {
@@ -2837,7 +2837,7 @@ fn observe_cargo_test_count_chunks(
 }
 
 fn finish_cargo_test_count_evidence(
-    accumulator: Option<webcodex_validation::CargoTestRunMetadataAccumulator>,
+    accumulator: Option<webcodex_core::cargo_test_count::CargoTestRunMetadataAccumulator>,
 ) -> Option<ShellJobTestCountEvidence> {
     accumulator.map(|accumulator| {
         let metadata = accumulator.finish();
@@ -4917,7 +4917,7 @@ impl JobManager {
             let timeout_secs = timeout_secs.min(policy.max_timeout_secs).max(1);
             let mut step_index = 0;
             let mut test_count_accumulator = capture_cargo_test_count
-                .then(webcodex_validation::CargoTestRunMetadataAccumulator::default);
+                .then(webcodex_core::cargo_test_count::CargoTestRunMetadataAccumulator::default);
             let (final_status, out, err, final_progress) = loop {
                 const OUTPUT_CHANNEL_CAPACITY: usize = 64;
                 let (tx, rx) = mpsc::sync_channel::<OutputChunk>(OUTPUT_CHANNEL_CAPACITY);

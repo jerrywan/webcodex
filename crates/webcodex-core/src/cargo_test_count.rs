@@ -1,6 +1,6 @@
 //! Cargo test execution-count evidence derived from complete harness summaries.
 
-use webcodex_core::validation_evidence::{
+use crate::validation_evidence::{
     parse_complete_cargo_test_summary_counts, CargoTestCountEvidenceStatus,
 };
 
@@ -248,7 +248,7 @@ mod tests {
         parse_cargo_test_run_metadata, CargoTestRunMetadataAccumulator,
         CARGO_TEST_STREAM_LINE_MAX_BYTES,
     };
-    use webcodex_core::validation_evidence::CargoTestCountEvidenceStatus;
+    use crate::validation_evidence::CargoTestCountEvidenceStatus;
 
     #[test]
     fn cargo_test_counts_aggregate_multiple_harness_summaries() {
