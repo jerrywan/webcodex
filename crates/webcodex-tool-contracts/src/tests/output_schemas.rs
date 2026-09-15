@@ -78,6 +78,26 @@ fn observation_schemas_do_not_repeat_static_continuation_semantics() {
             "{name} must rely on its explicit observation token/input contract"
         );
     }
+
+    let observe_jobs = spec_named(&specs, "observe_jobs");
+    let variants = observe_jobs.output_schema["properties"]["output"]["anyOf"]
+        .as_array()
+        .expect("observe_jobs output variants");
+    let full = variants
+        .iter()
+        .find(|variant| variant["properties"].get("next_index").is_some())
+        .expect("observe_jobs full batch output");
+    let item_output = &full["properties"]["items"]["items"]["properties"]["output"]["anyOf"][0];
+    assert!(
+        item_output["properties"]
+            .get("continuation_semantics")
+            .is_none(),
+        "observe_jobs items must rely on observation_token -> after_observation_token"
+    );
+    assert!(
+        full["properties"].get("continuation_semantics").is_some(),
+        "observe_jobs must retain dynamic outer batch/index disambiguation"
+    );
 }
 
 #[test]

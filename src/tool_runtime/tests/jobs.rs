@@ -1726,7 +1726,7 @@ fn assert_unknown_job(result: ToolResult) {
     assert_eq!(result.output["error_kind"], "unknown_job");
     assert_eq!(result.output["failure_kind"], "job_not_found");
     assert_eq!(result.output["state_changed"], false);
-    assert_eq!(result.output["recovery_kind"], "reobserve");
+    assert!(result.output.get("recovery_kind").is_none());
     assert!(result.output.get("recovery_tool").is_none());
     assert_eq!(
         result.output["suggested_call"],

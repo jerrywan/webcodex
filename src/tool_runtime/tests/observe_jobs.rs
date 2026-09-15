@@ -150,10 +150,6 @@ fn canonical_observation(
         "recovery_reason_code": null,
         "recovery_reason": null,
         "observation_token": format!("wjob1:a:{job_id}:fixture_epoch:7"),
-        "continuation_semantics": {
-            "kind": "observe",
-            "carrier": "observation_token"
-        },
         "log_delta_status": log_delta_status,
         "stdout_delta_reset": false,
         "stderr_delta_reset": false,
@@ -807,7 +803,6 @@ fn observe_jobs_compact_projection_preserves_mixed_failure_and_budget_recovery()
         "success": false,
         "output": null,
         "error_kind": "unknown_job",
-        "recovery_kind": "reobserve",
         "suggested_call": {"tool": "list_jobs", "arguments": {}},
         "error": "unknown job: missing-job"
     });
@@ -950,7 +945,7 @@ fn observe_jobs_projection_reports_deterministic_byte_measurements() {
             ),
             json!({
                 "index": 1, "job_id": "missing-measure", "success": false,
-                "output": null, "error_kind": "unknown_job", "recovery_kind": "reobserve",
+                "output": null, "error_kind": "unknown_job",
                 "suggested_call": {"tool": "list_jobs", "arguments": {}},
                 "error": "unknown job: missing-measure"
             }),

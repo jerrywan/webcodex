@@ -455,11 +455,6 @@ fn observe_jobs_output_schema() -> Value {
                 "maxLength": webcodex_core::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN,
                 "description": "Opaque Job-bound lifecycle/log-delta token for this frozen returned snapshot. Return it unchanged."
             },
-            "continuation_semantics": continuation_semantics_schema(
-                ContinuationKind::Observe,
-                ContinuationCarrier::ObservationToken,
-                "The Job observation token is an exact Job-bound stream cursor copied into after_observation_token on the next observation. It is not a retry token.",
-            ),
             "last_update_seq": nullable_schema("integer", "Agent protocol diagnostic sequence, when available."),
             "cursor": {
                 "type": "object",
@@ -498,7 +493,7 @@ fn observe_jobs_output_schema() -> Value {
             "job_id", "status", "exit_code", "stdout_tail", "stderr_tail",
             "stdout_lines", "stderr_lines", "stdout_truncated", "stderr_truncated",
             "log_delta_status", "stdout_delta_reset", "stderr_delta_reset",
-            "observation_token", "continuation_semantics", "cursor", "changed",
+            "observation_token", "cursor", "changed",
             "terminal", "executor", "cwd", "shell", "purpose", "command_summary",
             "activity", "detected_summary", "validation"
         ]

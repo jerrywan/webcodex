@@ -112,6 +112,7 @@ fn batch_item(observed: ObservedJob) -> Value {
             // fact to the model.
             output.remove("wait_outcome");
             output.remove("waited_ms");
+            output.remove("continuation_semantics");
         }
         json!({
             "index": observed.index,
@@ -130,11 +131,12 @@ fn batch_item(observed: ObservedJob) -> Value {
             "success": false,
             "output": null,
             "error_kind": error_kind,
-            "recovery_kind": recovery_kind.as_str(),
             "error": bounded_error(observed.result.error.as_deref()),
         });
         if error_kind == "unknown_job" {
             item["suggested_call"] = SuggestedToolCall::new("list_jobs", json!({})).to_value();
+        } else {
+            item["recovery_kind"] = json!(recovery_kind.as_str());
         }
         item
     }
@@ -786,7 +788,7 @@ mod tests {
             result: ToolResult::err("unknown job: job-missing"),
         });
         assert_eq!(missing["error_kind"], "unknown_job");
-        assert_eq!(missing["recovery_kind"], "reobserve");
+        assert!(missing.get("recovery_kind").is_none());
         assert!(missing.get("recovery_tool").is_none());
         let suggested = &missing["suggested_call"];
         assert_eq!(suggested, &json!({"tool": "list_jobs", "arguments": {}}));
