@@ -1716,7 +1716,6 @@ fn computer_snapshot_artifact_lifecycle_failure(
     );
     computer_suggested_recovery(
         result,
-        RecoveryKind::Reconcile,
         "read_project_artifact_metadata",
         json!({"project": project, "path": path}),
     )
@@ -1883,7 +1882,6 @@ fn filter_accessibility_tree(
 
 fn computer_suggested_recovery(
     mut result: ToolResult,
-    recovery_kind: RecoveryKind,
     tool: &'static str,
     arguments: Value,
 ) -> ToolResult {
@@ -1895,7 +1893,7 @@ fn computer_suggested_recovery(
             "suggested_call".to_string(),
             SuggestedToolCall::new(tool, arguments).to_value(),
         );
-    result.with_recovery(recovery_kind)
+    result
 }
 
 fn computer_reconcile_recovery(
@@ -1925,41 +1923,26 @@ fn computer_error_with_client(kind: &str, message: &str, client_id: Option<&str>
         "stale_surface" => match client_id {
             Some(client_id) => computer_suggested_recovery(
                 result,
-                RecoveryKind::Reobserve,
                 "computer_list_windows",
                 json!({"client_id": client_id}),
             ),
-            None => computer_reconcile_recovery(
-                result,
-                RecoveryKind::Reobserve,
-                "computer_list_windows",
-            ),
+            None => computer_reconcile_recovery(result, "computer_list_windows"),
         },
         "stale_application" => match client_id {
             Some(client_id) => computer_suggested_recovery(
                 result,
-                RecoveryKind::Reobserve,
                 "computer_list_applications",
                 json!({"client_id": client_id}),
             ),
-            None => computer_reconcile_recovery(
-                result,
-                RecoveryKind::Reobserve,
-                "computer_list_applications",
-            ),
+            None => computer_reconcile_recovery(result, "computer_list_applications"),
         },
         "stale_display" => match client_id {
             Some(client_id) => computer_suggested_recovery(
                 result,
-                RecoveryKind::Reobserve,
                 "computer_list_displays",
                 json!({"client_id": client_id}),
             ),
-            None => computer_reconcile_recovery(
-                result,
-                RecoveryKind::Reobserve,
-                "computer_list_displays",
-            ),
+            None => computer_reconcile_recovery(result, "computer_list_displays"),
         },
         "invalid_request" => result.with_recovery(RecoveryKind::FixInput),
         "permission_denied" => result.with_recovery(RecoveryKind::UserAction),
@@ -2015,7 +1998,6 @@ fn computer_pointer_effect_not_started(
         "stale_snapshot_generation" if valid_display_id(&context.display_id) => {
             computer_suggested_recovery(
                 result,
-                RecoveryKind::Reobserve,
                 "computer_snapshot_display",
                 json!({"client_id": context.client_id, "display_id": context.display_id}),
             )
@@ -2293,7 +2275,6 @@ fn computer_application_effect_outcome_unknown(
     );
     computer_suggested_recovery(
         result,
-        RecoveryKind::Reobserve,
         "computer_list_windows",
         json!({"client_id": client_id}),
     )

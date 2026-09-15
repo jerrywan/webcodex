@@ -605,7 +605,6 @@ fn observe_jobs_failure_item_schema_closes_recovery_metadata() {
                 "success": false,
                 "output": null,
                 "error_kind": "unknown_job",
-                "recovery_kind": "reobserve",
                 "suggested_call": {"tool": "list_jobs", "arguments": {}},
                 "error": "unknown job"
             }],
@@ -622,9 +621,9 @@ fn observe_jobs_failure_item_schema_closes_recovery_metadata() {
     });
     validate(&result).unwrap();
 
-    let mut invalid_kind = result.clone();
-    invalid_kind["output"]["items"][0]["recovery_kind"] = json!("blind_retry");
-    assert!(validate(&invalid_kind).is_err());
+    let mut duplicate_kind = result.clone();
+    duplicate_kind["output"]["items"][0]["recovery_kind"] = json!("reobserve");
+    assert!(validate(&duplicate_kind).is_err());
 
     let mut invalid_tool = result.clone();
     invalid_tool["output"]["items"][0]["suggested_call"]["tool"] = json!("computer_list_windows");
@@ -1956,7 +1955,6 @@ fn computer_recovery_output_schemas_use_canonical_action_shapes() {
     let canonical_recovery = json!({
         "success": false,
         "output": {
-            "recovery_kind": "reobserve",
             "suggested_call": {
                 "tool": "computer_list_windows",
                 "arguments": {"client_id": "special"}
@@ -1965,6 +1963,9 @@ fn computer_recovery_output_schemas_use_canonical_action_shapes() {
         "error": "reobserve"
     });
     test_support::validate_schema_instance(&canonical_recovery, &schema).unwrap();
+    let mut duplicate_kind = canonical_recovery.clone();
+    duplicate_kind["output"]["recovery_kind"] = json!("reobserve");
+    assert!(test_support::validate_schema_instance(&duplicate_kind, &schema).is_err());
 
     let mut legacy = canonical_recovery.clone();
     legacy["output"]["recovery_tool"] = json!("computer_list_windows");
@@ -1986,7 +1987,6 @@ fn skill_recovery_output_schema_accepts_canonical_shapes_and_declares_legacy_rej
             "skill_key": "demo",
             "outcome_unknown": true,
             "state_changed": null,
-            "recovery_kind": "reconcile",
             "suggested_call": {
                 "tool": "skill_versions",
                 "arguments": {
@@ -2005,6 +2005,7 @@ fn skill_recovery_output_schema_accepts_canonical_shapes_and_declares_legacy_rej
         .as_object_mut()
         .unwrap()
         .remove("suggested_call");
+    family_only["output"]["recovery_kind"] = json!("reconcile");
     family_only["output"]["reconcile_with"] = json!("skill_versions");
     test_support::validate_schema_instance(&family_only, &schema).unwrap();
 
@@ -2024,7 +2025,13 @@ fn skill_recovery_output_schema_accepts_canonical_shapes_and_declares_legacy_rej
         .any(|constraint| constraint["not"]["required"] == json!(["recovery_tool"])));
     assert!(recovery_constraints.iter().any(|constraint| {
         constraint["if"]["required"] == json!(["suggested_call"])
-            && constraint["then"]["not"]["required"] == json!(["reconcile_with"])
+            && constraint["then"]["not"]["anyOf"]
+                .as_array()
+                .is_some_and(|forbidden| {
+                    forbidden
+                        .iter()
+                        .any(|entry| entry["required"] == json!(["recovery_kind"]))
+                })
     }));
     assert!(recovery_constraints.iter().any(|constraint| {
         constraint["if"]["required"] == json!(["reconcile_with"])

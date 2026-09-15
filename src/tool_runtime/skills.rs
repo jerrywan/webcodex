@@ -2012,7 +2012,6 @@ fn skill_error_dynamic(
         let target = output
             .as_object_mut()
             .expect("Skill store error projection is always an object");
-        target.insert("recovery_kind".to_string(), json!("reconcile"));
         if !project.is_empty() {
             if let Some(skill_key) = recovery_skill_key.as_deref() {
                 target.insert(
@@ -2024,9 +2023,11 @@ fn skill_error_dynamic(
                     .to_value(),
                 );
             } else {
+                target.insert("recovery_kind".to_string(), json!("reconcile"));
                 target.insert("reconcile_with".to_string(), json!("skill_versions"));
             }
         } else {
+            target.insert("recovery_kind".to_string(), json!("reconcile"));
             target.insert("reconcile_with".to_string(), json!("skill_versions"));
         }
         if outcome_unknown {

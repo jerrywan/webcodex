@@ -590,7 +590,6 @@ fn observe_jobs_output_schema() -> Value {
                 }
             },
             "else": {
-                "required": ["recovery_kind"],
                 "properties": {
                     "output": {"type": "null"},
                     "error_kind": {"type": "string"},
@@ -606,8 +605,16 @@ fn observe_jobs_output_schema() -> Value {
         },
         "then": {
             "required": ["suggested_call"],
-            "properties": {"recovery_kind": {"const": "reobserve"}}
+            "not": {"required": ["recovery_kind"]}
         }
+    }));
+    item["allOf"].as_array_mut().unwrap().push(json!({
+        "if": {
+            "properties": {"success": {"const": false}},
+            "required": ["success"],
+            "not": {"required": ["suggested_call"]}
+        },
+        "then": {"required": ["recovery_kind"]}
     }));
     let batch_output = json!({
         "type": "object",
