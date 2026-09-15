@@ -66,7 +66,10 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         "adaptive runtime preferred batch-capable inspect tool",
         "including when only one known range is needed",
     ] {
-        assert!(!read_files_desc.contains(obsolete), "obsolete read ritual: {read_files_desc}");
+        assert!(
+            !read_files_desc.contains(obsolete),
+            "obsolete read ritual: {read_files_desc}"
+        );
     }
 
     for phrase in [
@@ -402,16 +405,27 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         );
     }
     let cargo_test_desc = desc("cargo_test");
-    for phrase in ["executed-test evidence", "min_tests/require_tests", "bounded output"] {
+    for phrase in [
+        "executed-test evidence",
+        "min_tests/require_tests",
+        "bounded output",
+    ] {
         assert!(cargo_test_desc.contains(phrase), "cargo_test: {phrase}");
     }
     let go_test_desc = desc("go_test");
-    for phrase in ["structured option for common supported", "go json test-count evidence"] {
+    for phrase in [
+        "structured option for common supported",
+        "go json test-count evidence",
+    ] {
         assert!(go_test_desc.contains(phrase), "go_test: {phrase}");
     }
     assert!(!go_test_desc.contains("preferred structured"));
     let cargo_fmt_desc = desc("cargo_fmt");
-    for phrase in ["ensure rust formatting", "precheck", "changed/state_changed"] {
+    for phrase in [
+        "ensure rust formatting",
+        "precheck",
+        "changed/state_changed",
+    ] {
         assert!(cargo_fmt_desc.contains(phrase), "cargo_fmt: {phrase}");
     }
 
