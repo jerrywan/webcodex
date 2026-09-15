@@ -372,7 +372,13 @@ fn suggested_read_files_arguments_schema() -> Value {
                     "properties": {
                         "path": schema_type("string", "Original project-relative path."),
                         "start_line": schema_type("integer", "Original line offset for unreturned items, or the next unread line for a partial range."),
-                        "limit": schema_type("integer", "Original limit for unreturned items, or the bounded remaining range for a partial item.")
+                        "limit": schema_type("integer", "Original limit for unreturned items, or the bounded remaining range for a partial item."),
+                        "expected_read_revision": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991_u64,
+                            "description": "Snapshot fence retained from an unreturned original item, or bound to the observed read_revision for a continued partial range."
+                        }
                     },
                     "required": ["path"]
                 }
@@ -469,7 +475,8 @@ fn read_files_output_schema() -> Value {
                 "enum": [
                     "invalid_path", "sensitive_path", "not_found", "not_file",
                     "permission_denied", "invalid_utf8", "range_too_large",
-                    "agent_unavailable", "timeout", "malformed_agent_response", "io_error"
+                    "agent_unavailable", "timeout", "malformed_agent_response", "io_error",
+                    "stale_read_revision"
                 ]
             },
             "path": schema_type("string", "Project-relative input path."),
@@ -508,7 +515,7 @@ fn read_files_output_schema() -> Value {
             "truncation_reason": {"type": "string", "enum": ["batch_response_budget", "hard_result_cap"]},
             "suggested_call": suggested_tool_call_schema(
                 "read_files", suggested_read_files_arguments_schema(),
-                "One parser-ready follow-up: unread returned ranges in original order, then unreturned original items. Positions are not snapshot-stable; compare each file's read_revision across calls before joining. A zero-progress request may instead raise max_result_bytes; at the hard cap no fake call is offered.",
+                "One parser-ready follow-up: unread returned ranges are fenced to their observed read_revision, followed by unreturned original items. Follow it directly; Runtime rejects a continued item if its file snapshot changed. A zero-progress request may instead raise max_result_bytes; at the hard cap no fake call is offered.",
             ),
             "session_hint": session_hint_schema(),
             "permission": permission_decision_schema()

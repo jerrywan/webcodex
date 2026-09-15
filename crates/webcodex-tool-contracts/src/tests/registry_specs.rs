@@ -48,7 +48,8 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         "business session_id",
         "read_revision",
         "single output-level suggested_call",
-        "not snapshot-stable",
+        "continued ranges are fenced",
+        "runtime rejects a continuation",
     ] {
         assert!(
             read_files_desc.contains(phrase),

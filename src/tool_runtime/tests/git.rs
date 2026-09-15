@@ -5829,6 +5829,7 @@ async fn show_changes_with_session_id_returns_session_block_and_records_call() {
                             path: "README.md".to_string(),
                             start_line: None,
                             limit: Some(1),
+                            expected_read_revision: None,
                         }],
                         session_id: Some(session_id),
                         with_line_numbers: None,

@@ -830,6 +830,7 @@ async fn restart_restored_coding_task_session_reloads_rules_without_persisting_b
                 path: "src/restart.rs".to_string(),
                 start_line: None,
                 limit: None,
+                expected_read_revision: None,
             }],
             session_id: Some(session_id.clone()),
             with_line_numbers: None,

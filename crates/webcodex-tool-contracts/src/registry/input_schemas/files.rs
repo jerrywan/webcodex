@@ -277,6 +277,12 @@ pub fn read_files_input_schema() -> Value {
                 "limit": {
                     "type": "integer",
                     "description": "Optional maximum line count; normalized by the canonical file-read range rules."
+                },
+                "expected_read_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991_u64,
+                    "description": "Optional full-file snapshot fence from a previous read_files result for this exact Project/path. Runtime rejects the item if that snapshot is no longer current."
                 }
             }
         }

@@ -140,9 +140,9 @@ pub(super) const READ_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE.review(super::ToolReviewEvidence::ReadOnlyInspection).exploration(super::ToolExplorationEvidence::ReadBatch),
             ),
-            "Adaptive Runtime preferred batch-capable inspect tool, including when only one known range is needed. Reads 1..8 UTF-8 ranges. Successful items expose read_revision for the exact full-file snapshot. Follow the single output-level suggested_call: it combines unread returned ranges in original order with unreturned original items. These positions are not snapshot-stable; compare each file's read_revision across calls before joining ranges. The call binds the exact resolved Project and business session_id. Zero progress may suggest a larger max_result_bytes; the 512 KiB hard cap exposes no fake continuation.",
+            "Adaptive Runtime preferred batch-capable inspect tool, including when only one known range is needed. Reads 1..8 UTF-8 ranges. Successful items expose read_revision for the exact full-file snapshot. Successful partial reads return a single output-level suggested_call whose continued ranges are fenced to the observed read_revision; follow it directly and Runtime rejects a continuation if the file snapshot changed. The call binds the exact resolved Project and business session_id. Zero progress may suggest a larger max_result_bytes; the 512 KiB hard cap exposes no fake continuation.",
             read_files_input_schema,
-        ).with_gpt_action_description("Batch-read 1..8 UTF-8 project ranges. Follow the single suggested_call for unread ranges and remaining items. Positions are not snapshot-stable: compare each file's read_revision across calls before joining. Zero progress may suggest a larger budget; the hard cap exposes no fake call.")),
+        ).with_gpt_action_description("Batch-read 1..8 UTF-8 project ranges. Follow the single suggested_call directly: continued ranges are fenced to their observed read_revision, and Runtime rejects changed snapshots. Zero progress may suggest a larger budget; the hard cap exposes no fake call.")),
         50,
     ),
 ];

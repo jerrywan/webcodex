@@ -74,6 +74,33 @@ impl ReadModelProjection {
     }
 }
 
+fn read_revision_target(
+    resolved: &ResolvedProject,
+    path: &str,
+    runner_instance_id: &str,
+) -> ReadRevisionTarget {
+    ReadRevisionTarget {
+        project_id: resolved.resolved_id.clone(),
+        path: path.to_string(),
+        client_id: resolved.config.client_id.clone(),
+        runner_instance_id: runner_instance_id.to_string(),
+        project_root: resolved.config.path.clone(),
+        root_fingerprint: resolved.root_fingerprint.clone(),
+    }
+}
+
+fn stale_read_revision_failure(path: &str) -> ToolResult {
+    ToolResult::err_with_output(
+        "read_file failed: stale_read_revision",
+        json!({
+            "error_kind": "read_file_failed",
+            "reason_code": "stale_read_revision",
+            "path": path,
+            "state_changed": false,
+        }),
+    )
+}
+
 fn read_range_next_item(item: &Value) -> Option<ReadFilesItem> {
     if item.get("success").and_then(Value::as_bool) != Some(true) {
         return None;
@@ -82,9 +109,7 @@ fn read_range_next_item(item: &Value) -> Option<ReadFilesItem> {
     if output.get("has_more").and_then(Value::as_bool) != Some(true) {
         return None;
     }
-    // A positional follow-up needs the current full-file snapshot identity in
-    // the result, so callers can compare it with the next read before joining.
-    output.get("read_revision")?.as_u64()?;
+    let read_revision = output.get("read_revision")?.as_u64()?;
     let next_start_line = output.get("next_start_line")?.as_u64()? as usize;
     let total_lines = output.get("total_lines")?.as_u64()? as usize;
     let remaining_lines = total_lines
@@ -102,6 +127,7 @@ fn read_range_next_item(item: &Value) -> Option<ReadFilesItem> {
         path: item.get("path")?.as_str()?.to_string(),
         start_line: Some(next_start_line),
         limit: Some(requested_limit.min(remaining_lines).max(1)),
+        expected_read_revision: Some(read_revision),
     })
 }
 
@@ -122,6 +148,9 @@ fn read_files_suggested_arguments(
             if let Some(limit) = item.limit {
                 suggested["limit"] = json!(limit);
             }
+            if let Some(expected_read_revision) = item.expected_read_revision {
+                suggested["expected_read_revision"] = json!(expected_read_revision);
+            }
             suggested
         })
         .collect::<Vec<_>>();
@@ -141,9 +170,9 @@ fn read_files_suggested_arguments(
     arguments
 }
 
-/// Project one parser-ready follow-up for the invocation. Positions are not
-/// snapshot-stable: each item's read_revision remains the full-file identity
-/// to compare with the next read. No separate source-identity alias is needed.
+/// Project one parser-ready follow-up for the invocation. Continued ranges are
+/// fenced to the read_revision observed for the returned partial item; original
+/// unreturned items retain exactly the caller-supplied shape.
 pub(crate) fn add_actionable_read_continuations(
     projection: &ReadModelProjection,
     result: &mut ToolResult,
@@ -761,13 +790,28 @@ impl ToolRuntime {
         let mut completed: Vec<Value> =
             stream::iter(items.into_iter().enumerate().map(|(index, item)| {
                 let project = &resolved.config;
-                let project_id = runtime_project_id.clone();
                 let runner_project_id = runner_project_id.clone();
                 let runner_instance_id = runner_instance_id.clone();
-                let root_fingerprint = resolved.root_fingerprint.clone();
                 async move {
                     let path = item.path;
-                    let result = self
+                    let target = read_revision_target(resolved, &path, &runner_instance_id);
+                    let expected_sha256 = match item.expected_read_revision {
+                        Some(revision) => match self.read_revisions.resolve(revision, &target) {
+                            Ok(sha256) => Some(sha256),
+                            Err(_) => {
+                                let result = stale_read_revision_failure(&path);
+                                return json!({
+                                    "index": index,
+                                    "path": path,
+                                    "success": false,
+                                    "output": result.output,
+                                    "error": result.error,
+                                });
+                            }
+                        },
+                        None => None,
+                    };
+                    let mut result = self
                         .read_one_resolved_project_file(
                             project,
                             &runner_project_id,
@@ -779,6 +823,14 @@ impl ToolRuntime {
                             deadline,
                         )
                         .await;
+                    if result.success {
+                        if let Some(expected_sha256) = expected_sha256.as_deref() {
+                            let actual_sha256 = result.output.get("sha256").and_then(Value::as_str);
+                            if actual_sha256 != Some(expected_sha256) {
+                                result = stale_read_revision_failure(&path);
+                            }
+                        }
+                    }
                     let success = result.success;
                     let error = result.error;
                     let mut output = result.output;
@@ -788,17 +840,7 @@ impl ToolRuntime {
                             .and_then(Value::as_str)
                             .map(str::to_string)
                         {
-                            let read_revision = self.read_revisions.observe(
-                                ReadRevisionTarget {
-                                    project_id,
-                                    path: path.clone(),
-                                    client_id: project.client_id.clone(),
-                                    runner_instance_id,
-                                    project_root: project.path.clone(),
-                                    root_fingerprint,
-                                },
-                                sha256,
-                            );
+                            let read_revision = self.read_revisions.observe(target, sha256);
                             if let Some(output) = output.as_object_mut() {
                                 output.insert("read_revision".to_string(), json!(read_revision));
                             }
@@ -842,6 +884,7 @@ mod tests {
                     path: format!("src/{index}.rs"),
                     start_line: None,
                     limit: None,
+                    expected_read_revision: None,
                 })
                 .collect(),
             with_line_numbers: None,
@@ -1019,7 +1062,11 @@ mod tests {
         let second = vec!["y".repeat(140 * 1024)];
         let third = vec!["z".to_string()];
         let mut projection = batch_projection(3, Some(legacy_budget));
-        if let ReadModelProjection::Batch { session_id, .. } = &mut projection {
+        if let ReadModelProjection::Batch {
+            items, session_id, ..
+        } = &mut projection
+        {
+            items[1].expected_read_revision = Some(1234);
             *session_id = Some("wc_sess_batch_recovery".to_string());
         }
         let output = apply_output_budget(
@@ -1055,6 +1102,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["src/1.rs", "src/2.rs"]
         );
+        assert_eq!(
+            suggested["arguments"]["items"][0]["expected_read_revision"],
+            1234
+        );
+        assert!(suggested["arguments"]["items"][1]
+            .get("expected_read_revision")
+            .is_none());
         let next = ToolCall::from_tool_name(
             suggested["tool"].as_str().unwrap(),
             suggested["arguments"].clone(),
@@ -1106,6 +1160,10 @@ mod tests {
             assert_eq!(remaining.len(), count - partial_index);
             assert_eq!(remaining[0]["start_line"], next_start);
             assert_eq!(remaining[0]["limit"], next_limit);
+            assert_eq!(remaining[0]["expected_read_revision"], revision);
+            for item in remaining.iter().skip(1) {
+                assert!(item.get("expected_read_revision").is_none());
+            }
             for (offset, item) in remaining.iter().enumerate() {
                 assert_eq!(item["path"], format!("src/{}.rs", partial_index + offset));
             }
@@ -1375,6 +1433,7 @@ mod tests {
                 path: "src/0.rs".to_string(),
                 start_line: Some(11),
                 limit: Some(1),
+                expected_read_revision: None,
             }],
             with_line_numbers: None,
             max_result_bytes: None,
@@ -1481,6 +1540,7 @@ mod tests {
                     path: "src/lib.rs".to_string(),
                     start_line: None,
                     limit: None,
+                    expected_read_revision: None,
                 }],
                 session_id: None,
                 with_line_numbers: None,

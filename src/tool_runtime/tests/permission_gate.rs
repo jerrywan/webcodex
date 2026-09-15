@@ -298,6 +298,7 @@ async fn observe_tool_skips_permission_evaluator() {
                             path: "README.md".to_string(),
                             start_line: None,
                             limit: None,
+                            expected_read_revision: None,
                         }],
                         session_id: None,
                         with_line_numbers: None,
