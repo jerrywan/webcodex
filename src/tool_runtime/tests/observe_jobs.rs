@@ -90,6 +90,7 @@ async fn update_observed_job(
             error: None,
             command_execution_state: None,
             validation_progress: None,
+            test_count_evidence: None,
             activity,
             finished,
         })
@@ -1400,6 +1401,7 @@ async fn ordinary_receipts_production_sqlite_dual_restart_observe_and_list_filte
             error: None,
             command_execution_state: None,
             validation_progress: None,
+            test_count_evidence: None,
             activity: None,
             finished: true,
         })
@@ -1565,6 +1567,7 @@ async fn observe_jobs_terminal_policy_coalesces_noisy_jobs_with_one_deadline_and
             error: None,
             command_execution_state: None,
             validation_progress: None,
+            test_count_evidence: None,
             activity: Some(process_activity()),
             finished: false,
         })

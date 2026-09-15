@@ -141,6 +141,7 @@ fn cargo_test_update(
         error: None,
         command_execution_state: None,
         validation_progress: Some(progress),
+        test_count_evidence: None,
         activity,
         finished,
     }

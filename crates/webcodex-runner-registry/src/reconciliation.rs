@@ -288,6 +288,20 @@ fn validate_snapshot(
     validate_context(client_id, projects, require_project_membership, snapshot)?;
     validate_stream_snapshot(&snapshot.stdout, "stdout")?;
     validate_stream_snapshot(&snapshot.stderr, "stderr")?;
+    if let Some(evidence) = snapshot.test_count_evidence.as_ref() {
+        let cargo_test = snapshot
+            .context
+            .validation
+            .as_ref()
+            .is_some_and(|metadata| {
+                metadata.tool == "cargo_test"
+                    && metadata.kind == "test"
+                    && metadata.no_run != Some(true)
+            });
+        if !cargo_test || !lifecycle.is_terminal() || !evidence.is_valid() {
+            return Err("job inventory test_count_evidence is inconsistent".to_string());
+        }
+    }
     if snapshot.context.validation_steps.is_empty() && snapshot.validation_progress.is_some() {
         return Err("job inventory validation_progress is unexpected".to_string());
     }
@@ -698,6 +712,7 @@ pub(crate) fn record_from_snapshot(
         validation_steps: context.validation_steps.clone(),
         validation: context.validation.clone(),
         validation_progress: snapshot.validation_progress.clone(),
+        test_count_evidence: snapshot.test_count_evidence.clone(),
         activity: snapshot.activity,
         visibility: super::state::ShellJobVisibility::Public,
         last_update_seq: snapshot.update_seq,
@@ -731,6 +746,7 @@ fn apply_snapshot(
     job.command_execution_state = snapshot.command_execution_state;
     job.structured_execution = snapshot.context.structured_execution.clone();
     job.validation_progress = snapshot.validation_progress.clone();
+    job.test_count_evidence = snapshot.test_count_evidence.clone();
     job.activity = snapshot.activity;
     job.validation = snapshot.context.validation.clone();
     replace_log_from_snapshot(&mut job.stdout, &snapshot.stdout);

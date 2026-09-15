@@ -307,6 +307,7 @@ async fn update_agent_shell_job(
             error: error.map(str::to_string),
             command_execution_state,
             validation_progress: None,
+            test_count_evidence: None,
             activity: None,
             finished,
         })
@@ -1701,6 +1702,7 @@ async fn mark_next_agent_job_running(runtime: &ToolRuntime, client_id: &str) -> 
             error: None,
             command_execution_state: None,
             validation_progress: None,
+            test_count_evidence: None,
             activity: None,
             finished: false,
         })

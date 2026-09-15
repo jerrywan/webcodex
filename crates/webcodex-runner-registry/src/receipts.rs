@@ -146,6 +146,7 @@ fn capture(job: &ShellJobRecord) -> Option<RetainedJobReceipt> {
             stdout: stream(&job.stdout),
             stderr: stream(&job.stderr),
             validation_progress: job.validation_progress.clone(),
+            test_count_evidence: job.test_count_evidence.clone(),
             activity: None,
         },
     };
