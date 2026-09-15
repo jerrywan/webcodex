@@ -184,15 +184,15 @@ async fn read_project_artifact_emits_parser_ready_snapshot_fenced_continuation()
     )
     .await;
     let project = agent_test_project_id("artifact-read");
+    let project_input = "agent-proj".to_string();
     let sha256 = "c".repeat(64);
 
     let first_task = tokio::spawn({
         let runtime = runtime.clone();
-        let project = project.clone();
         async move {
             runtime
                 .read_project_artifact(
-                    project,
+                    project_input,
                     "data.bin".to_string(),
                     None,
                     Some(0),

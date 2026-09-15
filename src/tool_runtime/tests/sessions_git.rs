@@ -196,7 +196,7 @@ async fn run_git_log_page_with_stdout(
         },
     )
     .await;
-    let project = agent_test_project_id(client_id);
+    let project = "agent-proj".to_string();
     let task = tokio::spawn({
         let runtime = runtime.clone();
         async move {
@@ -303,6 +303,10 @@ async fn git_log_snapshot_continuation_survives_head_advance_without_gap_or_dupl
     assert_eq!(snapshot.len(), 40);
     let first_next = &first.output["suggested_call"];
     assert_eq!(first_next["tool"], "git_log");
+    assert_eq!(
+        first_next["arguments"]["project"],
+        agent_test_project_id("git-log-multipage")
+    );
     assert_eq!(first_next["arguments"]["head_commit"], snapshot);
     assert_eq!(first_next["arguments"]["limit"], 2);
     assert_eq!(first_next["arguments"]["skip"], 2);

@@ -216,6 +216,10 @@ impl ToolRuntime {
             },
             None => None,
         };
+        let resolved_project = match self.resolve_project_input(&project).await {
+            Ok(resolved) => resolved.resolved_id,
+            Err(error) => return ToolResult::err(error),
+        };
         let limit = normalize_git_log_limit(limit);
         let skip = normalize_git_log_skip(skip);
         let command = head_commit.as_deref().map_or_else(
@@ -223,7 +227,7 @@ impl ToolRuntime {
             |head| git_log_command_at_head(head, limit, skip),
         );
         let output = match self
-            .run_project_command_capture(&project, command, 30, None)
+            .run_project_command_capture(&resolved_project, command, 30, None)
             .await
         {
             Ok(output) => output,
@@ -280,7 +284,7 @@ impl ToolRuntime {
         });
         if let (Some(next_skip), Some(head_commit)) = (next_skip, head_commit.as_deref()) {
             payload["suggested_call"] = git_log_suggested_call(
-                &project,
+                &resolved_project,
                 head_commit,
                 limit,
                 next_skip,

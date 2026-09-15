@@ -694,10 +694,12 @@ impl ToolRuntime {
                 MAX_READ_PROJECT_ARTIFACT_LENGTH
             ));
         }
-        let proj = match self.resolve_project(&project).await {
-            Ok(p) => p,
-            Err(e) => return ToolResult::err(e),
+        let resolved = match self.resolve_project_input(&project).await {
+            Ok(resolved) => resolved,
+            Err(error) => return ToolResult::err(error),
         };
+        let resolved_project = resolved.resolved_id.clone();
+        let proj = resolved.config;
         let client_id = proj.client_id.clone();
         let mut payload = json!({
             "path": path.clone(),
@@ -790,7 +792,7 @@ impl ToolRuntime {
             if let (Some(observed_sha256), Some(next_offset)) = (observed_sha256, next_offset) {
                 if is_hex_sha256(observed_sha256) {
                     let mut arguments = json!({
-                        "project": project,
+                        "project": resolved_project,
                         "path": path,
                         "encoding": "base64",
                         "offset": next_offset,
