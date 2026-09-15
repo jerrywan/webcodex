@@ -307,7 +307,7 @@ fn search_project_texts_output_schema() -> Value {
             "suggested_call": suggested_tool_call_schema(
                 "search_project_texts",
                 crate::registry::input_schemas::search_project_texts_input_schema(),
-                "Parser-ready whole-query suffix rerun. Zero-progress soft-budget results may raise max_result_bytes; hard-cap zero progress exposes no fake next call."
+                "Parser-ready whole-query suffix rerun when the complete call itself fits the bounded model result. If it cannot fit, Runtime keeps truncation truthful and exposes no raw cursor or oversized fake call. Zero-progress soft-budget results may raise max_result_bytes; hard-cap zero progress exposes no fake next call."
             ),
             "session_hint": session_hint_schema(),
             "permission": permission_decision_schema()

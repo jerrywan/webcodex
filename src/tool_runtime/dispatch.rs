@@ -477,19 +477,28 @@ impl ModelFacingProjectionPlan {
             }
             ModelFacingProjection::Search(projection) => {
                 if let SearchModelProjection::Batch {
+                    project,
+                    queries,
+                    session_id,
                     default_timeouts,
                     max_result_bytes,
-                    ..
                 } = &projection
                 {
                     super::search_project_texts::apply_model_facing_output_budget(
                         result,
                         default_timeouts,
                         *max_result_bytes,
+                        project,
+                        queries,
+                        session_id.as_deref(),
                     );
                     super::search_project_texts::enforce_final_model_facing_hard_cap(
                         result,
                         default_timeouts,
+                        project,
+                        queries,
+                        session_id.as_deref(),
+                        *max_result_bytes,
                     );
                 }
                 sparsify_search_success_for_model(&projection, result);

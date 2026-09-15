@@ -110,9 +110,9 @@ pub(super) const SEARCH_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE.review(super::ToolReviewEvidence::Search).exploration(super::ToolExplorationEvidence::SearchBatch),
             ),
-            "Batch-capable project-text search for 1..8 independent queries when bounded structured results, protected-path policy, isolated failures, or portable Runtime search semantics materially help. Runs at most two Runner requests in flight. For one small known-scope search with predictable output, native rg via run_process is first-class. Each query defaults to regex; prefer pattern_mode=literal for identifiers, snippets, paths, and exact text, and request context explicitly. Batch continuation is whole-query through one parser-ready suggested_call; an individual truncated query has no safe match cursor and should be refined instead.",
+            "Batch-capable project-text search for 1..8 independent queries when bounded structured results, protected-path policy, isolated failures, or portable Runtime search semantics materially help. Runs at most two Runner requests in flight. For one small known-scope search with predictable output, native rg via run_process is first-class. Each query defaults to regex; prefer pattern_mode=literal for identifiers, snippets, paths, and exact text, and request context explicitly. Batch continuation is whole-query through one parser-ready suggested_call when that exact suffix call fits the model result budget; otherwise Runtime exposes truncation without a raw cursor or fake call. An individual truncated query has no safe match cursor and should be refined instead.",
             search_project_texts_input_schema,
-        ).with_gpt_action_description("Batch-search project text with 1..8 independent queries. Prefer literal mode for exact text. Follow the whole-query batch suggested_call directly; truncated individual queries must be narrowed/refined, not cursor-guessed.")),
+        ).with_gpt_action_description("Batch-search project text with 1..8 independent queries. Prefer literal mode for exact text. Follow a returned whole-query batch suggested_call directly. If no call fits the bounded result, narrow/refine instead; truncated individual queries must never be cursor-guessed.")),
         40,
     ),
 ];

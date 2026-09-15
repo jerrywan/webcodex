@@ -84,6 +84,8 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         "request context explicitly",
         "whole-query",
         "parser-ready suggested_call",
+        "fits the model result budget",
+        "without a raw cursor or fake call",
         "no safe match cursor",
         "refined",
     ] {
