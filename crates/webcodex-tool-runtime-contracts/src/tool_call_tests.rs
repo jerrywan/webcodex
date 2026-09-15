@@ -38,6 +38,76 @@ fn from_tool_name_parses_unit_tools_with_empty_object() {
     assert!(matches!(call, ToolCall::ListTools { .. }));
 }
 
+#[cfg(feature = "experimental-code-mode")]
+#[test]
+fn code_mode_exec_parses_outer_authority_and_omits_source_from_audit() {
+    const PRIVATE_SOURCE: &str = "const secret = 'NEVER_PERSIST_CODE_MODE_SOURCE'; text(secret);";
+    let session_id = format!("wc_sess_{}", "1".repeat(32));
+    let call = ToolCall::from_tool_name(
+        "code_mode_exec",
+        json!({
+            "project": "agent:special:demo",
+            "session_id": session_id,
+            "source": PRIVATE_SOURCE,
+            "timeout_ms": 7_500,
+        }),
+    )
+    .unwrap();
+    assert_eq!(call.tool_name(), "code_mode_exec");
+    assert_eq!(call.project(), Some("agent:special:demo"));
+    assert_eq!(call.session_id(), Some(session_id.as_str()));
+    let audit = call.session_log_arguments();
+    assert_eq!(audit["project"], "agent:special:demo");
+    assert_eq!(audit["source_bytes"], PRIVATE_SOURCE.len());
+    assert_eq!(audit["timeout_ms"], 7_500);
+    assert!(!audit.to_string().contains("NEVER_PERSIST_CODE_MODE_SOURCE"));
+
+    let result_audit = crate::tool_audit::session_log_result_for_tool(
+        "code_mode_exec",
+        &json!({
+            "content": ["NEVER_PERSIST_CODE_MODE_CONTENT"],
+            "message": "NEVER_PERSIST_CODE_MODE_ERROR_DETAIL",
+            "failure_kind": "runtime_error",
+            "stats": {
+                "tool_calls": 3,
+                "max_in_flight": 2,
+                "duration_ms": 17,
+                "returned_bytes": 31
+            }
+        }),
+    );
+    assert_eq!(result_audit["failure_kind"], "runtime_error");
+    assert_eq!(result_audit["tool_calls"], 3);
+    assert_eq!(result_audit["max_in_flight"], 2);
+    assert_eq!(result_audit["duration_ms"], 17);
+    assert_eq!(result_audit["returned_bytes"], 31);
+    assert!(result_audit.get("content").is_none());
+    assert!(result_audit.get("message").is_none());
+    let result_audit_text = result_audit.to_string();
+    assert!(!result_audit_text.contains("NEVER_PERSIST_CODE_MODE_CONTENT"));
+    assert!(!result_audit_text.contains("NEVER_PERSIST_CODE_MODE_ERROR_DETAIL"));
+}
+
+#[cfg(not(feature = "experimental-code-mode"))]
+#[test]
+fn code_mode_exec_is_not_a_tool_call_without_feature() {
+    let error = ToolCall::from_tool_name(
+        "code_mode_exec",
+        json!({
+            "project": "agent:special:demo",
+            "session_id": format!("wc_sess_{}", "1".repeat(32)),
+            "source": "text('x')",
+        }),
+    )
+    .expect_err("feature-off parser must reject code_mode_exec");
+    assert!(error.contains("unknown tool 'code_mode_exec'"), "{error}");
+    assert!(!is_known_tool_name("code_mode_exec"));
+    assert!(!known_tool_names().any(|name| name == "code_mode_exec"));
+    assert!(!registered_tool_specs()
+        .iter()
+        .any(|spec| spec.name == "code_mode_exec"));
+}
+
 #[test]
 fn apply_text_edits_shorthand_normalizes_once_to_canonical_call() {
     let revision = 3817291045227_u64;

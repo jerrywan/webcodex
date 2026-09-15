@@ -5,6 +5,8 @@ mod agent_waits;
 mod artifacts;
 #[cfg(feature = "workspace-checkpoints")]
 mod checkpoints;
+#[cfg(feature = "experimental-code-mode")]
+mod code_mode;
 mod coding_agents;
 mod coding_tasks;
 mod common;
@@ -42,6 +44,10 @@ pub fn output_schema_for_tool(name: &str) -> Value {
         return schema;
     }
     if let Some(schema) = coding_agents::output_schema_for_tool(name) {
+        return schema;
+    }
+    #[cfg(feature = "experimental-code-mode")]
+    if let Some(schema) = code_mode::output_schema_for_tool(name) {
         return schema;
     }
     if let Some(schema) = computer::output_schema_for_tool(name) {

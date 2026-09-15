@@ -3310,6 +3310,17 @@ mod computer_privacy_tests {
 impl ToolCall {
     pub fn session_log_arguments(&self) -> Value {
         match self {
+            #[cfg(feature = "experimental-code-mode")]
+            Self::CodeModeExec {
+                project,
+                source,
+                timeout_ms,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "source_bytes": source.len(),
+                "timeout_ms": timeout_ms,
+            }),
             Self::RunProcess {
                 project,
                 executable,

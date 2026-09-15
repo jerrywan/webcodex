@@ -1882,6 +1882,22 @@ impl ToolRuntime {
                 self.dispatch_workspace_checkpoint_tool(call).await
             }
 
+            #[cfg(feature = "experimental-code-mode")]
+            ToolCall::CodeModeExec {
+                project: _,
+                session_id,
+                source,
+                timeout_ms,
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => return ToolResult::err("code_mode_exec requires a resolved Project"),
+                };
+                self.code_mode_exec(project, session_id, source, timeout_ms, auth, transport)
+                    .await
+            }
+
             ToolCall::ComputerObserve(_) | ToolCall::ComputerControl(_) => ToolResult::err(
                 "Computer gateways must pass action-sensitive specialized governance".to_string(),
             ),

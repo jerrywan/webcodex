@@ -4,6 +4,8 @@ mod artifacts;
 #[cfg(feature = "workspace-checkpoints")]
 mod checkpoints;
 mod cleanup;
+#[cfg(feature = "experimental-code-mode")]
+mod code_mode;
 mod coding;
 mod coding_agents;
 mod common;
@@ -56,6 +58,8 @@ pub use cleanup::{
     delete_project_files_input_schema, discard_untracked_input_schema,
     git_restore_paths_input_schema,
 };
+#[cfg(feature = "experimental-code-mode")]
+pub use code_mode::code_mode_exec_input_schema;
 pub use coding::{finish_coding_task_input_schema, work_on_project_input_schema};
 pub use coding_agents::{
     coding_agent_cancel_input_schema, coding_agent_observe_input_schema,

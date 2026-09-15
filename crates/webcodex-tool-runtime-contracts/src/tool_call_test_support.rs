@@ -137,6 +137,7 @@ fn sample_field_value(field: &str) -> Value {
         "run_id" => json!("wc_agent_run_sample_1234"),
         "shell_id" => json!("wc_shell_123"),
         "session_id" => json!(format!("wc_sess_{}", "1".repeat(32))),
+        "source" => json!("text('ok');"),
         "checkpoint_id" => json!("wc_ckpt_1234"),
         "confirm" => json!(true),
         "client_id" => json!("oe"),

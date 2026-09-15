@@ -44,6 +44,61 @@ fn tool_definitions_cover_known_names_and_public_specs() {
     assert_eq!(registered_tool_names(), visible_definition_order);
 }
 
+#[cfg(feature = "experimental-code-mode")]
+#[test]
+fn experimental_code_mode_is_visible_read_only_and_feature_scoped() {
+    let definition = lookup_tool_definition("code_mode_exec").expect("code_mode_exec definition");
+    let metadata = definition.metadata();
+    assert!(definition.visibility.is_model_visible());
+    assert_eq!(metadata.effect, ToolEffect::Observe);
+    assert_eq!(metadata.risk, ToolRisk::Read);
+    assert_eq!(metadata.approval, ToolApprovalPolicy::None);
+    assert_eq!(metadata.idempotency, ToolIdempotency::PureRead);
+    assert_eq!(definition.adaptive_runtime_direct_rank(), Some(45));
+    assert!(registered_tool_specs()
+        .iter()
+        .any(|spec| spec.name == "code_mode_exec"));
+    assert!(TOOL_DISCOVERY_GROUPS
+        .iter()
+        .filter(|group| matches!(
+            group.name,
+            TOOL_DISCOVERY_GROUP_INSPECT | TOOL_DISCOVERY_GROUP_RUNTIME
+        ))
+        .all(|group| group.tools.contains(&"code_mode_exec")));
+    for intent in ["coding", "audit", "exploration"] {
+        assert!(
+            TOOL_MANIFEST_INTENTS
+                .iter()
+                .find(|profile| profile.name == intent)
+                .unwrap()
+                .tools
+                .contains(&"code_mode_exec"),
+            "{intent}"
+        );
+    }
+    assert!(!LOCAL_CODING_TOOL_NAMES.contains(&"code_mode_exec"));
+}
+
+#[cfg(not(feature = "experimental-code-mode"))]
+#[test]
+fn experimental_code_mode_is_absent_without_feature() {
+    assert!(lookup_tool_definition("code_mode_exec").is_none());
+    assert!(!known_tool_names().any(|name| name == "code_mode_exec"));
+    assert!(!registered_tool_specs()
+        .iter()
+        .any(|spec| spec.name == "code_mode_exec"));
+    assert!(TOOL_DISCOVERY_GROUPS
+        .iter()
+        .all(|group| !group.tools.contains(&"code_mode_exec")));
+    assert!(TOOL_MANIFEST_INTENTS
+        .iter()
+        .all(|intent| !intent.tools.contains(&"code_mode_exec")));
+    assert!(TOOL_RECOMMENDED_FLOWS
+        .iter()
+        .all(|flow| !flow.tools.contains(&"code_mode_exec")));
+    assert!(!LOCAL_CODING_TOOL_NAMES.contains(&"code_mode_exec"));
+}
+
 #[test]
 fn final_changes_requires_the_typed_internal_posix_runner_capability() {
     for name in ["present_changes", "changes_file_diff"] {

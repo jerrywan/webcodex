@@ -978,6 +978,18 @@ pub enum ToolCall {
         session_id: Option<String>,
     },
 
+    /// Execute one bounded read-only JavaScript orchestration cell. Project and
+    /// Workflow Session are mandatory outer authority targets; nested calls may
+    /// not select either target.
+    #[cfg(feature = "experimental-code-mode")]
+    CodeModeExec {
+        project: String,
+        session_id: String,
+        source: String,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+
     /// Execute one native process directly from a structured executable and
     /// argv. No shell parser, environment mutation, PTY, or durable handoff is
     /// part of this synchronous v1 contract.
@@ -3080,6 +3092,8 @@ impl ToolCall {
             Self::WorkspaceCheckpointRestore { .. } => "workspace_checkpoint_restore",
             #[cfg(feature = "workspace-checkpoints")]
             Self::WorkspaceCheckpointDelete { .. } => "workspace_checkpoint_delete",
+            #[cfg(feature = "experimental-code-mode")]
+            Self::CodeModeExec { .. } => "code_mode_exec",
             Self::RunProcess { .. } => "run_process",
             Self::RunDetachedProcess { .. } => "run_detached_process",
             Self::CodingAgentStart { .. } => "coding_agent_start",
@@ -3217,6 +3231,8 @@ impl ToolCall {
 
     pub fn session_id(&self) -> Option<&str> {
         match self {
+            #[cfg(feature = "experimental-code-mode")]
+            Self::CodeModeExec { session_id, .. } => Some(session_id.as_str()),
             Self::RunProcess { session_id, .. }
             | Self::RunDetachedProcess { session_id, .. }
             | Self::RunScript { session_id, .. }
@@ -3352,6 +3368,8 @@ impl ToolCall {
 
     pub fn project(&self) -> Option<&str> {
         match self {
+            #[cfg(feature = "experimental-code-mode")]
+            Self::CodeModeExec { project, .. } => Some(project.as_str()),
             Self::RunProcess { project, .. }
             | Self::RunDetachedProcess { project, .. }
             | Self::CodingAgentStart { project, .. }

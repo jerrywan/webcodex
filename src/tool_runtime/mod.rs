@@ -11,6 +11,8 @@ mod cargo_tools;
 mod changes;
 #[cfg(feature = "workspace-checkpoints")]
 mod checkpoint;
+#[cfg(feature = "experimental-code-mode")]
+mod code_mode;
 mod coding_agent;
 mod coding_task;
 mod coding_task_tools;

@@ -10,6 +10,8 @@ mod agent_waits;
 mod artifacts;
 #[cfg(feature = "workspace-checkpoints")]
 mod checkpoints;
+#[cfg(feature = "experimental-code-mode")]
+mod code_mode;
 mod coding_agents;
 mod communication;
 mod computer;
@@ -1279,6 +1281,8 @@ const TOOL_DEFINITION_GROUPS: &[&[ToolDefinition]] = &[
     #[cfg(feature = "workspace-checkpoints")]
     checkpoints::DEFINITIONS,
     coding_agents::DEFINITIONS,
+    #[cfg(feature = "experimental-code-mode")]
+    code_mode::DEFINITIONS,
     computer::DEFINITIONS,
     diagnostics::DEFINITIONS,
     discovery::DEFINITIONS,
