@@ -464,12 +464,31 @@ async fn receipts_validation_argv_is_omitted_and_inventory_cannot_restore_it() {
         current_step: None,
         failed_step: None,
     });
+    let test_count_evidence = ShellJobTestCountEvidence {
+        tests_detected: true,
+        tests_run_count: Some(6),
+        status: CargoTestCountEvidenceStatus::CompleteSummary,
+    };
+    terminal.test_count_evidence = Some(test_count_evidence.clone());
     a.update_job(terminal).await.unwrap();
-    assert!(store.rows.lock().unwrap()[0]
-        .snapshot
-        .context
-        .validation
-        .is_none());
+    let mut injected_receipt = {
+        let rows = store.rows.lock().unwrap();
+        let stored = &rows[0].snapshot;
+        assert!(stored.context.validation.is_none());
+        assert!(
+            stored.test_count_evidence.is_none(),
+            "receipt must not detach test-count evidence from its omitted validation identity"
+        );
+        rows[0].clone()
+    };
+    injected_receipt.snapshot.test_count_evidence = Some(test_count_evidence);
+    let injected_store = Arc::new(MemoryReceipts::default());
+    injected_store.rows.lock().unwrap().push(injected_receipt);
+    let rejected = durable(&injected_store).await;
+    assert!(
+        rejected.get_job(&job.job_id).await.is_err(),
+        "receipt hydration must reject provenance-free test-count evidence"
+    );
     drop(a);
     let b = durable(&store).await;
     let mut snapshot = snapshot_from_request(&job, &request, "completed", 2, stream("", 1, false));
