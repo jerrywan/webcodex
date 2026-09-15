@@ -1232,23 +1232,19 @@ fn key_tool_output_schemas_include_expected_fields() {
         );
     }
     for name in ["cargo_fmt", "cargo_check", "cargo_test", "go_test"] {
-        assert!(
-            has_output_field(name, "observation_token"),
-            "{name} missing promoted Job observation_token"
-        );
-        assert_eq!(
-            output_schema_property(&specs, name, "observation_token")["maxLength"],
-            webcodex_core::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN
-        );
-        let continuation_semantics = output_schema_property(&specs, name, "continuation_semantics");
-        assert_eq!(
-            continuation_semantics["properties"]["kind"]["const"], "observe",
-            "{name} continuation kind"
-        );
-        assert_eq!(
-            continuation_semantics["properties"]["carrier"]["const"], "observation_token",
-            "{name} continuation carrier"
-        );
+        for redundant in [
+            "observation_token",
+            "continuation_semantics",
+            "execution_source",
+            "purpose",
+            "executor",
+            "shell",
+        ] {
+            assert!(
+                !has_output_field(name, redundant),
+                "{name} model projection must not expose {redundant}"
+            );
+        }
         let continuation = output_schema_property(&specs, name, "continuation");
         assert_eq!(continuation["properties"]["tool"]["const"], "observe_jobs");
         assert_eq!(
@@ -2168,6 +2164,19 @@ fn validation_summary_schema_exposes_optional_recoverable_assertion_label_only()
     let event = &schema["properties"]["output"]["properties"]["validation"]["properties"]["events"]
         ["items"];
     let properties = event["properties"].as_object().unwrap();
+    let expected_purposes = webcodex_core::workflow_session_contract::EXECUTION_PURPOSE_VALUES
+        .iter()
+        .copied()
+        .filter(|purpose| {
+            webcodex_core::workflow_session_contract::is_validation_like_execution_purpose(purpose)
+        })
+        .map(Value::from)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        properties["purpose"]["enum"],
+        Value::Array(expected_purposes),
+        "validation summary purpose vocabulary must derive from canonical ExecutionPurpose classification"
+    );
     let assertion = &properties["assertion_name"];
     assert_eq!(assertion["type"], "string");
     assert_eq!(assertion["minLength"], 1);
@@ -2177,7 +2186,15 @@ fn validation_summary_schema_exposes_optional_recoverable_assertion_label_only()
     );
     let required = event["required"].as_array().unwrap();
     assert!(!required.iter().any(|field| field == "assertion_name"));
-    for hidden in ["expected_failure", "expected_failure_kind"] {
+    for hidden in [
+        "expected_failure",
+        "expected_failure_kind",
+        "execution_success",
+        "failure_category",
+        "execution_source",
+        "summary",
+        "session_id",
+    ] {
         assert!(
             !properties.contains_key(hidden),
             "validation event schema must not expose internal expectation field {hidden}"
