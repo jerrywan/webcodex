@@ -284,7 +284,10 @@ fn bind_mcp_app(
     endpoint_id: &str,
     generation: i64,
 ) -> String {
-    let binding_id = format!("wc_host_binding_{}", uuid::Uuid::new_v4().simple());
+    let binding_id = format!(
+        "wc_host_binding_{}",
+        webcodex_core::compact::random_suffix::<16>()
+    );
     let result = runtime.agent_continuation_bind(
         None,
         agent_id.to_string(),

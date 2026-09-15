@@ -305,7 +305,7 @@ fn observe_jobs_tool_call_enforces_batch_and_scalar_bounds() {
     )
     .is_err());
 
-    let max_token = "x".repeat(192);
+    let max_token = "x".repeat(crate::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN);
     assert!(ToolCall::from_tool_name(
         "observe_jobs",
         json!({"items": [{"job_id": "job", "after_observation_token": max_token}]})
@@ -313,7 +313,14 @@ fn observe_jobs_tool_call_enforces_batch_and_scalar_bounds() {
     .is_ok());
     assert!(ToolCall::from_tool_name(
         "observe_jobs",
-        json!({"items": [{"job_id": "job", "after_observation_token": "x".repeat(193)}]})
+        json!({
+            "items": [{
+                "job_id": "job",
+                "after_observation_token": "x".repeat(
+                    crate::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN + 1
+                )
+            }]
+        })
     )
     .is_err());
 

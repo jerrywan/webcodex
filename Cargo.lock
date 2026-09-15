@@ -5204,7 +5204,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "uuid",
+ "webcodex-core",
  "windows",
  "windows-sys 0.61.2",
  "xcap",

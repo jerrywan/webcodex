@@ -176,7 +176,7 @@ async fn mcp_legacy_protocol_does_not_expose_tasks_extension_methods() {
             rpc(
                 method,
                 Some(Value::from(62)),
-                json!({ "taskId": "wc_exec_ffffffffffffffffffffffffffffffff" }),
+                json!({ "taskId": "wc_exec_________________" }),
             ),
             None,
         )

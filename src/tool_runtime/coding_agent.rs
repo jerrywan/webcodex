@@ -1315,7 +1315,10 @@ fn deterministic_run_id(principal: &str, key: &str) -> String {
     hasher.update(principal.as_bytes());
     hasher.update(b"\0");
     hasher.update(key.as_bytes());
-    format!("wc_agent_run_{:x}", hasher.finalize())
+    format!(
+        "wc_agent_run_{}",
+        webcodex_core::compact::encode(hasher.finalize())
+    )
 }
 
 fn intent_fingerprint(
@@ -1490,8 +1493,7 @@ fn observation_token(
     payload.extend_from_slice(&masked_sequence);
     payload.extend_from_slice(&tag[..PUBLIC_TOKEN_TAG_BYTES]);
     let token = format!("{PUBLIC_TOKEN_PREFIX}{}", URL_SAFE_NO_PAD.encode(payload));
-    debug_assert_eq!(token.len(), 54);
-    assert_eq!(PUBLIC_TOKEN_TAG_BYTES, 16);
+    debug_assert_eq!(token.len(), PUBLIC_TOKEN_MAX_BYTES);
     token
 }
 

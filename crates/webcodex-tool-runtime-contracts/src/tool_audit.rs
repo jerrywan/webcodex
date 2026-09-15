@@ -1491,7 +1491,7 @@ mod computer_privacy_tests {
         const PROJECT_PATH: &str = "/private/native/project/root";
         const JOB_TOKEN: &str = "wjob-private-observation-token";
 
-        let plugin_binding = format!("wc_pbind_{}", "a".repeat(32));
+        let plugin_binding = "wc_pbind_qqqqqqqqqqqqqqqqqqqqqg".to_string();
         let plugin = json!({
             "action": "call",
             "binding": plugin_binding,
@@ -1515,7 +1515,7 @@ mod computer_privacy_tests {
         let ssh = json!({
             "action": "register",
             "runner": "private-runner",
-            "binding": format!("wc_sbind_{}", "b".repeat(32)),
+            "binding": "wc_sbind_u7u7u7u7u7u7u7u7u7u7uw".to_string(),
             "name": "private-ssh-name",
             "target": SSH_TARGET,
             "default_cwd": SSH_CWD
@@ -1649,7 +1649,7 @@ mod computer_privacy_tests {
     fn computer_application_list_ledger_omits_names_ids_and_native_identity() {
         let output = json!({
             "applications": [{
-                "application_id": "application_0123456789abcdef0123456789abcdef",
+                "application_id": "application_iavN7wEjRWeJq83v",
                 "display_name": "Private App",
                 "native_identity": "never-allowed"
             }],
@@ -1716,7 +1716,7 @@ mod computer_privacy_tests {
             "skill_read_file",
             &json!({
                 "project": "agent:test:demo",
-                "skill_id": "wc_skill_0123456789abcdef0123456789abcdef",
+                "skill_id": "wc_skill_ASNFZ4mrze8BI0VniavN7w",
                 "definition_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "path": "SKILL.md",
                 "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1746,7 +1746,7 @@ mod computer_privacy_tests {
                 "expected_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "idempotency_key": "PRIVATE_IDEMPOTENCY_KEY",
                 "activate": true,
-                "expected_state_revision": "wc_skillstate_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                "expected_state_revision": "wc_skillstate_u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7s"
             }),
         );
         let args_serialized = serde_json::to_string(&args).unwrap();
@@ -1764,8 +1764,7 @@ mod computer_privacy_tests {
             idempotency_key: "PRIVATE_IDEMPOTENCY_KEY".to_string(),
             activate: Some(true),
             expected_state_revision: Some(
-                "wc_skillstate_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                    .to_string(),
+                "wc_skillstate_u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7s".to_string(),
             ),
             session_id: None,
         }
@@ -1781,10 +1780,10 @@ mod computer_privacy_tests {
             "skill_versions",
             &json!({
                 "project": "agent:test:demo",
-                "skill_id": "wc_skill_0123456789abcdef0123456789abcdef",
+                "skill_id": "wc_skill_ASNFZ4mrze8BI0VniavN7w",
                 "skill_key": "demo",
-                "state_revision": "wc_skillstate_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                "active_package_revision": "wc_skillpkg_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "state_revision": "wc_skillstate_zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw",
+                "active_package_revision": "wc_skillpkg_3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d0",
                 "total_count": 1,
                 "offset": 0,
                 "next_offset": null,
@@ -1803,9 +1802,9 @@ mod computer_privacy_tests {
             "skill_install",
             &json!({
                 "project": "agent:test:demo",
-                "skill_id": "wc_skill_0123456789abcdef0123456789abcdef",
+                "skill_id": "wc_skill_ASNFZ4mrze8BI0VniavN7w",
                 "skill_key": "demo",
-                "package_revision": "wc_skillpkg_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "package_revision": "wc_skillpkg_3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d0",
                 "definition_revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
                 "artifact_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                 "file_count": 2,
@@ -1813,7 +1812,7 @@ mod computer_privacy_tests {
                 "installed": true,
                 "activated": false,
                 "replayed": false,
-                "state_revision": "wc_skillstate_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "state_revision": "wc_skillstate_zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw",
                 "active_package_revision": null,
                 "raw_skill_body": "PRIVATE_SKILL_BODY",
                 "archive_bytes": "PRIVATE_ZIP_BYTES",
@@ -2106,7 +2105,7 @@ mod computer_privacy_tests {
         let private_body = "PRIVATE_MEMORY_BODY";
         let private_tag = "PRIVATE_MEMORY_TAG";
         let revision = format!("wc_memrev_{}", "a".repeat(64));
-        let memory_id = "wc_mem_0123456789abcdef0123456789abcdef";
+        let memory_id = "wc_mem_iavN7wEjRWeJq83v";
 
         let search_args = session_log_arguments_for_tool_request(
             "memory_search",
@@ -2335,7 +2334,7 @@ mod computer_privacy_tests {
     fn computer_display_list_ledger_omits_ids_and_native_topology() {
         let output = json!({
             "displays": [{
-                "display_id": "display_0123456789abcdef0123456789abcdef",
+                "display_id": "display_iavN7wEjRWeJq83v",
                 "width": 1920,
                 "height": 1080,
                 "primary": true,
@@ -2357,7 +2356,7 @@ mod computer_privacy_tests {
 
     #[test]
     fn computer_display_snapshot_ledger_omits_image_and_native_topology() {
-        let display_id = "display_0123456789abcdef0123456789abcdef";
+        let display_id = "display_iavN7wEjRWeJq83v";
         let request = json!({
             "client_id": "msi",
             "display_id": display_id,
@@ -2477,7 +2476,7 @@ mod computer_privacy_tests {
 
     #[test]
     fn computer_pointer_ledger_keeps_only_source_space_and_opaque_lifecycle_metadata() {
-        let display_id = "display_0123456789abcdef0123456789abcdef";
+        let display_id = "display_iavN7wEjRWeJq83v";
         let request = json!({
             "client_id": "msi",
             "display_id": display_id,
@@ -2543,7 +2542,7 @@ mod computer_privacy_tests {
 
     #[test]
     fn computer_application_launch_ledger_keeps_only_opaque_lifecycle_metadata() {
-        let application_id = "application_0123456789abcdef0123456789abcdef";
+        let application_id = "application_iavN7wEjRWeJq83v";
         let output = json!({
             "application_id": application_id,
             "success": true,

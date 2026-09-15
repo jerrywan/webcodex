@@ -221,7 +221,7 @@ fn ssh_resource_parses_as_canonical_gateway_with_closed_action_vocabulary() {
         "ssh_resource",
         json!({
             "action": "register",
-            "binding": "wc_sbind_0123456789abcdef0123456789abcdef",
+            "binding": "wc_sbind_ASNFZ4mrze8BI0VniavN7w",
             "name": "spe",
             "target": "root@spe",
             "default_cwd": "/root/git"
@@ -1290,7 +1290,7 @@ fn from_tool_name_parses_finish_coding_task_workspace_projection_flag() {
 
 #[test]
 fn observe_session_messages_tool_call_and_audit_are_bounded() {
-    let raw_token = "wsm1:wc_sess_demo:1";
+    let raw_token = "wsm2_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     let call = ToolCall::from_tool_name(
         "observe_session_messages",
         json!({
@@ -1350,7 +1350,7 @@ fn observe_session_messages_tool_call_and_audit_are_bounded() {
         "observe_session_messages",
         json!({
             "session_id": "wc_sess_demo",
-            "after_observation_token": "x".repeat(193)
+            "after_observation_token": "x".repeat(webcodex_core::job_observation::MAX_JOB_OBSERVATION_TOKEN_LEN + 1)
         }),
     );
     assert!(oversized.is_err());

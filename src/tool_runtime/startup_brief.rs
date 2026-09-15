@@ -2095,11 +2095,14 @@ mod tests {
         });
         let extensions = StartupExtensions {
             skills: StartupSkillsCatalog::available(
-                format!("wc_skillcat_{}", "a".repeat(64)),
+                "wc_skillcat_qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo".to_string(),
                 false,
                 (0..64)
                     .map(|index| StartupSkillEntry {
-                        skill_id: format!("wc_skill_{index:032x}"),
+                        skill_id: format!(
+                            "wc_skill_{}",
+                            webcodex_core::compact::encode(&(index as u128).to_be_bytes()[0..])
+                        ),
                         name: format!("skill-{index:02}"),
                         description: format!("skill-{index:02}-{}", "s".repeat(500)),
                         source_scope: "project".to_string(),
@@ -2109,7 +2112,7 @@ mod tests {
                     .collect(),
             ),
             plugins: StartupPluginsCatalog::available(
-                format!("wc_plugcat_{}", "b".repeat(64)),
+                format!("wc_plugcat_{}", webcodex_core::compact::encode([0xbb; 32])),
                 64,
                 (0..64)
                     .map(|index| StartupPluginEntry {

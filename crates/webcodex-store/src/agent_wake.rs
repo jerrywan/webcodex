@@ -2081,6 +2081,24 @@ impl Database {
                     "Explicit Agent Wake activation no longer exists",
                 )
             })?;
+            let expected_hash: String = transaction
+                .query_row(
+                    "SELECT consume_token_hash FROM wc_agent_wake_attempts WHERE attempt_id = ?1",
+                    [&attempt_id],
+                    |row| row.get(0),
+                )
+                .map_err(store_error)?;
+            if attempt.wake_id != wake_id
+                || attempt.endpoint_id != endpoint_id
+                || attempt.controller_generation != expected_controller_generation
+                || expected_hash
+                    != digest_text("webcodex.agent-wake.consume-token.v1", &consume_token)
+            {
+                return Err(CommunicationStoreError::new(
+                    "invalid_activation_receipt",
+                    "Explicit activation receipt does not match its attempt",
+                ));
+            }
             let wake = load_wake(&transaction, wake_id)?.ok_or_else(|| {
                 CommunicationStoreError::new("wake_not_found", "Agent Wake does not exist")
             })?;
@@ -2201,6 +2219,9 @@ impl Database {
                 "Agent Wake changed before explicit activation was accepted",
             ));
         }
+        // Persist this one exact random possession proof in the existing private
+        // idempotency receipt so a lost response/restart returns the same proof.
+        // Other delivery paths continue retaining only their proof hashes.
         record_idempotent_resource(
             &transaction,
             principal,

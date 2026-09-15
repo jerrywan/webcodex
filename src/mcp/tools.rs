@@ -1301,14 +1301,7 @@ pub(super) fn strip_stateless_ack_session_message_ids(
             ));
         };
         let value = value.trim();
-        let valid = value.strip_prefix("wc_msg_").is_some_and(|suffix| {
-            !suffix.is_empty()
-                && suffix
-                    .as_bytes()
-                    .iter()
-                    .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-        });
-        if !valid {
+        if !webcodex_core::workflow_session_contract::is_valid_session_message_id(value) {
             return Err(format!(
                 "field '{}' must contain only valid wc_msg_* ids",
                 crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD
@@ -1349,14 +1342,7 @@ pub(super) fn strip_stateless_session_message_resolution(
         return Err("session_message_resolution.message_id must be a wc_msg_* string".to_string());
     };
     let message_id = message_id.trim().to_string();
-    let valid_message_id = message_id.strip_prefix("wc_msg_").is_some_and(|suffix| {
-        !suffix.is_empty()
-            && suffix
-                .as_bytes()
-                .iter()
-                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-    });
-    if !valid_message_id {
+    if !webcodex_core::workflow_session_contract::is_valid_session_message_id(&message_id) {
         return Err(
             "session_message_resolution.message_id must be a valid wc_msg_* id".to_string(),
         );
