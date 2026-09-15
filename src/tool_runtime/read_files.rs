@@ -722,6 +722,13 @@ impl ToolRuntime {
         }
 
         let runtime_project_id = resolved.resolved_id.clone();
+        let Some(runner_project_id) =
+            crate::tool_runtime::runner_local_project_id(&resolved.resolved_id).map(str::to_string)
+        else {
+            return ToolResult::err(
+                "read_files could not bind the resolved Project to a Runner-local project id",
+            );
+        };
         let requested_count = items.len();
         let with_line_numbers = with_line_numbers.unwrap_or(false);
         let deadline = Instant::now() + self.read_files_deadline;
@@ -755,6 +762,7 @@ impl ToolRuntime {
             stream::iter(items.into_iter().enumerate().map(|(index, item)| {
                 let project = &resolved.config;
                 let project_id = runtime_project_id.clone();
+                let runner_project_id = runner_project_id.clone();
                 let runner_instance_id = runner_instance_id.clone();
                 let root_fingerprint = resolved.root_fingerprint.clone();
                 async move {
@@ -762,6 +770,8 @@ impl ToolRuntime {
                     let result = self
                         .read_one_resolved_project_file(
                             project,
+                            &runner_project_id,
+                            &runner_instance_id,
                             path.clone(),
                             item.start_line,
                             item.limit,

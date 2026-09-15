@@ -18,7 +18,7 @@ use webcodex_core::plugin::{
     validate_response_for_request as validate_plugin_gateway_response, PluginDispatchState,
     PluginGatewayResponse,
 };
-use webcodex_core::runner_operation::{RunnerJobOperation, RunnerOperation};
+use webcodex_core::runner_operation::{RunnerFileOperation, RunnerJobOperation, RunnerOperation};
 use webcodex_core::runner_protocol::{
     RunnerPersistentShellResultRequest, RunnerPollRequest, RunnerRequest, RunnerResultPayload,
     ShellCommandExecutionState, ShellRunResponse,
@@ -532,28 +532,38 @@ impl RunnerRegistry {
                                 .is_some_and(|expected| runner.runner_instance_id != expected) =>
                         {
                             Some(
-                                "stale_runner: target Runner changed before file mutation dispatch"
+                                "stale_runner: target Runner changed before project file dispatch"
                                     .to_string(),
                             )
                         }
                         Some(runner) if runner.owner != pending.expected_runner_owner => Some(
                             "stale_authority: target Runner owner changed before dispatch".to_string(),
                         ),
-                        Some(runner)
-                            if !runner.runner_features.supports(RunnerFeature::FileWrite) =>
-                        {
-                            Some(
-                            "stale_authority: target Runner no longer advertises file_write before dispatch"
-                                .to_string(),
-                            )
-                        }
-                        Some(runner)
-                            if runner.projects.iter().any(|project| {
+                        Some(runner) => {
+                            let required_feature = match &pending.operation {
+                                RunnerOperation::File(RunnerFileOperation::Read(_)) => {
+                                    RunnerFeature::FileRead
+                                }
+                                _ => RunnerFeature::FileWrite,
+                            };
+                            if !runner.runner_features.supports(required_feature) {
+                                Some(format!(
+                                    "stale_authority: target Runner no longer advertises {} before dispatch",
+                                    required_feature.as_wire_name()
+                                ))
+                            } else if runner.projects.iter().any(|project| {
                                 !project.disabled
                                     && project.id == project_id
                                     && project.path == project_cwd
-                            }) => None,
-                        Some(_) | None => Some(format!(
+                            }) {
+                                None
+                            } else {
+                                Some(format!(
+                                    "stale_project: target project {project_id} is no longer registered at the resolved path"
+                                ))
+                            }
+                        }
+                        None => Some(format!(
                             "stale_project: target project {project_id} is no longer registered at the resolved path"
                         )),
                     },

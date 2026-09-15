@@ -686,6 +686,81 @@ impl RunnerRegistry {
         Ok((request_id, rx))
     }
 
+    /// Enqueue one ToolRuntime project-file read against one exact resolved
+    /// Project and Runner process. Project placement, Runner instance identity,
+    /// and file_read are admitted under one registry lock and revalidated
+    /// immediately before dequeue.
+    pub async fn enqueue_project_file_read(
+        &self,
+        body: ShellFileOpRequest,
+        expected_project_id: &str,
+        expected_project_cwd: &str,
+        expected_runner_instance_id: &str,
+        requested_by: String,
+    ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), String> {
+        validate_file_request(&body)?;
+        if body.op != "read" {
+            return Err(format!(
+                "project-file read enqueue does not accept op={}",
+                body.op
+            ));
+        }
+        if expected_project_id.is_empty()
+            || expected_project_cwd.is_empty()
+            || expected_runner_instance_id.is_empty()
+            || body.cwd.as_deref().map(str::trim) != Some(expected_project_cwd)
+        {
+            return Err("project-file read target identity is invalid".to_string());
+        }
+        let request_id = next_request_id();
+        let (tx, rx) = oneshot::channel();
+        let request = encode_file_operation(&request_id, &body, requested_by)?;
+        let mut inner = self.inner.lock().await;
+        self.prune_expired_shared_key_runners_locked(&mut inner, now_ts());
+        let current = inner
+            .runners
+            .get(&body.client_id)
+            .ok_or_else(|| format!("unknown shell client: {}", body.client_id))?;
+        if current.runner_instance_id != expected_runner_instance_id {
+            return Err("stale_runner: target Runner changed before read admission".to_string());
+        }
+        if !current.runner_features.supports(RunnerFeature::FileRead) {
+            return Err(format!(
+                "capability_unavailable: runner {} does not support {RUNNER_CAPABILITY_FILE_READ}",
+                body.client_id
+            ));
+        }
+        if !current.projects.iter().any(|project| {
+            !project.disabled
+                && project.id == expected_project_id
+                && project.path == expected_project_cwd
+        }) {
+            return Err(format!(
+                "stale_project: target project {expected_project_id} is no longer registered at the resolved path"
+            ));
+        }
+        let expected_runner_owner = current.owner.clone();
+        enqueue_pending_request_locked(
+            self.telemetry.as_ref(),
+            &mut inner,
+            &body.client_id,
+            request_id.clone(),
+            request,
+            Some(tx),
+            None,
+        )?;
+        let pending = inner
+            .pending_by_id
+            .get_mut(&request_id)
+            .expect("project-file read was just enqueued");
+        pending.expected_runner_owner = expected_runner_owner;
+        pending.expected_project_id = Some(expected_project_id.to_string());
+        pending.expected_project_cwd = Some(expected_project_cwd.to_string());
+        pending.expected_project_runner_instance_id = Some(expected_runner_instance_id.to_string());
+        notify_runner_locked(&inner, &body.client_id);
+        Ok((request_id, rx))
+    }
+
     /// Enqueue one ToolRuntime project-file mutation against one exact resolved
     /// Project and Runner process. Project placement, Runner instance identity,
     /// file_write, and apply_text_edits additive capabilities are admitted under
