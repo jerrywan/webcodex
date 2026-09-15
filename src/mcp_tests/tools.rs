@@ -723,6 +723,12 @@ fn stateless_workflow_recorder_metadata_does_not_expand_project_connector_or_loc
             "Echo the latest retained session_context_revision when known. Only use a revision actually retained in model context. This is tool-specific invocation metadata; never copy it into a tool whose current contract says it is ignored/inapplicable."
         );
         assert!(
+            !serde_json::to_string(&tool["outputSchema"])
+                .unwrap()
+                .contains("ignored_invocation_metadata"),
+            "{name} must not advertise ignored metadata it can never emit"
+        );
+        assert!(
             tool["outputSchema"]["properties"]["output"]["properties"]["session_continuity"]
                 ["properties"]["status"]["enum"]
                 .as_array()

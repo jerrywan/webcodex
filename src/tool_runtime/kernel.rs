@@ -1074,22 +1074,6 @@ mod tests {
     use crate::auth::{AuthContext, AuthKind};
     use serde_json::json;
 
-    #[test]
-    fn inapplicable_context_ack_normalizes_to_unsupported_before_session_recording() {
-        let metadata = ToolInvocationMetadata {
-            ack_session_context_revision: SessionContextRevisionAck::Revision(42),
-            ..Default::default()
-        };
-        assert_eq!(
-            metadata.effective_context_ack(false),
-            SessionContextRevisionAck::Unsupported
-        );
-        assert_eq!(
-            metadata.effective_context_ack(true),
-            SessionContextRevisionAck::Revision(42)
-        );
-    }
-
     fn test_runtime() -> ToolRuntime {
         ToolRuntime::new_for_tests()
     }

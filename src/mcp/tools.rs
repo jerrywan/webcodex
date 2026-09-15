@@ -448,16 +448,18 @@ fn add_context_projection_to_output_shape(
     if schema.get("type").and_then(Value::as_str) == Some("object") {
         if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
             properties.insert("context_projection".to_string(), projection_schema.clone());
-            properties.insert(IGNORED_INVOCATION_METADATA_FIELD.to_string(), json!({
-                "type": "array",
-                "maxItems": 1,
-                "uniqueItems": true,
-                "items": {
-                    "type": "string",
-                    "enum": [crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD]
-                },
-                "description": "These known wrapper metadata fields were accepted but not consumed by this target. The main tool call still executed normally; omit them on future calls."
-            }));
+            if !accepts_context_ack {
+                properties.insert(IGNORED_INVOCATION_METADATA_FIELD.to_string(), json!({
+                    "type": "array",
+                    "maxItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "enum": [crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD]
+                    },
+                    "description": "These known wrapper metadata fields were accepted but not consumed by this target. The main tool call still executed normally; omit them on future calls."
+                }));
+            }
             if accepts_context_ack {
                 properties.insert("session_context_revision".to_string(), json!({
                     "type": "integer", "minimum": 0,
