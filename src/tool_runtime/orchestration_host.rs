@@ -1,3 +1,4 @@
+use super::context_projection::TOOL_CALL_CONTEXT_REQUEST_FIELD;
 use super::kernel::{
     HostFileImportTrust, ToolCallContext, ToolCallErrorStatus, ToolCallRequest, ToolTransport,
 };
@@ -7,6 +8,12 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use webcodex_core::workflow_session_contract::{
+    TOOL_ACCEPTED_EXIT_CODES_FIELD, TOOL_ASSERTION_NAME_FIELD,
+    TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD, TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
+    TOOL_CALL_RECORDING_SESSION_ID_FIELD, TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD,
+    TOOL_EXPECTED_FAILURE_FIELD, TOOL_EXPECTED_FAILURE_KIND_FIELD, TOOL_RESULT_EXPECTATION_FIELD,
+};
 
 /// Immutable admission and authority-shaping policy for one orchestration frontend.
 ///
@@ -19,13 +26,39 @@ pub(crate) struct OrchestrationPolicy {
     pub(crate) policy_name: &'static str,
     pub(crate) admitted_tools: &'static [&'static str],
     pub(crate) denied_tools: &'static [&'static str],
-    pub(crate) forbidden_argument_fields: &'static [&'static str],
+    /// Frontend-specific argument fields that are additionally reserved. The
+    /// canonical Server-owned target/invocation fields below are always denied
+    /// by the host and cannot be weakened by a frontend policy.
+    pub(crate) additional_forbidden_argument_fields: &'static [&'static str],
 }
 
 impl OrchestrationPolicy {
     pub(crate) fn is_admitted(self, tool_name: &str) -> bool {
         !self.denied_tools.contains(&tool_name) && self.admitted_tools.contains(&tool_name)
     }
+}
+
+/// These fields are owned by the canonical orchestration boundary rather than
+/// by an individual frontend program. A frontend may further narrow arguments,
+/// but it cannot opt back into target selection, recorder/context metadata, or
+/// result-expectation evidence shaping.
+const SERVER_OWNED_ARGUMENT_FIELDS: &[&str] = &[
+    "project",
+    "session_id",
+    TOOL_CALL_RECORDING_SESSION_ID_FIELD,
+    TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
+    TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD,
+    TOOL_CALL_CONTEXT_REQUEST_FIELD,
+    TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD,
+    TOOL_EXPECTED_FAILURE_FIELD,
+    TOOL_EXPECTED_FAILURE_KIND_FIELD,
+    TOOL_RESULT_EXPECTATION_FIELD,
+    TOOL_ACCEPTED_EXIT_CODES_FIELD,
+    TOOL_ASSERTION_NAME_FIELD,
+];
+
+pub(crate) fn is_server_owned_orchestration_argument(field: &str) -> bool {
+    SERVER_OWNED_ARGUMENT_FIELDS.contains(&field) || field.starts_with("__webcodex_")
 }
 
 /// Payload-free diagnostic summary for one outer orchestration program. It is
@@ -220,14 +253,22 @@ impl CanonicalOrchestrationHost {
                 "nested tool arguments must be a JSON object",
             ));
         };
+        if let Some(field) = arguments
+            .keys()
+            .find(|field| is_server_owned_orchestration_argument(field))
+        {
+            return Err(OrchestrationHostError::new(format!(
+                "nested tool arguments may not set server-owned field `{field}`"
+            )));
+        }
         if let Some(field) = self
             .policy
-            .forbidden_argument_fields
+            .additional_forbidden_argument_fields
             .iter()
             .find(|field| arguments.contains_key(**field))
         {
             return Err(OrchestrationHostError::new(format!(
-                "nested tool arguments may not set server-owned field `{field}`"
+                "nested tool arguments may not set frontend-reserved field `{field}`"
             )));
         }
         arguments.insert("project".to_string(), Value::String(self.project.clone()));

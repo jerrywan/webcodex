@@ -115,7 +115,7 @@ async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
         policy_name: "test structured plan",
         admitted_tools: &["read_files"],
         denied_tools: &[],
-        forbidden_argument_fields: &["project", "session_id", "recording_session_id"],
+        additional_forbidden_argument_fields: &[],
     };
     let host = Arc::new(CanonicalOrchestrationHost::new(
         runtime.clone(),
@@ -195,6 +195,61 @@ async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
         .events
         .iter()
         .all(|event| event.tool_name != "code_mode_exec"));
+}
+
+#[tokio::test]
+async fn canonical_orchestration_host_rejects_server_owned_metadata_without_frontend_help() {
+    let runtime = test_runtime();
+    let session = runtime
+        .sessions
+        .start_session(None, Some("orchestration metadata guard".to_string()));
+    let policy = OrchestrationPolicy {
+        frontend: "test_structured_plan",
+        policy_name: "test structured plan",
+        admitted_tools: &["read_files"],
+        denied_tools: &[],
+        additional_forbidden_argument_fields: &[],
+    };
+    let host = CanonicalOrchestrationHost::new(
+        runtime,
+        None,
+        "agent:unused:demo".to_string(),
+        session.session_id,
+        ToolTransport::Mcp,
+        Some("test-parent".to_string()),
+        policy,
+    );
+
+    for (field, value) in [
+        ("project", json!("agent:other:demo")),
+        ("session_id", json!("wc_sess_0000000000000000")),
+        ("recording_session_id", json!("wc_sess_0000000000000000")),
+        ("ack_session_context_revision", json!(1)),
+        ("ack_session_message_ids", json!([])),
+        ("context_request", json!(["webcodex.workflow"])),
+        (
+            "session_message_resolution",
+            json!({"message_id": "wc_msg_0000000000000000", "resolution": "handled"}),
+        ),
+        ("expected_failure", json!(true)),
+        ("expected_failure_kind", json!("anything")),
+        ("result_expectation", json!("failure")),
+        ("accepted_exit_codes", json!([0, 1])),
+        ("assertion_name", json!("nested-assertion")),
+        ("__webcodex_private", json!(true)),
+    ] {
+        let mut arguments = serde_json::Map::new();
+        arguments.insert(field.to_string(), value);
+        arguments.insert("items".to_string(), json!([{"path": "README.md"}]));
+        let error = host
+            .invoke_tool("read_files".to_string(), Value::Object(arguments))
+            .await
+            .expect_err("server-owned nested metadata must fail before canonical dispatch");
+        assert!(error.into_message().contains(field), "{field}");
+    }
+    let composition = host.composition_summary(0, 0);
+    assert_eq!(composition.nested_calls, 0);
+    assert!(composition.nested_tool_counts.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

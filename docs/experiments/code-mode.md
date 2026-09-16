@@ -66,7 +66,7 @@ webcodex-code-mode (V8 thread)
 
 `webcodex-code-mode` does not depend on the root WebCodex crate, `ToolRuntime`, `AuthContext`, `RunnerRegistry`, or Session storage. It owns only one-shot JavaScript execution, JSON/V8 conversion, bounded output, nested-call scheduling, termination, and the transport-neutral `CodeModeHost` callback contract.
 
-The root-side canonical callback implementation is intentionally no longer V8-specific. `CanonicalOrchestrationHost` owns the reusable authority-preserving nested-tool boundary; `V8CodeModeHost` only adapts the Code Mode crate's request/response types. This is an E1.x architectural probe, not a new workflow engine or stable extension API.
+The root-side canonical callback implementation is intentionally no longer V8-specific. `CanonicalOrchestrationHost` owns the reusable authority-preserving nested-tool boundary; `V8CodeModeHost` only adapts the Code Mode crate's request/response types. Canonical target, recorder, context/ACK, result-expectation, and private wrapper fields are denied by the host itself; a frontend policy may add restrictions but cannot opt those Server-owned fields back in. This is an E1.x architectural probe, not a new workflow engine or stable extension API.
 
 The V8 integration follows the minimal runtime/thread, Promise callback, microtask-checkpoint, JSON conversion, and thread-safe isolate termination patterns used by OpenAI Codex's Apache-2.0-licensed code-mode implementation. WebCodex E1 does not copy Codex's persistent cells, remote sessions, stored values, media, module ecosystem, notification protocol, or full Code Mode subsystem.
 

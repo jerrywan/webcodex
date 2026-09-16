@@ -27,30 +27,12 @@ pub(crate) const READ_ONLY_NESTED_TOOLS: &[&str] = &[
     "show_changes",
 ];
 
-/// Nested JavaScript owns only business arguments below the outer authority
-/// target. These fields are either target selectors or canonical wrapper/evidence
-/// metadata and therefore remain exclusively server-owned.
-const FORBIDDEN_NESTED_FIELDS: &[&str] = &[
-    "project",
-    "session_id",
-    "recording_session_id",
-    "ack_session_context_revision",
-    "ack_session_message_ids",
-    "context_request",
-    "session_message_resolution",
-    "expected_failure",
-    "expected_failure_kind",
-    "result_expectation",
-    "accepted_exit_codes",
-    "assertion_name",
-];
-
 const CODE_MODE_E1_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     frontend: "code_mode_v8",
     policy_name: "Code Mode E1",
     admitted_tools: READ_ONLY_NESTED_TOOLS,
     denied_tools: &["code_mode_exec"],
-    forbidden_argument_fields: FORBIDDEN_NESTED_FIELDS,
+    additional_forbidden_argument_fields: &[],
 };
 
 pub(crate) fn is_admitted_nested_tool(tool_name: &str) -> bool {
@@ -227,8 +209,12 @@ mod tests {
             "result_expectation",
             "accepted_exit_codes",
             "assertion_name",
+            "__webcodex_private",
         ] {
-            assert!(FORBIDDEN_NESTED_FIELDS.contains(&field), "{field}");
+            assert!(
+                super::super::orchestration_host::is_server_owned_orchestration_argument(field),
+                "{field}"
+            );
         }
     }
 }

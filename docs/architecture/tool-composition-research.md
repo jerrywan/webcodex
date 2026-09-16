@@ -266,7 +266,9 @@ nested tool name + typed arguments
 Each child needs an independent logical invocation identity. A parent composition
 correlation id may connect those children for diagnostics, but it is not an
 idempotency key, Job id, Session id, permission token, or replacement for the
-child invocation identity.
+child invocation identity. Canonical target, recorder, context/ACK, expectation,
+and private wrapper fields must remain host-owned invariants; frontend admission
+policy may only narrow this boundary further, never re-enable those fields.
 
 Specialized gateways should be excluded from the first version. If they are ever
 admitted, they must continue through their existing action-specific governance
