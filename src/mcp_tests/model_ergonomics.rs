@@ -474,7 +474,9 @@ async fn http_mcp_code_mode_persists_only_bounded_composition_telemetry() {
     assert_eq!(composition["max_in_flight"], 0);
     assert_eq!(composition["nested_tool_counts"], json!({}));
     assert!(composition["duration_ms"].is_u64());
+    assert!(composition["slot_wait_ms"].is_u64());
     assert!(composition["returned_bytes"].is_u64());
+    assert!(composition["nested_raw_result_bytes_total"].is_u64());
     let mut keys = composition
         .as_object()
         .unwrap()
@@ -489,9 +491,11 @@ async fn http_mcp_code_mode_persists_only_bounded_composition_telemetry() {
             "max_in_flight",
             "nested_calls",
             "nested_failures",
+            "nested_raw_result_bytes_total",
             "nested_successes",
             "nested_tool_counts",
             "returned_bytes",
+            "slot_wait_ms",
         ]
     );
     let persisted = serde_json::to_string(&summary).unwrap();

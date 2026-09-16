@@ -314,6 +314,10 @@ impl RuntimeMetrics for TracingRuntimeMetrics {
                 "code_mode_returned_bytes",
                 observation.returned_bytes as u64,
             ),
+            (
+                "code_mode_nested_raw_result_bytes_total",
+                observation.nested_raw_result_bytes_total as u64,
+            ),
         ] {
             tracing::info!(
                 metric,
@@ -326,6 +330,13 @@ impl RuntimeMetrics for TracingRuntimeMetrics {
         tracing::info!(
             metric = "code_mode_runtime_duration_seconds",
             value = observation.duration_ms as f64 / 1000.0,
+            tool = "code_mode_exec",
+            surface = "runtime",
+            "runtime_metric"
+        );
+        tracing::info!(
+            metric = "code_mode_slot_wait_seconds",
+            value = observation.slot_wait_ms as f64 / 1000.0,
             tool = "code_mode_exec",
             surface = "runtime",
             "runtime_metric"
@@ -396,7 +407,9 @@ mod tests {
             nested_failures: 0,
             max_in_flight: 1,
             duration_ms: 7,
+            slot_wait_ms: 2,
             returned_bytes: 3,
+            nested_raw_result_bytes_total: 9,
             nested_tool_counts: std::collections::BTreeMap::from([("read_files".to_string(), 1)]),
         };
         observe_code_mode_composition(&PanicMetrics, &observation);

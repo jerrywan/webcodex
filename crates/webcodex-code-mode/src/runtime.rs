@@ -110,26 +110,37 @@ pub async fn execute(
     })?;
     let timeout_ms = normalized_timeout_ms(request.timeout_ms);
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let slot_wait_started_at = Instant::now();
     let execution_slot = tokio::select! {
         permit = execution_slots().acquire() => permit.map_err(|_| CodeModeError {
             kind: CodeModeErrorKind::Runtime,
             message: "code mode execution slots are unavailable".to_string(),
-            stats: CodeModeStats::default(),
+            stats: CodeModeStats {
+                slot_wait_ms: elapsed_ms(slot_wait_started_at),
+                ..CodeModeStats::default()
+            },
         })?,
         _ = tokio::time::sleep_until(deadline) => {
             return Err(CodeModeError {
                 kind: CodeModeErrorKind::Timeout,
                 message: format!("code mode execution exceeded {timeout_ms} ms while waiting for a runtime slot"),
-                stats: CodeModeStats::default(),
+                stats: CodeModeStats {
+                    slot_wait_ms: elapsed_ms(slot_wait_started_at),
+                    ..CodeModeStats::default()
+                },
             });
         }
     };
+    let slot_wait_ms = elapsed_ms(slot_wait_started_at);
     let _execution_slot = execution_slot;
     let mut runtime =
         spawn_runtime(request.source, request.allowed_tools).map_err(|message| CodeModeError {
             kind: CodeModeErrorKind::Runtime,
             message,
-            stats: CodeModeStats::default(),
+            stats: CodeModeStats {
+                slot_wait_ms,
+                ..CodeModeStats::default()
+            },
         })?;
 
     let mut deadline_sleep = Box::pin(tokio::time::sleep_until(deadline));
@@ -167,7 +178,7 @@ pub async fn execute(
             _ = &mut deadline_sleep => {
                 let _ = runtime.isolate_handle.terminate_execution();
                 let _ = runtime.command_tx.send(RuntimeCommand::Terminate);
-                let stats = finish_stats(started_at, tool_calls, max_in_flight, returned_bytes);
+                let stats = finish_stats(started_at, tool_calls, max_in_flight, returned_bytes, slot_wait_ms);
                 join_runtime(runtime.join).await;
                 return Err(CodeModeError {
                     kind: CodeModeErrorKind::Timeout,
@@ -221,7 +232,13 @@ pub async fn execute(
 
     let failure = runtime_finished.flatten();
     join_runtime(runtime.join).await;
-    let stats = finish_stats(started_at, tool_calls, max_in_flight, returned_bytes);
+    let stats = finish_stats(
+        started_at,
+        tool_calls,
+        max_in_flight,
+        returned_bytes,
+        slot_wait_ms,
+    );
     if let Some(failure) = failure {
         let kind = match failure.kind {
             RuntimeFailureKind::Runtime => CodeModeErrorKind::Runtime,
@@ -238,17 +255,23 @@ pub async fn execute(
     Ok(CodeModeExecution { content, stats })
 }
 
+fn elapsed_ms(started_at: Instant) -> u64 {
+    started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
 fn finish_stats(
     started_at: Instant,
     tool_calls: usize,
     max_in_flight: usize,
     returned_bytes: usize,
+    slot_wait_ms: u64,
 ) -> CodeModeStats {
     CodeModeStats {
         tool_calls,
         max_in_flight,
-        duration_ms: started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        duration_ms: elapsed_ms(started_at),
         returned_bytes,
+        slot_wait_ms,
     }
 }
 
@@ -773,6 +796,29 @@ mod tests {
                 .collect(),
             timeout_ms: Some(2_000),
         }
+    }
+
+    #[test]
+    fn slot_wait_is_diagnostic_only_and_not_serialized_in_model_stats() {
+        let stats = finish_stats(Instant::now(), 2, 1, 3, 17);
+        assert_eq!(stats.slot_wait_ms, 17);
+        let serialized = serde_json::to_value(stats).unwrap();
+        let mut keys = serialized
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "duration_ms",
+                "max_in_flight",
+                "returned_bytes",
+                "tool_calls"
+            ]
+        );
     }
 
     #[tokio::test]

@@ -152,8 +152,11 @@ impl ToolRuntime {
                 )
             }
         };
-        let composition =
-            orchestration.composition_summary(stats.duration_ms, stats.returned_bytes);
+        let composition = orchestration.composition_summary(
+            stats.duration_ms,
+            stats.returned_bytes,
+            stats.slot_wait_ms,
+        );
         super::runtime_metrics::observe_code_mode_composition(self.metrics.as_ref(), &composition);
         tracing::debug!(
             composition_parent_invocation_id = composition_parent_invocation_id
@@ -164,7 +167,9 @@ impl ToolRuntime {
             nested_failures = composition.nested_failures,
             max_in_flight = composition.max_in_flight,
             duration_ms = composition.duration_ms,
+            slot_wait_ms = composition.slot_wait_ms,
             returned_bytes = composition.returned_bytes,
+            nested_raw_result_bytes_total = composition.nested_raw_result_bytes_total,
             "code_mode_composition_finished"
         );
         (result, composition)

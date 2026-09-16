@@ -4,6 +4,7 @@ use super::kernel::{
 };
 use super::ToolRuntime;
 use crate::auth::AuthContext;
+use crate::json_measurement::serialized_json_len;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -71,7 +72,9 @@ pub(crate) struct OrchestrationCompositionSummary {
     pub(crate) nested_failures: usize,
     pub(crate) max_in_flight: usize,
     pub(crate) duration_ms: u64,
+    pub(crate) slot_wait_ms: u64,
     pub(crate) returned_bytes: usize,
+    pub(crate) nested_raw_result_bytes_total: usize,
     pub(crate) nested_tool_counts: BTreeMap<String, usize>,
 }
 
@@ -82,6 +85,7 @@ struct OrchestrationCompositionAccumulator {
     nested_failures: usize,
     in_flight: usize,
     max_in_flight: usize,
+    nested_raw_result_bytes_total: usize,
     nested_tool_counts: BTreeMap<String, usize>,
 }
 
@@ -97,8 +101,11 @@ impl OrchestrationCompositionAccumulator {
         self.nested_calls
     }
 
-    fn finish_call(&mut self, success: bool) {
+    fn finish_call(&mut self, success: bool, raw_result_bytes: usize) {
         self.in_flight = self.in_flight.saturating_sub(1);
+        self.nested_raw_result_bytes_total = self
+            .nested_raw_result_bytes_total
+            .saturating_add(raw_result_bytes);
         if success {
             self.nested_successes = self.nested_successes.saturating_add(1);
         } else {
@@ -106,14 +113,21 @@ impl OrchestrationCompositionAccumulator {
         }
     }
 
-    fn summary(&self, duration_ms: u64, returned_bytes: usize) -> OrchestrationCompositionSummary {
+    fn summary(
+        &self,
+        duration_ms: u64,
+        returned_bytes: usize,
+        slot_wait_ms: u64,
+    ) -> OrchestrationCompositionSummary {
         OrchestrationCompositionSummary {
             nested_calls: self.nested_calls,
             nested_successes: self.nested_successes,
             nested_failures: self.nested_failures,
             max_in_flight: self.max_in_flight,
             duration_ms,
+            slot_wait_ms,
             returned_bytes,
+            nested_raw_result_bytes_total: self.nested_raw_result_bytes_total,
             nested_tool_counts: self.nested_tool_counts.clone(),
         }
     }
@@ -125,11 +139,11 @@ struct NestedCallGuard<'a> {
 }
 
 impl NestedCallGuard<'_> {
-    fn finish(mut self, success: bool) {
+    fn finish(mut self, success: bool, raw_result_bytes: usize) {
         self.composition
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .finish_call(success);
+            .finish_call(success, raw_result_bytes);
         self.finished = true;
     }
 }
@@ -140,7 +154,7 @@ impl Drop for NestedCallGuard<'_> {
             self.composition
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .finish_call(false);
+                .finish_call(false, 0);
         }
     }
 }
@@ -230,11 +244,12 @@ impl CanonicalOrchestrationHost {
         &self,
         duration_ms: u64,
         returned_bytes: usize,
+        slot_wait_ms: u64,
     ) -> OrchestrationCompositionSummary {
         self.composition
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .summary(duration_ms, returned_bytes)
+            .summary(duration_ms, returned_bytes, slot_wait_ms)
     }
 
     fn prepare_arguments(
@@ -317,7 +332,12 @@ impl CanonicalOrchestrationHost {
             .await;
         let nested_success = outcome.error_status.is_none()
             && outcome.result.as_ref().is_some_and(|result| result.success);
-        child_guard.finish(nested_success);
+        let raw_result_bytes = outcome
+            .result
+            .as_ref()
+            .and_then(|result| serialized_json_len(result).ok())
+            .unwrap_or(0);
+        child_guard.finish(nested_success, raw_result_bytes);
         tracing::debug!(
             orchestration_frontend = self.policy.frontend,
             composition_parent_invocation_id = self

@@ -91,6 +91,10 @@ pub struct CodeModeStats {
     pub max_in_flight: usize,
     pub duration_ms: u64,
     pub returned_bytes: usize,
+    /// Diagnostic-only wait for the process-wide V8 execution slot. This is
+    /// intentionally omitted from the model-facing four-field stats projection.
+    #[serde(skip)]
+    pub slot_wait_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

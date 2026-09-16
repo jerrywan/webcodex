@@ -260,11 +260,13 @@ nested_successes
 nested_failures
 max_in_flight
 duration_ms
+slot_wait_ms
 returned_bytes
+nested_raw_result_bytes_total
 nested_tool_counts
 ```
 
-`nested_tool_counts` is limited to the explicit admitted tool set. Composition telemetry never stores JavaScript source, nested arguments, nested outputs, paths, queries, commands, credentials, raw Window identity, or arbitrary nested error text. RuntimeMetrics remains fail-open: metrics failure cannot change the `ToolResult`.
+`nested_raw_result_bytes_total` is the sum of serialized canonical child `ToolResult` sizes before JavaScript selection/projection. Together with `returned_bytes`, it gives a direct projection/compression ratio without retaining any nested payload. `slot_wait_ms` measures only time waiting for the process-wide V8 execution permit, so it can be separated from the remaining Code Mode interval. Tracing RuntimeMetrics exposes the same observations as `code_mode_nested_raw_result_bytes_total` and `code_mode_slot_wait_seconds`; the durable composition summary keeps the millisecond field above. `nested_tool_counts` is limited to the explicit admitted tool set. Composition telemetry never stores JavaScript source, nested arguments, nested outputs, paths, queries, commands, credentials, raw Window identity, or arbitrary nested error text. RuntimeMetrics remains fail-open: metrics failure cannot change the `ToolResult`.
 
 Nested canonical calls deliberately use no fabricated `ClientWindow`. One host/model-visible `code_mode_exec` request therefore remains one meaningful outer Window call, while the Runtime Console can project the bounded child summary from that outer ActionAudit row. This lets operators distinguish WebCodex-owned outer service time, Code Mode internal time, and the following outside-WebCodex inter-call gap without reclassifying nested calls as host round trips.
 
@@ -295,8 +297,10 @@ Use a real review task twice against the same repository state and comparable mo
 | nested tool invocations | 0 | count | composition work moved below the model boundary |
 | WebCodex-owned outer duration | per call / total | per call / total | service time owned by WebCodex |
 | Window inter-call gaps | bounded samples | bounded samples | outside-WebCodex gap, not reasoning time |
-| Code Mode internal duration | n/a | per outer call | V8 + nested orchestration interval |
-| returned model-facing bytes | total | total | transport/result pressure |
+| Code Mode internal duration | n/a | per outer call | total Code Mode interval, including any slot wait |
+| Code Mode slot wait | n/a | `slot_wait_ms` | process-wide V8 capacity contention |
+| nested raw result bytes | n/a | `nested_raw_result_bytes_total` | canonical child payload before projection |
+| returned model-facing bytes | total | total | transport/result pressure; compare with nested raw bytes |
 | Runner requests | where currently provable | where currently provable | canonical backend work actually performed |
 | task end-to-end wall time | observed | observed | user-visible completion interval |
 | analysis/review findings quality | findings + evidence | findings + evidence | correctness/usefulness guardrail |
