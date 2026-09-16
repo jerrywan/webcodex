@@ -831,6 +831,98 @@ impl ToolRuntime {
         ))
     }
 
+    pub(crate) async fn skill_load(
+        &self,
+        project: &ResolvedProject,
+        name: String,
+        auth: Option<&AuthContext>,
+    ) -> ToolResult {
+        let name = match validate_skill_load_name(name) {
+            Ok(name) => name,
+            Err(kind) => return skill_error(kind, &project.resolved_id, None),
+        };
+        let catalog = match self.discover_skills(project, auth).await {
+            Ok(catalog) => catalog,
+            Err(_) => return skill_error("skill_catalog_unavailable", &project.resolved_id, None),
+        };
+        let matches = catalog
+            .skills
+            .iter()
+            .filter(|skill| skill.descriptor.name.eq_ignore_ascii_case(&name))
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            return skill_error(
+                "skill_not_found",
+                &project.resolved_id,
+                Some(json!({"name": name})),
+            );
+        }
+        if matches.len() != 1 {
+            let candidates = matches
+                .iter()
+                .take(8)
+                .map(|skill| {
+                    json!({
+                        "skill_id": skill.descriptor.skill_id,
+                        "name": skill.descriptor.name,
+                        "source_scope": skill.descriptor.source_scope,
+                        "trust": skill.descriptor.trust,
+                        "package_revision": skill.descriptor.package_revision,
+                        "definition_revision": skill.descriptor.definition_revision,
+                    })
+                })
+                .collect::<Vec<_>>();
+            return skill_error(
+                "skill_name_ambiguous",
+                &project.resolved_id,
+                Some(json!({
+                    "name": name,
+                    "candidate_count": matches.len(),
+                    "candidates": candidates,
+                    "candidates_truncated": matches.len() > 8,
+                })),
+            );
+        }
+        let descriptor = matches[0].descriptor.clone();
+        let mut result = self
+            .skill_read_file(
+                project,
+                descriptor.skill_id.clone(),
+                Some(SKILL_DEFINITION_FILE.to_string()),
+                Some(1),
+                Some(MAX_SKILL_READ_LINES),
+                Some(descriptor.definition_revision.clone()),
+                descriptor.package_revision.clone(),
+                auth,
+            )
+            .await;
+        if !result.success {
+            return result;
+        }
+        let Some(output) = result.output.as_object_mut() else {
+            return skill_error("skill_load_result_invalid", &project.resolved_id, None);
+        };
+        output.insert(
+            "catalog_revision".to_string(),
+            Value::String(catalog.catalog_revision),
+        );
+        output.insert(
+            "descriptor".to_string(),
+            serde_json::to_value(&descriptor).expect("SkillDescriptor serialization is infallible"),
+        );
+        if serialized_json_len(&result.output)
+            .map(|bytes| bytes > MAX_SKILL_READ_RESULT_BYTES)
+            .unwrap_or(true)
+        {
+            return skill_error(
+                "skill_load_result_too_large",
+                &project.resolved_id,
+                Some(json!({"skill_id": descriptor.skill_id})),
+            );
+        }
+        result
+    }
+
     pub(crate) async fn skill_list(
         &self,
         project: &ResolvedProject,
@@ -2123,6 +2215,17 @@ fn recompute_name_conflicts(skills: &mut [CatalogSkill]) {
             .unwrap_or_default()
             > 1;
     }
+}
+
+fn validate_skill_load_name(name: String) -> Result<String, &'static str> {
+    if name.is_empty()
+        || name.trim() != name
+        || name.chars().count() > MAX_SKILL_NAME_CHARS
+        || name.chars().any(char::is_control)
+    {
+        return Err("skill_name_invalid");
+    }
+    Ok(name)
 }
 
 fn validate_query(query: Option<String>) -> Result<Option<String>, &'static str> {

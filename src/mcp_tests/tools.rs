@@ -466,6 +466,7 @@ fn skill_runtime_tools_are_stateless_full_operator_only_and_schema_static() {
         .into_iter()
         .map(|spec| spec.name)
         .collect::<Vec<_>>();
+    assert!(generic_names.iter().any(|name| name == "skill_load"));
     assert!(!generic_names.iter().any(|name| name == "skill_list"));
     assert!(!generic_names.iter().any(|name| name == "skill_read_file"));
 
@@ -489,7 +490,10 @@ fn skill_runtime_tools_are_stateless_full_operator_only_and_schema_static() {
         .filter_map(|tool| tool["name"].as_str())
         .filter(|name| name.starts_with("skill_"))
         .collect::<Vec<_>>();
-    assert_eq!(skill_names, vec!["skill_list", "skill_read_file"]);
+    assert_eq!(
+        skill_names,
+        vec!["skill_load", "skill_list", "skill_read_file"]
+    );
 
     let skill_list = before["tools"]
         .as_array()
@@ -582,7 +586,10 @@ fn skill_management_tools_require_admin_and_remain_fixed_schema() {
         .filter_map(|tool| tool["name"].as_str())
         .filter(|name| name.starts_with("skill_"))
         .collect::<Vec<_>>();
-    assert_eq!(shared_names, vec!["skill_list", "skill_read_file"]);
+    assert_eq!(
+        shared_names,
+        vec!["skill_load", "skill_list", "skill_read_file"]
+    );
 
     let admin = crate::auth::AuthContext {
         role: Some("admin".to_string()),
@@ -601,6 +608,7 @@ fn skill_management_tools_require_admin_and_remain_fixed_schema() {
     assert_eq!(
         names,
         vec![
+            "skill_load",
             "skill_list",
             "skill_read_file",
             "skill_versions",

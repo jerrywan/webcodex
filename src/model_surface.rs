@@ -372,6 +372,7 @@ mod tests {
         "runtime_status",
         "wait_for_agent_events",
         "plugin_tool",
+        "skill_load",
         "tool_manifest",
         "search_project_texts",
         "read_files",
