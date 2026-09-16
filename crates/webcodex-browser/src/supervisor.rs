@@ -11,6 +11,7 @@ use crate::types::{
 use base64::{engine::general_purpose, Engine as _};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 #[cfg(test)]
 use std::time::Duration;
@@ -21,10 +22,10 @@ use uuid::Uuid;
 pub struct BrowserSupervisor {
     inner: Arc<Mutex<SupervisorState>>,
     factory: Arc<dyn BackendFactory>,
+    shutting_down: Arc<AtomicBool>,
 }
 
 struct SupervisorState {
-    shutting_down: bool,
     browsers: HashMap<String, BrowserRuntime>,
 }
 
@@ -52,6 +53,7 @@ struct BrowserRuntime {
     target_to_page: HashMap<String, String>,
     elements: HashMap<String, ElementIdentity>,
     generation: u64,
+    page_count_floor: usize,
 }
 
 impl std::fmt::Debug for BrowserSupervisor {
@@ -74,10 +76,10 @@ impl BrowserSupervisor {
     fn with_factory(factory: Arc<dyn BackendFactory>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(SupervisorState {
-                shutting_down: false,
                 browsers: HashMap::new(),
             })),
             factory,
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -86,7 +88,9 @@ impl BrowserSupervisor {
     }
 
     pub fn begin_shutdown(&self) {
-        self.state().shutting_down = true;
+        // Shutdown admission must never wait behind a Browser operation that is
+        // currently holding the runtime mutex while bounded CDP I/O completes.
+        self.shutting_down.store(true, Ordering::Release);
     }
 
     pub fn list_browsers(&self) -> Vec<BrowserSummary> {
@@ -98,34 +102,29 @@ impl BrowserSupervisor {
             .take(MAX_BROWSERS)
             .map(|(id, runtime)| BrowserSummary {
                 browser_id: id.clone(),
-                page_count: runtime.pages.len(),
+                page_count: runtime.page_count(),
             })
             .collect()
     }
 
     pub fn launch(&self) -> BrowserResult<BrowserSummary> {
+        self.reject_if_shutting_down()?;
         self.reap_expired();
-        let mut state = self.state();
-        if state.shutting_down {
-            return Err(BrowserError::not_started(
-                "runner_shutting_down",
-                "Browser launch rejected during Runner shutdown",
-            ));
-        }
+        let mut state = self.operation_state()?;
         if state.browsers.len() >= MAX_BROWSERS {
             return Err(BrowserError::not_started(
                 "browser_limit",
                 "maximum owned Browser runtimes reached",
             ));
         }
-        let mut backend = self.factory.launch()?;
-        let pages = backend.pages().unwrap_or_default();
+        let backend = self.factory.launch()?;
         let browser_id = opaque_id("browser");
-        let mut runtime = BrowserRuntime::new(backend);
-        runtime.reconcile_pages(pages);
+        let runtime = BrowserRuntime::new(backend);
         let summary = BrowserSummary {
             browser_id: browser_id.clone(),
-            page_count: runtime.pages.len(),
+            // Chromium is launched with one explicit about:blank target. Keep a
+            // conservative count floor until pages observation assigns opaque IDs.
+            page_count: runtime.page_count(),
         };
         state.browsers.insert(browser_id, runtime);
         Ok(summary)
@@ -133,7 +132,7 @@ impl BrowserSupervisor {
 
     pub fn pages(&self, browser_id: &str, limit: usize) -> BrowserResult<Vec<PageSummary>> {
         self.touch_current(browser_id)?;
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let runtime = state
             .browsers
             .get_mut(browser_id)
@@ -159,18 +158,33 @@ impl BrowserSupervisor {
 
     pub fn new_page(&self, browser_id: &str) -> BrowserResult<PageSummary> {
         self.touch_current(browser_id)?;
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let runtime = state
             .browsers
             .get_mut(browser_id)
             .ok_or_else(|| stale_browser(browser_id))?;
-        if runtime.pages.len() >= MAX_PAGES_PER_BROWSER {
+        if runtime.page_count() >= MAX_PAGES_PER_BROWSER {
             return Err(BrowserError::not_started(
                 "page_limit",
                 "maximum pages per Browser reached",
             ));
         }
-        let target_id = runtime.backend.new_page()?;
+        let target_id = match runtime.backend.new_page() {
+            Ok(target_id) => {
+                runtime.page_count_floor = runtime
+                    .page_count()
+                    .saturating_add(1)
+                    .min(MAX_PAGES_PER_BROWSER);
+                target_id
+            }
+            Err(error) if error.execution_state == crate::types::ExecutionState::OutcomeUnknown => {
+                // Creation may have happened. Block another create until a pages
+                // observation reconciles the authoritative target inventory.
+                runtime.page_count_floor = MAX_PAGES_PER_BROWSER;
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         runtime.elements.clear();
         // Target.createTarget already returned an exact target id, so creation is
         // known to have completed. A later observation failure must never make a
@@ -218,7 +232,7 @@ impl BrowserSupervisor {
 
     pub fn snapshot(&self, browser_id: &str, page_id: &str) -> BrowserResult<SemanticSnapshot> {
         self.touch_current(browser_id)?;
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let runtime = state
             .browsers
             .get_mut(browser_id)
@@ -259,7 +273,7 @@ impl BrowserSupervisor {
 
     pub fn screenshot(&self, browser_id: &str, page_id: &str) -> BrowserResult<Screenshot> {
         self.touch_current(browser_id)?;
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let runtime = state
             .browsers
             .get_mut(browser_id)
@@ -272,7 +286,7 @@ impl BrowserSupervisor {
     pub fn navigate(&self, browser_id: &str, page_id: &str, url: &str) -> BrowserResult<()> {
         self.touch_current(browser_id)?;
         validate_navigation_url(url)?;
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let runtime = state
             .browsers
             .get_mut(browser_id)
@@ -312,7 +326,7 @@ impl BrowserSupervisor {
 
     pub fn key(&self, browser_id: &str, page_id: &str, key: BrowserKey) -> BrowserResult<()> {
         self.touch_current(browser_id)?;
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let runtime = state
             .browsers
             .get_mut(browser_id)
@@ -324,7 +338,7 @@ impl BrowserSupervisor {
 
     pub fn close_page(&self, browser_id: &str, page_id: &str) -> BrowserResult<()> {
         self.touch_current(browser_id)?;
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let runtime = state
             .browsers
             .get_mut(browser_id)
@@ -335,13 +349,17 @@ impl BrowserSupervisor {
         if result.is_ok() {
             runtime.pages.remove(page_id);
             runtime.target_to_page.remove(&target_id);
+            runtime.page_count_floor = runtime
+                .page_count_floor
+                .saturating_sub(1)
+                .max(runtime.pages.len());
         }
         result
     }
 
     pub fn close_browser(&self, browser_id: &str) -> BrowserResult<()> {
         self.touch_current(browser_id)?;
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let mut runtime = state
             .browsers
             .remove(browser_id)
@@ -376,8 +394,9 @@ impl BrowserSupervisor {
     }
 
     fn touch_current(&self, browser_id: &str) -> BrowserResult<()> {
+        self.reject_if_shutting_down()?;
         let now = Instant::now();
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let expired = state
             .browsers
             .get(browser_id)
@@ -428,7 +447,7 @@ impl BrowserSupervisor {
     where
         F: FnOnce(&mut dyn BrowserBackend, &str, i64) -> BrowserResult<()>,
     {
-        let mut state = self.state();
+        let mut state = self.operation_state()?;
         let runtime = state
             .browsers
             .get_mut(browser_id)
@@ -458,6 +477,30 @@ impl BrowserSupervisor {
         )
     }
 
+    fn reject_if_shutting_down(&self) -> BrowserResult<()> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            Err(BrowserError::not_started(
+                "runner_shutting_down",
+                "Browser operation rejected during Runner shutdown",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn operation_state(&self) -> BrowserResult<std::sync::MutexGuard<'_, SupervisorState>> {
+        self.reject_if_shutting_down()?;
+        let state = self.state();
+        if self.shutting_down.load(Ordering::Acquire) {
+            drop(state);
+            return Err(BrowserError::not_started(
+                "runner_shutting_down",
+                "Browser operation rejected during Runner shutdown",
+            ));
+        }
+        Ok(state)
+    }
+
     fn state(&self) -> std::sync::MutexGuard<'_, SupervisorState> {
         self.inner
             .lock()
@@ -476,7 +519,12 @@ impl BrowserRuntime {
             target_to_page: HashMap::new(),
             elements: HashMap::new(),
             generation: 0,
+            page_count_floor: 1,
         }
+    }
+
+    fn page_count(&self) -> usize {
+        self.pages.len().max(self.page_count_floor)
     }
 
     fn expired(&self, now: Instant) -> bool {
@@ -485,6 +533,7 @@ impl BrowserRuntime {
     }
 
     fn reconcile_pages(&mut self, pages: Vec<BackendPage>) {
+        self.page_count_floor = pages.len().min(MAX_PAGES_PER_BROWSER);
         let live_targets = pages
             .iter()
             .map(|page| page.target_id.clone())
@@ -580,7 +629,10 @@ impl BrowserRuntime {
     }
 
     fn refresh_document_fence(&mut self, page_id: &str, target_id: &str) -> BrowserResult<()> {
-        let pages = self.backend.pages()?;
+        let pages = self
+            .backend
+            .pages()
+            .map_err(pre_effect_revalidation_error)?;
         let current = pages
             .into_iter()
             .find(|page| page.target_id == target_id)
@@ -638,6 +690,14 @@ fn screenshot_result(
         file_bytes: decoded.len() as u64,
         sha256,
     })
+}
+
+fn pre_effect_revalidation_error(mut error: BrowserError) -> BrowserError {
+    error.execution_state = crate::types::ExecutionState::NotStarted;
+    if error.recovery_action.is_none() {
+        error.recovery_action = Some("pages");
+    }
+    error
 }
 
 fn stale_browser(browser_id: &str) -> BrowserError {
@@ -906,6 +966,26 @@ mod tests {
     }
 
     #[test]
+    fn launch_tracks_the_implicit_about_blank_page_without_extra_cdp_observation() {
+        let supervisor = fixture();
+        let browser = supervisor.launch().unwrap();
+        assert_eq!(browser.page_count, 1);
+        assert_eq!(supervisor.list_browsers()[0].page_count, 1);
+        assert_eq!(supervisor.pages(&browser.browser_id, 8).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn pre_effect_revalidation_failure_is_not_started() {
+        let error = pre_effect_revalidation_error(BrowserError::observed(
+            "fixture_observation_failed",
+            "fixture",
+            None,
+        ));
+        assert_eq!(error.execution_state, ExecutionState::NotStarted);
+        assert_eq!(error.recovery_action, Some("pages"));
+    }
+
+    #[test]
     fn unavailable_browser_is_truthful_and_pre_dispatch() {
         let supervisor = BrowserSupervisor::with_factory(Arc::new(UnavailableFactory));
         assert!(!supervisor.available());
@@ -922,6 +1002,16 @@ mod tests {
         assert_eq!(error.kind, "page_create_reconcile_failed");
         assert_eq!(error.execution_state, ExecutionState::Completed);
         assert_eq!(error.recovery_action, Some("pages"));
+        assert_eq!(
+            supervisor
+                .list_browsers()
+                .into_iter()
+                .find(|summary| summary.browser_id == browser.browser_id)
+                .unwrap()
+                .page_count,
+            2,
+            "completed create must reserve page capacity until pages reconciliation"
+        );
     }
 
     #[test]
