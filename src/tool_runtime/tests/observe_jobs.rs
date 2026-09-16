@@ -1505,6 +1505,7 @@ async fn ordinary_receipts_production_sqlite_dual_restart_observe_and_list_filte
 
 #[tokio::test]
 async fn observe_jobs_terminal_policy_coalesces_noisy_jobs_with_one_deadline_and_caller_delta() {
+    for policy in [ObserveJobsWakeOn::Terminal, ObserveJobsWakeOn::AllTerminal] {
     let runtime = test_runtime();
     let (job_a, request_a, auth) = register_and_start_agent_job(&runtime, "coalesce-a").await;
     let (job_b, request_b, _) = register_and_start_agent_job(&runtime, "coalesce-b").await;
@@ -1530,7 +1531,7 @@ async fn observe_jobs_terminal_policy_coalesces_noisy_jobs_with_one_deadline_and
         ],
         40,
         Some(1),
-        ObserveJobsWakeOn::Terminal,
+        policy,
         Some(&auth),
     );
     tokio::pin!(observation);
@@ -1574,6 +1575,10 @@ async fn observe_jobs_terminal_policy_coalesces_noisy_jobs_with_one_deadline_and
         })
         .await
         .unwrap();
+    if policy == ObserveJobsWakeOn::AllTerminal {
+        update_observed_job(&runtime, "coalesce-a", &request_a, "completed", None, None, true).await;
+        assert!(futures_util::poll!(&mut observation).is_pending());
+    }
     let noisy = async {
         loop {
             tokio::time::sleep(Duration::from_millis(80)).await;
@@ -1607,7 +1612,7 @@ async fn observe_jobs_terminal_policy_coalesces_noisy_jobs_with_one_deadline_and
     let b = &result.output["items"][1]["output"];
     assert_eq!(a["changed"], true);
     assert_eq!(b["changed"], true);
-    assert_eq!(a["terminal"], false);
+    assert_eq!(a["terminal"], policy == ObserveJobsWakeOn::AllTerminal);
     assert_eq!(a["stdout_tail"], "before wait\nduring wait\n");
     assert_eq!(b["stderr_tail"], "stderr during wait\n");
     assert!(b["stdout_tail"].as_str().unwrap().contains("noise"));
@@ -1615,8 +1620,9 @@ async fn observe_jobs_terminal_policy_coalesces_noisy_jobs_with_one_deadline_and
     assert_ne!(b["observation_token"], token_b);
     assert_eq!(
         a["activity"],
-        serde_json::to_value(process_activity()).unwrap()
+        if policy == ObserveJobsWakeOn::AllTerminal { Value::Null } else { serde_json::to_value(process_activity()).unwrap() }
     );
+}
 }
 
 #[tokio::test]
@@ -1624,7 +1630,8 @@ async fn observe_jobs_updates_around_first_wait_registration_are_not_lost() {
     // First poll drives the baseline pass and canonical wait registration to
     // Pending without a scheduler sleep. Updates immediately before that poll
     // exercise revision comparison; updates immediately after it exercise Notify.
-    for terminal in [false, true] {
+    for policy in [ObserveJobsWakeOn::Change, ObserveJobsWakeOn::Terminal, ObserveJobsWakeOn::AllTerminal] {
+        let terminal = policy != ObserveJobsWakeOn::Change;
         for update_before_poll in [false, true] {
             let runtime = test_runtime();
             let (job_id, request, auth) =
@@ -1634,11 +1641,7 @@ async fn observe_jobs_updates_around_first_wait_registration_are_not_lost() {
                 vec![item(&job_id, Some(token.clone()))],
                 40,
                 Some(5),
-                if terminal {
-                    ObserveJobsWakeOn::Terminal
-                } else {
-                    ObserveJobsWakeOn::Change
-                },
+                policy,
                 Some(&auth),
             );
             tokio::pin!(observation);
@@ -1713,5 +1716,67 @@ fn observe_jobs_canonical_continuation_is_parser_ready_with_or_without_baseline(
             hint["arguments"]["items"][0]["after_observation_token"].as_str(),
             token
         );
+    }
+}
+
+#[tokio::test]
+async fn observe_jobs_all_terminal_waits_for_entire_set_and_preserves_original_delta() {
+    for initially_terminal in [0, 1, 2] {
+        let runtime = test_runtime();
+        let (a, request_a, auth) = register_and_start_agent_job(&runtime, "all-a").await;
+        let (b, request_b, _) = register_and_start_agent_job(&runtime, "all-b").await;
+        let token_a = observation_token(&runtime, &a, &auth).await;
+        let token_b = observation_token(&runtime, &b, &auth).await;
+        update_observed_job(&runtime, "all-a", &request_a,
+            if initially_terminal > 0 { "completed" } else { "running" },
+            Some("before wait\n"), None, initially_terminal > 0).await;
+        if initially_terminal == 2 {
+            update_observed_job(&runtime, "all-b", &request_b, "completed", Some("b done\n"), None, true).await;
+        }
+        // Exactly one outer observation, including both staggered completions.
+        let observation = runtime.observe_jobs_for_auth(
+            vec![item(&a, Some(token_a)), item(&b, Some(token_b))],
+            40, Some(5), ObserveJobsWakeOn::AllTerminal, Some(&auth));
+        tokio::pin!(observation);
+        if initially_terminal < 2 {
+            assert!(futures_util::poll!(&mut observation).is_pending());
+            if initially_terminal == 0 {
+                update_observed_job(&runtime, "all-a", &request_a, "completed", Some("a done\n"), None, true).await;
+                assert!(futures_util::poll!(&mut observation).is_pending(), "first terminal Job must not wake the batch");
+            }
+            update_observed_job(&runtime, "all-b", &request_b, "completed", Some("b done\n"), None, true).await;
+        }
+        let result = tokio::time::timeout(Duration::from_secs(1), observation).await.unwrap();
+        assert!(result.success, "{:?}", result.error);
+        assert_eq!(result.output["wait"]["outcome"], "terminal");
+        assert_eq!(result.output["terminal_count"], 2);
+        assert_eq!(result.output["items"][0]["job_id"], a);
+        assert_eq!(result.output["items"][1]["job_id"], b);
+        assert_eq!(result.output["items"][0]["output"]["stdout_tail"],
+            if initially_terminal == 0 { "before wait\na done\n" } else { "before wait\n" });
+        if initially_terminal == 2 {
+            assert_eq!(result.output["wait"]["waited_ms"], 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn observe_jobs_all_terminal_item_errors_return_without_waiting_for_running_job() {
+    let runtime = test_runtime();
+    let (job, _, auth) = register_and_start_agent_job(&runtime, "all-error").await;
+    let token = observation_token(&runtime, &job, &auth).await;
+    let (foreign, _, _) = register_and_start_agent_job(&runtime, "all-foreign").await;
+    let other_auth = auth_context(Some("other-observer"), false);
+    for (bad_item, caller) in [
+        (item("missing-job", Some(token.clone())), &auth),
+        (item(&foreign, Some("invalid-token".into())), &auth),
+        (item(&foreign, None), &other_auth),
+    ] {
+        let result = tokio::time::timeout(Duration::from_secs(1), runtime.observe_jobs_for_auth(
+            vec![item(&job, Some(token.clone())), bad_item], 40, Some(5),
+            ObserveJobsWakeOn::AllTerminal, Some(caller))).await.unwrap();
+        assert!(result.success, "{:?}", result.error);
+        assert_eq!(result.output["wait"]["outcome"], "item_error");
+        assert!(result.output["failed_count"].as_u64().unwrap() > 0);
     }
 }

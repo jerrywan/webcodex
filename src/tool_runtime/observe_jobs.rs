@@ -54,10 +54,13 @@ fn observed_has_error(observed: &[ObservedJob]) -> bool {
     observed.iter().any(|item| !item.result.success)
 }
 
-fn observed_has_terminal(observed: &[ObservedJob]) -> bool {
-    observed
-        .iter()
-        .any(|item| item.result.output["terminal"].as_bool() == Some(true))
+fn observed_terminal_satisfied(observed: &[ObservedJob], wake_on: ObserveJobsWakeOn) -> bool {
+    let mut terminal = observed.iter().map(|item| item.result.output["terminal"].as_bool() == Some(true));
+    if wake_on == ObserveJobsWakeOn::AllTerminal {
+        terminal.all(|terminal| terminal)
+    } else {
+        terminal.any(|terminal| terminal)
+    }
 }
 
 fn observed_has_change(observed: &[ObservedJob]) -> bool {
@@ -659,7 +662,7 @@ impl ToolRuntime {
         observed
     }
 
-    async fn wait_for_any_observed_job(
+    async fn wait_for_observed_jobs(
         &self,
         items: &[ObserveJobsItem],
         auth: Option<&AuthContext>,
@@ -673,7 +676,7 @@ impl ToolRuntime {
         let mut waits = stream::iter(items.iter().cloned().map(|mut item| async move {
             loop {
                 if Instant::now() >= deadline {
-                    return Ok(WakeReason::Timeout);
+                    return Ok::<WakeReason, String>(WakeReason::Timeout);
                 }
                 let result = self
                     .job_log_for_auth(
@@ -706,7 +709,7 @@ impl ToolRuntime {
                     }
                     item.after_observation_token = Some(token.to_string());
                 } else if result.output["wait_outcome"].as_str() == Some("timeout") {
-                    return Ok(WakeReason::Timeout);
+                    return Ok::<WakeReason, String>(WakeReason::Timeout);
                 } else {
                     return Err(
                         "observe_jobs canonical wait returned an invalid wait outcome".into(),
@@ -717,9 +720,19 @@ impl ToolRuntime {
         .buffer_unordered(MAX_OBSERVE_JOBS_ITEMS);
         // This one absolute deadline also bounds every re-entered canonical
         // wait. Non-terminal updates never reset or extend the batch duration.
-        match tokio::time::timeout_at(deadline, waits.next()).await {
-            Ok(Some(reason)) => reason,
-            Ok(None) => Err("observe_jobs shared wait had no item futures".into()),
+        let wait = async {
+            while let Some(reason) = waits.next().await {
+                let reason = reason?;
+                if wake_on != ObserveJobsWakeOn::AllTerminal || reason != WakeReason::Terminal {
+                    return Ok(reason);
+                }
+                // A terminal Job leaves the pending set; the other canonical
+                // waiters retain their private cursors and registrations.
+            }
+            Ok(WakeReason::Terminal)
+        };
+        match tokio::time::timeout_at(deadline, wait).await {
+            Ok(reason) => reason,
             Err(_) => Ok(WakeReason::Timeout),
         }
     }
@@ -742,11 +755,13 @@ impl ToolRuntime {
         let missing_baseline = items
             .iter()
             .any(|item| item.after_observation_token.is_none());
-        let immediate_reason = if wait_secs.is_none() || missing_baseline {
+        let immediate_reason = if wake_on == ObserveJobsWakeOn::AllTerminal && observed_has_error(&initial) {
+            Some(WakeReason::ItemError)
+        } else if wait_secs.is_none() || missing_baseline {
             Some(WakeReason::Immediate)
         } else if observed_has_error(&initial) {
             Some(WakeReason::ItemError)
-        } else if observed_has_terminal(&initial) {
+        } else if observed_terminal_satisfied(&initial, wake_on) {
             Some(WakeReason::Terminal)
         } else if wake_on == ObserveJobsWakeOn::Change && observed_has_change(&initial) {
             Some(WakeReason::Updated)
@@ -759,9 +774,14 @@ impl ToolRuntime {
         } else {
             let wait_secs = wait_secs.expect("shared wait requires validated wait_secs");
             let wait_started = Instant::now();
+            let pending: Vec<_> = items.iter().zip(&initial)
+                .filter(|(_, observed)| wake_on != ObserveJobsWakeOn::AllTerminal
+                    || observed.result.output["terminal"].as_bool() != Some(true))
+                .map(|(item, _)| item.clone())
+                .collect();
             let wait_reason = match self
-                .wait_for_any_observed_job(
-                    &items,
+                .wait_for_observed_jobs(
+                    &pending,
                     auth,
                     wait_secs,
                     wake_on,
@@ -777,7 +797,7 @@ impl ToolRuntime {
             let final_reason =
                 if observed_has_error(&refreshed) || wait_reason == WakeReason::ItemError {
                     WakeReason::ItemError
-                } else if observed_has_terminal(&refreshed) || wait_reason == WakeReason::Terminal {
+                } else if observed_terminal_satisfied(&refreshed, wake_on) || wait_reason == WakeReason::Terminal {
                     WakeReason::Terminal
                 } else if wake_on == ObserveJobsWakeOn::Change
                     && (observed_has_change(&refreshed) || wait_reason == WakeReason::Updated)

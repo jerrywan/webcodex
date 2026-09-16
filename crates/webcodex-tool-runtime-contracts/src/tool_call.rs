@@ -272,6 +272,7 @@ pub enum ObserveJobsWakeOn {
     #[default]
     Change,
     Terminal,
+    AllTerminal,
 }
 
 fn deserialize_non_empty_read_path<'de, D>(deserializer: D) -> Result<String, D::Error>

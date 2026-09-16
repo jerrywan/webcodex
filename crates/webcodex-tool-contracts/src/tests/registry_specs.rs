@@ -1054,7 +1054,7 @@ fn observe_jobs_wake_policy_schema_is_closed_and_compatible() {
         webcodex_core::runtime_contract::MAX_JOB_OBSERVATION_WAIT_SECS,
         100
     );
-    assert_eq!(wake["enum"], serde_json::json!(["change", "terminal"]));
+    assert_eq!(wake["enum"], serde_json::json!(["change", "terminal", "all_terminal"]));
     assert_eq!(wake["default"], "change");
     assert!(!spec.input_schema["required"]
         .as_array()
@@ -1081,6 +1081,9 @@ fn observe_jobs_wake_policy_schema_is_closed_and_compatible() {
     assert!(wait_description.contains("further useful progress depends on terminal outcome"));
     assert!(wait_description.contains("independent work continues"));
     let wake_description = wake["description"].as_str().unwrap();
-    assert!(wake_description.contains("dependent progress is blocked"));
-    assert!(wake_description.contains("not as an unconditional next call"));
+    assert!(wake_description.contains("any terminal result unblocks progress"));
+    assert!(wake_description.contains("predetermined set"));
+    for policy in ["change", "terminal", "all_terminal"] {
+        test_support::validate_schema_instance(&json!({"items": [{"job_id": "job"}], "wake_on": policy}), &spec.input_schema).unwrap();
+    }
 }

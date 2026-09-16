@@ -466,9 +466,9 @@ pub fn observe_jobs_input_schema() -> Value {
             },
             "wake_on": {
                 "type": "string",
-                "enum": ["change", "terminal"],
+                "enum": ["change", "terminal", "all_terminal"],
                 "default": "change",
-                "description": "Bounded-wait wake policy. change (default) returns on any observable change. terminal coalesces non-terminal log/progress/activity changes until any Job is terminal, an item errors, or the shared deadline expires; use terminal waiting when dependent progress is blocked, not as an unconditional next call. Deadline returns timeout even when changed=true; deltas remain relative to the caller's original tokens. No token means immediate baseline; no wait_secs means immediate observation."
+                "description": "Bounded-wait wake policy. change (default) returns on any observable change. terminal waits for any Job to be terminal; use it for one Job or when any terminal result unblocks progress. all_terminal waits for every Job in a predetermined set needed before progress. Both coalesce non-terminal log/progress/activity updates and return immediately on any item error or at the shared deadline. Deadline returns timeout even when changed=true; deltas remain relative to the caller's original tokens. No token means immediate baseline; no wait_secs means immediate observation."
             }
         },
         "required": ["items"]

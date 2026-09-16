@@ -1861,6 +1861,7 @@ fn observe_jobs_wake_policy_defaults_validates_and_audits_safely() {
         (None, ObserveJobsWakeOn::Change),
         (Some("change"), ObserveJobsWakeOn::Change),
         (Some("terminal"), ObserveJobsWakeOn::Terminal),
+        (Some("all_terminal"), ObserveJobsWakeOn::AllTerminal),
     ] {
         let mut args = json!({
             "items": [{"job_id": "job", "after_observation_token": "private-observation-cursor"}],
