@@ -616,7 +616,7 @@ fn from_tool_name_parses_run_shell_with_required_fields() {
 fn from_tool_name_parses_run_shell_with_optional_fields() {
     let call = ToolCall::from_tool_name(
         "run_shell",
-        json!({"project": "demo", "command": "ls", "timeout_secs": 180, "cwd": "sub"}),
+        json!({"project": "demo", "command": "ls", "timeout_secs": 180, "sync_wait_secs": 7, "cwd": "sub"}),
     )
     .unwrap();
     match call {
@@ -624,12 +624,14 @@ fn from_tool_name_parses_run_shell_with_optional_fields() {
             project,
             command,
             timeout_secs,
+            sync_wait_secs,
             cwd,
             ..
         } => {
             assert_eq!(project, "demo");
             assert_eq!(command, "ls");
             assert_eq!(timeout_secs, Some(180));
+            assert_eq!(sync_wait_secs, Some(7));
             assert_eq!(cwd, Some("sub".to_string()));
         }
         other => panic!("expected RunShell, got {:?}", other),
