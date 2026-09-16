@@ -18,10 +18,12 @@ pub(super) fn decorate_structured_execution_prestart_denial(
     result: &mut ToolResult,
     fallback_failure_kind: &'static str,
 ) {
-    if !matches!(
+    let structured_execution = matches!(
         tool_name,
         "run_process" | "run_detached_process" | "run_script" | "run_skill_resource"
-    ) {
+    );
+    let structured_mutation = tool_name == "apply_text_edits";
+    if !structured_execution && !structured_mutation {
         return;
     }
     let mut output = match std::mem::take(&mut result.output) {
@@ -43,12 +45,18 @@ pub(super) fn decorate_structured_execution_prestart_denial(
         "execution_state".to_string(),
         Value::String("not_started".to_string()),
     );
-    output.insert("command_started".to_string(), Value::Bool(false));
-    output.insert("command_completed".to_string(), Value::Bool(false));
-    output.insert("command_ok".to_string(), Value::Bool(false));
-    output.insert("exit_code".to_string(), Value::Null);
     output.insert("failure_kind".to_string(), Value::String(failure_kind));
     output.insert("tool_failure".to_string(), Value::Bool(true));
+    if structured_mutation {
+        // These Runtime gates precede business mutation dispatch, so the
+        // canonical mutation result can authoritatively prove no state changed.
+        output.insert("state_changed".to_string(), Value::Bool(false));
+    } else {
+        output.insert("command_started".to_string(), Value::Bool(false));
+        output.insert("command_completed".to_string(), Value::Bool(false));
+        output.insert("command_ok".to_string(), Value::Bool(false));
+        output.insert("exit_code".to_string(), Value::Null);
+    }
     result.output = Value::Object(output);
 }
 

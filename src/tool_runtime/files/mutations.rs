@@ -263,6 +263,7 @@ fn apply_text_edit_occurrence_capability_rejection(reason: impl AsRef<str>) -> T
         ),
         json!({
             "state_changed": false,
+            "execution_state": "not_started",
             "error_kind": "agent_capability_unavailable",
             "failure_kind": "capability_unavailable",
             "capability": crate::runner_protocol::RUNNER_CAPABILITY_APPLY_TEXT_EDIT_OCCURRENCE
@@ -278,6 +279,7 @@ fn apply_text_edit_line_scope_capability_rejection(reason: impl AsRef<str>) -> T
         ),
         json!({
             "state_changed": false,
+            "execution_state": "not_started",
             "error_kind": "agent_capability_unavailable",
             "failure_kind": "capability_unavailable",
             "capability": crate::runner_protocol::RUNNER_CAPABILITY_APPLY_TEXT_EDIT_LINE_SCOPE
@@ -1877,6 +1879,7 @@ fn compact_apply_text_edits_preflight_rejection(
     let detail = message.into();
     let mut output = json!({
         "state_changed": false,
+        "execution_state": "not_started",
         "error_kind": error_kind,
     });
     if let Some(change_index) = change_index {
@@ -1908,6 +1911,7 @@ fn compact_apply_text_edits_path_policy_rejection(
         output.remove("path");
         output.remove("error");
     }
+    result.output["execution_state"] = json!("not_started");
     result.output["change_index"] = json!(change_index);
     result.output["kind"] = json!(kind);
     result
@@ -1925,6 +1929,7 @@ fn apply_text_edits_preflight_rejection(
     let detail = message.into();
     let mut output = json!({
         "state_changed": false,
+        "execution_state": "not_started",
         "error_kind": error_kind,
         "retry_guidance": retry_guidance,
     });
@@ -1962,6 +1967,7 @@ fn apply_text_edits_path_policy_rejection(
         output.remove("path");
         output.remove("error");
     }
+    result.output["execution_state"] = json!("not_started");
     result.output["change_index"] = json!(change_index);
     result.output["kind"] = json!(kind);
     result.output["retry_guidance"] =

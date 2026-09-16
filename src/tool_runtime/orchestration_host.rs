@@ -9,6 +9,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
+#[cfg(test)]
+use tokio::sync::Semaphore;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use webcodex_core::workflow_session_contract::{
     TOOL_ACCEPTED_EXIT_CODES_FIELD, TOOL_ASSERTION_NAME_FIELD,
@@ -26,28 +28,74 @@ use webcodex_tool_contracts::{
 /// This deliberately does not participate in direct mutation dispatch. It only
 /// contains concurrent orchestration frontends targeting the same canonical
 /// resolved Project, while unrelated Projects retain independent mutation lanes.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct OrchestrationMutationFenceRegistry {
     projects: Mutex<BTreeMap<String, Weak<AsyncMutex<()>>>>,
+    #[cfg(test)]
+    acquire_attempted: Semaphore,
+    #[cfg(test)]
+    acquired: Semaphore,
+}
+
+impl Default for OrchestrationMutationFenceRegistry {
+    fn default() -> Self {
+        Self {
+            projects: Mutex::new(BTreeMap::new()),
+            #[cfg(test)]
+            acquire_attempted: Semaphore::new(0),
+            #[cfg(test)]
+            acquired: Semaphore::new(0),
+        }
+    }
 }
 
 impl OrchestrationMutationFenceRegistry {
+    fn fence(&self, project: &str) -> Arc<AsyncMutex<()>> {
+        let mut projects = self
+            .projects
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        projects.retain(|_, fence| fence.strong_count() > 0);
+        if let Some(fence) = projects.get(project).and_then(Weak::upgrade) {
+            fence
+        } else {
+            let fence = Arc::new(AsyncMutex::new(()));
+            projects.insert(project.to_string(), Arc::downgrade(&fence));
+            fence
+        }
+    }
+
     async fn acquire(&self, project: &str) -> OwnedMutexGuard<()> {
-        let fence = {
-            let mut projects = self
-                .projects
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            projects.retain(|_, fence| fence.strong_count() > 0);
-            if let Some(fence) = projects.get(project).and_then(Weak::upgrade) {
-                fence
-            } else {
-                let fence = Arc::new(AsyncMutex::new(()));
-                projects.insert(project.to_string(), Arc::downgrade(&fence));
-                fence
-            }
-        };
-        fence.lock_owned().await
+        let fence = self.fence(project);
+        #[cfg(test)]
+        self.acquire_attempted.add_permits(1);
+        let guard = fence.lock_owned().await;
+        #[cfg(test)]
+        self.acquired.add_permits(1);
+        guard
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn hold_project_for_test(&self, project: &str) -> OwnedMutexGuard<()> {
+        self.fence(project).lock_owned().await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_acquire_attempt_for_test(&self) {
+        self.acquire_attempted
+            .acquire()
+            .await
+            .expect("orchestration mutation fence attempt semaphore closed")
+            .forget();
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_acquired_for_test(&self) {
+        self.acquired
+            .acquire()
+            .await
+            .expect("orchestration mutation fence acquired semaphore closed")
+            .forget();
     }
 }
 
@@ -740,5 +788,32 @@ impl CanonicalOrchestrationHost {
             output: result.output,
             error: result.error,
         })
+    }
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::*;
+
+    #[test]
+    fn mutation_result_without_authoritative_state_changed_fails_closed() {
+        let mut effects = OrchestrationEffectAccumulator::default();
+        effects.begin_if_consequential(1, "apply_text_edits");
+        effects.finish(
+            1,
+            &crate::tool_runtime::ToolResult::ok(serde_json::json!({
+                "execution_state": "completed"
+            })),
+        );
+
+        let receipt = effects.receipt();
+        assert_eq!(receipt.consequential_calls, 1);
+        assert_eq!(receipt.known_results, 0);
+        assert_eq!(receipt.outcome_unknown, 1);
+        assert_eq!(
+            receipt.children[0].outcome,
+            ConsequentialChildOutcome::OutcomeUnknown
+        );
+        assert_eq!(receipt.children[0].state_changed, None);
     }
 }
