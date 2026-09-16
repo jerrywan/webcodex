@@ -63,6 +63,24 @@ fn observed_terminal_satisfied(observed: &[ObservedJob], wake_on: ObserveJobsWak
     }
 }
 
+fn final_wake_reason(observed: &[ObservedJob], wake_on: ObserveJobsWakeOn, wait_reason: WakeReason) -> WakeReason {
+if observed_has_error(observed) || wait_reason == WakeReason::ItemError {
+                    WakeReason::ItemError
+                } else if wake_on == ObserveJobsWakeOn::AllTerminal && wait_reason == WakeReason::Timeout {
+                    // A final snapshot may race a post-deadline completion;
+                    // it must not rewrite the expired shared wait as satisfied.
+                    WakeReason::Timeout
+                } else if observed_terminal_satisfied(observed, wake_on) || wait_reason == WakeReason::Terminal {
+                    WakeReason::Terminal
+                } else if wake_on == ObserveJobsWakeOn::Change
+                    && (observed_has_change(observed) || wait_reason == WakeReason::Updated)
+                {
+                    WakeReason::Updated
+                } else {
+                    WakeReason::Timeout
+                }
+}
+
 fn observed_has_change(observed: &[ObservedJob]) -> bool {
     observed
         .iter()
@@ -794,18 +812,7 @@ impl ToolRuntime {
             };
             let waited_ms = wait_started.elapsed().as_millis() as u64;
             let refreshed = self.observe_jobs_pass(&items, tail_lines, auth).await;
-            let final_reason =
-                if observed_has_error(&refreshed) || wait_reason == WakeReason::ItemError {
-                    WakeReason::ItemError
-                } else if observed_terminal_satisfied(&refreshed, wake_on) || wait_reason == WakeReason::Terminal {
-                    WakeReason::Terminal
-                } else if wake_on == ObserveJobsWakeOn::Change
-                    && (observed_has_change(&refreshed) || wait_reason == WakeReason::Updated)
-                {
-                    WakeReason::Updated
-                } else {
-                    WakeReason::Timeout
-                };
+            let final_reason = final_wake_reason(&refreshed, wake_on, wait_reason);
             (refreshed, final_reason, waited_ms)
         };
 
@@ -823,6 +830,15 @@ impl ToolRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_terminal_deadline_is_not_rewritten_by_a_racing_final_snapshot() {
+        let completed = vec![ObservedJob { index: 0, job_id: "job".into(),
+            result: ToolResult::ok(json!({"terminal":true,"changed":true})) }];
+        assert_eq!(final_wake_reason(&completed, ObserveJobsWakeOn::AllTerminal, WakeReason::Timeout), WakeReason::Timeout);
+        assert_eq!(final_wake_reason(&completed, ObserveJobsWakeOn::AllTerminal, WakeReason::Terminal), WakeReason::Terminal);
+        assert_eq!(final_wake_reason(&completed, ObserveJobsWakeOn::AllTerminal, WakeReason::ItemError), WakeReason::ItemError);
+    }
 
     #[test]
     fn bounded_error_limits_character_count() {
