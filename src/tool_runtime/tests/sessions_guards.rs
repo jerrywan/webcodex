@@ -926,7 +926,7 @@ async fn deny_write_only_allows_read_and_shell_tools() {
                         command: "exit 0".to_string(),
                         session_id: Some(session_id),
                         timeout_secs: Some(30),
-                        sync_wait_secs: None,
+                        sync_wait_secs: Some(30),
                         cwd: None,
                         purpose: None,
                         shell: None,

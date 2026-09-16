@@ -699,8 +699,7 @@ async fn apply_text_edits_shorthand_read_revision_uses_existing_wire_guard() {
             "path":"src/lib.rs",
             "old_text":"dup",
             "new_text":"SECOND",
-            "expected_read_revision": revision,
-            "occurrence": 2
+            "expected_read_revision": revision
         }]
     }));
     let task = tokio::spawn({
@@ -714,7 +713,7 @@ async fn apply_text_edits_shorthand_read_revision_uses_existing_wire_guard() {
     assert_eq!(payload["changes"][0]["kind"], "edit");
     assert_eq!(payload["changes"][0]["expected_sha256"], sha);
     assert_eq!(payload["changes"][0]["edits"][0]["kind"], "replace_exact");
-    assert_eq!(payload["changes"][0]["edits"][0]["occurrence"], 2);
+    assert!(payload["changes"][0]["edits"][0]["occurrence"].is_null());
     assert!(payload["changes"][0]
         .get("expected_read_revision")
         .is_none());
@@ -726,42 +725,22 @@ async fn apply_text_edits_shorthand_read_revision_uses_existing_wire_guard() {
 #[tokio::test]
 async fn apply_text_edits_shorthand_positional_guards_match_canonical_rejection() {
     let runtime = test_runtime();
-    for (canonical_edit, shorthand) in [
-        (
-            serde_json::json!({"kind":"replace_exact","old_text":"dup","new_text":"x","occurrence":2}),
-            serde_json::json!({"path":"src/lib.rs","old_text":"dup","new_text":"x","occurrence":2}),
-        ),
-        (
-            serde_json::json!({"kind":"replace_exact","old_text":"dup","new_text":"x","line_scope":{"start_line":2,"end_line":2}}),
-            serde_json::json!({"path":"src/lib.rs","old_text":"dup","new_text":"x","line_scope":{"start_line":2,"end_line":2}}),
-        ),
+    for shorthand in [
+        serde_json::json!({"path":"src/lib.rs","old_text":"dup","new_text":"x","occurrence":2}),
+        serde_json::json!({"path":"src/lib.rs","old_text":"dup","new_text":"x","line_scope":{"start_line":2,"end_line":2}}),
+        serde_json::json!({"path":"src/lib.rs","old_text":"dup","new_text":"x","expected_read_revision":3817291045227_u64,"occurrence":2}),
     ] {
-        let canonical_changes = parsed_apply_text_edits_changes(serde_json::json!({
-            "project": "agent:unused:unused",
-            "changes": [{"kind":"edit","path":"src/lib.rs","edits":[canonical_edit]}]
-        }));
-        let shorthand_changes = parsed_apply_text_edits_changes(serde_json::json!({
-            "project": "agent:unused:unused",
-            "changes": [shorthand]
-        }));
-        let canonical = runtime
-            .apply_text_edits("agent:unused:unused".to_string(), canonical_changes, None)
-            .await;
-        let shorthand = runtime
-            .apply_text_edits("agent:unused:unused".to_string(), shorthand_changes, None)
-            .await;
-        assert!(!canonical.success);
-        assert!(!shorthand.success);
-        assert_eq!(
-            shorthand.output["error_kind"],
-            canonical.output["error_kind"]
+        let parsed = ToolCall::from_tool_name(
+            "apply_text_edits",
+            serde_json::json!({
+                "project": "agent:unused:unused",
+                "changes": [shorthand]
+            }),
         );
-        assert_eq!(shorthand.output["state_changed"], false);
-        assert_eq!(shorthand.error, canonical.error);
-        assert!(shorthand
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("expected_read_revision is required")));
+        assert!(
+            parsed.is_err(),
+            "positional shorthand must stay canonical-only"
+        );
     }
 
     let empty_old_text = parsed_apply_text_edits_changes(serde_json::json!({

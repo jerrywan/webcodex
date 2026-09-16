@@ -236,13 +236,13 @@ pub fn run_shell_input_schema() -> Value {
         (
             "timeout_secs",
             "integer",
-            "Total execution runtime budget in seconds (minimum 1, default 60). Oversized values are Runtime-clamped to the shared structured-execution ceiling. Runner-host work may hand off the same original execution as a durable Job; named SSH remains limited to its direct execution ceiling.",
+            "Total lifetime seconds (default 60, min 1); clamped to shared structured-execution ceiling; named SSH keeps direct ceiling.",
             false,
         ),
         (
             "sync_wait_secs",
             "integer",
-            "Foreground grace before same-execution durable Job handoff. Omit for 10s. Values above 60 or the effective timeout are clamped to the smaller bound. This controls when run_shell returns a Job, not when the command is killed; named SSH resources do not support this field.",
+            "same-execution durable Job handoff grace (default 10s), clamped by 60s and timeout; controls return, not when the command is killed; named SSH unsupported.",
             false,
         ),
         (

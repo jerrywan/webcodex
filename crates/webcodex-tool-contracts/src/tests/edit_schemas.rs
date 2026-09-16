@@ -52,6 +52,8 @@ fn apply_text_edits_input_schema_encodes_file_and_edit_kind_contracts() {
     assert_eq!(shorthand["additionalProperties"], false);
     assert_eq!(shorthand["properties"]["old_text"]["minLength"], 1);
     assert!(shorthand["properties"].get("kind").is_none());
+    assert!(shorthand["properties"].get("occurrence").is_none());
+    assert!(shorthand["properties"].get("line_scope").is_none());
     assert_eq!(
         edit["properties"]["expected_read_revision"]["type"],
         "integer"
@@ -119,8 +121,6 @@ fn apply_text_edits_input_schema_encodes_file_and_edit_kind_contracts() {
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","expected_read_revision":revision,"edits":[{"kind":"insert_after","anchor_text":"anchor","new_text":"new","occurrence":2}]}]}),
         json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new"}]}),
         json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new","expected_read_revision":revision}]}),
-        json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new","expected_read_revision":revision,"occurrence":2}]}),
-        json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new","expected_read_revision":revision,"line_scope":{"start_line":10,"end_line":20}}]}),
         json!({"project":"demo","changes":[{"kind":"create","path":"new.txt","content":""}]}),
         json!({"project":"demo","changes":[{"kind":"delete","path":"old.txt","expected_read_revision":revision}]}),
         json!({"project":"demo","changes":[{"kind":"rename","path":"old.txt","to_path":"new.txt","expected_read_revision":revision}]}),
@@ -146,6 +146,8 @@ fn apply_text_edits_input_schema_encodes_file_and_edit_kind_contracts() {
         json!({"project":"demo","changes":[{"kind":"rename","path":"old.txt","to_path":"new.txt"}]}),
         json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new","occurrence":2}]}),
         json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new","line_scope":{"start_line":1,"end_line":2}}]}),
+        json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new","expected_read_revision":revision,"occurrence":2}]}),
+        json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new","expected_read_revision":revision,"line_scope":{"start_line":10,"end_line":20}}]}),
         json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old"}]}),
         json!({"project":"demo","changes":[{"path":"a.rs","old_text":"old","new_text":"new","unknown":true}]}),
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","old_text":"old","new_text":"new"}]}),

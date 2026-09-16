@@ -49,9 +49,7 @@ fn apply_text_edits_shorthand_normalizes_once_to_canonical_call() {
                 "path": "src/lib.rs",
                 "old_text": "old",
                 "new_text": "new",
-                "expected_read_revision": revision,
-                "occurrence": 2,
-                "line_scope": {"start_line": 10, "end_line": 20}
+                "expected_read_revision": revision
             }]
         }),
     )
@@ -72,9 +70,8 @@ fn apply_text_edits_shorthand_normalizes_once_to_canonical_call() {
     assert_eq!(edit.old_text.as_deref(), Some("old"));
     assert_eq!(edit.new_text.as_deref(), Some("new"));
     assert!(edit.anchor_text.is_none());
-    assert_eq!(edit.occurrence, Some(2));
-    assert_eq!(edit.line_scope.unwrap().start_line, 10);
-    assert_eq!(edit.line_scope.unwrap().end_line, 20);
+    assert!(edit.occurrence.is_none());
+    assert!(edit.line_scope.is_none());
 
     let canonical = ToolCall::from_tool_name(
         "apply_text_edits",
@@ -98,6 +95,8 @@ fn apply_text_edits_shorthand_normalizes_once_to_canonical_call() {
 
     for invalid in [
         json!({"project":"agent:special:demo","changes":[{"path":"src/lib.rs","old_text":"old","new_text":"new","unknown":true}]}),
+        json!({"project":"agent:special:demo","changes":[{"path":"src/lib.rs","old_text":"old","new_text":"new","occurrence":2}]}),
+        json!({"project":"agent:special:demo","changes":[{"path":"src/lib.rs","old_text":"old","new_text":"new","expected_read_revision":revision,"line_scope":{"start_line":10,"end_line":20}}]}),
         json!({"project":"agent:special:demo","changes":[{"kind":"edit","path":"src/lib.rs","old_text":"old","new_text":"new"}]}),
         json!({"project":"agent:special:demo","changes":[{"path":"new.rs","content":"fn main() {}"}]}),
     ] {

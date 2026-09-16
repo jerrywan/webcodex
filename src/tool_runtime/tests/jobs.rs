@@ -60,7 +60,7 @@ async fn run_shell_session_events_record_exit_without_stdio_bodies() {
                         command: "printf success-output".to_string(),
                         session_id: Some(session_id),
                         timeout_secs: Some(30),
-                        sync_wait_secs: None,
+                        sync_wait_secs: Some(30),
                         cwd: None,
                         purpose: None,
                         shell: None,
@@ -103,7 +103,7 @@ async fn run_shell_session_events_record_exit_without_stdio_bodies() {
                         command: "printf failure-output; exit 7".to_string(),
                         session_id: Some(session_id),
                         timeout_secs: Some(30),
-                        sync_wait_secs: None,
+                        sync_wait_secs: Some(30),
                         cwd: None,
                         purpose: None,
                         shell: None,
@@ -215,7 +215,15 @@ async fn run_shell_via_agent(
     let command = command.to_string();
     let task = tokio::spawn(async move {
         runtime_for_task
-            .run_shell(project, command, timeout_secs, None)
+            .run_shell_with_contract(
+                project,
+                command,
+                timeout_secs,
+                Some(timeout_secs.unwrap_or(60)),
+                None,
+                None,
+                None,
+            )
             .await
     });
     let req = wait_for_patch_agent_request(&runtime, client_id).await;
@@ -248,7 +256,15 @@ async fn run_shell_via_agent_lifecycle_error(
     let runtime_for_task = runtime.clone();
     let task = tokio::spawn(async move {
         runtime_for_task
-            .run_shell(project, "printf lifecycle".to_string(), Some(30), None)
+            .run_shell_with_contract(
+                project,
+                "printf lifecycle".to_string(),
+                Some(30),
+                Some(30),
+                None,
+                None,
+                None,
+            )
             .await
     });
     let request = wait_for_patch_agent_request(&runtime, client_id).await;

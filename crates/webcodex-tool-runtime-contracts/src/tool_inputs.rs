@@ -89,10 +89,6 @@ impl<'de> Deserialize<'de> for ApplyFileChangeInput {
             new_text: String,
             #[serde(default)]
             expected_read_revision: Option<u64>,
-            #[serde(default)]
-            occurrence: Option<usize>,
-            #[serde(default)]
-            line_scope: Option<ApplyTextLineScope>,
         }
 
         #[derive(Deserialize)]
@@ -121,8 +117,8 @@ impl<'de> Deserialize<'de> for ApplyFileChangeInput {
                     old_text: Some(input.old_text),
                     new_text: Some(input.new_text),
                     anchor_text: None,
-                    occurrence: input.occurrence,
-                    line_scope: input.line_scope,
+                    occurrence: None,
+                    line_scope: None,
                 }],
                 expected_read_revision: input.expected_read_revision,
             },

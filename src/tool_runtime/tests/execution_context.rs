@@ -60,7 +60,7 @@ async fn run_shell_inherits_session_context_and_explicit_arguments_override_it()
                         command: "pwd".to_string(),
                         session_id: Some(session_id),
                         timeout_secs: Some(30),
-                        sync_wait_secs: None,
+                        sync_wait_secs: Some(30),
                         cwd: None,
                         purpose: None,
                         shell: None,
@@ -103,7 +103,7 @@ async fn run_shell_inherits_session_context_and_explicit_arguments_override_it()
                         command: "pwd".to_string(),
                         session_id: Some(session_id),
                         timeout_secs: Some(30),
-                        sync_wait_secs: None,
+                        sync_wait_secs: Some(30),
                         cwd: Some("override".to_string()),
                         purpose: None,
                         shell: Some(ExecutionShell::Sh),
@@ -145,7 +145,7 @@ async fn run_shell_inherits_session_context_and_explicit_arguments_override_it()
                         command: "pwd".to_string(),
                         session_id: None,
                         timeout_secs: Some(30),
-                        sync_wait_secs: None,
+                        sync_wait_secs: Some(30),
                         cwd: None,
                         purpose: None,
                         shell: None,
@@ -233,7 +233,8 @@ async fn outer_recorder_does_not_override_business_session_execution_context() {
                             "project": project,
                             "command": "pwd",
                             "session_id": business_id,
-                            "timeout_secs": 30
+                            "timeout_secs": 30,
+                            "sync_wait_secs": 30
                         }),
                     },
                     ToolCallContext {

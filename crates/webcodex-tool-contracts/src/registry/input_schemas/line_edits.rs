@@ -146,30 +146,14 @@ fn exact_replace_shorthand_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "description": "One replace_exact: old_text is non-empty; occurrence is 1-based global source order; occurrence or line_scope requires expected_read_revision. Normalizes to canonical edit before preflight.",
+        "description": "One non-positional replace_exact; positional selectors use canonical edit form.",
         "properties": {
             "path": {"type": "string", "minLength": 1},
             "old_text": {"type": "string", "minLength": 1},
             "new_text": {"type": "string"},
-            "expected_read_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991_u64},
-            "occurrence": {"type": "integer", "minimum": 1},
-            "line_scope": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "start_line": {"type": "integer", "minimum": 1},
-                    "end_line": {"type": "integer", "minimum": 1}
-                },
-                "required": ["start_line", "end_line"]
-            }
+            "expected_read_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991_u64}
         },
-        "required": ["path", "old_text", "new_text"],
-        "allOf": [{
-            "anyOf": [
-                {"required": ["expected_read_revision"]},
-                {"not": {"anyOf": [{"required": ["occurrence"]}, {"required": ["line_scope"]}]}}
-            ]
-        }]
+        "required": ["path", "old_text", "new_text"]
     })
 }
 
