@@ -754,6 +754,10 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
         }
         "run_process" => {
             let mut properties = vec![
+                ("suggested_call", suggested_tool_call_schema(
+                    "run_shell", crate::registry::input_schemas::run_shell_input_schema(),
+                    "Optional failure-only advisory call for a proven lossless shell-command-mode conversion rejected before process start. It grants no retry or execution authority."
+                )),
                 (
                     "duration_ms",
                     schema_type("integer", "Process duration in milliseconds. Diagnostic telemetry: omitted on ordinary synchronous terminal success and from the default model-facing failure projection."),
@@ -857,6 +861,10 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 json!("run_process");
             schema["properties"]["output"]["allOf"] =
                 structured_execution_lifecycle_constraints("run_process");
+            schema["allOf"] = json!([{
+                "if": {"properties": {"success": {"const": true}}, "required": ["success"]},
+                "then": {"properties": {"output": {"not": {"required": ["suggested_call"]}}}}
+            }]);
             Some(schema)
         }
         "run_script" => {
