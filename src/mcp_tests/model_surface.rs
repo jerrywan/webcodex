@@ -122,7 +122,7 @@ async fn apply_text_edits_discriminated_schema_reaches_full_and_local_coding_mcp
             .as_array()
             .unwrap()
             .len(),
-        4
+        5
     );
 
     for surface in [
