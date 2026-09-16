@@ -84,10 +84,10 @@ fn builtin_coding_workflow_defaults_cover_unnamed_tasks_without_granting_authori
         "wait_secs=100,wake_on=terminal",
         "not for visibility",
         "sufficient fresh validation",
-        "Formatting is finalization, not per-edit validation",
-        "Format once after Rust source stabilizes",
+        "Formatting is finalization",
+        "After Rust stabilizes, format once",
         "before final diff/closeout",
-        "rerun only after later Rust edits affecting formatting",
+        "rerun only after later Rust edits",
     ] {
         assert!(defaults.contains(boundary), "missing guidance: {boundary}");
     }

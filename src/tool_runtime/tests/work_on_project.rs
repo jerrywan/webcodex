@@ -3993,8 +3993,8 @@ async fn work_on_project_sizes_and_runner_request_reduction_are_stable() {
     );
     // The sparse projection itself remains below 1 KiB when static workflow
     // guidance is omitted. With Session ACK/recording/sidecar guidance plus the
-    // v9 early-validation-handoff rule included, this fixture is about 4.5 KiB
-    // fresh and 4.6 KiB on unchanged continuation. Keep the default tightly
+    // current validation/finalization guidance included, this fixture stays within
+    // the dedicated sparse budgets below. Keep the default tightly
     // bounded and still far below the standard startup hard cap while leaving
     // only modest protocol headroom.
     assert!(
