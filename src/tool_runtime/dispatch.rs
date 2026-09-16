@@ -1635,9 +1635,16 @@ impl ToolRuntime {
             .recording_session_authorized
             .then(|| recorder_metadata.recording_session_project.as_deref())
             .flatten();
-        let shell_recovery = self.process_shell_recovery_call(
-            &call, &recorder_metadata.expectation, ssh_resource.as_deref(),
-            project_resolution.as_ref().and_then(|resolved| resolved.as_ref().ok())).await;
+        let shell_recovery = self
+            .process_shell_recovery_call(
+                &call,
+                &recorder_metadata.expectation,
+                ssh_resource.as_deref(),
+                project_resolution
+                    .as_ref()
+                    .and_then(|resolved| resolved.as_ref().ok()),
+            )
+            .await;
         let mut result = self
             .dispatch_authorized_inner(
                 call,
@@ -1653,10 +1660,13 @@ impl ToolRuntime {
                 correlation,
             )
             .await;
-        if !result.success && result.output["command_started"] == false
+        if !result.success
+            && result.output["command_started"] == false
             && result.output["execution_state"] == "not_started"
             && result.output["failure_kind"] == "invalid_arguments"
-            && result.error.as_deref().is_some_and(|error| error.contains("run_process does not accept shell command modes"))
+            && result.error.as_deref().is_some_and(|error| {
+                error.contains("run_process does not accept shell command modes")
+            })
         {
             if let Some(suggested_call) = shell_recovery {
                 result.output["suggested_call"] = suggested_call;

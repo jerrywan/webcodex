@@ -190,11 +190,19 @@ pub(crate) fn detected_job_summary_with_activity(
         detected["tests_failed"] = json!(metadata.tests_failed);
         if cargo_test {
             let diagnostics = webcodex_core::validation_evidence::parse_cargo_test_diagnostics(
-                stdout, stderr, analysis_truncated);
-            if !diagnostics.failed_test_details.is_empty() || metadata.tests_failed.unwrap_or(0) > 0 {
-                detected["failed_test_details"] = json!(diagnostics.failed_test_details.iter()
-                    .map(|detail| json!({"name": detail.name})).collect::<Vec<_>>());
-                detected["failed_test_details_truncated"] = json!(diagnostics.failed_test_details_truncated);
+                stdout,
+                stderr,
+                analysis_truncated,
+            );
+            if !diagnostics.failed_test_details.is_empty() || metadata.tests_failed.unwrap_or(0) > 0
+            {
+                detected["failed_test_details"] = json!(diagnostics
+                    .failed_test_details
+                    .iter()
+                    .map(|detail| json!({"name": detail.name}))
+                    .collect::<Vec<_>>());
+                detected["failed_test_details_truncated"] =
+                    json!(diagnostics.failed_test_details_truncated);
             }
         }
     }
@@ -212,25 +220,58 @@ mod detected_summary_tests {
     fn generic_cargo_failed_identities_are_bounded_advisory_and_truthful_when_incomplete() {
         let stdout = (0..25).map(|index| format!("test cases::failure_{index} ... FAILED\n")).collect::<String>()
             + "test result: FAILED. 0 passed; 25 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s\n";
-        let detected = detected_job_summary_with_activity(Some("cargo test --lib"), None,
-            "failed", Some(101), &stdout, "", false, None);
+        let detected = detected_job_summary_with_activity(
+            Some("cargo test --lib"),
+            None,
+            "failed",
+            Some(101),
+            &stdout,
+            "",
+            false,
+            None,
+        );
         assert_eq!(detected["tests_failed"], 25);
-        assert_eq!(detected["failed_test_details"].as_array().unwrap().len(), webcodex_core::validation_evidence::MAX_FAILED_TESTS);
-        assert_eq!(detected["failed_test_details"][0]["name"], "cases::failure_0");
+        assert_eq!(
+            detected["failed_test_details"].as_array().unwrap().len(),
+            webcodex_core::validation_evidence::MAX_FAILED_TESTS
+        );
+        assert_eq!(
+            detected["failed_test_details"][0]["name"],
+            "cases::failure_0"
+        );
         assert_eq!(detected["failed_test_details_truncated"], true);
         assert!(detected.get("validation_target_id").is_none());
         assert!(detected.get("test_count_evidence").is_none());
         for captured in [false, true] {
             let stdout = if captured { "test cases::captured ... FAILED\n" } else { "" }.to_string()
                 + "test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s\n";
-            let detected = detected_job_summary_with_activity(Some("cargo test"), None,
-                "failed", Some(101), &stdout, "", true, None);
-            assert_eq!(detected["failed_test_details"].as_array().unwrap().len(), usize::from(captured));
+            let detected = detected_job_summary_with_activity(
+                Some("cargo test"),
+                None,
+                "failed",
+                Some(101),
+                &stdout,
+                "",
+                true,
+                None,
+            );
+            assert_eq!(
+                detected["failed_test_details"].as_array().unwrap().len(),
+                usize::from(captured)
+            );
             assert_eq!(detected["failed_test_details_truncated"], true);
         }
         for command in ["cargo testing", "echo cargo test", "custom"] {
-            let detected = detected_job_summary_with_activity(Some(command), Some("test"),
-                "failed", Some(1), &stdout, "", false, None);
+            let detected = detected_job_summary_with_activity(
+                Some(command),
+                Some("test"),
+                "failed",
+                Some(1),
+                &stdout,
+                "",
+                false,
+                None,
+            );
             assert!(detected.get("failed_test_details").is_none());
         }
     }

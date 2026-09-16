@@ -34,7 +34,10 @@ fn apply_text_edits_input_schema_encodes_file_and_edit_kind_contracts() {
     // Host renderers need a readable structural union. Cross-field revision
     // requirements belong to canonical Runtime preflight, not nested unions.
     for key in ["allOf", "not", "if", "then", "else"] {
-        assert!(!edit.to_string().contains(&format!("\"{key}\":")), "unexpected conditional {key}");
+        assert!(
+            !edit.to_string().contains(&format!("\"{key}\":")),
+            "unexpected conditional {key}"
+        );
     }
     for key in ["kind", "path", "expected_read_revision", "edits"] {
         assert!(edit["properties"].get(key).is_some());
