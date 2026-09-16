@@ -79,6 +79,65 @@ fn experimental_code_mode_is_visible_read_only_and_feature_scoped() {
     assert!(!LOCAL_CODING_TOOL_NAMES.contains(&"code_mode_exec"));
 }
 
+#[cfg(feature = "experimental-code-mode")]
+#[test]
+fn code_mode_composition_policy_is_canonical_closed_and_independent_from_frontend_admission() {
+    const E1_TOOLS: &[&str] = &[
+        "read_files",
+        "search_project_texts",
+        "project_overview",
+        "list_project_tracked_files",
+        "git_status",
+        "git_log",
+        "git_diff_hunks",
+        "git_review_summary",
+        "show_changes",
+    ];
+    for name in E1_TOOLS {
+        let definition = lookup_tool_definition(name).unwrap_or_else(|| panic!("missing {name}"));
+        assert_eq!(
+            runtime_tool_composition_policy(name),
+            ToolCompositionPolicy::Parallel,
+            "{name}"
+        );
+        let metadata = definition.metadata();
+        assert_eq!(metadata.effect, ToolEffect::Observe, "{name}");
+        assert_eq!(metadata.risk, ToolRisk::Read, "{name}");
+    }
+
+    for name in ["cargo_check", "cargo_test"] {
+        assert_eq!(
+            runtime_tool_composition_policy(name),
+            ToolCompositionPolicy::Sequential,
+            "{name}"
+        );
+    }
+
+    for name in [
+        "cargo_fmt",
+        "run_process",
+        "run_script",
+        "run_shell",
+        "run_job",
+        "run_detached_process",
+        "observe_jobs",
+        "apply_text_edits",
+        "apply_patch",
+        "write_project_file",
+        "code_mode_exec",
+    ] {
+        assert_eq!(
+            runtime_tool_composition_policy(name),
+            ToolCompositionPolicy::Denied,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        runtime_tool_composition_policy("future_unknown_tool"),
+        ToolCompositionPolicy::Denied
+    );
+}
+
 #[cfg(not(feature = "experimental-code-mode"))]
 #[test]
 fn experimental_code_mode_is_absent_without_feature() {
