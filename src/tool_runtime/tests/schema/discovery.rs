@@ -220,6 +220,7 @@ fn allowed_tool_definition_categories_for_discovery_group(group: &str) -> &'stat
         "git" => &["checkpoint", "cleanup", "file", "git"],
         "goal" => &["goal"],
         "inspect" => &[
+            "browser",
             "checkpoint",
             "computer",
             "file",

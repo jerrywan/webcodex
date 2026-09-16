@@ -65,6 +65,13 @@ pub(in crate::tool_runtime::tests) fn sample_tool_args_for_spec(spec: &ToolSpec)
         "plugin_tool" => {
             args.insert("action".to_string(), json!("list"));
         }
+        "browser_observe" => {
+            args.insert("action".to_string(), json!("targets"));
+        }
+        "browser_act" => {
+            args.insert("action".to_string(), json!("launch"));
+            args.insert("client_id".to_string(), json!("oe"));
+        }
         "computer_observe" => {
             args.insert("action".to_string(), json!("targets"));
         }
