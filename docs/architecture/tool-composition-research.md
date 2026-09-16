@@ -200,7 +200,10 @@ ChatGPT / model host
 compose_tools / code-mode entry
         |
         v
-bounded orchestration runtime
+orchestration frontend/runtime
+        |
+        v
+CanonicalOrchestrationHost
         |
         +--> canonical child invocation A --+
         +--> canonical child invocation B --+--> existing ToolRuntime
@@ -233,6 +236,13 @@ not be selected until portability, startup cost, memory bounds, cancellation, an
 sandbox guarantees are measured. An internal test representation may use a
 structured plan; that does not imply shipping a generic JSON DAG as the ordinary
 model-facing contract.
+
+The E1.x implementation now exercises this split concretely: V8 remains the
+current frontend, while root-side canonical authority/admission/dispatch and
+composition accounting live in `CanonicalOrchestrationHost`. This does not decide
+that V8 is permanent. It establishes a seam where a later structured-plan or
+reusable TypeScript frontend can be compared without creating a second execution
+authority.
 
 ## Canonical nested invocation boundary
 

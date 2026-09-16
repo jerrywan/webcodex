@@ -43,24 +43,51 @@ code_mode_exec
 root ToolRuntime resolves/authorizes exact Project + Workflow Session
   |
   v
-RootCodeModeHost  <---------------------------+
-  |                                           |
-  v                                           |
-webcodex-code-mode (V8 thread)                |
-  |  tools.<name>(args) Promise               |
-  +---------------- host callback ------------+
-                                              |
-                                              v
-                         ToolRuntime::call_tool_with_context(...)
-                                              |
-                         canonical parsing / OAuth / Project authority
-                         permission evaluation / Session evidence
-                         Runner routing / ToolResult projection
+V8CodeModeHost (thin frontend adapter)
+  |
+  v
+CanonicalOrchestrationHost
+  |  admission / server-owned argument injection
+  |  child correlation / composition accounting
+  |  exact auth + Project + Session + transport context
+  v
+ToolRuntime::call_tool_with_context(...)
+  |
+  v
+canonical parsing / OAuth / Project authority
+permission evaluation / Session evidence
+Runner routing / ToolResult projection
+
+webcodex-code-mode (V8 thread)
+  |
+  | tools.<name>(args) Promise
+  +---- CodeModeHost callback ----> V8CodeModeHost
 ```
 
 `webcodex-code-mode` does not depend on the root WebCodex crate, `ToolRuntime`, `AuthContext`, `RunnerRegistry`, or Session storage. It owns only one-shot JavaScript execution, JSON/V8 conversion, bounded output, nested-call scheduling, termination, and the transport-neutral `CodeModeHost` callback contract.
 
+The root-side canonical callback implementation is intentionally no longer V8-specific. `CanonicalOrchestrationHost` owns the reusable authority-preserving nested-tool boundary; `V8CodeModeHost` only adapts the Code Mode crate's request/response types. This is an E1.x architectural probe, not a new workflow engine or stable extension API.
+
 The V8 integration follows the minimal runtime/thread, Promise callback, microtask-checkpoint, JSON conversion, and thread-safe isolate termination patterns used by OpenAI Codex's Apache-2.0-licensed code-mode implementation. WebCodex E1 does not copy Codex's persistent cells, remote sessions, stored values, media, module ecosystem, notification protocol, or full Code Mode subsystem.
+
+### E1.x frontend/host separation
+
+The experiment now distinguishes the orchestration **frontend** from the canonical **host**:
+
+```text
+frontend program/runtime
+    |      current: bounded V8 JavaScript
+    |      possible later: tested TS composition package or structured plan
+    v
+CanonicalOrchestrationHost
+    |
+    v
+canonical ToolRuntime
+```
+
+Only the V8 frontend exists today. The separation is meant to answer a narrower architectural question: can different orchestration representations share one authority, evidence, canonical dispatch, and composition-accounting boundary instead of each reimplementing WebCodex semantics? The frontend/runtime still owns program evaluation, scheduling/concurrency limits, timeout/cancellation, and output shaping. This does not add a TypeScript Composition Plugin, a Rust plan executor, bidirectional Native Plugin RPC, or another durable workflow lifecycle.
+
+Native Tool Plugins remain capability providers. A future reusable TypeScript composition layer, if dogfood justifies one, should consume this same canonical host boundary rather than teaching the existing stdin/stdout Native Plugin protocol to call back recursively into ToolRuntime.
 
 ## JavaScript API
 

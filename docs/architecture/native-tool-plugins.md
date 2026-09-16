@@ -320,6 +320,14 @@ Memory, orchestration, or integrations, is also a separate architectural layer.
 It may consume canonical WebCodex primitives, but Native Tool Plugins should not
 silently evolve into that runtime.
 
+The Experimental Code Mode E1.x work now provides a concrete reason to preserve
+that distinction. Its root-side `CanonicalOrchestrationHost` re-enters canonical
+`ToolRuntime` with exact outer authority while the V8 adapter is only a frontend.
+That host/frontend split is a possible substrate for a future tested TypeScript
+composition layer, but it does **not** change the Native Plugin protocol today.
+Native Plugins remain one-way capability providers over `initialize` / `tools/list`
+/ `tools/call`; they do not receive a recursive ToolRuntime callback channel.
+
 ## Explicit non-goals for the authoring workflow
 
 The authoring CLI should not introduce:
