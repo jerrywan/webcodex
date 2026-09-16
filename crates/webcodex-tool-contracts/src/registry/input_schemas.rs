@@ -59,7 +59,10 @@ pub use cleanup::{
     git_restore_paths_input_schema,
 };
 #[cfg(feature = "experimental-code-mode")]
-pub use code_mode::{code_mode_exec_effectful_input_schema, code_mode_exec_input_schema};
+pub use code_mode::{
+    code_mode_exec_effectful_input_schema, code_mode_exec_input_schema,
+    code_mode_exec_mutating_input_schema,
+};
 pub use coding::{finish_coding_task_input_schema, work_on_project_input_schema};
 pub use coding_agents::{
     coding_agent_cancel_input_schema, coding_agent_observe_input_schema,

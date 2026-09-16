@@ -70,6 +70,10 @@ pub(crate) struct OrchestrationPolicy {
     /// canonical tools whose continuation is observe_jobs. It never changes the
     /// child's total execution timeout or Job identity.
     pub(crate) nested_sync_wait_max_secs: Option<u64>,
+    /// Optional per-cell budget for canonical mutation attempts. Classification
+    /// comes only from ToolEffect::Mutate; a rejected over-budget call never
+    /// crosses canonical business dispatch.
+    pub(crate) max_mutation_calls: Option<usize>,
 }
 
 impl OrchestrationPolicy {
@@ -414,6 +418,7 @@ pub(crate) struct CanonicalOrchestrationHost {
     scheduling: RwLock<()>,
     accepting_nested_calls: Mutex<bool>,
     effects: Mutex<OrchestrationEffectAccumulator>,
+    mutation_calls: Mutex<usize>,
 }
 
 impl CanonicalOrchestrationHost {
@@ -438,6 +443,7 @@ impl CanonicalOrchestrationHost {
             scheduling: RwLock::new(()),
             accepting_nested_calls: Mutex::new(true),
             effects: Mutex::new(OrchestrationEffectAccumulator::default()),
+            mutation_calls: Mutex::new(0),
         }
     }
 
@@ -630,9 +636,24 @@ impl CanonicalOrchestrationHost {
                     "orchestration frontend is closed; nested call was not dispatched",
                 ));
             }
-            // The acceptance gate and scheduling guard establish one linear
-            // dispatch boundary with stop_accepting_nested_calls(): once the gate
-            // closes, a waiter that later acquires the scheduling fence cannot start.
+            // The acceptance gate plus scheduling/Project mutation fences establish
+            // one linear dispatch boundary with stop_accepting_nested_calls(): once
+            // admission closes, a waiter that later acquires either fence cannot start.
+            if runtime_tool_metadata(&tool_name).effect == ToolEffect::Mutate {
+                if let Some(max_mutation_calls) = self.policy.max_mutation_calls {
+                    let mut mutation_calls = self
+                        .mutation_calls
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    if *mutation_calls >= max_mutation_calls {
+                        return Err(OrchestrationHostError::new(format!(
+                            "{} permits at most {max_mutation_calls} mutation attempt per cell; start a new outer Code Mode call for another mutation",
+                            self.policy.policy_name
+                        )));
+                    }
+                    *mutation_calls = mutation_calls.saturating_add(1);
+                }
+            }
             self.begin_nested_call(&tool_name)
         };
         self.effects

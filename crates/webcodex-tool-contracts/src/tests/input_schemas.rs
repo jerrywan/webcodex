@@ -946,6 +946,37 @@ fn code_mode_effectful_schema_keeps_authority_outer_bound_and_deadline_explicit(
         .contains("decision deadline"));
 }
 
+#[cfg(feature = "experimental-code-mode")]
+#[test]
+fn code_mode_mutating_schema_keeps_authority_outer_bound_and_mutation_scope_narrow() {
+    let specs = registered_tool_specs();
+    let spec = spec_named(&specs, "code_mode_exec_mutating");
+    let properties = spec.input_schema["properties"].as_object().unwrap();
+    assert_schema_fields!(
+        properties,
+        "code_mode_exec_mutating input schema",
+        present: ["project", "session_id", "source", "timeout_ms"],
+        absent: [
+            "recording_session_id",
+            "ack_session_context_revision",
+            "ack_session_message_ids",
+            "context_request",
+            "session_message_resolution",
+            "state_changed",
+        ]
+    );
+    assert_eq!(
+        spec.input_schema["required"],
+        json!(["project", "session_id", "source"])
+    );
+    assert_eq!(properties["source"]["maxLength"], 65_536);
+    let source_description = properties["source"]["description"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(source_description.contains("one canonical apply_text_edits mutation attempt"));
+    assert!(source_description.contains("Validation"));
+}
+
 #[test]
 fn agent_continuation_bind_requires_canonical_view_fence_without_model_exposure() {
     let specs = crate::registry::agent_continuation_app_tool_specs();

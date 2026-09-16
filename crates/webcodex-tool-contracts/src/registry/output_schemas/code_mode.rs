@@ -89,7 +89,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("message", bounded_failure_message_schema()),
             ("failure_kind", failure_kind_schema()),
         ])),
-        "code_mode_exec_effectful" => Some(wrapped_output_schema(vec![
+        "code_mode_exec_effectful" | "code_mode_exec_mutating" => Some(wrapped_output_schema(vec![
             ("content", content_schema()),
             ("stats", stats_schema()),
             ("effect_receipt", effect_receipt_schema()),

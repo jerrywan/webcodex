@@ -1002,6 +1002,17 @@ pub enum ToolCall {
         timeout_ms: Option<u64>,
     },
 
+    /// Execute one experimental E2b guarded mutation cell. The outer envelope is
+    /// ProjectWrite; nested mutation remains a canonical apply_text_edits call.
+    #[cfg(feature = "experimental-code-mode")]
+    CodeModeExecMutating {
+        project: String,
+        session_id: String,
+        source: String,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+
     /// Execute one native process directly from a structured executable and
     /// argv. No shell parser, environment mutation, PTY, or durable handoff is
     /// part of this synchronous v1 contract.
@@ -3108,6 +3119,8 @@ impl ToolCall {
             Self::CodeModeExec { .. } => "code_mode_exec",
             #[cfg(feature = "experimental-code-mode")]
             Self::CodeModeExecEffectful { .. } => "code_mode_exec_effectful",
+            #[cfg(feature = "experimental-code-mode")]
+            Self::CodeModeExecMutating { .. } => "code_mode_exec_mutating",
             Self::RunProcess { .. } => "run_process",
             Self::RunDetachedProcess { .. } => "run_detached_process",
             Self::CodingAgentStart { .. } => "coding_agent_start",
@@ -3247,7 +3260,8 @@ impl ToolCall {
         match self {
             #[cfg(feature = "experimental-code-mode")]
             Self::CodeModeExec { session_id, .. }
-            | Self::CodeModeExecEffectful { session_id, .. } => Some(session_id.as_str()),
+            | Self::CodeModeExecEffectful { session_id, .. }
+            | Self::CodeModeExecMutating { session_id, .. } => Some(session_id.as_str()),
             Self::RunProcess { session_id, .. }
             | Self::RunDetachedProcess { session_id, .. }
             | Self::RunScript { session_id, .. }
@@ -3384,9 +3398,9 @@ impl ToolCall {
     pub fn project(&self) -> Option<&str> {
         match self {
             #[cfg(feature = "experimental-code-mode")]
-            Self::CodeModeExec { project, .. } | Self::CodeModeExecEffectful { project, .. } => {
-                Some(project.as_str())
-            }
+            Self::CodeModeExec { project, .. }
+            | Self::CodeModeExecEffectful { project, .. }
+            | Self::CodeModeExecMutating { project, .. } => Some(project.as_str()),
             Self::RunProcess { project, .. }
             | Self::RunDetachedProcess { project, .. }
             | Self::CodingAgentStart { project, .. }

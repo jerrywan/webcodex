@@ -69,3 +69,37 @@ pub fn code_mode_exec_effectful_input_schema() -> Value {
         json!("^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$");
     schema
 }
+
+pub fn code_mode_exec_mutating_input_schema() -> Value {
+    let mut schema = object_schema(vec![
+        (
+            "project",
+            "string",
+            "Required Project target. Nested JavaScript tool calls cannot select or override Project authority.",
+            true,
+        ),
+        (
+            "session_id",
+            "string",
+            "Required exact Workflow Session. Every nested child remains a canonical ToolRuntime invocation in this same Session.",
+            true,
+        ),
+        (
+            "source",
+            "string",
+            "Experimental E2b JavaScript orchestration source. Admitted tools are the E1 read set plus one canonical apply_text_edits mutation attempt. Validation, shell/process, Jobs, other mutations, gateways, and recursive Code Mode are not exposed. Use read_files read_revision for guarded adaptive edits and inspect after mutation.",
+            true,
+        ),
+        (
+            "timeout_ms",
+            "integer",
+            "Optional orchestration/frontend decision deadline in milliseconds. Defaults to 5000 and is server-clamped to 1..30000. Already-started canonical mutation may be reconciled for at most a short bounded drain so state-change truth is not fabricated.",
+            false,
+        ),
+    ]);
+    schema["properties"]["source"]["maxLength"] = Value::from(65_536);
+    schema["properties"]["timeout_ms"]["minimum"] = Value::from(0);
+    schema["properties"]["session_id"]["pattern"] =
+        json!("^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$");
+    schema
+}

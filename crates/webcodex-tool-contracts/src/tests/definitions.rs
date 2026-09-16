@@ -110,6 +110,39 @@ fn experimental_code_mode_effectful_has_conservative_e2a_envelope() {
 
 #[cfg(feature = "experimental-code-mode")]
 #[test]
+fn experimental_code_mode_mutating_has_conservative_e2b_envelope() {
+    let definition = lookup_tool_definition("code_mode_exec_mutating")
+        .expect("code_mode_exec_mutating definition");
+    let metadata = definition.metadata();
+    assert!(definition.visibility.is_model_visible());
+    assert_eq!(metadata.effect, ToolEffect::Mutate);
+    assert_eq!(metadata.risk, ToolRisk::ProjectWrite);
+    assert_eq!(metadata.approval, ToolApprovalPolicy::Standard);
+    assert_eq!(metadata.idempotency, ToolIdempotency::NonIdempotent);
+    assert_eq!(metadata.authority, ToolAuthorityPolicy::Require(PROJECT_WRITE));
+    assert_eq!(definition.permission_risk(), PERMISSION_RISK_WRITE);
+    assert_eq!(definition.adaptive_runtime_direct_rank(), Some(47));
+    assert!(definition.requires_explicit_business_session());
+    assert_eq!(
+        runtime_tool_composition_policy("code_mode_exec_mutating"),
+        ToolCompositionPolicy::Denied,
+        "Code Mode must never recursively compose itself"
+    );
+    assert!(registered_tool_specs()
+        .iter()
+        .any(|spec| spec.name == "code_mode_exec_mutating"));
+    assert!(TOOL_DISCOVERY_GROUPS
+        .iter()
+        .find(|group| group.name == TOOL_DISCOVERY_GROUP_RUNTIME)
+        .expect("runtime discovery group")
+        .tools
+        .contains(&"code_mode_exec_mutating"));
+    assert!(CODING_INTENT_TOOL_NAMES.contains(&"code_mode_exec_mutating"));
+    assert!(!LOCAL_CODING_TOOL_NAMES.contains(&"code_mode_exec_mutating"));
+}
+
+#[cfg(feature = "experimental-code-mode")]
+#[test]
 fn code_mode_composition_policy_is_canonical_closed_and_independent_from_frontend_admission() {
     const E1_TOOLS: &[&str] = &[
         "read_files",
@@ -154,6 +187,7 @@ fn code_mode_composition_policy_is_canonical_closed_and_independent_from_fronten
         "write_project_file",
         "code_mode_exec",
         "code_mode_exec_effectful",
+        "code_mode_exec_mutating",
     ] {
         assert_eq!(
             runtime_tool_composition_policy(name),
@@ -170,21 +204,34 @@ fn code_mode_composition_policy_is_canonical_closed_and_independent_from_fronten
 #[cfg(not(feature = "experimental-code-mode"))]
 #[test]
 fn experimental_code_mode_is_absent_without_feature() {
-    assert!(lookup_tool_definition("code_mode_exec").is_none());
-    assert!(!known_tool_names().any(|name| name == "code_mode_exec"));
-    assert!(!registered_tool_specs()
-        .iter()
-        .any(|spec| spec.name == "code_mode_exec"));
-    assert!(TOOL_DISCOVERY_GROUPS
-        .iter()
-        .all(|group| !group.tools.contains(&"code_mode_exec")));
-    assert!(TOOL_MANIFEST_INTENTS
-        .iter()
-        .all(|intent| !intent.tools.contains(&"code_mode_exec")));
-    assert!(TOOL_RECOMMENDED_FLOWS
-        .iter()
-        .all(|flow| !flow.tools.contains(&"code_mode_exec")));
-    assert!(!LOCAL_CODING_TOOL_NAMES.contains(&"code_mode_exec"));
+    for name in [
+        "code_mode_exec",
+        "code_mode_exec_effectful",
+        "code_mode_exec_mutating",
+    ] {
+        assert!(lookup_tool_definition(name).is_none(), "{name}");
+        assert!(!known_tool_names().any(|known| known == name), "{name}");
+        assert!(!registered_tool_specs().iter().any(|spec| spec.name == name), "{name}");
+        assert!(
+            TOOL_DISCOVERY_GROUPS
+                .iter()
+                .all(|group| !group.tools.contains(&name)),
+            "{name}"
+        );
+        assert!(
+            TOOL_MANIFEST_INTENTS
+                .iter()
+                .all(|intent| !intent.tools.contains(&name)),
+            "{name}"
+        );
+        assert!(
+            TOOL_RECOMMENDED_FLOWS
+                .iter()
+                .all(|flow| !flow.tools.contains(&name)),
+            "{name}"
+        );
+        assert!(!LOCAL_CODING_TOOL_NAMES.contains(&name), "{name}");
+    }
 }
 
 #[test]

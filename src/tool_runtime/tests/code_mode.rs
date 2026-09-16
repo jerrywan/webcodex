@@ -925,6 +925,7 @@ async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
         denied_tools: &[],
         additional_forbidden_argument_fields: &[],
         nested_sync_wait_max_secs: None,
+        max_mutation_calls: None,
     };
     let host = Arc::new(CanonicalOrchestrationHost::new(
         runtime.clone(),
@@ -1022,6 +1023,7 @@ async fn canonical_orchestration_host_rejects_server_owned_metadata_without_fron
         denied_tools: &[],
         additional_forbidden_argument_fields: &[],
         nested_sync_wait_max_secs: None,
+        max_mutation_calls: None,
     };
     let host = CanonicalOrchestrationHost::new(
         runtime,

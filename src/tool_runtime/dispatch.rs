@@ -1943,6 +1943,37 @@ impl ToolRuntime {
                 result
             }
 
+            #[cfg(feature = "experimental-code-mode")]
+            ToolCall::CodeModeExecMutating {
+                project: _,
+                session_id,
+                source,
+                timeout_ms,
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err(
+                            "code_mode_exec_mutating requires a resolved Project",
+                        )
+                    }
+                };
+                let (result, composition) = self
+                    .code_mode_exec_mutating(
+                        project,
+                        session_id,
+                        source,
+                        timeout_ms,
+                        auth,
+                        transport,
+                        _logical_invocation_id.map(str::to_string),
+                    )
+                    .await;
+                correlation.code_mode_composition = Some(composition);
+                result
+            }
+
             ToolCall::ComputerObserve(_) | ToolCall::ComputerControl(_) => ToolResult::err(
                 "Computer gateways must pass action-sensitive specialized governance".to_string(),
             ),

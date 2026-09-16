@@ -41,22 +41,53 @@ pub(crate) const E2A_NESTED_TOOLS: &[&str] = &[
     "cargo_test",
 ];
 
+pub(crate) const E2B_NESTED_TOOLS: &[&str] = &[
+    "read_files",
+    "search_project_texts",
+    "project_overview",
+    "list_project_tracked_files",
+    "git_status",
+    "git_log",
+    "git_diff_hunks",
+    "git_review_summary",
+    "show_changes",
+    "apply_text_edits",
+];
+
+const RECURSIVE_CODE_MODE_TOOLS: &[&str] = &[
+    "code_mode_exec",
+    "code_mode_exec_effectful",
+    "code_mode_exec_mutating",
+];
+
 const CODE_MODE_E1_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     frontend: "code_mode_v8",
     policy_name: "Code Mode E1",
     admitted_tools: READ_ONLY_NESTED_TOOLS,
-    denied_tools: &["code_mode_exec", "code_mode_exec_effectful"],
+    denied_tools: RECURSIVE_CODE_MODE_TOOLS,
     additional_forbidden_argument_fields: &[],
     nested_sync_wait_max_secs: None,
+    max_mutation_calls: None,
 };
 
 const CODE_MODE_E2A_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     frontend: "code_mode_v8_effectful",
     policy_name: "Code Mode E2a",
     admitted_tools: E2A_NESTED_TOOLS,
-    denied_tools: &["code_mode_exec", "code_mode_exec_effectful"],
+    denied_tools: RECURSIVE_CODE_MODE_TOOLS,
     additional_forbidden_argument_fields: &[],
     nested_sync_wait_max_secs: Some(5),
+    max_mutation_calls: None,
+};
+
+const CODE_MODE_E2B_POLICY: OrchestrationPolicy = OrchestrationPolicy {
+    frontend: "code_mode_v8_mutating",
+    policy_name: "Code Mode E2b",
+    admitted_tools: E2B_NESTED_TOOLS,
+    denied_tools: RECURSIVE_CODE_MODE_TOOLS,
+    additional_forbidden_argument_fields: &[],
+    nested_sync_wait_max_secs: None,
+    max_mutation_calls: Some(1),
 };
 
 pub(crate) fn is_admitted_nested_tool(tool_name: &str) -> bool {
@@ -64,7 +95,7 @@ pub(crate) fn is_admitted_nested_tool(tool_name: &str) -> bool {
 }
 
 pub(crate) const MAX_MODEL_ERROR_BYTES: usize = 16 * 1024;
-const E2A_MAX_STARTED_CHILD_DRAIN_MS: u64 = 5_000;
+const CONSEQUENTIAL_MAX_STARTED_CHILD_DRAIN_MS: u64 = 5_000;
 
 fn bounded_model_error(message: &str) -> String {
     if message.len() <= MAX_MODEL_ERROR_BYTES {
@@ -241,7 +272,7 @@ impl ToolRuntime {
                 timeout_ms,
             },
             CodeModeTerminationMode::DrainStartedChildren {
-                max_drain_ms: E2A_MAX_STARTED_CHILD_DRAIN_MS,
+                max_drain_ms: CONSEQUENTIAL_MAX_STARTED_CHILD_DRAIN_MS,
             },
         )
         .await;
@@ -309,6 +340,112 @@ impl ToolRuntime {
         );
         (result, composition)
     }
+    pub(crate) async fn code_mode_exec_mutating(
+        &self,
+        project: ResolvedProject,
+        session_id: String,
+        source: String,
+        timeout_ms: Option<u64>,
+        auth: Option<&AuthContext>,
+        transport: super::sessions::SessionTransport,
+        composition_parent_invocation_id: Option<String>,
+    ) -> (ToolResult, CodeModeCompositionSummary) {
+        let transport = match transport {
+            super::sessions::SessionTransport::Api => ToolTransport::Api,
+            super::sessions::SessionTransport::Mcp => ToolTransport::Mcp,
+        };
+        let orchestration = Arc::new(CanonicalOrchestrationHost::new(
+            self.clone(),
+            auth,
+            project.resolved_id,
+            session_id,
+            transport,
+            composition_parent_invocation_id.clone(),
+            CODE_MODE_E2B_POLICY,
+        ));
+        let host = Arc::new(V8CodeModeHost {
+            orchestration: Arc::clone(&orchestration),
+        });
+        let execution = webcodex_code_mode::execute_with_termination_mode(
+            host as Arc<dyn CodeModeHost>,
+            CodeModeExecuteRequest {
+                source,
+                allowed_tools: E2B_NESTED_TOOLS
+                    .iter()
+                    .map(|tool| (*tool).to_string())
+                    .collect(),
+                timeout_ms,
+            },
+            CodeModeTerminationMode::DrainStartedChildren {
+                max_drain_ms: CONSEQUENTIAL_MAX_STARTED_CHILD_DRAIN_MS,
+            },
+        )
+        .await;
+        let effect_receipt = orchestration.effect_receipt();
+        let has_consequential_work = effect_receipt.consequential_calls > 0;
+        let (result, stats) = match execution {
+            Ok(execution) => {
+                let stats = execution.stats.clone();
+                let mut output = json!({
+                    "content": execution.content,
+                    "stats": execution.stats,
+                });
+                if has_consequential_work {
+                    output["effect_receipt"] = json!(effect_receipt);
+                }
+                (ToolResult::ok(output), stats)
+            }
+            Err(error) => {
+                let stats = error.stats.clone();
+                let message = if has_consequential_work {
+                    bounded_model_error(&format!(
+                        "{} One or more consequential child calls entered canonical execution. Do not blindly rerun the whole orchestration; inspect the effect receipt and current workspace state before another mutation.",
+                        error.message
+                    ))
+                } else {
+                    bounded_model_error(&error.message)
+                };
+                let mut output = json!({
+                    "failure_kind": error.kind.as_str(),
+                    "message": message,
+                    "stats": error.stats,
+                });
+                if has_consequential_work {
+                    output["effect_receipt"] = json!(effect_receipt);
+                }
+                (
+                    ToolResult::err_with_output("mutating code mode execution failed", output),
+                    stats,
+                )
+            }
+        };
+        let composition = orchestration.composition_summary(
+            stats.duration_ms,
+            stats.returned_bytes,
+            stats.slot_wait_ms,
+        );
+        super::runtime_metrics::observe_code_mode_composition(self.metrics.as_ref(), &composition);
+        tracing::debug!(
+            composition_parent_invocation_id = composition_parent_invocation_id
+                .as_deref()
+                .unwrap_or("unavailable"),
+            nested_calls = composition.nested_calls,
+            nested_successes = composition.nested_successes,
+            nested_failures = composition.nested_failures,
+            max_in_flight = composition.max_in_flight,
+            duration_ms = composition.duration_ms,
+            slot_wait_ms = composition.slot_wait_ms,
+            returned_bytes = composition.returned_bytes,
+            nested_raw_result_bytes_total = composition.nested_raw_result_bytes_total,
+            consequential_calls = composition.consequential_calls,
+            known_results = composition.known_results,
+            job_handoffs = composition.job_handoffs,
+            outcome_unknown = composition.outcome_unknown,
+            "code_mode_mutating_composition_finished"
+        );
+        (result, composition)
+    }
+
 }
 
 #[cfg(test)]
