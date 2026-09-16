@@ -184,6 +184,11 @@ fn coding_git_baseline_and_repository_edit_fact_persist_resume_and_default_legac
         Some(baseline.as_str())
     );
     assert!(!created.summary.repository_edit_observed);
+    let model_facing_summary = serde_json::to_value(&created.summary).unwrap();
+    assert!(model_facing_summary.get("git_baseline_tree").is_none());
+    assert!(model_facing_summary
+        .get("repository_edit_observed")
+        .is_none());
 
     let session_id = created.summary.session_id.clone();
     let edit = store

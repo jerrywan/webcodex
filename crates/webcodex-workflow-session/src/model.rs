@@ -1264,8 +1264,12 @@ pub struct SessionSummary {
     pub guards: SessionGuards,
     pub execution_context: SessionExecutionContext,
     pub lifecycle: SessionLifecycle,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Internal Final Changes presentation baseline. Runtime projections read it
+    /// directly; it is not part of the model-facing Session summary payload.
+    #[serde(skip_serializing)]
     pub git_baseline_tree: Option<String>,
+    /// Internal sticky presentation eligibility fact; never model-facing state.
+    #[serde(skip_serializing)]
     pub repository_edit_observed: bool,
     pub created_at: i64,
     pub updated_at: i64,

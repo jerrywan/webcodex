@@ -128,6 +128,46 @@ struct ChangesTotals {
     deletions: u64,
 }
 
+/// Keep Final Changes under read/presentation authority even when repository
+/// configuration defines executable clean/process filters or an fsmonitor hook.
+/// The command-scope overlay preserves ordinary Git config (autocrlf, sparse
+/// checkout, ignores, etc.) while replacing only execution-bearing filters with
+/// identity/no-op behavior for this observation.
+const CHANGES_GIT_SAFE_CONFIG_SETUP: &str = r#"changes_git_overlay=$(mktemp "${TMPDIR:-/tmp}/webcodex-changes-config.XXXXXX")
+changes_git_filter_keys=$(mktemp "${TMPDIR:-/tmp}/webcodex-changes-filter-keys.XXXXXX")
+changes_git_tmp_index=
+changes_git_untracked_tmp=
+changes_git_cleanup() {
+  rm -f -- "$changes_git_overlay" "$changes_git_filter_keys"
+  if [ -n "$changes_git_tmp_index" ]; then rm -f -- "$changes_git_tmp_index"; fi
+  if [ -n "$changes_git_untracked_tmp" ]; then rm -f -- "$changes_git_untracked_tmp"; fi
+}
+trap changes_git_cleanup 0 HUP INT TERM
+: >"$changes_git_overlay"
+set +e
+git config --null --name-only --get-regexp '^filter\.' >"$changes_git_filter_keys"
+changes_git_filter_status=$?
+set -e
+if [ "$changes_git_filter_status" -ne 0 ] && [ "$changes_git_filter_status" -ne 1 ]; then
+  exit 71
+fi
+if [ -s "$changes_git_filter_keys" ]; then
+  CHANGES_GIT_OVERLAY="$changes_git_overlay" xargs -0 -n 1 sh -c '
+    key=$1
+    case "$key" in
+      *.clean) value=cat ;;
+      *.process) value= ;;
+      *.required) value=false ;;
+      *) exit 0 ;;
+    esac
+    git config --file "$CHANGES_GIT_OVERLAY" "$key" "$value"
+  ' sh <"$changes_git_filter_keys"
+fi
+changes_git() {
+  git -c include.path="$changes_git_overlay" -c core.fsmonitor=false "$@"
+}
+"#;
+
 impl ToolRuntime {
     /// Cheap closeout eligibility probe. It intentionally does not freeze a
     /// snapshot or generate diff bodies: only the explicit presentation call
@@ -151,8 +191,10 @@ impl ToolRuntime {
             r#"set -eu
 LC_ALL=C; export LC_ALL
 GIT_TERMINAL_PROMPT=0; export GIT_TERMINAL_PROMPT
+umask 077
+{safe_config_setup}
 set +e
-git --no-pager diff --quiet --no-ext-diff --no-textconv {baseline_tree} -- .
+changes_git --no-pager diff --quiet --no-ext-diff --no-textconv {baseline_tree} -- .
 diff_status=$?
 set -e
 if [ "$diff_status" -eq 1 ]; then
@@ -161,15 +203,14 @@ fi
 if [ "$diff_status" -ne 0 ]; then
   exit 20
 fi
-umask 077
-tmp=$(mktemp "${{TMPDIR:-/tmp}}/webcodex-changes-untracked.XXXXXX")
-trap 'rm -f "$tmp"' 0 HUP INT TERM
-git ls-files --others --exclude-standard -z -- . >"$tmp"
-if [ -s "$tmp" ]; then
+changes_git_untracked_tmp=$(mktemp "${{TMPDIR:-/tmp}}/webcodex-changes-untracked.XXXXXX")
+changes_git ls-files --others --exclude-standard -z -- . >"$changes_git_untracked_tmp"
+if [ -s "$changes_git_untracked_tmp" ]; then
   exit 10
 fi
 exit 0
-"#
+"#,
+            safe_config_setup = CHANGES_GIT_SAFE_CONFIG_SETUP,
         );
         let output = self
             .run_project_internal_posix_script_capture(project, script, 30, None)
@@ -178,7 +219,9 @@ exit 0
         match output.exit_code {
             Some(0) => Ok(false),
             Some(10) => Ok(true),
-            _ => Err("Changes closeout probe could not compare the Session baseline to the current workspace".to_string()),
+            other => Err(format!(
+                "Changes closeout probe could not compare the Session baseline to the current workspace (exit_code={other:?})"
+            )),
         }
     }
 
@@ -273,10 +316,7 @@ exit 0
             Ok(context) => context,
             Err(result) => return result,
         };
-        if validate_project_relative_path(&path).is_err()
-            || path == "."
-            || path.chars().count() > MAX_CHANGES_PATH_CHARS
-        {
+        if !valid_changes_path(&path) {
             return changes_identity_error("changes_snapshot_path_invalid");
         }
 
@@ -370,24 +410,29 @@ exit 0
 
     async fn freeze_final_workspace_tree(&self, project: &str) -> Result<String, ToolResult> {
         // A private temporary index snapshots HEAD plus the complete current
-        // workspace without touching the real index/ref/worktree. `git add` may
-        // write immutable blobs/trees to the repository object database; the
-        // resulting tree is intentionally unreachable presentation state.
-        let script = r#"set -eu
+        // workspace without touching the real index/ref/worktree. Custom Git
+        // clean/process filters and fsmonitor are neutralized because this is a
+        // read-authority presentation path, not repository-configured execution.
+        // `git add` may still write immutable blobs/trees to the object database;
+        // the resulting tree is intentionally unreachable presentation state.
+        let script = format!(
+            r#"set -eu
 LC_ALL=C; export LC_ALL
 GIT_TERMINAL_PROMPT=0; export GIT_TERMINAL_PROMPT
 umask 077
-tmp_index=$(mktemp "${TMPDIR:-/tmp}/webcodex-changes-index.XXXXXX")
-rm -f "$tmp_index"
-trap 'rm -f "$tmp_index"' 0 HUP INT TERM
-if git rev-parse --verify HEAD >/dev/null 2>&1; then
-  GIT_INDEX_FILE="$tmp_index" git read-tree HEAD
+{safe_config_setup}
+changes_git_tmp_index=$(mktemp "${{TMPDIR:-/tmp}}/webcodex-changes-index.XXXXXX")
+rm -f "$changes_git_tmp_index"
+if changes_git rev-parse --verify HEAD >/dev/null 2>&1; then
+  GIT_INDEX_FILE="$changes_git_tmp_index" changes_git read-tree HEAD
 else
-  GIT_INDEX_FILE="$tmp_index" git read-tree --empty
+  GIT_INDEX_FILE="$changes_git_tmp_index" changes_git read-tree --empty
 fi
-GIT_INDEX_FILE="$tmp_index" git add -A -- .
-GIT_INDEX_FILE="$tmp_index" git write-tree
-"#;
+GIT_INDEX_FILE="$changes_git_tmp_index" changes_git add -A -- .
+GIT_INDEX_FILE="$changes_git_tmp_index" changes_git write-tree
+"#,
+            safe_config_setup = CHANGES_GIT_SAFE_CONFIG_SETUP,
+        );
         let output = self
             .run_project_internal_posix_script_capture(project, script.to_string(), 60, None)
             .await
@@ -597,6 +642,26 @@ fn complete_nul_prefix(source: &str) -> &str {
     }
 }
 
+fn valid_changes_path(path: &str) -> bool {
+    if path.is_empty()
+        || path == "."
+        || path.chars().count() > MAX_CHANGES_PATH_CHARS
+        || path.chars().any(char::is_control)
+        || path.starts_with('/')
+        || path.starts_with('\\')
+    {
+        return false;
+    }
+    let bytes = path.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return false;
+    }
+    if path.split(['/', '\\']).any(|component| component == "..") {
+        return false;
+    }
+    validate_project_relative_path(path).is_ok()
+}
+
 fn parse_name_status_z(source: &str) -> Vec<ChangesFileMetadata> {
     let fields = complete_nul_prefix(source).split('\0').collect::<Vec<_>>();
     let mut index = 0;
@@ -624,14 +689,8 @@ fn parse_name_status_z(source: &str) -> Vec<ChangesFileMetadata> {
             index += 1;
             (None, current)
         };
-        if path.is_empty()
-            || path.chars().count() > MAX_CHANGES_PATH_CHARS
-            || validate_project_relative_path(path).is_err()
-            || previous_path.is_some_and(|previous| {
-                previous.is_empty()
-                    || previous.chars().count() > MAX_CHANGES_PATH_CHARS
-                    || validate_project_relative_path(previous).is_err()
-            })
+        if !valid_changes_path(path)
+            || previous_path.is_some_and(|previous| !valid_changes_path(previous))
         {
             continue;
         }
@@ -679,7 +738,7 @@ fn parse_numstat_z(source: &str) -> BTreeMap<String, Numstat> {
         } else {
             path_field
         };
-        if path.is_empty() || validate_project_relative_path(path).is_err() {
+        if !valid_changes_path(path) {
             continue;
         }
         let binary = additions == "-" || deletions == "-";
@@ -723,6 +782,35 @@ mod tests {
         assert_eq!(files[0].path, "src/a.rs");
 
         let stats = parse_numstat_z("1\t2\tsrc/a.rs\03\t4\tsrc/partial");
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats["src/a.rs"].additions, Some(1));
+        assert_eq!(stats["src/a.rs"].deletions, Some(2));
+    }
+
+    #[test]
+    fn changes_paths_match_the_app_safe_identity_boundary() {
+        for safe in ["src/a.rs", "leading space.rs", "name\\part.rs"] {
+            assert!(valid_changes_path(safe), "{safe:?}");
+        }
+        for unsafe_path in [
+            "line\nbreak.rs",
+            "tab\tname.rs",
+            "/absolute.rs",
+            "\\rooted.rs",
+            "C:drive.rs",
+            "../outside.rs",
+            "src/../outside.rs",
+            ".",
+        ] {
+            assert!(!valid_changes_path(unsafe_path), "{unsafe_path:?}");
+        }
+
+        let files =
+            parse_name_status_z("M\0src/a.rs\0M\0line\nbreak.rs\0M\0C:drive.rs\0M\0\\rooted.rs\0");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "src/a.rs");
+
+        let stats = parse_numstat_z("1\t2\tsrc/a.rs\03\t4\tline\nbreak.rs\05\t6\tC:drive.rs\0");
         assert_eq!(stats.len(), 1);
         assert_eq!(stats["src/a.rs"].additions, Some(1));
         assert_eq!(stats["src/a.rs"].deletions, Some(2));

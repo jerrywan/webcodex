@@ -1,4 +1,4 @@
-use super::RunnerCapabilityRequirement::{GitOrShell, OwnerOnly};
+use super::RunnerCapabilityRequirement::{GitOrShell, InternalPosixScript, OwnerOnly};
 use super::ToolVisibility::{ModelHidden, ModelVisible};
 use super::{
     adaptive_runtime_direct, context_recovery_only, context_reobservable, def, model_spec,
@@ -144,7 +144,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 ]),
                 ModelVisible,
                 "workflow",
-                Some(GitOrShell),
+                Some(InternalPosixScript),
                 TOOL_PROVIDER_CONTROL,
                 super::ToolSemanticContract {
                     effect: super::ToolEffect::Observe,
@@ -209,7 +209,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ]),
         ModelHidden,
         "workflow",
-        Some(GitOrShell),
+        Some(InternalPosixScript),
         TOOL_PROVIDER_CONTROL,
         super::ToolSemanticContract {
             effect: super::ToolEffect::Observe,

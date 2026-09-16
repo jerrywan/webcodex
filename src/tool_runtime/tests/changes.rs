@@ -343,6 +343,77 @@ async fn final_changes_uses_startup_tree_whole_final_workspace_and_frozen_lazy_d
 }
 
 #[tokio::test]
+async fn final_changes_neutralizes_repository_configured_clean_and_process_filters() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_git_repo(tmp.path());
+    fs::write(
+        tmp.path().join(".gitattributes"),
+        "clean.dat filter=cleaner\nprocess.dat filter=processor\n",
+    )
+    .unwrap();
+    fs::write(tmp.path().join("clean.dat"), "base clean\n").unwrap();
+    fs::write(tmp.path().join("process.dat"), "base process\n").unwrap();
+    git(
+        tmp.path(),
+        &["add", ".gitattributes", "clean.dat", "process.dat"],
+    );
+    git(tmp.path(), &["commit", "-m", "filtered baseline"]);
+    let baseline = git(tmp.path(), &["rev-parse", "HEAD^{tree}"]);
+
+    let clean_script = tmp.path().join("clean-filter.sh");
+    let process_script = tmp.path().join("process-filter.sh");
+    let marker = tmp.path().join("filter-executed");
+    fs::write(&clean_script, "printf 'clean\\n' >> \"$1\"\ncat\n").unwrap();
+    fs::write(&process_script, "printf 'process\\n' >> \"$1\"\nexit 99\n").unwrap();
+    let clean_command = format!("sh {} {}", clean_script.display(), marker.display());
+    let process_command = format!("sh {} {}", process_script.display(), marker.display());
+    git(
+        tmp.path(),
+        &["config", "filter.cleaner.clean", &clean_command],
+    );
+    git(tmp.path(), &["config", "filter.cleaner.required", "true"]);
+    git(tmp.path(), &["config", "filter.processor.clean", "cat"]);
+    git(
+        tmp.path(),
+        &["config", "filter.processor.process", &process_command],
+    );
+    git(tmp.path(), &["config", "filter.processor.required", "true"]);
+    fs::write(tmp.path().join("clean.dat"), "changed clean\n").unwrap();
+    fs::write(tmp.path().join("process.dat"), "changed process\n").unwrap();
+
+    let runtime = test_runtime();
+    let auth = auth_context(None, true);
+    let client_id = "changes-filter-safe";
+    let project =
+        register_runner_project_at_path_with_auth(&runtime, client_id, "demo", tmp.path(), &auth)
+            .await;
+    let session = start_changes_session(&runtime, &auth, &project, baseline);
+    record_first_class_edit(&runtime, &session.session_id, &project, "clean.dat");
+
+    let summary = runtime.sessions.summary(&session.session_id, None).unwrap();
+    assert!(presentation_needed(&runtime, client_id, &project, summary).await);
+    assert!(
+        !marker.exists(),
+        "closeout Changes probe must not execute repository-configured filters"
+    );
+
+    let result = present(&runtime, client_id, &project, &session.session_id, &auth).await;
+    assert!(result.success, "{:?}", result.error);
+    assert!(
+        !marker.exists(),
+        "Changes snapshot must not execute repository-configured filters"
+    );
+    assert_eq!(
+        file_by_path(&result.output, "clean.dat")["kind"],
+        "modified"
+    );
+    assert_eq!(
+        file_by_path(&result.output, "process.dat")["kind"],
+        "modified"
+    );
+}
+
+#[tokio::test]
 async fn committed_final_tree_is_presentable_even_when_worktree_is_clean() {
     let tmp = tempfile::tempdir().unwrap();
     init_git_repo(tmp.path());

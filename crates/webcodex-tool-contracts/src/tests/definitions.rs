@@ -45,6 +45,23 @@ fn tool_definitions_cover_known_names_and_public_specs() {
 }
 
 #[test]
+fn final_changes_requires_the_typed_internal_posix_runner_capability() {
+    for name in ["present_changes", "changes_file_diff"] {
+        let requirement = runtime_tool_runner_capability(name)
+            .unwrap_or_else(|| panic!("{name} must require its real Runner execution capability"));
+        assert_eq!(
+            requirement,
+            RunnerCapabilityRequirement::InternalPosixScript
+        );
+        assert_eq!(requirement.label(), "internal_posix_script");
+        assert_eq!(
+            requirement.registry_capabilities(),
+            &["internal_posix_script"]
+        );
+    }
+}
+
+#[test]
 fn tool_definitions_are_activity_semantics_ssot() {
     use ToolActivityInteraction::{Meaningful, NonMeaningful};
     use ToolActivityKind::{Edit, Navigate, None as NoKind, Read, Review, Run, Search, Test};
