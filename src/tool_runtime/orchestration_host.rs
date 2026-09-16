@@ -219,6 +219,10 @@ pub(crate) struct ConsequentialChildReceipt {
     pub(crate) ordinal: usize,
     pub(crate) tool: String,
     pub(crate) outcome: ConsequentialChildOutcome,
+    /// Authoritative workspace state-change truth for canonical mutation only.
+    /// Non-mutations and uncertain mutation outcomes deliberately omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) state_changed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) job_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -252,6 +256,7 @@ impl OrchestrationEffectAccumulator {
                 // Until canonical ToolRuntime returns trustworthy evidence, an
                 // already-dispatched consequential child is conservatively unknown.
                 outcome: ConsequentialChildOutcome::OutcomeUnknown,
+                state_changed: None,
                 job_id: None,
                 continuation: None,
             },
@@ -269,6 +274,7 @@ impl OrchestrationEffectAccumulator {
         if execution_state == Some("outcome_unknown") || failure_kind == Some("outcome_unknown") {
             if let Some(child) = self.children.get_mut(&ordinal) {
                 child.outcome = ConsequentialChildOutcome::OutcomeUnknown;
+                child.state_changed = None;
                 child.job_id = None;
                 child.continuation = None;
             }
@@ -281,6 +287,7 @@ impl OrchestrationEffectAccumulator {
             ) {
                 if let Some(child) = self.children.get_mut(&ordinal) {
                     child.outcome = ConsequentialChildOutcome::JobHandoff;
+                    child.state_changed = None;
                     child.job_id = Some(job_id.to_string());
                     child.continuation = Some(continuation.clone());
                 }
@@ -293,10 +300,30 @@ impl OrchestrationEffectAccumulator {
             self.children.remove(&ordinal);
             return;
         }
+        let is_mutation = self.children.get(&ordinal).is_some_and(|child| {
+            runtime_tool_metadata(&child.tool).effect == ToolEffect::Mutate
+        });
+        let mutation_state_changed = is_mutation
+            .then(|| output.get("state_changed").and_then(Value::as_bool))
+            .flatten();
         if let Some(child) = self.children.get_mut(&ordinal) {
-            child.outcome = ConsequentialChildOutcome::KnownResult;
             child.job_id = None;
             child.continuation = None;
+            if is_mutation {
+                if let Some(state_changed) = mutation_state_changed {
+                    child.outcome = ConsequentialChildOutcome::KnownResult;
+                    child.state_changed = Some(state_changed);
+                } else {
+                    // A mutation without authoritative state-change truth is not
+                    // a known effect result, even when the business ToolResult
+                    // itself is otherwise well-formed.
+                    child.outcome = ConsequentialChildOutcome::OutcomeUnknown;
+                    child.state_changed = None;
+                }
+            } else {
+                child.outcome = ConsequentialChildOutcome::KnownResult;
+                child.state_changed = None;
+            }
         }
     }
 
