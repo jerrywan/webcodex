@@ -9,6 +9,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use webcodex_tool_contracts::{runtime_tool_composition_policy, ToolCompositionPolicy};
 use webcodex_core::workflow_session_contract::{
     TOOL_ACCEPTED_EXIT_CODES_FIELD, TOOL_ASSERTION_NAME_FIELD,
     TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD, TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
@@ -159,6 +161,24 @@ impl Drop for NestedCallGuard<'_> {
     }
 }
 
+enum CompositionSchedulingGuard<'a> {
+    Parallel(RwLockReadGuard<'a, ()>),
+    Sequential(RwLockWriteGuard<'a, ()>),
+}
+
+impl CompositionSchedulingGuard<'_> {
+    fn keep_alive(&self) {
+        match self {
+            Self::Parallel(guard) => {
+                let _ = &**guard;
+            }
+            Self::Sequential(guard) => {
+                let _ = &**guard;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OrchestrationToolResponse {
     pub(crate) success: bool,
@@ -201,6 +221,8 @@ pub(crate) struct CanonicalOrchestrationHost {
     composition_parent_invocation_id: Option<String>,
     policy: OrchestrationPolicy,
     composition: Mutex<OrchestrationCompositionAccumulator>,
+    scheduling: RwLock<()>,
+    accepting_nested_calls: Mutex<bool>,
 }
 
 impl CanonicalOrchestrationHost {
@@ -222,6 +244,8 @@ impl CanonicalOrchestrationHost {
             composition_parent_invocation_id,
             policy,
             composition: Mutex::new(OrchestrationCompositionAccumulator::default()),
+            scheduling: RwLock::new(()),
+            accepting_nested_calls: Mutex::new(true),
         }
     }
 
@@ -238,6 +262,30 @@ impl CanonicalOrchestrationHost {
                 finished: false,
             },
         )
+    }
+
+    pub(crate) fn stop_accepting_nested_calls(&self) {
+        *self
+            .accepting_nested_calls
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+    }
+
+    async fn acquire_scheduling_guard(
+        &self,
+        tool_name: &str,
+    ) -> Result<CompositionSchedulingGuard<'_>, OrchestrationHostError> {
+        match runtime_tool_composition_policy(tool_name) {
+            ToolCompositionPolicy::Denied => Err(OrchestrationHostError::new(format!(
+                "nested tool `{tool_name}` is denied by canonical composition policy"
+            ))),
+            ToolCompositionPolicy::Sequential => Ok(CompositionSchedulingGuard::Sequential(
+                self.scheduling.write().await,
+            )),
+            ToolCompositionPolicy::Parallel => Ok(CompositionSchedulingGuard::Parallel(
+                self.scheduling.read().await,
+            )),
+        }
     }
 
     pub(crate) fn composition_summary(
@@ -300,7 +348,23 @@ impl CanonicalOrchestrationHost {
         arguments: Value,
     ) -> Result<OrchestrationToolResponse, OrchestrationHostError> {
         let arguments = self.prepare_arguments(&tool_name, arguments)?;
-        let (child_ordinal, child_guard) = self.begin_nested_call(&tool_name);
+        let scheduling_guard = self.acquire_scheduling_guard(&tool_name).await?;
+        let (child_ordinal, child_guard) = {
+            let accepting = self
+                .accepting_nested_calls
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !*accepting {
+                return Err(OrchestrationHostError::new(
+                    "orchestration frontend is closed; nested call was not dispatched",
+                ));
+            }
+            // The acceptance gate and scheduling guard establish one linear
+            // dispatch boundary with stop_accepting_nested_calls(): once the gate
+            // closes, a waiter that later acquires the scheduling fence cannot start.
+            self.begin_nested_call(&tool_name)
+        };
+        scheduling_guard.keep_alive();
         tracing::debug!(
             orchestration_frontend = self.policy.frontend,
             composition_parent_invocation_id = self
@@ -330,6 +394,9 @@ impl CanonicalOrchestrationHost {
                 },
             )
             .await;
+        // Sequential policy fences only the canonical ToolRuntime invocation.
+        // A returned durable Job owns its own lifecycle after this point.
+        drop(scheduling_guard);
         let nested_success = outcome.error_status.is_none()
             && outcome.result.as_ref().is_some_and(|result| result.success);
         let raw_result_bytes = outcome
