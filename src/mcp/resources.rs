@@ -1,6 +1,7 @@
 use super::protocol::request_client_capabilities;
 use super::response::{
-    mcp_runtime_tool_result_fallback, mcp_stateless_result, rpc_error, rpc_result,
+    mcp_runtime_tool_result_fallback, mcp_stateless_result, rpc_error, rpc_error_with_data,
+    rpc_result, MCP_STATELESS_CACHE_SCOPE, MCP_STATELESS_CACHE_TTL_MS,
 };
 use super::{require_mcp_scope, scope_forbidden, McpOutcome};
 use crate::auth::AuthContext;
@@ -1209,7 +1210,19 @@ pub(super) fn mcp_artifact_export_stream_prefix(
 }
 
 pub(super) fn mcp_artifact_export_stream_suffix() -> Result<Vec<u8>, McpArtifactExportReadError> {
-    let mut output = b"\"}],\"resultType\":\"complete\",\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"webcodex\",\"version\":".to_vec();
+    let mut output = b"\"}],\"resultType\":\"complete\",\"ttlMs\":".to_vec();
+    output.extend_from_slice(
+        &serde_json::to_vec(&MCP_STATELESS_CACHE_TTL_MS)
+            .map_err(|_| McpArtifactExportReadError::Unsafe)?,
+    );
+    output.extend_from_slice(b",\"cacheScope\":");
+    output.extend_from_slice(
+        &serde_json::to_vec(MCP_STATELESS_CACHE_SCOPE)
+            .map_err(|_| McpArtifactExportReadError::Unsafe)?,
+    );
+    output.extend_from_slice(
+        b",\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"webcodex\",\"version\":",
+    );
     output.extend_from_slice(
         &serde_json::to_vec(env!("CARGO_PKG_VERSION"))
             .map_err(|_| McpArtifactExportReadError::Unsafe)?,
@@ -1524,6 +1537,15 @@ pub(super) fn handle_list(
     McpOutcome::Ok(rpc_result(id, mcp_stateless_result(result, true)))
 }
 
+fn resource_not_found(id: Option<Value>, uri: &str) -> McpOutcome {
+    McpOutcome::BadRequest(rpc_error_with_data(
+        id,
+        -32602,
+        format!("Resource not found: {uri}"),
+        json!({ "uri": uri }),
+    ))
+}
+
 pub(super) async fn handle_read(
     runtime: &ToolRuntime,
     params: Value,
@@ -1549,24 +1571,14 @@ pub(super) async fn handle_read(
     if is_snapshot_resource_uri(uri) {
         let caller = match mcp_artifact_export_caller_binding(auth) {
             Ok(caller) => caller,
-            Err(_) => {
-                return McpOutcome::BadRequest(rpc_error(
-                    id,
-                    -32602,
-                    format!("Resource not found: {uri}"),
-                ));
-            }
+            Err(_) => return resource_not_found(id, uri),
         };
         let record = mcp_snapshot_resource_registry()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_for_caller(uri, &caller);
         let Some(record) = record else {
-            return McpOutcome::BadRequest(rpc_error(
-                id,
-                -32602,
-                format!("Resource not found: {uri}"),
-            ));
+            return resource_not_found(id, uri);
         };
         for scope in match record.kind {
             McpSnapshotResourceKind::Window => &[crate::auth::SCOPE_COMPUTER_READ][..],
@@ -1617,7 +1629,7 @@ pub(super) async fn handle_read(
     let Some(result) =
         mcp_static_app_resource_read(uri, runtime.runtime_info.configured_public_url.as_deref())
     else {
-        return McpOutcome::BadRequest(rpc_error(id, -32602, format!("Resource not found: {uri}")));
+        return resource_not_found(id, uri);
     };
     let mut result = mcp_stateless_result(result, true);
     if uri == MCP_COMPUTER_UI_RESOURCE_URI {
