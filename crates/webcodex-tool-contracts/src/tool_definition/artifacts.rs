@@ -98,7 +98,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Project artifact read: metadata=facts; inspect=fenced segment; image=MCP image; export=MCP ResourceLink. Use export for whole files; use import_conversation_files_to_project for host-to-Project attachments.",
+            "Project artifact read: metadata=facts; inspect=fenced segment; image=MCP image; export=MCP ResourceLink. Use export for whole files, not repeated inspect calls; use import_conversation_files_to_project for host-to-Project attachments.",
             project_artifact_input_schema,
         )
         .with_gpt_action_description("Project artifact read surface. GPT Actions supports metadata and bounded inspect; native image and ResourceLink export require MCP."),
