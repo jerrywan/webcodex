@@ -58,3 +58,37 @@ fn artifact_upload_followup_descriptions_explain_required_path_binding() {
         );
     }
 }
+
+#[test]
+fn project_artifact_is_compact_typed_project_read_facade() {
+    let definition =
+        lookup_tool_definition("project_artifact").expect("project_artifact definition");
+    assert_eq!(definition.metadata.effect, ToolEffect::Observe);
+    assert_eq!(definition.metadata.risk, ToolRisk::Read);
+    assert_eq!(definition.metadata.approval, ToolApprovalPolicy::None);
+    assert_eq!(definition.metadata.idempotency, ToolIdempotency::PureRead);
+    assert_eq!(
+        definition.metadata.authority,
+        ToolAuthorityPolicy::Require(PROJECT_READ)
+    );
+    assert!(!definition.requires_permission());
+
+    let specs = registered_tool_specs();
+    let spec = spec_named(&specs, "project_artifact");
+    let props = spec.input_schema["properties"].as_object().unwrap();
+    assert_eq!(spec.input_schema["additionalProperties"], false);
+    assert_eq!(
+        spec.input_schema["required"],
+        json!(["project", "path", "action"])
+    );
+    assert_eq!(
+        props["action"]["enum"],
+        json!(["metadata", "inspect", "image", "export"])
+    );
+    assert!(!props.contains_key("encoding"));
+    assert_eq!(spec.input_schema["allOf"].as_array().unwrap().len(), 2);
+    assert!(spec.description.contains("not repeated inspect"));
+    assert!(spec
+        .description
+        .contains("import_conversation_files_to_project"));
+}
