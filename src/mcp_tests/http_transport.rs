@@ -2716,6 +2716,76 @@ async fn http_mcp_2026_protocol_error_matrix_and_legacy_session_compatibility() 
 }
 
 #[tokio::test]
+async fn http_mcp_2026_invalid_request_metadata_maps_to_invalid_params_before_dispatch() {
+    let config = test_config(Some("secret"));
+    let (_tmp, db) = test_db();
+    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let service = Service::new(build_test_router(config, db, runtime));
+
+    for (label, params, id) in [
+        ("missing meta", json!({}), 2100),
+        (
+            "missing protocol version",
+            json!({"_meta": {"io.modelcontextprotocol/clientCapabilities": {}}}),
+            2101,
+        ),
+        (
+            "non-string protocol version",
+            json!({"_meta": {
+                "io.modelcontextprotocol/protocolVersion": 7,
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }}),
+            2102,
+        ),
+    ] {
+        let (status, body) = stateless_2026_jsonrpc(
+            &service,
+            "secret",
+            Some(MCP_STATELESS_PROTOCOL_VERSION),
+            Some("tools/list"),
+            None,
+            None,
+            json!({"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{label}: {body}");
+        assert_eq!(body["id"], id, "{label}: {body}");
+        assert_eq!(body["error"]["code"], -32602, "{label}: {body}");
+        assert_ne!(
+            body["error"]["code"], MCP_HEADER_MISMATCH,
+            "{label}: {body}"
+        );
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.starts_with("Invalid params:")),
+            "{label}: {body}"
+        );
+        assert!(body.get("result").is_none(), "{label}: {body}");
+    }
+
+    let (status, body) = stateless_2026_jsonrpc(
+        &service,
+        "secret",
+        Some(MCP_STATELESS_PROTOCOL_VERSION),
+        Some("tools/list"),
+        None,
+        None,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2103,
+            "method": "tools/list",
+            "params": mcp_2026_params(json!({}))
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["id"], 2103);
+    assert!(body.get("error").is_none(), "{body}");
+    assert!(body.get("result").is_some(), "{body}");
+}
+
+#[tokio::test]
 async fn http_mcp_2026_tools_call_requires_matching_name_and_accepts_base64_sentinel() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
