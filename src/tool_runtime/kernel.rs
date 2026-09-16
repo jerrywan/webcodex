@@ -843,6 +843,10 @@ impl ToolRuntime {
         }
 
         let project = tool_project(&call);
+        // Preserve the concrete business Session only for final presentation. The
+        // generic recorder remains independent provenance and Window affinity
+        // never becomes execution or Session authority.
+        let business_session_id = call.session_id().map(str::to_string);
         // Permission is evaluated once inside dispatch (pre-exec gate). Kernel
         // only reuses the attached decision for the outer recording session —
         // never re-evaluate (no second request id / inconsistent outcome).
@@ -920,16 +924,21 @@ impl ToolRuntime {
             correlation.recorder_gap_session_id.as_deref(),
             correlation.resolved_project.as_deref(),
         ) {
-            if let Some(output) = result.output.as_object_mut() {
-                output.insert(
-                    "workflow_recording_attention".to_string(),
-                    serde_json::json!({
-                        "status": "recording_session_missing",
-                        "candidate_session_id": session_id,
-                        "project": project,
-                        "reason": "same_window_recent_explicit_association"
-                    }),
-                );
+            // The gap remains correlation/audit truth. It is not actionable model
+            // guidance when this exact call already supplied the same authorized
+            // business Session for the same resolved Project.
+            if business_session_id.as_deref() != Some(session_id) {
+                if let Some(output) = result.output.as_object_mut() {
+                    output.insert(
+                        "workflow_recording_attention".to_string(),
+                        serde_json::json!({
+                            "status": "recording_session_missing",
+                            "candidate_session_id": session_id,
+                            "project": project,
+                            "reason": "same_window_recent_explicit_association"
+                        }),
+                    );
+                }
             }
         }
         if request.tool_name == "tool_manifest" {
