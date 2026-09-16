@@ -4,10 +4,10 @@
 // microtask checkpoint, and isolate-termination ideas needed for E1.
 
 use crate::{
-    normalized_timeout_ms, CodeModeError, CodeModeErrorKind, CodeModeExecuteRequest,
-    CodeModeExecution, CodeModeHost, CodeModeStats, CodeModeToolRequest, CodeModeToolResponse,
-    MAX_CONCURRENT_EXECUTIONS, MAX_CONCURRENT_TOOL_CALLS, MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS,
-    MAX_SOURCE_BYTES, MAX_TOOL_CALLS,
+    normalized_max_concurrent_executions, normalized_timeout_ms, CodeModeError, CodeModeErrorKind,
+    CodeModeExecuteRequest, CodeModeExecution, CodeModeHost, CodeModeStats, CodeModeToolRequest,
+    CodeModeToolResponse, MAX_CONCURRENT_EXECUTIONS_ENV, MAX_CONCURRENT_TOOL_CALLS,
+    MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS, MAX_SOURCE_BYTES, MAX_TOOL_CALLS,
 };
 use serde_json::{json, Value as JsonValue};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -22,7 +22,16 @@ struct V8Initialization {
 }
 
 static V8_INITIALIZATION: OnceLock<Result<V8Initialization, String>> = OnceLock::new();
-static EXECUTION_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_EXECUTIONS);
+static EXECUTION_SLOTS: OnceLock<Semaphore> = OnceLock::new();
+
+fn execution_slots() -> &'static Semaphore {
+    // Process configuration is sampled once, before the first V8 cell acquires a
+    // slot. Later environment mutation cannot silently resize a live semaphore.
+    EXECUTION_SLOTS.get_or_init(|| {
+        let configured = std::env::var(MAX_CONCURRENT_EXECUTIONS_ENV).ok();
+        Semaphore::new(normalized_max_concurrent_executions(configured.as_deref()))
+    })
+}
 
 fn ensure_v8_initialized() -> Result<(), String> {
     match V8_INITIALIZATION.get_or_init(|| {
@@ -102,7 +111,7 @@ pub async fn execute(
     let timeout_ms = normalized_timeout_ms(request.timeout_ms);
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     let execution_slot = tokio::select! {
-        permit = EXECUTION_SLOTS.acquire() => permit.map_err(|_| CodeModeError {
+        permit = execution_slots().acquire() => permit.map_err(|_| CodeModeError {
             kind: CodeModeErrorKind::Runtime,
             message: "code mode execution slots are unavailable".to_string(),
             stats: CodeModeStats::default(),

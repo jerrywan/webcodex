@@ -13,9 +13,19 @@ pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 pub const MAX_TIMEOUT_MS: u64 = 30_000;
 pub const MAX_TOOL_CALLS: usize = 32;
 pub const MAX_CONCURRENT_TOOL_CALLS: usize = 8;
-/// Process-local cap for simultaneously active V8 cells. E1 runs V8 on the Server,
-/// so bound isolate/thread fanout independently from nested tool-call concurrency.
-pub const MAX_CONCURRENT_EXECUTIONS: usize = 2;
+/// Default process-local cap for simultaneously active V8 cells. E1 runs V8 on
+/// the Server, so bound isolate/thread fanout independently from nested tool-call
+/// concurrency. Resource-rich dogfood hosts may raise this through the bounded
+/// server-process environment override without changing the safe default.
+pub const DEFAULT_MAX_CONCURRENT_EXECUTIONS: usize = 2;
+pub const MAX_CONFIGURED_CONCURRENT_EXECUTIONS: usize = 64;
+pub const MAX_CONCURRENT_EXECUTIONS_ENV: &str = "WEBCODEX_CODE_MODE_MAX_CONCURRENT_EXECUTIONS";
+
+pub fn normalized_max_concurrent_executions(raw: Option<&str>) -> usize {
+    raw.and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(1, MAX_CONFIGURED_CONCURRENT_EXECUTIONS))
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_EXECUTIONS)
+}
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 pub const MAX_OUTPUT_ITEMS: usize = 256;
 
@@ -129,6 +139,21 @@ pub fn normalized_timeout_ms(timeout_ms: Option<u64>) -> u64 {
     timeout_ms
         .unwrap_or(DEFAULT_TIMEOUT_MS)
         .clamp(1, MAX_TIMEOUT_MS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_concurrency_override_is_bounded_and_defaults_safely() {
+        assert_eq!(normalized_max_concurrent_executions(None), 2);
+        assert_eq!(normalized_max_concurrent_executions(Some("")), 2);
+        assert_eq!(normalized_max_concurrent_executions(Some("invalid")), 2);
+        assert_eq!(normalized_max_concurrent_executions(Some("0")), 1);
+        assert_eq!(normalized_max_concurrent_executions(Some("16")), 16);
+        assert_eq!(normalized_max_concurrent_executions(Some("999")), 64);
+    }
 }
 
 #[cfg(feature = "v8-runtime")]
