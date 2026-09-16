@@ -582,14 +582,41 @@ impl ToolRuntime {
             };
         let handoff_requested = ssh_resource.is_none() && timeout > budget.sync_wait_secs;
         let async_handoff_available = if handoff_requested {
-            self.runner_registry
+            let features = match self
+                .runner_registry
                 .get_runner_feature_set(&client_id)
                 .await
-                .is_ok_and(|features| {
-                    features.supports(RunnerFeature::Shell)
-                        && (features.supports(RunnerFeature::AsyncJobs)
-                            || features.supports(RunnerFeature::AsyncShellJobs))
-                })
+            {
+                Ok(features) => features,
+                Err(error) => {
+                    let mut result = Self::run_shell_tool_failure_result(
+                        command_rejected_message(
+                            error,
+                            "confirm the Runner is registered and connected, then retry; the command was not started.",
+                        ),
+                        "agent_offline",
+                        ShellCommandExecutionState::NotStarted,
+                    );
+                    add_structured_continuation_facts(
+                        &mut result,
+                        timeout,
+                        budget.sync_wait_secs,
+                        false,
+                    );
+                    decorate_execution_output(
+                        &mut result.output,
+                        declared_purpose,
+                        &command_summary,
+                        &resolved_cwd,
+                        actual_shell,
+                        "agent",
+                    );
+                    return result;
+                }
+            };
+            features.supports(RunnerFeature::Shell)
+                && (features.supports(RunnerFeature::AsyncJobs)
+                    || features.supports(RunnerFeature::AsyncShellJobs))
         } else {
             false
         };
