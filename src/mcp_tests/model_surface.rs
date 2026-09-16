@@ -34,6 +34,21 @@ async fn adaptive_tools_list_exposes_ranked_direct_tools_and_gateway() {
     };
     let names = tool_names(&value);
     assert!(names.contains(&crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME));
+    #[cfg(feature = "experimental-code-mode")]
+    {
+        const MAX_EXPERIMENTAL_CODE_MODE_TOOL_BYTES: usize = 4 * 1024;
+        let code_mode = value["result"]["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .find(|tool| tool["name"] == "code_mode_exec")
+            .expect("experimental Code Mode feature must expose code_mode_exec directly");
+        let code_mode_bytes = serde_json::to_vec(code_mode).unwrap().len();
+        assert!(
+            code_mode_bytes <= MAX_EXPERIMENTAL_CODE_MODE_TOOL_BYTES,
+            "experimental code_mode_exec compact schema cost {code_mode_bytes} exceeded {MAX_EXPERIMENTAL_CODE_MODE_TOOL_BYTES} bytes"
+        );
+    }
     assert!(
         !names.contains(&"apply_patch"),
         "long-tail tool leaked direct"
