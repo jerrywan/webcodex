@@ -1,10 +1,10 @@
 # Tool composition research and development plan
 
-Status: active experimental design record. E1 read-only orchestration and the E2a
-structured-validation/Job foundation are now implemented behind the experimental
-Code Mode feature; E2b mutation remains unimplemented. The governing rule is still
-that composition may reduce model-facing round trips but may not shortcut existing
-tool, Session, Job, permission, audit, Project, recovery, or Runner boundaries.
+Status: active experimental design record. E1 read-only orchestration, the E2a
+structured-validation/Job foundation, and the narrow E2b guarded structured-mutation
+slice are implemented behind the experimental Code Mode feature. The governing rule
+is still that composition may reduce model-facing round trips but may not shortcut
+existing tool, Session, Job, permission, audit, Project, recovery, or Runner boundaries.
 
 ## Motivation
 
@@ -280,21 +280,11 @@ ToolCompositionPolicy::Sequential
 ToolCompositionPolicy::Parallel
 ```
 
-This policy is canonical `ToolDefinition` metadata. The default, including unknown/future tools, is `Denied`. The exact E1 read allowlist is `Parallel`; `cargo_check` and `cargo_test` are `Sequential`; everything else remains denied unless deliberately reviewed later. Frontend admission is separate and explicit: composition policy never makes a tool reachable and grants no scope, permission, Project, Runner, retry, or idempotency authority.
+This policy is canonical `ToolDefinition` metadata. The default, including unknown/future tools, is `Denied`. The exact E1 read allowlist is `Parallel`; `cargo_check`, `cargo_test`, and `apply_text_edits` are `Sequential`; everything else remains denied unless deliberately reviewed later. Frontend admission is separate and explicit: composition policy never makes a tool reachable and grants no scope, permission, Project, Runner, retry, or idempotency authority. E1 still admits only reads, E2a admits reads plus the two validators, and E2b admits reads plus only `apply_text_edits`.
 
-`CanonicalOrchestrationHost` enforces this with one composition-local shared/exclusive scheduling fence. `Parallel` canonical child invocation intervals can overlap; `Sequential` is exclusive against every child interval. The fence ends when canonical ToolRuntime invocation returns, including an existing same-execution Job handoff. Durable Jobs then own their ordinary lifetime independently, so two predetermined validators can enter sequentially yet later run concurrently as Jobs. No path/file resource-key framework exists in E2a.
+`CanonicalOrchestrationHost` enforces the policy with one composition-local shared/exclusive scheduling fence. `Parallel` canonical child invocation intervals can overlap; `Sequential` is exclusive against every child interval. The fence ends when canonical ToolRuntime invocation returns, including an existing same-execution Job handoff. Durable Jobs then own their ordinary lifetime independently, so two predetermined E2a validators can enter sequentially yet later run concurrently as Jobs.
 
-A later, evidence-driven extension may add a resource key such as:
-
-```text
-file:<canonical project + path>
-git:<canonical project/worktree>
-job:<job id>
-```
-
-That would allow, for example, two proven-independent file mutations while still
-serializing two mutations of the same file. This should not become a generic lock
-framework before concrete mutation dogfood requires it.
+E2b adds one deliberately coarse cross-host fence only for orchestration-originated canonical mutation. A process-local registry is shared by cloned `ToolRuntime` state and keyed by canonical resolved Project id. An E2b mutation acquires that Project's exclusive fence before canonical dispatch and holds it until the child `ToolResult` is known; different Projects remain independent. Read-only orchestration and E2a validation never acquire this registry, and ordinary direct mutations deliberately bypass it. The experiment does not define file locks, Git locks, lock hierarchies, a generic resource graph, distributed locking, or Runner-protocol locking. Finer locking is deferred until telemetry demonstrates that Project-level serialization is a real bottleneck.
 
 Even parallel-eligible tools need a composition-wide concurrency cap. Parallelism
 must improve latency without turning one model call into unbounded Runner/process
@@ -327,7 +317,9 @@ recorder context to admitted child calls, but each child must record through the
 same existing Session path it would use directly. The composition wrapper must
 not become a second authoritative business event that double-counts the children.
 
-E1 read-only/re-observable children established the first slice. E2a now proves the consequential rule: every child records through its ordinary canonical Session path; the parent does not become a fake validation identity or transaction. Once all already-started children have drained to a known result, same-execution Job handoff, or truthful uncertainty, the consequential E2a parent is decorated from the latest monotonic Session state. It accepts only trusted outer ACK metadata, never lets JavaScript ACK guidance, and never compresses child revisions or evidence into a synthetic single validation event.
+E1 read-only/re-observable children established the first slice. E2a proves the consequential validation rule: every child records through its ordinary canonical Session path; the parent does not become a fake validation identity or transaction. E2b applies the same rule to mutation: the nested canonical `apply_text_edits` event owns first-class Edit provenance and state-change evidence, while the outer `code_mode_exec_mutating` wrapper emits no generic top-level `state_changed` and does not independently set `repository_edit_observed`. No-op, dry-run, and provably pre-start edits remain non-provenance; a successful nested edit with canonical `state_changed=true` qualifies exactly as a direct edit would. Final Changes continues to compare the Session Git baseline with the complete final workspace, not with a Code Mode-local diff.
+
+Once all already-started children have drained to a known result, same-execution Job handoff, or truthful uncertainty, a consequential parent is decorated from the latest monotonic Session state. It accepts only trusted outer ACK metadata, never lets JavaScript ACK guidance, and never compresses child revisions or evidence into a synthetic event.
 
 Composition must never use Window affinity or recorder-gap hints to fill in a
 missing recorder. The Window work remains diagnostic only.
@@ -396,9 +388,10 @@ The experiment now uses these concrete stage names:
 
 ```text
 E1   read-only orchestration
-E2a  effectful foundation + structured validation / Jobs
-E2b  guarded source mutation, likely apply_text_edits first
-E2c  selective generic process/shell only if telemetry justifies it
+E2a  structured validation + Job/effect foundation
+E2b  guarded structured mutation: E1 reads + one apply_text_edits attempt
+E2c  decide whether validation and mutation should coexist in one cell;
+     consider selective generic process/shell only if telemetry justifies it
 E3   Async Event Delivery
 E4   product/stability decision
 ```
@@ -426,13 +419,26 @@ E2a closes the correctness prerequisites that were previously future work:
 
 `observe_jobs` is deliberately not nested: Code Mode has a 30-second frontend maximum while ordinary Job observation may wait up to 100 seconds. The parent returns the canonical handoff and the model later observes it normally.
 
-### E2b — next decision, not implemented
+### E2b — implemented guarded structured mutation
 
-Only clean E2a effect/Job/timeout dogfood can justify considering guarded source mutation. The likely first candidate is canonical `apply_text_edits`, not shell. E2b must define concrete mutation scheduling/resource rules, stale-read/revision behavior, partial-effect presentation, permission evidence, and Final Changes interaction without inventing transaction/rollback semantics.
+`code_mode_exec_mutating` is feature-gated and conservatively declares `Mutate / ProjectWrite / Standard / NonIdempotent / project:write`. It admits the E1 read set plus only canonical `apply_text_edits`; validators, `apply_patch`, whole-file write, generic process/shell, Job observation, gateways, Computer control, Git/Session mutation, and recursive Code Mode remain excluded.
+
+The first-version mutation contract is intentionally narrow:
+
+- one E2b cell may cross the canonical mutation boundary at most once, counted by canonical `ToolEffect::Mutate` rather than a tool-name registry;
+- the one mutation may still use `apply_text_edits`' existing transactional multi-file batch and `read_revision` guards;
+- a second mutation attempt is rejected before canonical business dispatch and cannot reach the Runner;
+- same-Project E2b mutations are serialized by the process-local Project fence described above; different Projects may proceed independently;
+- direct writes are unchanged and are not silently serialized against the experimental fence;
+- mutation receipts preserve optional authoritative `state_changed`: missing mutation truth fails closed to `outcome_unknown`, never false;
+- JavaScript failure or timeout after dispatch preserves completed mutation truth, while unresolved work after the existing bounded five-second reconciliation remains `outcome_unknown`;
+- E2b adds no retry engine, mutation transaction coordinator, JS patch parser, filesystem API, or second write protocol.
+
+The primary adaptive workflow is therefore `canonical read -> JavaScript decision -> one canonical apply_text_edits -> canonical post-edit inspection`. Validation is intentionally outside the mutation-capable cell. Combining validation Jobs and later mutation would otherwise make validation freshness ambiguous without a workspace-snapshot fence; that question is deferred rather than hidden.
 
 ### E2c / E3 / E4
 
-Generic process/shell admission remains a later telemetry-driven question. Async Event Delivery remains a separate stage rather than a Code Mode-specific waiter. Product/stability commitment comes only after the experimental execution and dogfood evidence are mature.
+E2c first decides whether validation and mutation should coexist in one cell and whether any selective process/shell composition is justified by telemetry. Finer mutation locking is also evidence-driven, not assumed. Async Event Delivery remains a separate stage rather than a Code Mode-specific waiter. Product/stability commitment comes only after the experimental execution and dogfood evidence are mature.
 
 ## What not to build
 
@@ -471,8 +477,7 @@ A production-ready first slice should satisfy all of the following:
   exposing raw host identity or payload bodies;
 - direct tools continue to work unchanged;
 - no Workflow Session is selected from Window identity;
-- no mutation support ships until multi-child Session/Job/recovery semantics are
-  explicitly proven.
+- guarded mutation reuses canonical `apply_text_edits`, allows at most one mutation attempt per cell, preserves exact state-change/uncertainty truth, and leaves direct mutation semantics unchanged.
 
 ## Open design questions
 
@@ -487,9 +492,10 @@ A production-ready first slice should satisfy all of the following:
    without prematurely designing resource locks for mutation?
 5. How should parent/child invocation identities appear in ActionAudit and the
    Windows view while preserving current privacy policy?
-6. Which concrete resource fence is necessary for E2b guarded mutation without prematurely building a generic lock manager?
-7. Does nested short Job observation remove enough outer turns to justify widening E2a, or is ordinary `observe_jobs` the better boundary?
-8. Which timing boundaries can the current Runner protocol prove directly, and which require additive privacy-safe telemetry?
+6. Does E2b dogfood show enough same-Project mutation contention to justify anything finer than the current coarse Project fence?
+7. Can validation and mutation safely coexist in one E2c cell without a canonical workspace-snapshot/freshness fence, or should ordinary post-cell validation remain the boundary?
+8. Does nested short Job observation remove enough outer turns to justify widening E2a, or is ordinary `observe_jobs` the better boundary?
+9. Which timing boundaries can the current Runner protocol prove directly, and which require additive privacy-safe telemetry?
 
 These questions should be answered with focused prototypes and dogfood traces,
 not by widening the first implementation preemptively.

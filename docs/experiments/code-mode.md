@@ -1,4 +1,4 @@
-# Experimental Code Mode — E1 Read-Only and E2a Effectful Foundation
+# Experimental Code Mode — E1 Read-Only, E2a Effectful Foundation, and E2b Guarded Mutation
 
 > This is an experiment, not a stable compatibility surface.
 
@@ -27,7 +27,7 @@ The root `experimental-code-mode` feature enables:
 - `webcodex-tool-contracts/experimental-code-mode`;
 - `webcodex-tool-runtime-contracts/experimental-code-mode`.
 
-Without that feature, both `code_mode_exec` and `code_mode_exec_effectful` are absent from the canonical `ToolDefinition`, `ToolSpec`, `ToolCall`, discovery, Adaptive Runtime, OpenAPI, and MCP surfaces. The default `webcodex-code-mode` crate contains only lightweight transport-neutral contracts and does not compile or link V8.
+Without that feature, `code_mode_exec`, `code_mode_exec_effectful`, and `code_mode_exec_mutating` are absent from the canonical `ToolDefinition`, `ToolSpec`, `ToolCall`, discovery, Adaptive Runtime, OpenAPI, and MCP surfaces. The default `webcodex-code-mode` crate contains only lightweight transport-neutral contracts and does not compile or link V8.
 
 ## Architecture
 
@@ -330,7 +330,7 @@ Nested scheduling is owned by canonical `ToolDefinition`, not by JavaScript. `To
 
 ```text
 Denied      default, including unknown/future tools
-Sequential  cargo_check, cargo_test
+Sequential  cargo_check, cargo_test, apply_text_edits
 Parallel    the exact E1 read allowlist
 ```
 
@@ -380,18 +380,47 @@ Unlike re-observable E1, consequential E2a participates in normal Session contin
 
 `observe_jobs` remains intentionally outside nested E2a. A validator uses a short sync grace, may return its existing Job handoff, and Code Mode returns. The model then observes that exact Job through ordinary `observe_jobs`, including `wake_on=all_terminal` for a predetermined set when later work genuinely depends on all of them.
 
+### E2b — Guarded structured mutation
+
+E2b adds a third experimental entry point, `code_mode_exec_mutating`, without replacing E1 or E2a. Its outer contract is conservatively `Mutate / ProjectWrite / Standard / NonIdempotent / project:write` and requires an explicit business Workflow Session. That outer envelope grants no child authority and does not itself become edit provenance.
+
+E2b admits exactly the E1 read set plus one existing canonical mutation primitive:
+
+```text
+apply_text_edits
+```
+
+It intentionally does **not** admit `cargo_check`, `cargo_test`, `cargo_fmt`, generic process/shell tools, `observe_jobs`, `apply_patch`, `write_project_file`, delete/Git/Session/Goal/Agent mutation, gateways, Computer control, deploy/release tools, or any Code Mode entry point. Validation therefore remains outside the mutation-capable cell in this phase. A normal workflow is `code_mode_exec_mutating` followed by ordinary canonical validation after the cell returns; E2b does not attempt workspace-snapshot fencing for background validation Jobs.
+
+`apply_text_edits` is canonically `Sequential`, but composition eligibility remains independent from frontend admission: E1 and E2a still cannot call it. One E2b cell may attempt a canonical mutation at most once. The budget is classified from canonical `ToolEffect::Mutate`, counts failed/pre-start attempts as attempts, and rejects a second mutation before canonical business dispatch. `apply_text_edits` already supports transactional multi-file batches, so E2b does not add an in-cell mutation retry engine or a second patch protocol.
+
+Across independent Code Mode cells, orchestration-originated mutation is serialized by a small process-local registry keyed by the canonical resolved Project id. The Project fence is shared by cloned `ToolRuntime` state and is held only through the canonical mutation `ToolRuntime` result. Different Projects retain independent mutation lanes. Read-only orchestration and E2a validation do not acquire this fence, and ordinary direct `apply_text_edits` intentionally remains outside it. This is coarse Code Mode containment, not a global WebCodex write lock or generic resource-lock framework.
+
+Mutation effect receipts preserve canonical state-change truth. A known mutation result is `known_result` only when the canonical child returns an authoritative boolean `state_changed`; otherwise the receipt fails closed to `outcome_unknown` and omits the field. Pre-start results that prove the mutation never began are not retained as effects. No-op and dry-run edits can therefore be known with `state_changed=false`, while a completed write carries `state_changed=true`. Parent JavaScript failure or frontend timeout does not erase a completed mutation; the same bounded five-second post-frontend reconciliation used by E2a either learns the canonical result or leaves the dispatched mutation `outcome_unknown`. E2b never retries automatically.
+
+Final Changes remains owned by canonical Session evidence. The outer E2b call has no generic top-level `state_changed` and does not itself set `repository_edit_observed`. A successful nested canonical `apply_text_edits` event with `state_changed=true` is the first-class `Edit` provenance; no-op, dry-run, pre-start failure, and outcome uncertainty do not become successful edit evidence. Once eligible, `present_changes` still freezes the complete Session Git baseline → final workspace tree, including later or otherwise independently produced workspace changes; it is not a Code Mode provenance diff.
+
+### E2b live dogfood protocol
+
+Live E2b dogfood must run in an isolated managed worktree rather than the source checkout. First verify the three model-facing manifests still expose the intended stage controls: E1 as read-only `Observe / Read / PureRead / project:read`, E2a as `Execute / JobRun / NonIdempotent / job:run`, and E2b as `Mutate / ProjectWrite / NonIdempotent / project:write`.
+
+The minimum mutation cases are: one real `read_files -> read_revision -> apply_text_edits -> read_files` cell; a canonical no-op/dry-run with `state_changed=false`; a stale revision rejection that leaves newer workspace state intact; JavaScript failure after a successful write with a preserved `known_result/state_changed=true` receipt; two mutation calls proving only one crosses canonical dispatch; `finish_coding_task` / `present_changes` proving real Session edit eligibility and full baseline-to-final workspace presentation; and denials for shell, validation, alternate mutation primitives, and recursive Code Mode.
+
+Capture both call economy and effect truth: outer model-facing calls, nested calls, canonical edit calls, Runner file-write requests, Code Mode duration, `slot_wait_ms`, nested raw result bytes, returned bytes, consequential-call counters, known results, outcome uncertainty, and mutation `state_changed`. The value hypothesis is specifically whether one adaptive E2b call can replace the direct sequence `read_files -> model decision -> apply_text_edits -> model decision -> read/show_changes` without weakening canonical authority or evidence. Do not infer generic mutation safety or model-level speedup from local runtime tests alone.
+
 ### Current stage sequence
 
 ```text
 E1   read-only orchestration
-E2a  effectful foundation + structured validation / Jobs
-E2b  guarded source mutation, likely apply_text_edits first
-E2c  selective generic process/shell only if telemetry justifies it
+E2a  structured validation + Job/effect foundation
+E2b  guarded structured mutation: E1 reads + one apply_text_edits attempt
+E2c  decide whether validation and mutation should coexist in one cell;
+     consider selective process/shell only with telemetry
 E3   Async Event Delivery
 E4   product/stability decision
 ```
 
-Progress to E2b is contingent on clean E2a effect/Job/timeout dogfood; E2a itself is not evidence that mutation is ready.
+E2b validates only this narrow read → one canonical structured edit → bounded post-edit inspection loop. It is not evidence that generic mutation orchestration, multi-effect transactions, nested validation freshness, or process/shell composition is solved.
 
 ## Known limitations / non-goals
 
@@ -407,4 +436,4 @@ E1 intentionally has no:
 - Windows/macOS Code Mode packaging guarantee;
 - stable compatibility promise.
 
-The implemented stage sequence is documented above. Current E2a remains deliberately narrower than source mutation, generic shell/process orchestration, nested Job waiting, Async Event Delivery, or a stable product commitment.
+The implemented stage sequence is documented above. Current E2b remains deliberately narrower than nested validation, multiple mutation attempts, generic shell/process orchestration, global/direct-write serialization, finer-than-Project mutation locking, nested Job waiting, Async Event Delivery, or a stable product commitment.
