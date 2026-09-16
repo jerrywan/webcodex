@@ -39,6 +39,73 @@ fn from_tool_name_parses_unit_tools_with_empty_object() {
 }
 
 #[test]
+fn apply_text_edits_shorthand_normalizes_once_to_canonical_call() {
+    let revision = 3817291045227_u64;
+    let call = ToolCall::from_tool_name(
+        "apply_text_edits",
+        json!({
+            "project": "agent:special:demo",
+            "changes": [{
+                "path": "src/lib.rs",
+                "old_text": "old",
+                "new_text": "new",
+                "expected_read_revision": revision,
+                "occurrence": 2,
+                "line_scope": {"start_line": 10, "end_line": 20}
+            }]
+        }),
+    )
+    .unwrap();
+    let ToolCall::ApplyTextEdits { changes, .. } = call else {
+        panic!("expected apply_text_edits");
+    };
+    assert_eq!(changes.len(), 1);
+    let change = &changes[0];
+    assert_eq!(change.kind, ApplyFileChangeKind::Edit);
+    assert_eq!(change.path, "src/lib.rs");
+    assert!(change.to_path.is_none());
+    assert!(change.content.is_none());
+    assert_eq!(change.expected_read_revision, Some(revision));
+    assert_eq!(change.edits.len(), 1);
+    let edit = &change.edits[0];
+    assert_eq!(edit.kind, ApplyTextEditKind::ReplaceExact);
+    assert_eq!(edit.old_text.as_deref(), Some("old"));
+    assert_eq!(edit.new_text.as_deref(), Some("new"));
+    assert!(edit.anchor_text.is_none());
+    assert_eq!(edit.occurrence, Some(2));
+    assert_eq!(edit.line_scope.unwrap().start_line, 10);
+    assert_eq!(edit.line_scope.unwrap().end_line, 20);
+
+    let canonical = ToolCall::from_tool_name(
+        "apply_text_edits",
+        json!({
+            "project": "agent:special:demo",
+            "changes": [{
+                "kind": "edit",
+                "path": "src/lib.rs",
+                "edits": [{"kind": "replace_exact", "old_text": "old", "new_text": "new"}]
+            }]
+        }),
+    )
+    .unwrap();
+    let ToolCall::ApplyTextEdits { changes, .. } = canonical else {
+        panic!("expected canonical apply_text_edits");
+    };
+    assert_eq!(changes[0].kind, ApplyFileChangeKind::Edit);
+    assert_eq!(changes[0].edits[0].kind, ApplyTextEditKind::ReplaceExact);
+    assert_eq!(changes[0].edits[0].old_text.as_deref(), Some("old"));
+    assert_eq!(changes[0].edits[0].new_text.as_deref(), Some("new"));
+
+    for invalid in [
+        json!({"project":"agent:special:demo","changes":[{"path":"src/lib.rs","old_text":"old","new_text":"new","unknown":true}]}),
+        json!({"project":"agent:special:demo","changes":[{"kind":"edit","path":"src/lib.rs","old_text":"old","new_text":"new"}]}),
+        json!({"project":"agent:special:demo","changes":[{"path":"new.rs","content":"fn main() {}"}]}),
+    ] {
+        assert!(ToolCall::from_tool_name("apply_text_edits", invalid).is_err());
+    }
+}
+
+#[test]
 fn heartbeat_agent_task_attempt_parses_optional_active_turn_proof() {
     let base = json!({
         "task_id": "wc_agent_task_ERERERERERERERER".to_string(),

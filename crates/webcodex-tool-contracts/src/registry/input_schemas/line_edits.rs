@@ -142,6 +142,37 @@ fn project_path_schema(description: &str) -> Value {
     })
 }
 
+fn exact_replace_shorthand_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "description": "One replace_exact: old_text is non-empty; occurrence is 1-based global source order; occurrence or line_scope requires expected_read_revision. Normalizes to canonical edit before preflight.",
+        "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "old_text": {"type": "string", "minLength": 1},
+            "new_text": {"type": "string"},
+            "expected_read_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991_u64},
+            "occurrence": {"type": "integer", "minimum": 1},
+            "line_scope": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "start_line": {"type": "integer", "minimum": 1},
+                    "end_line": {"type": "integer", "minimum": 1}
+                },
+                "required": ["start_line", "end_line"]
+            }
+        },
+        "required": ["path", "old_text", "new_text"],
+        "allOf": [{
+            "anyOf": [
+                {"required": ["expected_read_revision"]},
+                {"not": {"anyOf": [{"required": ["occurrence"]}, {"required": ["line_scope"]}]}}
+            ]
+        }]
+    })
+}
+
 fn apply_file_change_schema() -> Value {
     json!({
         "oneOf": [
@@ -209,7 +240,8 @@ fn apply_file_change_schema() -> Value {
                     "expected_read_revision": read_revision_schema("Required full-file snapshot guard from read_files for rename.")
                 },
                 "required": ["kind", "path", "to_path", "expected_read_revision"]
-            }
+            },
+            exact_replace_shorthand_schema()
         ]
     })
 }
@@ -226,7 +258,7 @@ pub fn apply_text_edits_input_schema() -> Value {
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 16,
-                "description": "Transactional list of 1..16 file changes. Each change uses the fields declared by its kind; the whole batch is preflighted before mutation.",
+                "description": "Transactional list of 1..16 file changes. Use explicit kind forms, or path + old_text + new_text for one replace_exact; the whole batch is preflighted before mutation.",
                 "items": apply_file_change_schema()
             },
             "dry_run": {
