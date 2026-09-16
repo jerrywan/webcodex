@@ -3956,9 +3956,9 @@ async fn work_on_project_sizes_and_runner_request_reduction_are_stable() {
         "the identical advanced fixture should add only the overview request"
     );
     assert_eq!(
-        reused_requests.len(),
+        reused_requests.len() + 1,
         fresh_requests.len(),
-        "unchanged continuation should retain the same lightweight probes"
+        "fresh startup pays exactly one Git baseline probe; exact continuation must preserve the durable baseline without re-probing it"
     );
     assert_eq!(
         workflow_omitted_requests.len(),

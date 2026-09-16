@@ -515,6 +515,23 @@ async fn adaptive_runtime_tools_list_is_small_core_plus_gateway() {
         present_work_result["_meta"]["ui"]["resourceUri"], MCP_WORK_RESULT_UI_RESOURCE_URI,
         "explicit Work presentation entry must retain its App binding"
     );
+    let present_changes = compact_tools
+        .iter()
+        .find(|tool| tool["name"] == "present_changes")
+        .expect("missing present_changes");
+    assert_eq!(
+        present_changes["_meta"]["ui"]["resourceUri"], MCP_CHANGES_UI_RESOURCE_URI,
+        "explicit Final Changes presentation must retain its V3 App binding"
+    );
+    let lazy_diff = compact_tools
+        .iter()
+        .find(|tool| tool["name"] == "changes_file_diff")
+        .expect("missing app-only changes_file_diff");
+    assert_eq!(
+        lazy_diff.pointer("/_meta/ui/visibility"),
+        Some(&json!(["app"]))
+    );
+    assert!(lazy_diff.pointer("/_meta/ui/resourceUri").is_none());
     let list_jobs = compact_tools
         .iter()
         .find(|tool| tool["name"] == "list_jobs")
@@ -637,6 +654,7 @@ async fn adaptive_runtime_tools_list_is_small_core_plus_gateway() {
         "import_conversation_files_to_project",
         "project_artifact",
         "present_work_result",
+        "present_changes",
     ] {
         assert!(
             names.contains(&promoted),

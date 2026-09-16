@@ -759,6 +759,22 @@ pub enum ToolCall {
         session_id: String,
     },
 
+    /// Explicit final coding Changes presentation for one exact Workflow Session.
+    PresentChanges {
+        project: String,
+        session_id: String,
+    },
+
+    /// App-only bounded lazy read from one opaque frozen Changes snapshot.
+    /// Business session identity is deliberately excluded from generic Session
+    /// recording so user expansion clicks cannot become Session work events.
+    ChangesFileDiff {
+        project: String,
+        session_id: String,
+        snapshot_id: String,
+        path: String,
+    },
+
     /// Return a bounded structured summary of recorded session ledger data for
     /// an explicit session id.
     SessionSummary {
@@ -3007,6 +3023,8 @@ impl ToolCall {
             Self::FinishCodingTask { .. } => "finish_coding_task",
             Self::PresentWorkResult { .. } => "present_work_result",
             Self::WorkResultState { .. } => "work_result_state",
+            Self::PresentChanges { .. } => "present_changes",
+            Self::ChangesFileDiff { .. } => "changes_file_diff",
             Self::SessionSummary { .. } => "session_summary",
             Self::UpdateSessionContext { .. } => "update_session_context",
             Self::CloseSession { .. } => "close_session",
@@ -3227,11 +3245,12 @@ impl ToolCall {
             | Self::WorkspaceCheckpointRestore { session_id, .. }
             | Self::WorkspaceCheckpointDelete { session_id, .. } => session_id.as_deref(),
             Self::SessionHandoffSummary { session_id, .. } => Some(session_id.as_str()),
-            Self::PresentWorkResult { session_id, .. } => Some(session_id.as_str()),
-            // work_result_state intentionally does not expose its business
-            // Session through this generic recorder projection: explicit App
-            // refresh authorizes and reads that exact target inside its runtime method.
-            Self::WorkResultState { .. } => None,
+            Self::PresentWorkResult { session_id, .. }
+            | Self::PresentChanges { session_id, .. } => Some(session_id.as_str()),
+            // App-only presentation reads intentionally do not expose their business
+            // Session through this generic recorder projection: each re-authorizes
+            // and reads the exact target inside its runtime method.
+            Self::WorkResultState { .. } | Self::ChangesFileDiff { .. } => None,
             Self::ImportConversationFilesToProject { session_id, .. } => session_id.as_deref(),
             Self::CallHierarchy { session_id, .. } => session_id.as_deref(),
             Self::WorkOnProject { session_id, .. } => session_id.as_deref(),
@@ -3370,7 +3389,9 @@ impl ToolCall {
             }
             Self::FinishCodingTask { project, .. }
             | Self::PresentWorkResult { project, .. }
-            | Self::WorkResultState { project, .. } => Some(project.as_str()),
+            | Self::WorkResultState { project, .. }
+            | Self::PresentChanges { project, .. }
+            | Self::ChangesFileDiff { project, .. } => Some(project.as_str()),
             Self::UpdateSessionContext { project, .. }
             | Self::ValidationSummary { project, .. } => Some(project.as_str()),
             Self::SessionHandoffSummary { project, .. } => project.as_deref(),

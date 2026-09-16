@@ -1828,6 +1828,21 @@ impl ToolRuntime {
                 session_id,
             } => self.work_result_state(project, session_id, auth).await,
 
+            ToolCall::PresentChanges {
+                project,
+                session_id,
+            } => self.present_changes(project, session_id, auth).await,
+
+            ToolCall::ChangesFileDiff {
+                project,
+                session_id,
+                snapshot_id,
+                path,
+            } => {
+                self.changes_file_diff(project, session_id, snapshot_id, path, auth)
+                    .await
+            }
+
             call @ ToolCall::SessionHandoffSummary { .. } => {
                 let context_continuity_capable = protocol_capabilities.context_continuity
                     && super::tool_definition::runtime_tool_accepts_context_ack(call.tool_name());

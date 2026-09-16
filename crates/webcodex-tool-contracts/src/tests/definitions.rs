@@ -409,6 +409,7 @@ fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
         "present_goal_plan",
         "present_agent_continuation",
         "present_work_result",
+        "present_changes",
         "export_project_artifact",
         "rotate_agent_continuation_endpoint",
     ] {
