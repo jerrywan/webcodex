@@ -323,6 +323,7 @@ fn tool_categories_and_recommended_flows_are_well_formed() {
         .expect("file_transfer category present");
     for name in [
         "import_conversation_files_to_project",
+        "project_artifact",
         "export_project_artifact",
         "save_project_artifact",
         "read_project_artifact",

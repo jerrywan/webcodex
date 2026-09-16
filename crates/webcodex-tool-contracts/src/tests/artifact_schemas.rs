@@ -87,6 +87,42 @@ fn project_artifact_is_compact_typed_project_read_facade() {
     );
     assert!(!props.contains_key("encoding"));
     assert_eq!(spec.input_schema["allOf"].as_array().unwrap().len(), 2);
+    let output_props = spec.output_schema["properties"]["output"]["properties"]
+        .as_object()
+        .expect("project_artifact output properties");
+    for field in [
+        "path",
+        "exists",
+        "bytes",
+        "file_bytes",
+        "sha256",
+        "mime_type",
+        "content_base64",
+        "content_delivery",
+        "suggested_call",
+    ] {
+        assert!(
+            output_props.contains_key(field),
+            "missing output field {field}"
+        );
+    }
+    let suggested = &output_props["suggested_call"];
+    assert_eq!(suggested["properties"]["tool"]["const"], "project_artifact");
+    assert_eq!(
+        suggested["properties"]["arguments"]["properties"]["action"]["const"],
+        "inspect"
+    );
+    assert_eq!(
+        suggested["properties"]["arguments"]["required"],
+        json!([
+            "project",
+            "path",
+            "action",
+            "offset",
+            "length",
+            "expected_sha256"
+        ])
+    );
     assert!(spec.description.contains("not repeated inspect"));
     assert!(spec
         .description

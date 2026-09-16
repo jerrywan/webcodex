@@ -211,6 +211,7 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
         name: TOOL_DISCOVERY_GROUP_FILE_TRANSFER,
         tools: &[
             "import_conversation_files_to_project",
+            "project_artifact",
             "export_project_artifact",
             "save_project_artifact",
             "read_project_artifact_metadata",
