@@ -1780,3 +1780,53 @@ async fn observe_jobs_all_terminal_item_errors_return_without_waiting_for_runnin
         assert!(result.output["failed_count"].as_u64().unwrap() > 0);
     }
 }
+
+#[tokio::test]
+async fn observe_jobs_generic_failed_test_identity_survives_small_model_tail() {
+    for tool in ["run_process", "run_shell"] {
+        let runtime = test_runtime();
+        let client = "generic-failure-tail";
+        register_agent(&runtime, client, None, RunnerCapabilities {
+            shell: true, async_jobs: true, async_shell_jobs: true,
+            structured_process_argv: true, structured_execution_jobs: true,
+            ..Default::default()
+        }).await;
+        let auth = bootstrap_auth_context();
+        let mut arguments = json!({"project":agent_test_project_id(client),
+            "sync_wait_secs":1,"timeout_secs":30,"purpose":"test"});
+        if tool == "run_process" {
+            arguments["executable"] = json!("cargo"); arguments["args"] = json!(["test", "--lib"]);
+        } else {
+            arguments["command"] = json!("cargo test --lib");
+        }
+        let task = tokio::spawn({
+            let runtime = runtime.clone(); let auth = auth.clone();
+            async move { runtime.dispatch_with_auth(ToolCall::from_tool_name(tool, arguments).unwrap(), Some(&auth)).await }
+        });
+        let request = wait_for_patch_agent_request(&runtime, client).await;
+        let handoff = task.await.unwrap();
+        assert!(handoff.success, "{handoff:?}");
+        let job = handoff.output["job_id"].as_str().unwrap();
+        let stdout = "running 1 test\ntest cases::outside_tail ... FAILED\n".to_string()
+            + &"retained diagnostic padding\n".repeat(400)
+            + "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s\n";
+        runtime.runner_registry.update_job(RunnerJobUpdateRequest {
+            client_id: client.into(), runner_instance_id: "inst".into(), update_seq: None,
+            job_id: job.into(), request_id: Some(request.request_id), status: "failed".into(),
+            stdout_chunk: Some(stdout), stderr_chunk: None, stdout_tail: None, stderr_tail: None,
+            log_snapshot: None, exit_code: Some(101), duration_ms: Some(100), error: None,
+            command_execution_state: Some(crate::runner_protocol::ShellCommandExecutionState::Completed),
+            validation_progress: None, test_count_evidence: None, activity: None, finished: true,
+        }).await.unwrap();
+        let observed = runtime.observe_jobs_for_auth(vec![item(job, None)], 2, None,
+            ObserveJobsWakeOn::Change, Some(&auth)).await;
+        assert!(observed.success, "{observed:?}");
+        let snapshot = &observed.output["items"][0]["output"];
+        assert!(!snapshot["stdout_tail"].as_str().unwrap().contains("outside_tail"));
+        assert_eq!(snapshot["detected_summary"]["tests_failed"], 1);
+        assert_eq!(snapshot["detected_summary"]["failed_test_details"][0]["name"], "cases::outside_tail");
+        assert_eq!(snapshot["detected_summary"]["failed_test_details_truncated"], false);
+        assert!(snapshot["validation"].is_null(), "generic detection grants no structured validation proof");
+        assert!(snapshot.get("validation_target_id").is_none());
+    }
+}
