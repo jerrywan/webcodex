@@ -1705,3 +1705,31 @@ async fn apply_text_edits_complete_rollback_is_known_completed_no_effect() {
         .as_deref()
         .is_some_and(|error| error.contains("was rolled back")));
 }
+
+#[tokio::test]
+async fn apply_text_edits_host_structural_schema_accepts_but_runtime_rejects_unguarded_position() {
+    let client = "ate-structural-schema";
+    let runtime = runtime_with_agent_project(client);
+    register_agent(&runtime, client, None, RunnerCapabilities {
+        file_write: true, apply_text_edit_occurrence: true, ..Default::default()
+    }).await;
+    let project = agent_test_project_id(client);
+    let specs = registered_tool_specs();
+    let schema = &spec_named(&specs, "apply_text_edits").input_schema;
+    for selector in [serde_json::json!({"occurrence":2}),
+        serde_json::json!({"line_scope":{"start_line":2,"end_line":2}})] {
+        let mut edit = serde_json::json!({"kind":"replace_exact","old_text":"dup","new_text":"changed"});
+        edit.as_object_mut().unwrap().extend(selector.as_object().unwrap().clone());
+        let arguments = serde_json::json!({"project":project,"changes":[
+            {"kind":"create","path":"must-not-exist.txt","content":"no partial writes"},
+            {"kind":"edit","path":"src/lib.rs","edits":[edit]}
+        ]});
+        crate::tool_runtime::startup_brief::validate_schema_instance_for_test(&arguments, schema).unwrap();
+        let changes = parsed_apply_text_edits_changes(arguments);
+        let rejected = runtime.apply_text_edits(project.clone(), changes, None).await;
+        assert!(!rejected.success);
+        assert_eq!(rejected.output["state_changed"], false);
+        assert!(rejected.error.as_deref().unwrap().contains("expected_read_revision"));
+        assert_no_apply_text_edits_runner_request(&runtime, client).await;
+    }
+}

@@ -31,6 +31,14 @@ fn apply_text_edits_input_schema_encodes_file_and_edit_kind_contracts() {
     assert_eq!(changes["items"]["oneOf"].as_array().unwrap().len(), 5);
 
     let edit = variant_for_kind(&changes["items"], "edit");
+    // Host renderers need a readable structural union. Cross-field revision
+    // requirements belong to canonical Runtime preflight, not nested unions.
+    for key in ["allOf", "not", "if", "then", "else"] {
+        assert!(!edit.to_string().contains(&format!("\"{key}\":")), "unexpected conditional {key}");
+    }
+    for key in ["kind", "path", "expected_read_revision", "edits"] {
+        assert!(edit["properties"].get(key).is_some());
+    }
     let create = variant_for_kind(&changes["items"], "create");
     let delete = variant_for_kind(&changes["items"], "delete");
     let rename = variant_for_kind(&changes["items"], "rename");
@@ -113,6 +121,8 @@ fn apply_text_edits_input_schema_encodes_file_and_edit_kind_contracts() {
 
     let revision = 3817291045227_u64;
     let valid = [
+        json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"replace_exact","old_text":"old","line_scope":{"start_line":10,"end_line":20}}]}]}),
+        json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"replace_exact","old_text":"old","occurrence":2}]}]}),
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"replace_exact","old_text":"old"}]}]}),
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"delete_exact","old_text":"old"}]}]}),
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"insert_before","anchor_text":"anchor","new_text":"new"}]}]}),
@@ -137,8 +147,6 @@ fn apply_text_edits_input_schema_encodes_file_and_edit_kind_contracts() {
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"replace_exact"}]}]}),
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"delete_exact","old_text":"old","new_text":"x"}]}]}),
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"insert_after","anchor_text":"anchor"}]}]}),
-        json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"replace_exact","old_text":"old","line_scope":{"start_line":10,"end_line":20}}]}]}),
-        json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","edits":[{"kind":"replace_exact","old_text":"old","occurrence":2}]}]}),
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","expected_read_revision":0,"edits":[{"kind":"replace_exact","old_text":"old"}]}]}),
         json!({"project":"demo","changes":[{"kind":"edit","path":"a.rs","expected_read_revision":9007199254740992_u64,"edits":[{"kind":"replace_exact","old_text":"old"}]}]}),
         json!({"project":"demo","changes":[{"kind":"create","path":"new.txt","content":"x","expected_read_revision":revision}]}),

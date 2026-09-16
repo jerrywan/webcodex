@@ -110,21 +110,6 @@ fn apply_text_edit_schema() -> Value {
     })
 }
 
-fn apply_text_edit_schema_without_positional_selectors() -> Value {
-    let mut schema = apply_text_edit_schema();
-    for variant in schema["oneOf"]
-        .as_array_mut()
-        .expect("apply_text_edit_schema oneOf")
-    {
-        let properties = variant["properties"]
-            .as_object_mut()
-            .expect("exact edit properties");
-        properties.remove("occurrence");
-        properties.remove("line_scope");
-    }
-    schema
-}
-
 fn read_revision_schema(description: &str) -> Value {
     json!({
         "type": "integer",
@@ -175,21 +160,7 @@ fn apply_file_change_schema() -> Value {
                         "items": apply_text_edit_schema()
                     }
                 },
-                "required": ["kind", "path", "edits"],
-                "allOf": [{
-                    "oneOf": [
-                        {"required": ["expected_read_revision"]},
-                        {
-                            "not": {"required": ["expected_read_revision"]},
-                            "properties": {
-                                "edits": {
-                                    "type": "array",
-                                    "items": apply_text_edit_schema_without_positional_selectors()
-                                }
-                            }
-                        }
-                    ]
-                }]
+                "required": ["kind", "path", "edits"]
             },
             {
                 "type": "object",
