@@ -218,10 +218,11 @@ fn assert_builtin_workflow(output: &Value) {
     let closeout_guidance = workflow["model_protocol"]["normal_closeout"]
         .as_str()
         .expect("normal closeout guidance");
-    assert!(closeout_guidance.contains("Source/validation"));
+    assert!(closeout_guidance.contains("Source/validation/unresolved Session evidence"));
     assert!(closeout_guidance.contains("finish_coding_task(summary_only=true)"));
-    assert!(closeout_guidance.contains("Read-only/planning/artifact"));
+    assert!(closeout_guidance.contains("Pure read/planning/investigation/artifact"));
     assert!(closeout_guidance.contains("finalize directly"));
+    assert!(closeout_guidance.contains("project rules require closeout"));
     let roles = workflow["roles"]
         .as_object()
         .expect("workflow roles object");
