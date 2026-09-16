@@ -57,6 +57,8 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
             "workspace_checkpoint_list",
             #[cfg(feature = "workspace-checkpoints")]
             "workspace_checkpoint_show",
+            "browser_observe",
+            "browser_act",
             "computer_observe",
             "computer_control",
             "computer_save_snapshot",
@@ -427,6 +429,12 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
             "run_script",
             "run_shell",
         ],
+    },
+    ToolRecommendedFlow {
+        name: "browser",
+        summary: "Browser/CDP runtime: discover Browser-capable Runners, launch an owned ephemeral Browser, observe pages/semantic snapshots, act only through opaque identities, then re-observe after navigation or uncertain effects.",
+        manifest_purpose: "Use browser_observe for targets/browsers/pages/snapshot/screenshot and browser_act for the closed launch/new_page/navigate/click/input_text/key/close actions. Browser/Page/Element ids are opaque; navigation stales element ids. Never retry an outcome_unknown effect blindly: follow the returned browser_observe reconciliation call.",
+        tools: &["browser_observe", "browser_act"],
     },
     ToolRecommendedFlow {
         name: "computer_observe",

@@ -1,0 +1,1042 @@
+use crate::cdp::{
+    BackendFactory, BackendNode, BackendPage, BackendScreenshot, BrowserBackend, ChromiumFactory,
+};
+use crate::types::{
+    clip_bytes, clip_chars, validate_navigation_url, BrowserError, BrowserKey, BrowserResult,
+    BrowserShutdownReport, BrowserSummary, PageSummary, Screenshot, SemanticNode, SemanticSnapshot,
+    BROWSER_IDLE_TIMEOUT, MAX_BROWSERS, MAX_BROWSER_LIFETIME, MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION,
+    MAX_INPUT_TEXT_BYTES, MAX_NODE_TEXT_BYTES, MAX_PAGES_PER_BROWSER, MAX_PAGE_SUMMARIES,
+    MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_NODES, SHUTDOWN_TIMEOUT,
+};
+use base64::{engine::general_purpose, Engine as _};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::time::Duration;
+use std::time::Instant;
+use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct BrowserSupervisor {
+    inner: Arc<Mutex<SupervisorState>>,
+    factory: Arc<dyn BackendFactory>,
+}
+
+struct SupervisorState {
+    shutting_down: bool,
+    browsers: HashMap<String, BrowserRuntime>,
+}
+
+#[derive(Debug, Clone)]
+struct PageIdentity {
+    target_id: String,
+    document_id: String,
+    snapshot_generation: u64,
+}
+
+#[derive(Debug, Clone)]
+struct ElementIdentity {
+    page_id: String,
+    document_id: String,
+    snapshot_generation: u64,
+    backend_node_id: i64,
+    actionable: bool,
+}
+
+struct BrowserRuntime {
+    backend: Box<dyn BrowserBackend>,
+    created_at: Instant,
+    last_activity_at: Instant,
+    pages: HashMap<String, PageIdentity>,
+    target_to_page: HashMap<String, String>,
+    elements: HashMap<String, ElementIdentity>,
+    generation: u64,
+}
+
+impl std::fmt::Debug for BrowserSupervisor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrowserSupervisor").finish_non_exhaustive()
+    }
+}
+
+impl Default for BrowserSupervisor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BrowserSupervisor {
+    pub fn new() -> Self {
+        Self::with_factory(Arc::new(ChromiumFactory))
+    }
+
+    fn with_factory(factory: Arc<dyn BackendFactory>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(SupervisorState {
+                shutting_down: false,
+                browsers: HashMap::new(),
+            })),
+            factory,
+        }
+    }
+
+    pub fn available(&self) -> bool {
+        self.factory.available()
+    }
+
+    pub fn begin_shutdown(&self) {
+        self.state().shutting_down = true;
+    }
+
+    pub fn list_browsers(&self) -> Vec<BrowserSummary> {
+        self.reap_expired();
+        let state = self.state();
+        state
+            .browsers
+            .iter()
+            .take(MAX_BROWSERS)
+            .map(|(id, runtime)| BrowserSummary {
+                browser_id: id.clone(),
+                page_count: runtime.pages.len(),
+            })
+            .collect()
+    }
+
+    pub fn launch(&self) -> BrowserResult<BrowserSummary> {
+        self.reap_expired();
+        let mut state = self.state();
+        if state.shutting_down {
+            return Err(BrowserError::not_started(
+                "runner_shutting_down",
+                "Browser launch rejected during Runner shutdown",
+            ));
+        }
+        if state.browsers.len() >= MAX_BROWSERS {
+            return Err(BrowserError::not_started(
+                "browser_limit",
+                "maximum owned Browser runtimes reached",
+            ));
+        }
+        let mut backend = self.factory.launch()?;
+        let pages = backend.pages().unwrap_or_default();
+        let browser_id = opaque_id("browser");
+        let mut runtime = BrowserRuntime::new(backend);
+        runtime.reconcile_pages(pages);
+        let summary = BrowserSummary {
+            browser_id: browser_id.clone(),
+            page_count: runtime.pages.len(),
+        };
+        state.browsers.insert(browser_id, runtime);
+        Ok(summary)
+    }
+
+    pub fn pages(&self, browser_id: &str, limit: usize) -> BrowserResult<Vec<PageSummary>> {
+        self.touch_current(browser_id)?;
+        let mut state = self.state();
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        let observed = runtime.backend.pages()?;
+        runtime.reconcile_pages(observed.clone());
+        Ok(observed
+            .into_iter()
+            .take(limit.clamp(1, MAX_PAGE_SUMMARIES))
+            .filter_map(|page| {
+                runtime
+                    .target_to_page
+                    .get(&page.target_id)
+                    .map(|page_id| PageSummary {
+                        browser_id: browser_id.to_string(),
+                        page_id: page_id.clone(),
+                        title: clip_chars(&page.title, 256),
+                        url: clip_bytes(&page.url, 2048),
+                    })
+            })
+            .collect())
+    }
+
+    pub fn new_page(&self, browser_id: &str) -> BrowserResult<PageSummary> {
+        self.touch_current(browser_id)?;
+        let mut state = self.state();
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        if runtime.pages.len() >= MAX_PAGES_PER_BROWSER {
+            return Err(BrowserError::not_started(
+                "page_limit",
+                "maximum pages per Browser reached",
+            ));
+        }
+        let target_id = runtime.backend.new_page()?;
+        runtime.elements.clear();
+        // Target.createTarget already returned an exact target id, so creation is
+        // known to have completed. A later observation failure must never make a
+        // retry look safe; preserve completed certainty and direct the caller to
+        // pages reconciliation instead.
+        let pages = runtime.backend.pages().map_err(|error| {
+            BrowserError::observed(
+                "page_create_reconcile_failed",
+                format!(
+                    "new page was created but page reconciliation failed: {}",
+                    error.message
+                ),
+                Some("pages"),
+            )
+        })?;
+        runtime.reconcile_pages(pages.clone());
+        let page = pages
+            .into_iter()
+            .find(|page| page.target_id == target_id)
+            .ok_or_else(|| {
+                BrowserError::observed(
+                    "page_create_unobserved",
+                    "new page was created but is not present in the reconciled page list",
+                    Some("pages"),
+                )
+            })?;
+        let page_id = runtime
+            .target_to_page
+            .get(&target_id)
+            .cloned()
+            .ok_or_else(|| {
+                BrowserError::observed(
+                    "page_create_unobserved",
+                    "new page was created but its opaque page identity could not be reconciled",
+                    Some("pages"),
+                )
+            })?;
+        Ok(PageSummary {
+            browser_id: browser_id.to_string(),
+            page_id,
+            title: clip_chars(&page.title, 256),
+            url: clip_bytes(&page.url, 2048),
+        })
+    }
+
+    pub fn snapshot(&self, browser_id: &str, page_id: &str) -> BrowserResult<SemanticSnapshot> {
+        self.touch_current(browser_id)?;
+        let mut state = self.state();
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        let target_id = runtime.page_target(page_id)?;
+        let snapshot = runtime.backend.snapshot(&target_id)?;
+        runtime.generation = runtime.generation.saturating_add(1);
+        let generation = runtime.generation;
+        runtime.elements.clear();
+        if let Some(page) = runtime.pages.get_mut(page_id) {
+            page.document_id = snapshot.document_id.clone();
+            page.snapshot_generation = generation;
+        }
+        let mut nodes = Vec::new();
+        let mut aggregate_bytes = 0usize;
+        let mut truncated = snapshot.truncated;
+        for node in snapshot.nodes.into_iter().take(MAX_SNAPSHOT_NODES) {
+            let projected = runtime.project_node(page_id, &snapshot.document_id, generation, node);
+            let projected_bytes = serde_json::to_vec(&projected)
+                .map(|value| value.len())
+                .unwrap_or(MAX_SNAPSHOT_BYTES);
+            if aggregate_bytes.saturating_add(projected_bytes) > MAX_SNAPSHOT_BYTES {
+                truncated = true;
+                break;
+            }
+            aggregate_bytes += projected_bytes;
+            nodes.push(projected);
+        }
+        Ok(SemanticSnapshot {
+            browser_id: browser_id.to_string(),
+            page_id: page_id.to_string(),
+            snapshot_generation: generation,
+            node_count: nodes.len(),
+            truncated,
+            nodes,
+        })
+    }
+
+    pub fn screenshot(&self, browser_id: &str, page_id: &str) -> BrowserResult<Screenshot> {
+        self.touch_current(browser_id)?;
+        let mut state = self.state();
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        let target_id = runtime.page_target(page_id)?;
+        let shot = runtime.backend.screenshot(&target_id)?;
+        screenshot_result(browser_id, page_id, shot)
+    }
+
+    pub fn navigate(&self, browser_id: &str, page_id: &str, url: &str) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        validate_navigation_url(url)?;
+        let mut state = self.state();
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        let target_id = runtime.page_target(page_id)?;
+        // Navigation can replace the document. Fence prior element authority before
+        // dispatch; uncertain outcomes remain stale rather than silently retargeting.
+        runtime.invalidate_elements_for_page(page_id);
+        runtime.backend.navigate(&target_id, url)
+    }
+
+    pub fn click(&self, browser_id: &str, page_id: &str, element_id: &str) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        self.element_effect(browser_id, page_id, element_id, |backend, target, node| {
+            backend.click(target, node)
+        })
+    }
+
+    pub fn input_text(
+        &self,
+        browser_id: &str,
+        page_id: &str,
+        element_id: &str,
+        text: &str,
+    ) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        if text.is_empty() || text.contains('\0') || text.len() > MAX_INPUT_TEXT_BYTES {
+            return Err(BrowserError::not_started(
+                "invalid_text",
+                "input text must be non-empty, NUL-free, and within the Browser UTF-8 byte bound",
+            ));
+        }
+        self.element_effect(browser_id, page_id, element_id, |backend, target, node| {
+            backend.input_text(target, node, text)
+        })
+    }
+
+    pub fn key(&self, browser_id: &str, page_id: &str, key: BrowserKey) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        let mut state = self.state();
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        let target_id = runtime.page_target(page_id)?;
+        runtime.refresh_document_fence(page_id, &target_id)?;
+        runtime.backend.key(&target_id, key)
+    }
+
+    pub fn close_page(&self, browser_id: &str, page_id: &str) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        let mut state = self.state();
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        let target_id = runtime.page_target(page_id)?;
+        runtime.invalidate_elements_for_page(page_id);
+        let result = runtime.backend.close_page(&target_id);
+        if result.is_ok() {
+            runtime.pages.remove(page_id);
+            runtime.target_to_page.remove(&target_id);
+        }
+        result
+    }
+
+    pub fn close_browser(&self, browser_id: &str) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        let mut state = self.state();
+        let mut runtime = state
+            .browsers
+            .remove(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        runtime.backend.shutdown(SHUTDOWN_TIMEOUT)
+    }
+
+    pub fn shutdown_until(&self, deadline: Instant) -> BrowserShutdownReport {
+        self.begin_shutdown();
+        let mut state = self.state();
+        let mut report = BrowserShutdownReport {
+            browsers: state.browsers.len(),
+            ..BrowserShutdownReport::default()
+        };
+        let browsers = std::mem::take(&mut state.browsers);
+        drop(state);
+        for (_, mut runtime) in browsers {
+            let remaining = deadline
+                .saturating_duration_since(Instant::now())
+                .min(SHUTDOWN_TIMEOUT);
+            if remaining.is_zero() {
+                report.timed_out += 1;
+            }
+            // Even with no graceful budget left, explicitly ask the backend to
+            // terminate/reap its owned process tree. ManagedChild::Drop remains a
+            // final fallback, not the normal zero-budget shutdown path.
+            if runtime.backend.shutdown(remaining).is_err() {
+                report.failures += 1;
+            }
+        }
+        report
+    }
+
+    fn touch_current(&self, browser_id: &str) -> BrowserResult<()> {
+        let now = Instant::now();
+        let mut state = self.state();
+        let expired = state
+            .browsers
+            .get(browser_id)
+            .is_some_and(|runtime| runtime.expired(now));
+        if expired {
+            let mut runtime = state
+                .browsers
+                .remove(browser_id)
+                .expect("expired Browser existed under the same lock");
+            drop(state);
+            let _ = runtime.backend.shutdown(SHUTDOWN_TIMEOUT);
+            return Err(stale_browser(browser_id));
+        }
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        runtime.last_activity_at = now;
+        Ok(())
+    }
+
+    fn reap_expired(&self) {
+        let now = Instant::now();
+        let mut state = self.state();
+        let expired_ids = state
+            .browsers
+            .iter()
+            .filter(|(_, runtime)| runtime.expired(now))
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        let expired = expired_ids
+            .into_iter()
+            .filter_map(|id| state.browsers.remove(&id))
+            .collect::<Vec<_>>();
+        drop(state);
+        for mut runtime in expired {
+            let _ = runtime.backend.shutdown(SHUTDOWN_TIMEOUT);
+        }
+    }
+
+    fn element_effect<F>(
+        &self,
+        browser_id: &str,
+        page_id: &str,
+        element_id: &str,
+        effect: F,
+    ) -> BrowserResult<()>
+    where
+        F: FnOnce(&mut dyn BrowserBackend, &str, i64) -> BrowserResult<()>,
+    {
+        let mut state = self.state();
+        let runtime = state
+            .browsers
+            .get_mut(browser_id)
+            .ok_or_else(|| stale_browser(browser_id))?;
+        let target_id = runtime.page_target(page_id)?;
+        runtime.refresh_document_fence(page_id, &target_id)?;
+        let element = runtime
+            .elements
+            .get(element_id)
+            .cloned()
+            .ok_or_else(stale_element)?;
+        let page = runtime
+            .pages
+            .get(page_id)
+            .ok_or_else(|| stale_page(page_id))?;
+        if element.page_id != page_id
+            || element.document_id != page.document_id
+            || element.snapshot_generation != page.snapshot_generation
+            || !element.actionable
+        {
+            return Err(stale_element());
+        }
+        effect(
+            runtime.backend.as_mut(),
+            &target_id,
+            element.backend_node_id,
+        )
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, SupervisorState> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+impl BrowserRuntime {
+    fn new(backend: Box<dyn BrowserBackend>) -> Self {
+        let now = Instant::now();
+        Self {
+            backend,
+            created_at: now,
+            last_activity_at: now,
+            pages: HashMap::new(),
+            target_to_page: HashMap::new(),
+            elements: HashMap::new(),
+            generation: 0,
+        }
+    }
+
+    fn expired(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.last_activity_at) >= BROWSER_IDLE_TIMEOUT
+            || now.saturating_duration_since(self.created_at) >= MAX_BROWSER_LIFETIME
+    }
+
+    fn reconcile_pages(&mut self, pages: Vec<BackendPage>) {
+        let live_targets = pages
+            .iter()
+            .map(|page| page.target_id.clone())
+            .collect::<HashSet<_>>();
+        let removed = self
+            .pages
+            .iter()
+            .filter(|(_, page)| !live_targets.contains(&page.target_id))
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        for page_id in removed {
+            if let Some(page) = self.pages.remove(&page_id) {
+                self.target_to_page.remove(&page.target_id);
+            }
+            self.invalidate_elements_for_page(&page_id);
+        }
+        for page in pages {
+            if let Some(page_id) = self.target_to_page.get(&page.target_id).cloned() {
+                let changed_document = self
+                    .pages
+                    .get(&page_id)
+                    .is_some_and(|current| current.document_id != page.document_id);
+                if changed_document {
+                    if let Some(current) = self.pages.get_mut(&page_id) {
+                        current.document_id = page.document_id;
+                        current.snapshot_generation = 0;
+                    }
+                    self.invalidate_elements_for_page(&page_id);
+                }
+            } else {
+                let page_id = opaque_id("page");
+                self.target_to_page
+                    .insert(page.target_id.clone(), page_id.clone());
+                self.pages.insert(
+                    page_id,
+                    PageIdentity {
+                        target_id: page.target_id,
+                        document_id: page.document_id,
+                        snapshot_generation: 0,
+                    },
+                );
+            }
+        }
+    }
+
+    fn page_target(&self, page_id: &str) -> BrowserResult<String> {
+        self.pages
+            .get(page_id)
+            .map(|page| page.target_id.clone())
+            .ok_or_else(|| stale_page(page_id))
+    }
+
+    fn project_node(
+        &mut self,
+        page_id: &str,
+        document_id: &str,
+        snapshot_generation: u64,
+        node: BackendNode,
+    ) -> SemanticNode {
+        let mut element_id = None;
+        if node.actionable {
+            if let Some(backend_node_id) = node.backend_node_id {
+                let id = opaque_id("element");
+                self.elements.insert(
+                    id.clone(),
+                    ElementIdentity {
+                        page_id: page_id.to_string(),
+                        document_id: document_id.to_string(),
+                        snapshot_generation,
+                        backend_node_id,
+                        actionable: true,
+                    },
+                );
+                element_id = Some(id);
+            }
+        }
+        SemanticNode {
+            role: clip_chars(&node.role, 64),
+            name: node
+                .name
+                .map(|value| clip_bytes(&value, MAX_NODE_TEXT_BYTES)),
+            value: node
+                .value
+                .map(|value| clip_bytes(&value, MAX_NODE_TEXT_BYTES)),
+            element_id,
+            actionable: node.actionable,
+        }
+    }
+
+    fn invalidate_elements_for_page(&mut self, page_id: &str) {
+        self.elements
+            .retain(|_, element| element.page_id != page_id);
+    }
+
+    fn refresh_document_fence(&mut self, page_id: &str, target_id: &str) -> BrowserResult<()> {
+        let pages = self.backend.pages()?;
+        let current = pages
+            .into_iter()
+            .find(|page| page.target_id == target_id)
+            .ok_or_else(|| stale_page(page_id))?;
+        let stored = self
+            .pages
+            .get_mut(page_id)
+            .ok_or_else(|| stale_page(page_id))?;
+        if stored.document_id != current.document_id {
+            stored.document_id = current.document_id;
+            stored.snapshot_generation = 0;
+            self.invalidate_elements_for_page(page_id);
+            return Err(stale_element());
+        }
+        Ok(())
+    }
+}
+
+fn screenshot_result(
+    browser_id: &str,
+    page_id: &str,
+    screenshot: BackendScreenshot,
+) -> BrowserResult<Screenshot> {
+    let decoded = general_purpose::STANDARD
+        .decode(&screenshot.data)
+        .map_err(|_| {
+            BrowserError::observed("invalid_image", "CDP returned invalid image base64", None)
+        })?;
+    if decoded.is_empty() || decoded.len() > MAX_IMAGE_BYTES {
+        return Err(BrowserError::observed(
+            "image_too_large",
+            "browser screenshot exceeded bounded image bytes",
+            None,
+        ));
+    }
+    if screenshot.width == 0
+        || screenshot.height == 0
+        || screenshot.width > MAX_IMAGE_DIMENSION
+        || screenshot.height > MAX_IMAGE_DIMENSION
+    {
+        return Err(BrowserError::observed(
+            "invalid_image_dimensions",
+            "browser screenshot dimensions are outside the bounded image contract",
+            None,
+        ));
+    }
+    let sha256 = format!("{:x}", Sha256::digest(&decoded));
+    Ok(Screenshot {
+        browser_id: browser_id.to_string(),
+        page_id: page_id.to_string(),
+        content_base64: screenshot.data,
+        mime_type: "image/png".to_string(),
+        width: screenshot.width,
+        height: screenshot.height,
+        file_bytes: decoded.len() as u64,
+        sha256,
+    })
+}
+
+fn stale_browser(browser_id: &str) -> BrowserError {
+    BrowserError::not_started(
+        "stale_browser",
+        format!("browser_id '{browser_id}' is no longer current"),
+    )
+}
+
+fn stale_page(page_id: &str) -> BrowserError {
+    BrowserError::not_started(
+        "stale_page",
+        format!("page_id '{page_id}' is no longer current"),
+    )
+}
+
+fn stale_element() -> BrowserError {
+    let mut error = BrowserError::not_started(
+        "stale_element",
+        "element_id is stale; re-observe the semantic snapshot before acting",
+    );
+    error.recovery_action = Some("snapshot");
+    error
+}
+
+fn opaque_id(prefix: &str) -> String {
+    format!("{prefix}_{}", Uuid::new_v4().simple())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cdp::{BackendFactory, BackendSnapshot, BrowserBackend};
+    use crate::types::ExecutionState;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct FakeFactory {
+        launches: AtomicUsize,
+    }
+
+    impl BackendFactory for FakeFactory {
+        fn available(&self) -> bool {
+            true
+        }
+
+        fn launch(&self) -> BrowserResult<Box<dyn BrowserBackend>> {
+            self.launches.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(FakeBackend::new()))
+        }
+    }
+
+    struct FakeBackend {
+        pages: Vec<BackendPage>,
+        document_generation: u64,
+        snapshot_node_count: usize,
+        fail_pages_after_create: bool,
+        page_created: bool,
+    }
+
+    impl FakeBackend {
+        fn new() -> Self {
+            Self::with_snapshot_nodes(1)
+        }
+
+        fn with_snapshot_nodes(snapshot_node_count: usize) -> Self {
+            Self {
+                pages: vec![BackendPage {
+                    target_id: "private-target".to_string(),
+                    title: "Fixture".to_string(),
+                    url: "https://example.test/?private=query".to_string(),
+                    document_id: "doc-1".to_string(),
+                }],
+                document_generation: 1,
+                snapshot_node_count,
+                fail_pages_after_create: false,
+                page_created: false,
+            }
+        }
+
+        fn with_new_page_reconcile_failure() -> Self {
+            let mut backend = Self::new();
+            backend.fail_pages_after_create = true;
+            backend
+        }
+    }
+
+    impl BrowserBackend for FakeBackend {
+        fn pages(&mut self) -> BrowserResult<Vec<BackendPage>> {
+            if self.fail_pages_after_create && self.page_created {
+                return Err(BrowserError::observed(
+                    "fixture_pages_failed",
+                    "fixture page reconciliation failed",
+                    None,
+                ));
+            }
+            Ok(self.pages.clone())
+        }
+        fn new_page(&mut self) -> BrowserResult<String> {
+            let target_id = format!("private-target-{}", self.pages.len() + 1);
+            self.pages.push(BackendPage {
+                target_id: target_id.clone(),
+                title: String::new(),
+                url: "about:blank".to_string(),
+                document_id: format!("doc-{}", self.document_generation),
+            });
+            self.page_created = true;
+            Ok(target_id)
+        }
+        fn snapshot(&mut self, _target_id: &str) -> BrowserResult<BackendSnapshot> {
+            let nodes = (0..self.snapshot_node_count)
+                .map(|index| BackendNode {
+                    role: "button".to_string(),
+                    name: Some(format!("Go {index}")),
+                    value: Some("x".repeat(MAX_NODE_TEXT_BYTES * 2)),
+                    backend_node_id: Some(index as i64 + 7),
+                    actionable: true,
+                })
+                .collect::<Vec<_>>();
+            Ok(BackendSnapshot {
+                document_id: format!("doc-{}", self.document_generation),
+                nodes,
+                truncated: self.snapshot_node_count > MAX_SNAPSHOT_NODES,
+            })
+        }
+        fn screenshot(&mut self, _target_id: &str) -> BrowserResult<BackendScreenshot> {
+            Ok(BackendScreenshot {
+                data: general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nFAKE"),
+                width: 800,
+                height: 600,
+            })
+        }
+        fn navigate(&mut self, _target_id: &str, _url: &str) -> BrowserResult<()> {
+            self.document_generation += 1;
+            for page in &mut self.pages {
+                page.document_id = format!("doc-{}", self.document_generation);
+            }
+            Ok(())
+        }
+        fn click(&mut self, _target_id: &str, _backend_node_id: i64) -> BrowserResult<()> {
+            Ok(())
+        }
+        fn input_text(
+            &mut self,
+            _target_id: &str,
+            _backend_node_id: i64,
+            _text: &str,
+        ) -> BrowserResult<()> {
+            Ok(())
+        }
+        fn key(&mut self, _target_id: &str, _key: BrowserKey) -> BrowserResult<()> {
+            Ok(())
+        }
+        fn close_page(&mut self, target_id: &str) -> BrowserResult<()> {
+            self.pages.retain(|page| page.target_id != target_id);
+            Ok(())
+        }
+        fn shutdown(&mut self, _timeout: Duration) -> BrowserResult<()> {
+            Ok(())
+        }
+    }
+
+    struct ManyNodesFactory;
+    impl BackendFactory for ManyNodesFactory {
+        fn available(&self) -> bool {
+            true
+        }
+        fn launch(&self) -> BrowserResult<Box<dyn BrowserBackend>> {
+            Ok(Box::new(FakeBackend::with_snapshot_nodes(
+                MAX_SNAPSHOT_NODES + 64,
+            )))
+        }
+    }
+
+    struct NewPageReconcileFailureFactory;
+    impl BackendFactory for NewPageReconcileFailureFactory {
+        fn available(&self) -> bool {
+            true
+        }
+        fn launch(&self) -> BrowserResult<Box<dyn BrowserBackend>> {
+            Ok(Box::new(FakeBackend::with_new_page_reconcile_failure()))
+        }
+    }
+
+    struct UnavailableFactory;
+    impl BackendFactory for UnavailableFactory {
+        fn available(&self) -> bool {
+            false
+        }
+        fn launch(&self) -> BrowserResult<Box<dyn BrowserBackend>> {
+            Err(BrowserError::not_started(
+                "browser_unavailable",
+                "no supported Chromium-family browser is installed",
+            ))
+        }
+    }
+
+    fn fixture() -> BrowserSupervisor {
+        BrowserSupervisor::with_factory(Arc::new(FakeFactory::default()))
+    }
+
+    #[test]
+    fn opaque_ids_never_expose_cdp_target_identity() {
+        let supervisor = fixture();
+        let browser = supervisor.launch().unwrap();
+        let page = supervisor.pages(&browser.browser_id, 8).unwrap().remove(0);
+        assert!(browser.browser_id.starts_with("browser_"));
+        assert!(page.page_id.starts_with("page_"));
+        assert!(!page.page_id.contains("private-target"));
+        let snapshot = supervisor
+            .snapshot(&browser.browser_id, &page.page_id)
+            .unwrap();
+        let element = snapshot.nodes[0].element_id.as_ref().unwrap();
+        assert!(element.starts_with("element_"));
+    }
+
+    #[test]
+    fn navigation_invalidates_prior_element_authority() {
+        let supervisor = fixture();
+        let browser = supervisor.launch().unwrap();
+        let page = supervisor.pages(&browser.browser_id, 8).unwrap().remove(0);
+        let element = supervisor
+            .snapshot(&browser.browser_id, &page.page_id)
+            .unwrap()
+            .nodes[0]
+            .element_id
+            .clone()
+            .unwrap();
+        supervisor
+            .navigate(
+                &browser.browser_id,
+                &page.page_id,
+                "https://example.test/next",
+            )
+            .unwrap();
+        let error = supervisor
+            .click(&browser.browser_id, &page.page_id, &element)
+            .unwrap_err();
+        assert_eq!(error.kind, "stale_element");
+        assert_eq!(error.execution_state, ExecutionState::NotStarted);
+        assert_eq!(error.recovery_action, Some("snapshot"));
+    }
+
+    #[test]
+    fn newer_snapshot_invalidates_prior_snapshot_elements() {
+        let supervisor = fixture();
+        let browser = supervisor.launch().unwrap();
+        let page = supervisor.pages(&browser.browser_id, 8).unwrap().remove(0);
+        let element = supervisor
+            .snapshot(&browser.browser_id, &page.page_id)
+            .unwrap()
+            .nodes[0]
+            .element_id
+            .clone()
+            .unwrap();
+        supervisor
+            .snapshot(&browser.browser_id, &page.page_id)
+            .unwrap();
+        assert_eq!(
+            supervisor
+                .click(&browser.browser_id, &page.page_id, &element)
+                .unwrap_err()
+                .kind,
+            "stale_element"
+        );
+    }
+
+    #[test]
+    fn unavailable_browser_is_truthful_and_pre_dispatch() {
+        let supervisor = BrowserSupervisor::with_factory(Arc::new(UnavailableFactory));
+        assert!(!supervisor.available());
+        let error = supervisor.launch().unwrap_err();
+        assert_eq!(error.kind, "browser_unavailable");
+        assert_eq!(error.execution_state, ExecutionState::NotStarted);
+    }
+
+    #[test]
+    fn new_page_reconciliation_failure_preserves_completed_effect_certainty() {
+        let supervisor = BrowserSupervisor::with_factory(Arc::new(NewPageReconcileFailureFactory));
+        let browser = supervisor.launch().unwrap();
+        let error = supervisor.new_page(&browser.browser_id).unwrap_err();
+        assert_eq!(error.kind, "page_create_reconcile_failed");
+        assert_eq!(error.execution_state, ExecutionState::Completed);
+        assert_eq!(error.recovery_action, Some("pages"));
+    }
+
+    #[test]
+    fn semantic_snapshot_and_text_are_bounded() {
+        let supervisor = BrowserSupervisor::with_factory(Arc::new(ManyNodesFactory));
+        let browser = supervisor.launch().unwrap();
+        let page = supervisor.pages(&browser.browser_id, 8).unwrap().remove(0);
+        let snapshot = supervisor
+            .snapshot(&browser.browser_id, &page.page_id)
+            .unwrap();
+        assert!(snapshot.truncated);
+        assert!(snapshot.node_count <= MAX_SNAPSHOT_NODES);
+        let encoded = serde_json::to_vec(&snapshot.nodes).unwrap();
+        assert!(encoded.len() <= MAX_SNAPSHOT_BYTES + MAX_NODE_TEXT_BYTES * 2);
+        assert!(snapshot.nodes.iter().all(|node| {
+            node.value
+                .as_ref()
+                .is_none_or(|value| value.len() <= MAX_NODE_TEXT_BYTES)
+        }));
+    }
+
+    #[test]
+    fn input_text_bound_fails_before_effect_dispatch() {
+        let supervisor = fixture();
+        let browser = supervisor.launch().unwrap();
+        let page = supervisor.pages(&browser.browser_id, 8).unwrap().remove(0);
+        let element = supervisor
+            .snapshot(&browser.browser_id, &page.page_id)
+            .unwrap()
+            .nodes[0]
+            .element_id
+            .clone()
+            .unwrap();
+        let error = supervisor
+            .input_text(
+                &browser.browser_id,
+                &page.page_id,
+                &element,
+                &"x".repeat(MAX_INPUT_TEXT_BYTES + 1),
+            )
+            .unwrap_err();
+        assert_eq!(error.kind, "invalid_text");
+        assert_eq!(error.execution_state, ExecutionState::NotStarted);
+        for invalid in ["", "nul\0text"] {
+            let error = supervisor
+                .input_text(&browser.browser_id, &page.page_id, &element, invalid)
+                .unwrap_err();
+            assert_eq!(error.kind, "invalid_text");
+            assert_eq!(error.execution_state, ExecutionState::NotStarted);
+        }
+    }
+
+    #[test]
+    fn screenshot_bytes_are_bounded_before_projection() {
+        let error = screenshot_result(
+            "browser_test",
+            "page_test",
+            BackendScreenshot {
+                data: general_purpose::STANDARD.encode(vec![0u8; MAX_IMAGE_BYTES + 1]),
+                width: 1,
+                height: 1,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, "image_too_large");
+        assert_eq!(error.execution_state, ExecutionState::Completed);
+    }
+
+    #[test]
+    fn screenshot_dimensions_are_bounded_before_projection() {
+        let error = screenshot_result(
+            "browser_test",
+            "page_test",
+            BackendScreenshot {
+                data: general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nFAKE"),
+                width: MAX_IMAGE_DIMENSION + 1,
+                height: 1,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, "invalid_image_dimensions");
+        assert_eq!(error.execution_state, ExecutionState::Completed);
+    }
+
+    #[test]
+    fn idle_and_absolute_lifetime_expire_owned_browser_runtimes() {
+        let supervisor = fixture();
+        let browser = supervisor.launch().unwrap();
+        {
+            let mut state = supervisor.state();
+            let runtime = state.browsers.get_mut(&browser.browser_id).unwrap();
+            runtime.last_activity_at = Instant::now() - BROWSER_IDLE_TIMEOUT;
+        }
+        assert!(supervisor.list_browsers().is_empty());
+
+        let browser = supervisor.launch().unwrap();
+        {
+            let mut state = supervisor.state();
+            let runtime = state.browsers.get_mut(&browser.browser_id).unwrap();
+            runtime.created_at = Instant::now() - MAX_BROWSER_LIFETIME;
+        }
+        assert!(supervisor.list_browsers().is_empty());
+    }
+
+    #[test]
+    fn launch_and_shutdown_are_bounded_and_owned() {
+        let supervisor = fixture();
+        supervisor.launch().unwrap();
+        supervisor.begin_shutdown();
+        assert_eq!(
+            supervisor.launch().unwrap_err().kind,
+            "runner_shutting_down"
+        );
+        let report = supervisor.shutdown_until(Instant::now() + Duration::from_secs(1));
+        assert_eq!(report.browsers, 1);
+        assert_eq!(report.failures, 0);
+    }
+}

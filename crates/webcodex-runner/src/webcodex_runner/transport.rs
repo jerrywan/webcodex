@@ -11,8 +11,8 @@ use super::lsp::LspSupervisor;
 use super::projects::RunnerProjectCache;
 use super::shutdown::{
     ActivityTracker, BackgroundThreads, ShutdownCoordinator, ShutdownDeadline, ShutdownPhaseResult,
-    ShutdownReport, BACKGROUND_JOIN_BUDGET, DEFAULT_SHUTDOWN_BUDGET, JOB_DRAIN_BUDGET,
-    LSP_SHUTDOWN_BUDGET, PROVIDER_SHUTDOWN_BUDGET,
+    ShutdownReport, BACKGROUND_JOIN_BUDGET, BROWSER_SHUTDOWN_BUDGET, DEFAULT_SHUTDOWN_BUDGET,
+    JOB_DRAIN_BUDGET, LSP_SHUTDOWN_BUDGET, PROVIDER_SHUTDOWN_BUDGET,
 };
 use super::PersistentShellManager;
 use crate::runner_config::{
@@ -27,6 +27,7 @@ use crate::runner_protocol::{
 use crate::runner_protocol::{
     PROJECT_INVENTORY_PAGE_MAX_SERIALIZED_BYTES, PROJECT_INVENTORY_PAGE_MAX_SUMMARIES,
 };
+use webcodex_browser::BrowserSupervisor;
 
 mod project_inventory;
 mod result_submission;
@@ -178,6 +179,7 @@ fn send_provider_metadata(
 #[derive(Clone)]
 pub(crate) struct RunnerRuntimeState {
     lsp: LspSupervisor,
+    browser: BrowserSupervisor,
     config: Arc<ReloadableRunnerConfig>,
     jobs: JobManager,
     persistent_shells: PersistentShellManager,
@@ -203,6 +205,7 @@ impl RunnerRuntimeState {
         let persistent_shells = PersistentShellManager::new(&cfg.shell, jobs.ssh_pool.clone());
         Self {
             lsp: LspSupervisor::default(),
+            browser: BrowserSupervisor::new(),
             config: Arc::new(ReloadableRunnerConfig::new(cfg.clone(), path)),
             jobs,
             persistent_shells,
@@ -229,6 +232,7 @@ impl RunnerRuntimeState {
         self.config.begin_shutdown();
         self.jobs.stop_accepting_work();
         self.persistent_shells.close_all("runner_shutdown");
+        self.browser.begin_shutdown();
         self.lsp.begin_shutdown_until(deadline);
     }
 
@@ -293,6 +297,7 @@ impl RunnerRuntimeState {
         self.config.begin_shutdown();
         self.jobs.stop_accepting_work();
         self.persistent_shells.close_all("runner_shutdown");
+        self.browser.begin_shutdown();
         self.lsp.begin_shutdown_until(deadline.instant());
         phases.push(ShutdownPhaseResult::completed(
             "stop_accepting_work",
@@ -366,6 +371,19 @@ impl RunnerRuntimeState {
             provider_timeouts,
             provider_failures,
             "provider_shutdown_failed",
+        ));
+
+        let started = Instant::now();
+        let browser = self
+            .browser
+            .shutdown_until(deadline.phase_deadline(BROWSER_SHUTDOWN_BUDGET));
+        phases.push(shutdown_phase(
+            "browser_runtimes_stop",
+            started,
+            browser.browsers,
+            browser.timed_out,
+            browser.failures,
+            "browser_shutdown_failed",
         ));
 
         let started = Instant::now();
@@ -1674,6 +1692,7 @@ fn run_polling_runner_with_shutdown(
             project_inventory_page,
             runner_instance_id,
             &runtime.lsp,
+            &runtime.browser,
             &shutdown,
             &runtime.dispatches,
             &mut polling_dispatches,
@@ -2078,6 +2097,7 @@ fn handle_stream_envelope(
                 Err(error) => return Some(error),
             };
             let lsp = runtime.lsp.clone();
+            let browser = runtime.browser.clone();
             let dispatch_guard = runtime.dispatches.enter();
             let project_inventory_refresh_tx = project_inventory_refresh_tx.clone();
             tokio::task::spawn_blocking(move || {
@@ -2090,6 +2110,7 @@ fn handle_stream_envelope(
                     &persistent_shells,
                     &project_registry_dir,
                     &lsp,
+                    &browser,
                     request,
                 );
                 if dispatch_result

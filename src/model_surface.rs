@@ -516,6 +516,22 @@ mod tests {
     }
 
     #[test]
+    fn browser_tools_stay_gateway_only_on_adaptive_runtime() {
+        for tool_name in ["browser_observe", "browser_act"] {
+            assert!(adaptive_runtime_direct_tool_definitions()
+                .iter()
+                .all(|definition| definition.name != tool_name));
+            assert_eq!(
+                adaptive_runtime_tool_invocation_route(tool_name),
+                (
+                    TOOL_SURFACE_AVAILABILITY_GATEWAY,
+                    Some(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME)
+                )
+            );
+        }
+    }
+
+    #[test]
     fn structured_suggested_call_targets_project_to_actionable_adaptive_routes() {
         let mut targets = std::collections::BTreeSet::new();
         for spec in registered_tool_specs()

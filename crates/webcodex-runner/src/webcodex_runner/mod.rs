@@ -1,4 +1,5 @@
 pub(crate) mod artifacts;
+pub(crate) mod browser;
 #[cfg(feature = "workspace-checkpoints")]
 pub(crate) mod checkpoints;
 pub(crate) mod coding_agent;
@@ -42,6 +43,7 @@ pub(crate) mod validation;
 pub(crate) use artifacts::handle_artifact_file_operation;
 #[cfg(test)]
 pub(crate) use artifacts::is_artifact_request_kind;
+pub(crate) use browser::handle_browser_operation;
 #[cfg(feature = "workspace-checkpoints")]
 pub(crate) use checkpoints::handle_checkpoint_file_request;
 #[cfg(all(test, feature = "workspace-checkpoints"))]

@@ -524,6 +524,70 @@ pub struct RunnerComputerOperation {
     pub timeout_secs: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunnerBrowserOperationKind {
+    ListBrowsers,
+    ListPages,
+    Snapshot,
+    Screenshot,
+    Launch,
+    NewPage,
+    Navigate,
+    Click,
+    InputText,
+    Key,
+    ClosePage,
+    CloseBrowser,
+}
+
+impl RunnerBrowserOperationKind {
+    pub fn wire_kind(self) -> &'static str {
+        match self {
+            Self::ListBrowsers => "browser_list_browsers",
+            Self::ListPages => "browser_list_pages",
+            Self::Snapshot => "browser_snapshot",
+            Self::Screenshot => "browser_screenshot",
+            Self::Launch => "browser_launch",
+            Self::NewPage => "browser_new_page",
+            Self::Navigate => "browser_navigate",
+            Self::Click => "browser_click",
+            Self::InputText => "browser_input_text",
+            Self::Key => "browser_key",
+            Self::ClosePage => "browser_close_page",
+            Self::CloseBrowser => "browser_close",
+        }
+    }
+
+    pub fn from_wire(kind: &str) -> Option<Self> {
+        Some(match kind {
+            "browser_list_browsers" => Self::ListBrowsers,
+            "browser_list_pages" => Self::ListPages,
+            "browser_snapshot" => Self::Snapshot,
+            "browser_screenshot" => Self::Screenshot,
+            "browser_launch" => Self::Launch,
+            "browser_new_page" => Self::NewPage,
+            "browser_navigate" => Self::Navigate,
+            "browser_click" => Self::Click,
+            "browser_input_text" => Self::InputText,
+            "browser_key" => Self::Key,
+            "browser_close_page" => Self::ClosePage,
+            "browser_close" => Self::CloseBrowser,
+            _ => return None,
+        })
+    }
+
+    pub fn is_large_image(self) -> bool {
+        matches!(self, Self::Screenshot)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerBrowserOperation {
+    pub kind: RunnerBrowserOperationKind,
+    pub payload: String,
+    pub timeout_secs: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct RunnerPersistentShellOperation {
     pub request: PersistentShellRequest,
@@ -544,6 +608,7 @@ pub enum RunnerOperation {
     File(RunnerFileOperation),
     Project(RunnerProjectOperation),
     Computer(RunnerComputerOperation),
+    Browser(RunnerBrowserOperation),
     Validation {
         payload: ValidationBridgeRequest,
         timeout_secs: u64,
@@ -581,6 +646,7 @@ impl RunnerOperation {
             Self::File(operation) => operation.wire_kind(),
             Self::Project(operation) => operation.kind.wire_kind(),
             Self::Computer(operation) => operation.kind.wire_kind(),
+            Self::Browser(operation) => operation.kind.wire_kind(),
             Self::Validation { .. } => crate::validation_bridge::AGENT_VALIDATION_REQUEST_KIND,
             Self::Lsp { .. } => crate::lsp_bridge::AGENT_LSP_REQUEST_KIND,
             Self::PersistentShell(_) => "persistent_shell",
@@ -603,6 +669,7 @@ impl RunnerOperation {
     pub fn is_large_native_image_request(&self) -> bool {
         match self {
             Self::Computer(operation) => operation.kind.is_large_image(),
+            Self::Browser(operation) => operation.kind.is_large_image(),
             Self::File(RunnerFileOperation::ReadProjectArtifact(payload)) => payload
                 .content
                 .as_deref()
@@ -765,6 +832,12 @@ fn encode_operation(
         }
         RunnerOperation::Computer(operation) => {
             validate_computer_payload(operation.kind, &operation.payload)?;
+            wire.kind = operation.kind.wire_kind().to_string();
+            wire.stdin = Some(operation.payload);
+            wire.timeout_secs = operation.timeout_secs.max(1);
+        }
+        RunnerOperation::Browser(operation) => {
+            validate_browser_payload(operation.kind, &operation.payload)?;
             wire.kind = operation.kind.wire_kind().to_string();
             wire.stdin = Some(operation.payload);
             wire.timeout_secs = operation.timeout_secs.max(1);
@@ -1119,6 +1192,29 @@ fn decode_operation(wire: &RunnerRequest) -> Result<RunnerOperation, String> {
                 .ok_or_else(|| "computer operation requires JSON payload".to_string())?;
             validate_computer_payload(operation_kind, &payload)?;
             Ok(RunnerOperation::Computer(RunnerComputerOperation {
+                kind: operation_kind,
+                payload,
+                timeout_secs: wire.timeout_secs,
+            }))
+        }
+        kind if RunnerBrowserOperationKind::from_wire(kind).is_some() => {
+            ensure_special_payloads_absent(wire)?;
+            ensure_no_file_fields(wire)?;
+            if wire.job_id.is_some()
+                || wire.cwd.is_some()
+                || !wire.command.is_empty()
+                || wire.job_context.is_some()
+            {
+                return Err("browser operation contains incompatible execution fields".to_string());
+            }
+            let operation_kind =
+                RunnerBrowserOperationKind::from_wire(kind).expect("checked browser kind");
+            let payload = wire
+                .stdin
+                .clone()
+                .ok_or_else(|| "browser operation requires JSON payload".to_string())?;
+            validate_browser_payload(operation_kind, &payload)?;
+            Ok(RunnerOperation::Browser(RunnerBrowserOperation {
                 kind: operation_kind,
                 payload,
                 timeout_secs: wire.timeout_secs,
@@ -1590,6 +1686,17 @@ fn validate_computer_payload(
         return Err("computer request payload exceeds V2 bound".to_string());
     }
     validate_json_payload(payload, "computer operation")
+}
+
+fn validate_browser_payload(
+    _kind: RunnerBrowserOperationKind,
+    payload: &str,
+) -> Result<(), String> {
+    const MAX_BROWSER_REQUEST_PAYLOAD_BYTES: usize = 32 * 1024;
+    if payload.len() > MAX_BROWSER_REQUEST_PAYLOAD_BYTES {
+        return Err("browser request payload exceeds V2 bound".to_string());
+    }
+    validate_json_payload(payload, "browser operation")
 }
 
 fn validate_persistent_shell(request: &PersistentShellRequest) -> Result<(), String> {

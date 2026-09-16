@@ -41,6 +41,7 @@ Start with the goal that matches what you are trying to do.
 - [Coding Workflow](CODING_WORKFLOW.md) — task bootstrap, guidance, validation, and closeout
 - [Native Tool Plugins](PLUGINS.md) — add Runner-local tools with any executable language and no MCP SDK
 - [Computer Use roadmap](COMPUTER_USE.md) — semantic-first desktop automation direction and validation priorities
+- [Browser/CDP runtime architecture](architecture/browser-cdp-runtime.md) — first-class Browser domain, authority, lifecycle, stale fencing, and Phase 1 limits
 
 ## I want to contribute or release WebCodex
 

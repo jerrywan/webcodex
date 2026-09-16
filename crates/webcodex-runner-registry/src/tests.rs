@@ -303,6 +303,8 @@ mod apply_text_edit_local_guard;
 mod apply_text_edit_occurrence;
 #[path = "tests/artifact_export.rs"]
 mod artifact_export;
+#[path = "tests/browser.rs"]
+mod browser;
 #[path = "tests/capabilities.rs"]
 mod capabilities;
 #[path = "tests/computer_accessibility.rs"]

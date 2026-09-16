@@ -1253,6 +1253,7 @@ struct PollingDispatch {
     persistent_shells: webcodex_runner::PersistentShellManager,
     project_registry_dir: PathBuf,
     lsp: webcodex_runner::LspSupervisor,
+    browser: webcodex_browser::BrowserSupervisor,
     request: RunnerRequest,
 }
 
@@ -1266,6 +1267,7 @@ impl PollingDispatch {
             &self.persistent_shells,
             &self.project_registry_dir,
             &self.lsp,
+            &self.browser,
             self.request,
         )
     }
@@ -2069,6 +2071,13 @@ fn runner_register_capabilities(cfg: &RunnerConfig) -> RunnerCapabilities {
     // Default production behavior is unchanged: only the explicit opt-out
     // disables it, and the server already rejects inventory without the
     // capability and vice-versa.
+    // Browser capabilities are registration-required and depend on the actual
+    // Runner-local Chromium-family discovery result. The Server must never infer
+    // them from OS, protocol generation, shell, or Computer capabilities.
+    let browser_available = webcodex_browser::discover_chromium_executable().is_some();
+    capabilities.browser_observe = browser_available;
+    capabilities.browser_control = browser_available;
+    capabilities.browser_launch = browser_available;
     // Native read-only desktop observation is implemented only on macOS and
     // Windows. Unsupported platforms advertise false and fail closed.
     capabilities.computer_observe = cfg!(any(target_os = "macos", windows));
@@ -5726,6 +5735,7 @@ fn handle_one_poll(
     project_inventory_page: Option<ShellProjectInventoryPage>,
     runner_instance_id: &str,
     lsp: &webcodex_runner::LspSupervisor,
+    browser: &webcodex_browser::BrowserSupervisor,
     shutdown: &Arc<AtomicBool>,
     dispatches: &ActivityTracker,
     polling_dispatches: &mut PollingDispatchSupervisor,
@@ -5800,6 +5810,7 @@ fn handle_one_poll(
         Err(error) => return Err(PollError::new(PollErrorKind::Config, error)),
     };
     let lsp = lsp.clone();
+    let browser = browser.clone();
     let dispatch = PollingDispatch {
         request_id: request.request_id.clone(),
         sink,
@@ -5809,6 +5820,7 @@ fn handle_one_poll(
         persistent_shells,
         project_registry_dir,
         lsp,
+        browser,
         request,
     };
     if !once {

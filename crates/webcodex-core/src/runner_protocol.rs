@@ -304,6 +304,14 @@ pub const RUNNER_CAPABILITY_SKILL_MANAGEMENT: &str = "skill_management";
 /// reconnects. Missing on older runners and therefore defaults to `false`.
 /// Read-only native desktop/window observation. Missing on older Runners and
 /// false; never inferred from shell or file capabilities.
+pub const RUNNER_CAPABILITY_BROWSER_OBSERVE: &str = "browser_observe";
+/// Runner-owned Browser effects against opaque Browser/Page/Element identities.
+/// Missing on older Runners is false and is never inferred from Browser observation,
+/// Computer control, OS identity, protocol generation, or shell support.
+pub const RUNNER_CAPABILITY_BROWSER_CONTROL: &str = "browser_control";
+/// Runner-owned creation of an ephemeral Chromium-family Browser runtime. Missing
+/// on older Runners is false and is never inferred from executable/platform facts.
+pub const RUNNER_CAPABILITY_BROWSER_LAUNCH: &str = "browser_launch";
 pub const RUNNER_CAPABILITY_COMPUTER_OBSERVE: &str = "computer_observe";
 /// Bounded installed-application discovery. Missing on older Runners is false
 /// and is never inferred from desktop observation or launch authority.
@@ -473,6 +481,9 @@ pub const RUNNER_CAPABILITY_NAMES: &[&str] = &[
     RUNNER_CAPABILITY_SKILL_RUNTIME,
     RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION,
     RUNNER_CAPABILITY_SKILL_MANAGEMENT,
+    RUNNER_CAPABILITY_BROWSER_OBSERVE,
+    RUNNER_CAPABILITY_BROWSER_CONTROL,
+    RUNNER_CAPABILITY_BROWSER_LAUNCH,
     RUNNER_CAPABILITY_COMPUTER_OBSERVE,
     RUNNER_CAPABILITY_COMPUTER_APPLICATION_DISCOVERY,
     RUNNER_CAPABILITY_COMPUTER_APPLICATION_LAUNCH,
@@ -678,6 +689,16 @@ pub struct RunnerCapabilities {
     /// Managed Skill lifecycle/revision management. Independent from runtime reads.
     #[serde(default, skip_serializing_if = "is_false")]
     pub skill_management: bool,
+    /// Runner-owned Browser observation. Missing on older Runners is false and
+    /// never follows from OS/protocol/shell/Computer capabilities.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub browser_observe: bool,
+    /// Runner-owned Browser control excluding process launch.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub browser_control: bool,
+    /// Runner-owned launch of ephemeral Chromium-family runtimes.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub browser_launch: bool,
     /// Native read-only desktop/window observation. Missing on older Runners
     /// and therefore fail-closed.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -1019,6 +1040,9 @@ impl Default for RunnerCapabilities {
             skill_runtime: false,
             skill_resource_execution: false,
             skill_management: false,
+            browser_observe: false,
+            browser_control: false,
+            browser_launch: false,
             computer_observe: false,
             computer_application_discovery: false,
             computer_application_launch: false,
@@ -2554,6 +2578,9 @@ mod envelope_tests {
                 skill_runtime: false,
                 skill_resource_execution: false,
                 skill_management: false,
+                browser_observe: false,
+                browser_control: false,
+                browser_launch: false,
                 computer_observe: false,
                 computer_application_discovery: false,
                 computer_application_launch: false,

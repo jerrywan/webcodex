@@ -85,6 +85,98 @@ fn computer_control_output_schema_has_closed_native_platforms() {
 }
 
 #[test]
+fn browser_output_schemas_accept_canonical_results_and_reject_leaked_fields() {
+    let observe_schema = crate::tool_runtime::registry::output_schema_for_tool("browser_observe");
+    let act_schema = crate::tool_runtime::registry::output_schema_for_tool("browser_act");
+    let validate_observe = |value: &Value| {
+        crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+            value,
+            &observe_schema,
+        )
+    };
+    let validate_act = |value: &Value| {
+        crate::tool_runtime::startup_brief::validate_schema_instance_for_test(value, &act_schema)
+    };
+
+    let snapshot = serde_json::to_value(crate::tool_runtime::tool_result::ToolResult::ok(json!({
+        "execution_state": "completed",
+        "state_changed": false,
+        "browser_id": "browser_abcdefghijklmnop",
+        "page_id": "page_abcdefghijklmnop",
+        "snapshot_generation": 1,
+        "node_count": 1,
+        "truncated": false,
+        "nodes": [{
+            "role": "button",
+            "name": "Continue",
+            "value": null,
+            "element_id": "element_abcdefghijklmnop",
+            "actionable": true
+        }]
+    })))
+    .unwrap();
+    validate_observe(&snapshot).unwrap();
+
+    let screenshot =
+        serde_json::to_value(crate::tool_runtime::tool_result::ToolResult::ok(json!({
+            "execution_state": "completed",
+            "state_changed": false,
+            "browser_id": "browser_abcdefghijklmnop",
+            "page_id": "page_abcdefghijklmnop",
+            "content_base64": "iVBORw0KGgo=",
+            "mime_type": "image/png",
+            "width": 1024,
+            "height": 768,
+            "file_bytes": 8,
+            "sha256": "a".repeat(64)
+        })))
+        .unwrap();
+    validate_observe(&screenshot).unwrap();
+
+    let launch = serde_json::to_value(crate::tool_runtime::tool_result::ToolResult::ok(json!({
+        "execution_state": "completed",
+        "state_changed": true,
+        "browser_id": "browser_abcdefghijklmnop",
+        "page_count": 1
+    })))
+    .unwrap();
+    validate_act(&launch).unwrap();
+
+    let stale = serde_json::to_value(
+        crate::tool_runtime::tool_result::ToolResult::err_with_output(
+            "stale element",
+            json!({
+                "execution_state": "not_started",
+                "state_changed": false,
+                "error_kind": "stale_element",
+                "message": "element identity is stale",
+                "recovery": {
+                    "reason": "re-observe before acting",
+                    "suggested_call": {
+                        "tool": "browser_observe",
+                        "arguments": {
+                            "action": "snapshot",
+                            "client_id": "msi",
+                            "browser_id": "browser_abcdefghijklmnop",
+                            "page_id": "page_abcdefghijklmnop"
+                        }
+                    }
+                }
+            }),
+        ),
+    )
+    .unwrap();
+    validate_act(&stale).unwrap();
+
+    let mut leaked = snapshot;
+    leaked["output"]["target_id"] = json!("private-cdp-target");
+    assert!(validate_observe(&leaked).is_err());
+    let mut leaked = launch;
+    leaked["output"]["debug_endpoint"] = json!("private-endpoint");
+    assert!(validate_act(&leaked).is_err());
+}
+
+#[test]
 fn read_files_output_schema_rejects_sparse_item_over_default_limit() {
     let schema = crate::tool_runtime::registry::output_schema_for_tool("read_files");
     let default_limit = webcodex_workspace::file_read_range::EffectiveRange::new(None, None).limit;

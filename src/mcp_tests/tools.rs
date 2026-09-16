@@ -1480,6 +1480,41 @@ fn computer_observe_snapshot_frames_native_image_without_structured_base64() {
 }
 
 #[test]
+fn browser_observe_screenshot_uses_shared_native_image_framing_without_structured_base64() {
+    let image_bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4];
+    let image_base64 = general_purpose::STANDARD.encode(&image_bytes);
+    let result = ToolResult::ok(json!({
+        "browser_id": "browser_abcdefghijklmnop",
+        "page_id": "page_abcdefghijklmnop",
+        "width": 1024,
+        "height": 768,
+        "mime_type": "image/png",
+        "file_bytes": image_bytes.len(),
+        "sha256": "a".repeat(64),
+        "content_base64": image_base64
+    }));
+
+    let value = crate::mcp::mcp_runtime_tool_result("browser_observe", false, result);
+    assert_eq!(value["isError"], false);
+    let content = value["content"].as_array().expect("native content");
+    assert_eq!(content.len(), 2);
+    assert_eq!(content[1]["type"], "image");
+    assert_eq!(content[1]["mimeType"], "image/png");
+    assert_eq!(content[1]["data"], image_base64);
+    assert_eq!(
+        value["structuredContent"]["output"]["content_delivery"],
+        "mcp_image"
+    );
+    assert_eq!(
+        value["structuredContent"]["output"]["browser_id"],
+        "browser_abcdefghijklmnop"
+    );
+    assert!(value["structuredContent"]["output"]
+        .get("content_base64")
+        .is_none());
+}
+
+#[test]
 fn mcp_tools_list_explicit_full_projection_retains_output_schema() {
     // Pure renderer with explicit compact=false. Exposure-specific defaults
     // are covered through the request adapter rather than inferred here.

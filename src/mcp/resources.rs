@@ -521,17 +521,23 @@ pub(super) fn mcp_artifact_export_id_from_uri(uri: &str) -> Option<&str> {
 pub(super) enum McpSnapshotResourceKind {
     Window,
     Display,
+    Browser,
 }
 
 impl McpSnapshotResourceKind {
     pub(super) fn from_result(tool_name: &str, output: &Value) -> Option<Self> {
-        if tool_name != "computer_observe" || output.get("content_base64").is_none() {
+        if output.get("content_base64").is_none() {
             return None;
         }
-        if output.get("display_id").is_some() {
-            Some(Self::Display)
-        } else {
-            Some(Self::Window)
+        match tool_name {
+            "browser_observe"
+                if output.get("browser_id").is_some() && output.get("page_id").is_some() =>
+            {
+                Some(Self::Browser)
+            }
+            "computer_observe" if output.get("display_id").is_some() => Some(Self::Display),
+            "computer_observe" => Some(Self::Window),
+            _ => None,
         }
     }
 
@@ -544,6 +550,7 @@ impl McpSnapshotResourceKind {
         let kind = match self {
             Self::Window => "window",
             Self::Display => "display",
+            Self::Browser => "browser",
         };
         let normalized_client_id: String = client_id
             .chars()
@@ -556,7 +563,10 @@ impl McpSnapshotResourceKind {
             })
             .collect();
         let client_id = if normalized_client_id.is_empty() {
-            "computer"
+            match self {
+                Self::Browser => "browser",
+                Self::Window | Self::Display => "computer",
+            }
         } else {
             normalized_client_id.as_str()
         };
@@ -745,7 +755,8 @@ pub(super) fn mcp_runtime_tool_result_with_snapshot_resource(
     snapshot_caller: Option<McpArtifactExportCallerBinding>,
 ) -> Value {
     let native_image_requested = as_image_requested
-        || (tool_name == "computer_observe" && result.output.get("content_base64").is_some());
+        || (matches!(tool_name, "computer_observe" | "browser_observe")
+            && result.output.get("content_base64").is_some());
     if native_image_requested && result.success {
         match mcp_native_image_tool_result(tool_name, &mut result, snapshot_caller) {
             Ok(value) => return value,
@@ -816,6 +827,11 @@ pub(super) fn mcp_native_image_tool_result(
             .get("display_id")
             .and_then(Value::as_str)
             .unwrap_or("full display"),
+        Some(McpSnapshotResourceKind::Browser) => result
+            .output
+            .get("page_id")
+            .and_then(Value::as_str)
+            .unwrap_or("browser page"),
         None => result
             .output
             .get("path")
@@ -847,7 +863,7 @@ pub(super) fn mcp_native_image_tool_result(
             .and_then(Value::as_u64)
             .unwrap_or(0);
         if width == 0 || height == 0 || width > 4096 || height > 4096 {
-            return Err("computer snapshot dimensions are invalid".to_string());
+            return Err("native image dimensions are invalid".to_string());
         }
         format!("Image {image_label}: {mime_type}, {width}x{height}, {file_bytes} bytes.")
     } else {
@@ -894,7 +910,7 @@ pub(super) fn mcp_native_image_tool_result(
                 "name": name,
                 "mimeType": mime_type,
                 "size": file_bytes,
-                "description": "Short-lived authenticated WebCodex computer screenshot. No project artifact was created."
+                "description": "Short-lived authenticated WebCodex screenshot resource. No project artifact was created."
             })
         });
     let mut content = Vec::with_capacity(if snapshot_link.is_some() { 3 } else { 2 });
@@ -1602,6 +1618,7 @@ pub(super) async fn handle_read(
                 crate::auth::SCOPE_COMPUTER_READ,
                 crate::auth::SCOPE_COMPUTER_DISPLAY_READ,
             ][..],
+            McpSnapshotResourceKind::Browser => &[crate::auth::SCOPE_BROWSER_READ][..],
         } {
             if let Some(outcome) = require_mcp_scope(auth, scope) {
                 return outcome;
@@ -1732,11 +1749,12 @@ pub(super) fn prepare_tool_call(
     } else {
         None
     };
-    let snapshot_resource_caller = if stateless_2026 && tool_name == "computer_observe" {
-        mcp_artifact_export_caller_binding(auth).ok()
-    } else {
-        None
-    };
+    let snapshot_resource_caller =
+        if stateless_2026 && matches!(tool_name, "computer_observe" | "browser_observe") {
+            mcp_artifact_export_caller_binding(auth).ok()
+        } else {
+            None
+        };
     Ok(McpResourceToolCallContext {
         artifact_export_caller,
         snapshot_resource_caller,
@@ -1763,7 +1781,7 @@ pub(super) fn adapt_tool_result(
         ));
     }
     if artifact_presentation == ProjectArtifactPresentationMode::Image
-        || tool_name == "computer_observe"
+        || matches!(tool_name, "computer_observe" | "browser_observe")
     {
         return McpResourceToolResultAdaptation::Framed(
             mcp_runtime_tool_result_with_snapshot_resource(

@@ -549,6 +549,198 @@ impl HostFileImportProvenance {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BrowserObserveToolCall {
+    Targets,
+    Browsers {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+    },
+    Pages {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(range(min = 1, max = 32))]
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    Snapshot {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+    },
+    Screenshot {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+    },
+}
+
+impl BrowserObserveToolCall {
+    pub const fn action_name(&self) -> &'static str {
+        match self {
+            Self::Targets => "targets",
+            Self::Browsers { .. } => "browsers",
+            Self::Pages { .. } => "pages",
+            Self::Snapshot { .. } => "snapshot",
+            Self::Screenshot { .. } => "screenshot",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserKeyCall {
+    Enter,
+    Tab,
+    Escape,
+    Backspace,
+    Delete,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Space,
+}
+
+impl BrowserKeyCall {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enter => "enter",
+            Self::Tab => "tab",
+            Self::Escape => "escape",
+            Self::Backspace => "backspace",
+            Self::Delete => "delete",
+            Self::ArrowUp => "arrow_up",
+            Self::ArrowDown => "arrow_down",
+            Self::ArrowLeft => "arrow_left",
+            Self::ArrowRight => "arrow_right",
+            Self::Home => "home",
+            Self::End => "end",
+            Self::PageUp => "page_up",
+            Self::PageDown => "page_down",
+            Self::Space => "space",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BrowserActToolCall {
+    Launch {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+    },
+    NewPage {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+    },
+    Navigate {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+        #[schemars(length(min = 1, max = 8192))]
+        #[schemars(regex(pattern = "^https?://"))]
+        url: String,
+    },
+    Click {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^element_[A-Za-z0-9_-]{16,64}$"))]
+        element_id: String,
+    },
+    InputText {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^element_[A-Za-z0-9_-]{16,64}$"))]
+        element_id: String,
+        #[schemars(length(min = 1, max = 4096))]
+        text: String,
+    },
+    Key {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+        key: BrowserKeyCall,
+    },
+    ClosePage {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+    },
+    CloseBrowser {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+    },
+}
+
+impl BrowserActToolCall {
+    pub const fn action_name(&self) -> &'static str {
+        match self {
+            Self::Launch { .. } => "launch",
+            Self::NewPage { .. } => "new_page",
+            Self::Navigate { .. } => "navigate",
+            Self::Click { .. } => "click",
+            Self::InputText { .. } => "input_text",
+            Self::Key { .. } => "key",
+            Self::ClosePage { .. } => "close_page",
+            Self::CloseBrowser { .. } => "close_browser",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComputerObserveToolCall {
     Targets,
     Windows {
@@ -4042,6 +4234,12 @@ pub enum ToolCall {
         session_id: Option<String>,
     },
 
+    /// Read-only Browser observation gateway with closed typed actions.
+    BrowserObserve(BrowserObserveToolCall),
+
+    /// Effectful Browser gateway with action-sensitive authority resolved before dispatch.
+    BrowserAct(BrowserActToolCall),
+
     /// Read-only Computer observation gateway. The closed action enum preserves exact per-action semantics.
     ComputerObserve(ComputerObserveToolCall),
 
@@ -4783,6 +4981,8 @@ impl ToolCall {
             Self::GotoDefinition { .. } => "goto_definition",
             Self::FindReferences { .. } => "find_references",
             Self::CallHierarchy { .. } => "call_hierarchy",
+            Self::BrowserObserve(..) => "browser_observe",
+            Self::BrowserAct(..) => "browser_act",
             Self::ComputerObserve(..) => "computer_observe",
             Self::ComputerControl(..) => "computer_control",
             Self::ComputerSaveSnapshot { .. } => "computer_save_snapshot",

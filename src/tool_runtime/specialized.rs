@@ -38,6 +38,8 @@ pub(crate) async fn try_dispatch_specialized_gateway(
         request.tool_name.as_str(),
         crate::plugin_gateway::PLUGIN_TOOL_NAME
             | crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME
+            | "browser_observe"
+            | "browser_act"
             | "computer_observe"
             | "computer_control"
     ) {
@@ -77,6 +79,26 @@ pub(crate) async fn try_dispatch_specialized_gateway(
         )
         .await
         .map(|invocation| invocation.to_tool_result()),
+        ToolCall::BrowserObserve(call) => {
+            runtime
+                .invoke_browser_observe_gateway(
+                    call,
+                    context.session_id,
+                    context.auth,
+                    context.transport.into(),
+                )
+                .await
+        }
+        ToolCall::BrowserAct(call) => {
+            runtime
+                .invoke_browser_act_gateway(
+                    call,
+                    context.session_id,
+                    context.auth,
+                    context.transport.into(),
+                )
+                .await
+        }
         ToolCall::ComputerObserve(call) => {
             runtime
                 .invoke_computer_observe_gateway(
@@ -150,6 +172,7 @@ pub(crate) async fn try_dispatch_specialized_gateway(
 pub(crate) enum SpecializedSource {
     Plugin,
     SshResource,
+    Browser,
     Computer,
 }
 
@@ -158,6 +181,7 @@ impl SpecializedSource {
         match self {
             Self::Plugin => "plugin",
             Self::SshResource => "ssh-resource",
+            Self::Browser => "browser",
             Self::Computer => "computer",
         }
     }
@@ -554,7 +578,10 @@ impl ToolRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::{AuthContext, AuthKind, SCOPE_PLUGIN_INSPECT, SCOPE_PLUGIN_INVOKE};
+    use crate::auth::{
+        AuthContext, AuthKind, SCOPE_BROWSER_CONTROL, SCOPE_BROWSER_LAUNCH, SCOPE_BROWSER_READ,
+        SCOPE_PLUGIN_INSPECT, SCOPE_PLUGIN_INVOKE,
+    };
     use crate::tool_runtime::permissions::{AuthorityMode, PermissionEvaluator};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -642,6 +669,112 @@ mod tests {
             panic!("expected Session guard denial");
         };
         assert_eq!(result.output["error_kind"], "session_guard_denied");
+        assert_eq!(result.output["dispatch_certainty"], "not_started");
+    }
+
+    #[tokio::test]
+    async fn browser_read_only_session_allows_observation_and_denies_control_before_dispatch() {
+        let runtime = ToolRuntime::new_for_tests();
+        let auth = auth(
+            "browser-owner",
+            &[
+                SCOPE_BROWSER_READ,
+                SCOPE_BROWSER_CONTROL,
+                SCOPE_BROWSER_LAUNCH,
+            ],
+        );
+        let session = session(&runtime, &auth, crate::tool_runtime::SessionMode::ReadOnly);
+
+        let read = runtime
+            .govern_specialized_invocation(
+                "browser_observe",
+                SpecializedOperationPolicy::read(
+                    SpecializedSource::Browser,
+                    "targets",
+                    SCOPE_BROWSER_READ,
+                ),
+                SessionTransport::Mcp,
+                Some(&session.session_id),
+                Some(&auth),
+                &json!({"action":"targets"}),
+            )
+            .await
+            .expect("read-only Browser observation remains allowed");
+        runtime.finish_specialized_invocation(read, true, "completed", None);
+
+        let denied = runtime
+            .govern_specialized_invocation(
+                "browser_act",
+                SpecializedOperationPolicy::consequential(
+                    SpecializedSource::Browser,
+                    "navigate",
+                    SCOPE_BROWSER_CONTROL,
+                    "browser_control",
+                ),
+                SessionTransport::Mcp,
+                Some(&session.session_id),
+                Some(&auth),
+                &json!({"action":"navigate"}),
+            )
+            .await
+            .expect_err("read-only Session must deny Browser control");
+        let SpecializedGovernanceDenial::Tool(result) = denied else {
+            panic!("expected Browser Session guard denial");
+        };
+        assert_eq!(result.output["error_kind"], "session_guard_denied");
+        assert_eq!(result.output["dispatch_certainty"], "not_started");
+    }
+
+    #[tokio::test]
+    async fn browser_control_permission_is_checked_while_observe_skips_permission() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let runtime = ToolRuntime::new_for_tests().with_permission_evaluator(
+            PermissionEvaluator::with_mode(AuthorityMode::Restricted)
+                .with_eval_counter(counter.clone()),
+        );
+        let auth = auth(
+            "browser-owner",
+            &[SCOPE_BROWSER_READ, SCOPE_BROWSER_CONTROL],
+        );
+        let read = runtime
+            .govern_specialized_invocation(
+                "browser_observe",
+                SpecializedOperationPolicy::read(
+                    SpecializedSource::Browser,
+                    "targets",
+                    SCOPE_BROWSER_READ,
+                ),
+                SessionTransport::Mcp,
+                None,
+                Some(&auth),
+                &json!({}),
+            )
+            .await
+            .expect("Browser observation skips approval");
+        runtime.finish_specialized_invocation(read, true, "completed", None);
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+
+        let denied = runtime
+            .govern_specialized_invocation(
+                "browser_act",
+                SpecializedOperationPolicy::consequential(
+                    SpecializedSource::Browser,
+                    "click",
+                    SCOPE_BROWSER_CONTROL,
+                    "browser_control",
+                ),
+                SessionTransport::Mcp,
+                None,
+                Some(&auth),
+                &json!({}),
+            )
+            .await
+            .expect_err("Browser control requires Standard permission");
+        let SpecializedGovernanceDenial::Tool(result) = denied else {
+            panic!("expected Browser permission denial");
+        };
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        assert_eq!(result.output["failure_kind"], "permission_denied");
         assert_eq!(result.output["dispatch_certainty"], "not_started");
     }
 

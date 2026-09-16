@@ -7,6 +7,7 @@ pub(crate) const DEFAULT_SHUTDOWN_BUDGET: Duration = Duration::from_secs(12);
 pub(crate) const JOB_DRAIN_BUDGET: Duration = Duration::from_secs(3);
 pub(crate) const PROVIDER_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
 pub(crate) const LSP_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
+pub(crate) const BROWSER_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
 pub(crate) const BACKGROUND_JOIN_BUDGET: Duration = Duration::from_secs(2);
 pub(crate) const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
 

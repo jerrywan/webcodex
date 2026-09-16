@@ -5417,6 +5417,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "webcodex-browser"
+version = "0.4.1"
+dependencies = [
+ "base64",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tungstenite",
+ "url",
+ "uuid",
+ "webcodex-process",
+]
+
+[[package]]
 name = "webcodex-cli"
 version = "0.4.1"
 dependencies = [
@@ -5551,6 +5567,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "webcodex-browser",
  "webcodex-computer",
  "webcodex-core",
  "webcodex-lsp",
