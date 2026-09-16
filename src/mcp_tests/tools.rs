@@ -467,6 +467,9 @@ fn skill_runtime_tools_are_stateless_full_operator_only_and_schema_static() {
         .map(|spec| spec.name)
         .collect::<Vec<_>>();
     assert!(generic_names.iter().any(|name| name == "skill_load"));
+    assert!(generic_names
+        .iter()
+        .any(|name| name == "run_skill_resource"));
     assert!(!generic_names.iter().any(|name| name == "skill_list"));
     assert!(!generic_names.iter().any(|name| name == "skill_read_file"));
 
@@ -493,6 +496,36 @@ fn skill_runtime_tools_are_stateless_full_operator_only_and_schema_static() {
     assert_eq!(
         skill_names,
         vec!["skill_load", "skill_list", "skill_read_file"]
+    );
+
+    let run_skill_resource = before["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "run_skill_resource")
+        .expect("run_skill_resource must be exposed");
+    assert!(run_skill_resource["inputSchema"]["properties"]
+        .get("stdin")
+        .is_none());
+    assert!(run_skill_resource["inputSchema"]["properties"]
+        .get("executable")
+        .is_none());
+    assert_eq!(
+        run_skill_resource["inputSchema"]["properties"]["path"]["pattern"],
+        "^scripts/"
+    );
+    assert!(run_skill_resource["inputSchema"]["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "expected_definition_revision"));
+    assert_eq!(
+        run_skill_resource["outputSchema"]["properties"]["output"]["properties"]["skill_trust"]
+            ["enum"],
+        json!([
+            "operator_configured_guidance",
+            "operator_installed_guidance"
+        ])
     );
 
     let skill_list = before["tools"]

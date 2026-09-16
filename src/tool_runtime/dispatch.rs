@@ -20,7 +20,7 @@ pub(super) fn decorate_structured_execution_prestart_denial(
 ) {
     if !matches!(
         tool_name,
-        "run_process" | "run_detached_process" | "run_script"
+        "run_process" | "run_detached_process" | "run_script" | "run_skill_resource"
     ) {
         return;
     }
@@ -181,7 +181,11 @@ fn sparsify_terminal_structured_execution_success(tool_name: &str, result: &mut 
         sparsify_terminal_structured_validation_success(tool_name, result);
         return;
     }
-    if !matches!(tool_name, "run_process" | "run_script") || !result.success {
+    if !matches!(
+        tool_name,
+        "run_process" | "run_script" | "run_skill_resource"
+    ) || !result.success
+    {
         return;
     }
     let Some(output) = result.output.as_object_mut() else {
@@ -254,7 +258,7 @@ fn sparsify_terminal_structured_execution_success(tool_name: &str, result: &mut 
     }
 
     let summary_key = match tool_name {
-        "run_process" => "process_summary",
+        "run_process" | "run_skill_resource" => "process_summary",
         "run_script" => "script_summary",
         _ => unreachable!("structured execution sparsifier is tool-gated"),
     };
@@ -308,7 +312,10 @@ pub(super) fn sparsify_failure_model_result_metadata(tool_name: &str, result: &m
     }
     output.remove("session_recorded");
     output.remove("session_event_id");
-    if matches!(tool_name, "run_process" | "run_script") {
+    if matches!(
+        tool_name,
+        "run_process" | "run_script" | "run_skill_resource"
+    ) {
         for key in [
             "executor",
             "duration_ms",
@@ -319,7 +326,7 @@ pub(super) fn sparsify_failure_model_result_metadata(tool_name: &str, result: &m
             output.remove(key);
         }
         output.remove(match tool_name {
-            "run_process" => "process_summary",
+            "run_process" | "run_skill_resource" => "process_summary",
             "run_script" => "script_summary",
             _ => unreachable!("structured failure sparsifier is tool-gated"),
         });
@@ -415,6 +422,7 @@ impl ModelFacingProjectionPlan {
             | ToolCall::CancelAgentWait { .. } => ModelFacingProjection::AgentWait,
             ToolCall::RunJob { .. }
             | ToolCall::RunProcess { .. }
+            | ToolCall::RunSkillResource { .. }
             | ToolCall::RunScript { .. }
             | ToolCall::RunShell { .. }
             | ToolCall::RunDetachedProcess { .. }
@@ -1178,6 +1186,15 @@ impl ToolRuntime {
                     executable,
                     args.iter().map(String::as_str),
                 )),
+                ToolCall::RunSkillResource {
+                    skill_id,
+                    path,
+                    args,
+                    ..
+                } => Some(format!(
+                    "trusted skill resource {skill_id}:{path} ({} args)",
+                    args.len()
+                )),
                 ToolCall::RunDetachedProcess { args, .. } => {
                     Some(format!("detached process ({} args)", args.len()))
                 }
@@ -1456,6 +1473,7 @@ impl ToolRuntime {
                     if matches!(
                         &call,
                         ToolCall::RunProcess { .. }
+                            | ToolCall::RunSkillResource { .. }
                             | ToolCall::RunDetachedProcess { .. }
                             | ToolCall::RunScript { .. }
                             | ToolCall::RunShell { .. }
@@ -1924,6 +1942,43 @@ impl ToolRuntime {
 
             call @ (ToolCall::ApplyPatch { .. } | ToolCall::ApplyUnifiedDiff { .. }) => {
                 self.dispatch_patch_tool(call).await
+            }
+
+            ToolCall::RunSkillResource {
+                skill_id,
+                path,
+                expected_definition_revision,
+                expected_package_revision,
+                args,
+                session_id,
+                timeout_secs,
+                sync_wait_secs,
+                cwd,
+                purpose,
+                ..
+            } => {
+                let project = match project_resolution {
+                    Some(Ok(project)) => project,
+                    Some(Err(error)) => return error.into_tool_result(),
+                    None => {
+                        return ToolResult::err("run_skill_resource requires a resolved Project")
+                    }
+                };
+                self.run_skill_resource(
+                    &project,
+                    skill_id,
+                    path,
+                    expected_definition_revision,
+                    expected_package_revision,
+                    args,
+                    cwd,
+                    timeout_secs,
+                    sync_wait_secs,
+                    purpose,
+                    session_id,
+                    auth,
+                )
+                .await
             }
 
             ToolCall::SkillLoad { name, .. } => {

@@ -59,12 +59,15 @@ impl ToolRuntime {
         if matches!(
             call,
             ToolCall::RunProcess { .. }
+                | ToolCall::RunSkillResource { .. }
                 | ToolCall::RunDetachedProcess { .. }
                 | ToolCall::RunScript { .. }
         ) && ssh_resource.is_some()
         {
             let (tool, representation) = if matches!(call, ToolCall::RunScript { .. }) {
                 ("run_script", "typed script payloads")
+            } else if matches!(call, ToolCall::RunSkillResource { .. }) {
+                ("run_skill_resource", "trusted Skill resource execution")
             } else if matches!(call, ToolCall::RunDetachedProcess { .. }) {
                 ("run_detached_process", "detached native argv ownership")
             } else {

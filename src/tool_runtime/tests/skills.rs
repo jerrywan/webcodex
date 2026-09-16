@@ -187,6 +187,24 @@ async fn skill_load_is_exact_case_insensitive_and_fails_closed_on_ambiguity() {
     );
     assert!(loaded.output["catalog_revision"].as_str().is_some());
 
+    write_skill(
+        root.path(),
+        "unicode-name",
+        "Ångström",
+        "Unicode Skill name",
+        "unicode body\n",
+    );
+    let (unicode, _) = call_kernel_with_local_agent(
+        &runtime,
+        "skill-load-project",
+        "skill_load",
+        json!({"project": project, "name": "ÅNGSTRÖM"}),
+        true,
+    )
+    .await;
+    assert!(unicode.success, "{:?}", unicode.error);
+    assert_eq!(unicode.output["name"], "Ångström");
+
     let (substring, _) = call_kernel_with_local_agent(
         &runtime,
         "skill-load-project",
@@ -2144,4 +2162,226 @@ async fn skill_surface_sidecar_privacy_and_authority_are_fenced() {
     assert!(!write.success);
     assert_eq!(write.output["error_kind"], "permission_denied");
     assert!(!root.path().join("must-not-write.txt").exists());
+}
+
+#[tokio::test]
+async fn configured_skill_resource_executes_without_model_source_roundtrip_and_fences_revision() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = ToolRuntime::new_for_tests();
+    let client_id = "configured-skill-execution";
+    register_agent_with_projects(
+        &runtime,
+        client_id,
+        None,
+        RunnerCapabilities {
+            file_read: true,
+            skill_runtime: true,
+            shell: true,
+            structured_process_argv: true,
+            ..Default::default()
+        },
+        vec![registered_project(
+            "project",
+            root.path().to_string_lossy().as_ref(),
+        )],
+    )
+    .await;
+    let project = crate::tool_runtime::runner_project_runtime_id(client_id, "project");
+    let skill_id = "wc_skill_ExExExExExExExExExExEA".to_string();
+    let definition_revision =
+        "abababababababababababababababababababababababababababababababab".to_string();
+    let operator = Arc::new(Mutex::new(FakeOperatorSkillState {
+        configured: Some(FakeConfiguredSkillState {
+            skill_id: skill_id.clone(),
+            name: "configured-exec".to_string(),
+            description: "Configured executable guidance".to_string(),
+            definition_revision: definition_revision.clone(),
+            definition_text: "configured definition".to_string(),
+            resource_text: "import sys\nprint('skill-ok:' + sys.argv[1])\n".to_string(),
+            read_error: None,
+            next_definition_revision_after_probe: None,
+        }),
+        managed: None,
+    }));
+
+    let (result, kinds) = call_kernel_with_fake_operator_store(
+        &runtime,
+        client_id,
+        "run_skill_resource",
+        json!({
+            "project": project,
+            "skill_id": skill_id,
+            "path": "scripts/probe.py",
+            "expected_definition_revision": definition_revision,
+            "args": ["arg"],
+            "timeout_secs": 30,
+            "sync_wait_secs": 30,
+            "purpose": "diagnostic"
+        }),
+        operator.clone(),
+    )
+    .await;
+    assert!(result.success, "{:?}", result.error);
+    assert!(result.output["stdout_tail"]
+        .as_str()
+        .is_some_and(|stdout| stdout.contains("skill-ok:arg")));
+    assert_eq!(result.output["skill_id"], skill_id);
+    assert_eq!(result.output["skill_path"], "scripts/probe.py");
+    assert_eq!(result.output["skill_trust"], "operator_configured_guidance");
+    assert_eq!(
+        result.output["skill_sha256"],
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    );
+    assert!(kinds.iter().any(|kind| kind == "skill:resolve"));
+    assert!(kinds.iter().any(|kind| kind == "skill:read"));
+    assert!(kinds
+        .iter()
+        .any(|kind| kind != "skill:resolve" && kind != "skill:read" && !kind.starts_with("file_")));
+
+    let (unsupported, unsupported_kinds) = call_kernel_with_fake_operator_store(
+        &runtime,
+        client_id,
+        "run_skill_resource",
+        json!({
+            "project": project,
+            "skill_id": skill_id,
+            "path": "scripts/probe.rb",
+            "expected_definition_revision": definition_revision,
+        }),
+        operator.clone(),
+    )
+    .await;
+    assert!(!unsupported.success);
+    assert_eq!(
+        unsupported.output["failure_kind"],
+        "skill_resource_interpreter_unsupported"
+    );
+    assert_eq!(unsupported.output["command_started"], false);
+    assert!(unsupported_kinds.is_empty());
+
+    let stale_revision = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+    let (stale, stale_kinds) = call_kernel_with_fake_operator_store(
+        &runtime,
+        client_id,
+        "run_skill_resource",
+        json!({
+            "project": project,
+            "skill_id": skill_id,
+            "path": "scripts/probe.py",
+            "expected_definition_revision": stale_revision,
+        }),
+        operator,
+    )
+    .await;
+    assert!(!stale.success);
+    assert_eq!(stale.output["failure_kind"], "skill_definition_changed");
+    assert_eq!(stale.output["command_started"], false);
+    assert!(!stale_kinds.iter().any(|kind| kind == "skill:read"));
+}
+
+#[tokio::test]
+async fn run_skill_resource_denies_project_content_and_requires_managed_package_fence() {
+    let root = tempfile::tempdir().unwrap();
+    write_skill(
+        root.path(),
+        "local",
+        "local-exec",
+        "Project content must not execute",
+        "body\n",
+    );
+    let runtime = ToolRuntime::new_for_tests();
+    let client_id = "skill-execution-trust";
+    register_agent_with_projects(
+        &runtime,
+        client_id,
+        None,
+        RunnerCapabilities {
+            file_read: true,
+            skill_runtime: true,
+            shell: true,
+            structured_process_argv: true,
+            ..Default::default()
+        },
+        vec![registered_project(
+            "project",
+            root.path().to_string_lossy().as_ref(),
+        )],
+    )
+    .await;
+    let project = crate::tool_runtime::runner_project_runtime_id(client_id, "project");
+    let operator = Arc::new(Mutex::new(FakeOperatorSkillState {
+        configured: None,
+        managed: None,
+    }));
+    let (loaded, _) = call_kernel_with_fake_operator_store(
+        &runtime,
+        client_id,
+        "skill_load",
+        json!({"project": project, "name": "local-exec"}),
+        operator.clone(),
+    )
+    .await;
+    assert!(loaded.success, "{:?}", loaded.error);
+    let local_skill_id = loaded.output["skill_id"].as_str().unwrap().to_string();
+    let local_revision = loaded.output["definition_revision"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (denied, denied_kinds) = call_kernel_with_fake_operator_store(
+        &runtime,
+        client_id,
+        "run_skill_resource",
+        json!({
+            "project": project,
+            "skill_id": local_skill_id,
+            "path": "scripts/probe.py",
+            "expected_definition_revision": local_revision
+        }),
+        operator,
+    )
+    .await;
+    assert!(!denied.success);
+    assert_eq!(
+        denied.output["failure_kind"],
+        "skill_execution_trust_denied"
+    );
+    assert_eq!(denied.output["command_started"], false);
+    assert!(!denied_kinds.iter().any(|kind| kind == "skill:read"));
+
+    let managed_id = "wc_skill_MnMnMnMnMnMnMnMnMnMnMA".to_string();
+    let managed_definition =
+        "dededededededededededededededededededededededededededededededede".to_string();
+    let package_revision = "wc_skillpkg_u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7s".to_string();
+    let managed = Arc::new(Mutex::new(FakeOperatorSkillState {
+        configured: None,
+        managed: Some(FakeManagedSkillState {
+            skill_id: managed_id.clone(),
+            skill_key: "managed-exec".to_string(),
+            name: "managed-exec".to_string(),
+            description: "Managed executable guidance".to_string(),
+            package_revision,
+            definition_revision: managed_definition.clone(),
+            resource_text: "print('managed')\n".to_string(),
+        }),
+    }));
+    let (missing_package, missing_kinds) = call_kernel_with_fake_operator_store(
+        &runtime,
+        client_id,
+        "run_skill_resource",
+        json!({
+            "project": project,
+            "skill_id": managed_id,
+            "path": "scripts/probe.py",
+            "expected_definition_revision": managed_definition
+        }),
+        managed,
+    )
+    .await;
+    assert!(!missing_package.success);
+    assert_eq!(
+        missing_package.output["failure_kind"],
+        "skill_package_revision_required"
+    );
+    assert_eq!(missing_package.output["command_started"], false);
+    assert!(!missing_kinds.iter().any(|kind| kind == "skill:read"));
 }

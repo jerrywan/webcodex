@@ -777,6 +777,31 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             require_success_output_field(&mut schema, "continuation");
             Some(schema)
         }
+        "run_skill_resource" => {
+            let mut schema = output_schema_for_tool("run_process")
+                .expect("run_process output schema must exist");
+            let properties = schema["properties"]["output"]["properties"]
+                .as_object_mut()
+                .expect("run_process output properties");
+            properties.remove("suggested_call");
+            properties.insert("skill_id".to_string(), schema_type("string", "Opaque Runner Skill identity that supplied the executed script."));
+            properties.insert("skill_name".to_string(), schema_type("string", "Selected trusted Runner Skill name."));
+            properties.insert("skill_path".to_string(), schema_type("string", "Executed package-relative scripts/ resource path."));
+            properties.insert("skill_sha256".to_string(), schema_type("string", "SHA-256 of the exact executed script resource."));
+            properties.insert("skill_trust".to_string(), json!({"type":"string","enum":["operator_configured_guidance","operator_installed_guidance"]}));
+            properties.insert("skill_definition_revision".to_string(), schema_type("string", "SKILL.md digest fence used for this execution."));
+            properties.insert("skill_package_revision".to_string(), nullable_schema("string", "Immutable package revision for installed Skills; null for configured live Skills."));
+            properties.insert("state_changed".to_string(), schema_type("boolean", "False on pre-start Skill validation failures."));
+            if let Some(execution_source) = properties.get_mut("execution_source") {
+                execution_source["const"] = json!("run_skill_resource");
+                execution_source["description"] = json!("Canonical source is run_skill_resource. Diagnostic telemetry may be omitted on ordinary synchronous terminal success.");
+            }
+            schema["allOf"] = json!([{
+                "if": {"properties": {"success": {"const": true}}, "required": ["success"]},
+                "then": {"properties": {"output": {"not": {"required": ["suggested_call"]}}}}
+            }]);
+            Some(schema)
+        }
         "run_process" => {
             let mut properties = vec![
                 ("suggested_call", suggested_tool_call_schema(

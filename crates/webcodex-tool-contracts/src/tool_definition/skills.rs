@@ -1,15 +1,15 @@
-use super::RunnerCapabilityRequirement::{FileRead, SkillManagement};
+use super::RunnerCapabilityRequirement::{FileRead, SkillManagement, StructuredProcess};
 use super::ToolVisibility::{ModelHidden, ModelVisible};
 use super::{
-    adaptive_runtime_direct, def, model_spec, ToolDefinition, ToolOperatorExtensionFamily,
-    TOOL_CATEGORY_RUNTIME,
+    adaptive_runtime_direct, def, model_spec, require_all_scopes, ToolDefinition,
+    ToolOperatorExtensionFamily, TOOL_CATEGORY_RUNTIME,
 };
 use crate::metadata::{
     ToolPathHint::None as NoPath,
-    ToolRisk::{Read, SkillManage},
-    ADMIN, PROJECT_READ, TOOL_PROVIDER_RUNNER,
+    ToolRisk::{JobRun, Read, SkillManage},
+    ADMIN, JOB_RUN, PROJECT_READ, TOOL_PROVIDER_RUNNER,
 };
-use crate::registry::input_schemas::skill_load_input_schema;
+use crate::registry::input_schemas::{run_skill_resource_input_schema, skill_load_input_schema};
 
 /// Project Skill runtime tools. `skill_load` is the narrow direct model path;
 /// the broader discovery/read compatibility tools remain hidden operator
@@ -71,10 +71,63 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Load one uniquely named Skill by exact case-insensitive name for an authorized Project. Returns the selected descriptor plus bounded SKILL.md text and revision metadata in one read-only call. Ambiguous names fail closed; scripts and other Skill resources are never executed.",
+            "Load one uniquely named Skill by exact name using Unicode lowercase matching for an authorized Project. Returns the selected descriptor plus bounded SKILL.md text and revision metadata in one read-only call. Ambiguous names fail closed; scripts and other Skill resources are never executed.",
             skill_load_input_schema,
         ),
         27,
+    ),
+    adaptive_runtime_direct(
+        require_all_scopes(
+            model_spec(
+                def(
+                    "run_skill_resource",
+                    super::ToolAuditPolicy::typed_fields(&[
+                        super::ToolAuditResultField::value("skill_id"),
+                        super::ToolAuditResultField::value("skill_name"),
+                        super::ToolAuditResultField::value("skill_path"),
+                        super::ToolAuditResultField::value("skill_sha256"),
+                        super::ToolAuditResultField::value("skill_trust"),
+                        super::ToolAuditResultField::value("skill_definition_revision"),
+                        super::ToolAuditResultField::value("skill_package_revision"),
+                        super::ToolAuditResultField::value("execution_state"),
+                        super::ToolAuditResultField::value("exit_code"),
+                        super::ToolAuditResultField::value("failure_kind"),
+                        super::ToolAuditResultField::value("tool_failure"),
+                    ])
+                    .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&[
+                        "args",
+                        "process_summary",
+                    ])),
+                    ModelVisible,
+                    TOOL_CATEGORY_RUNTIME,
+                    Some(StructuredProcess),
+                    TOOL_PROVIDER_RUNNER,
+                    super::ToolSemanticContract {
+                        effect: super::ToolEffect::Execute,
+                        risk: JobRun,
+                        approval: super::ToolApprovalPolicy::Standard,
+                        idempotency: super::ToolIdempotency::NonIdempotent,
+                    },
+                    Some(JOB_RUN),
+                    true,
+                    NoPath,
+                    true,
+                    true,
+                    super::ToolSessionEvidencePolicy::NONE,
+                ),
+                "Execute one trusted Runner-configured or Runner-installed Skill script without exposing or retransmitting its source through model context. Only supported scripts/ resources are executable. WebCodex selects the interpreter from the resource extension (.py or .sh), supplies the script over stdin, and appends only caller-provided script arguments after the interpreter's script marker. expected_definition_revision is mandatory; installed Skills also require expected_package_revision; project-content Skills are rejected.",
+                run_skill_resource_input_schema,
+            )
+            .with_gpt_action_description("Execute one revision-fenced .py or .sh script from a trusted Runner Skill through a WebCodex-selected interpreter. Callers supply only script arguments; project-content Skills and unsupported resources are rejected, and the script body stays out of model arguments.")
+            .with_execution(super::ToolExecutionContract::new(
+                super::ToolExecutionForm::NativeArgv,
+                super::ToolExecutionLifetime::Runner,
+                super::ToolExecutionStart::SyncFirst,
+                super::ToolExecutionContinuation::ObserveJobs,
+            )),
+            &[PROJECT_READ, JOB_RUN],
+        ),
+        71,
     ),
     def(
         "skill_list",
