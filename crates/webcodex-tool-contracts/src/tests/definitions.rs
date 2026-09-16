@@ -81,6 +81,35 @@ fn experimental_code_mode_is_visible_read_only_and_feature_scoped() {
 
 #[cfg(feature = "experimental-code-mode")]
 #[test]
+fn experimental_code_mode_effectful_has_conservative_e2a_envelope() {
+    let definition = lookup_tool_definition("code_mode_exec_effectful")
+        .expect("code_mode_exec_effectful definition");
+    let metadata = definition.metadata();
+    assert!(definition.visibility.is_model_visible());
+    assert_eq!(metadata.effect, ToolEffect::Execute);
+    assert_eq!(metadata.risk, ToolRisk::JobRun);
+    assert_eq!(metadata.approval, ToolApprovalPolicy::Standard);
+    assert_eq!(metadata.idempotency, ToolIdempotency::NonIdempotent);
+    assert_eq!(definition.adaptive_runtime_direct_rank(), Some(46));
+    assert!(definition.requires_explicit_business_session());
+    assert_eq!(
+        runtime_tool_composition_policy("code_mode_exec_effectful"),
+        ToolCompositionPolicy::Denied,
+        "Code Mode must never recursively compose itself"
+    );
+    assert!(registered_tool_specs()
+        .iter()
+        .any(|spec| spec.name == "code_mode_exec_effectful"));
+    assert!(TOOL_DISCOVERY_GROUPS
+        .iter()
+        .find(|group| group.name == TOOL_DISCOVERY_GROUP_RUNTIME)
+        .expect("runtime discovery group")
+        .tools
+        .contains(&"code_mode_exec_effectful"));
+}
+
+#[cfg(feature = "experimental-code-mode")]
+#[test]
 fn code_mode_composition_policy_is_canonical_closed_and_independent_from_frontend_admission() {
     const E1_TOOLS: &[&str] = &[
         "read_files",
@@ -125,6 +154,7 @@ fn code_mode_composition_policy_is_canonical_closed_and_independent_from_fronten
         "apply_patch",
         "write_project_file",
         "code_mode_exec",
+        "code_mode_exec_effectful",
     ] {
         assert_eq!(
             runtime_tool_composition_policy(name),

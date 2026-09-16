@@ -273,6 +273,8 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
             "tool_manifest",
             #[cfg(feature = "experimental-code-mode")]
             "code_mode_exec",
+            #[cfg(feature = "experimental-code-mode")]
+            "code_mode_exec_effectful",
             "plugin_tool",
             "skill_load",
             "run_skill_resource",

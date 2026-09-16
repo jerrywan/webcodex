@@ -535,6 +535,8 @@ fn tool_definitions_drive_session_and_permission_policy() {
             "session_handoff_summary",
             #[cfg(feature = "experimental-code-mode")]
             "code_mode_exec",
+            #[cfg(feature = "experimental-code-mode")]
+            "code_mode_exec_effectful",
             "open_session_shell",
             "session_shell_exec",
             "session_shell_status",

@@ -26,33 +26,74 @@ fn content_schema() -> Value {
     schema
 }
 
+fn effect_receipt_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Sparse correctness receipt for consequential canonical child calls that actually crossed the orchestration dispatch boundary.",
+        "additionalProperties": false,
+        "properties": {
+            "consequential_calls": {"type": "integer", "minimum": 0, "maximum": 32},
+            "known_results": {"type": "integer", "minimum": 0, "maximum": 32},
+            "job_handoffs": {"type": "integer", "minimum": 0, "maximum": 32},
+            "outcome_unknown": {"type": "integer", "minimum": 0, "maximum": 32},
+            "children": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "ordinal": {"type": "integer", "minimum": 1, "maximum": 32},
+                        "tool": {"type": "string", "maxLength": 128},
+                        "outcome": {"type": "string", "enum": ["known_result", "job_handoff", "outcome_unknown"]},
+                        "job_id": {"type": "string", "description": "Canonical Job identity, present only for a normal same-execution Job handoff."},
+                        "continuation": {"type": "object", "description": "Parser-ready canonical Job continuation, present only when returned by the child ToolResult."}
+                    },
+                    "required": ["ordinal", "tool", "outcome"]
+                }
+            }
+        },
+        "required": ["consequential_calls", "known_results", "job_handoffs", "outcome_unknown", "children"]
+    })
+}
+
+fn bounded_failure_message_schema() -> Value {
+    let mut schema = schema_type(
+        "string",
+        "Model-facing bounded frontend failure detail. When consequential children were dispatched, the message warns against blindly rerunning the whole JavaScript program.",
+    );
+    schema["maxLength"] = json!(16_384);
+    schema
+}
+
+fn failure_kind_schema() -> Value {
+    json!({
+        "type": "string",
+        "enum": [
+            "invalid_request",
+            "runtime_error",
+            "timeout",
+            "tool_call_budget_exceeded",
+            "output_limit_exceeded"
+        ],
+        "description": "Present on a bounded Code Mode runtime/host failure. Ordinary nested ToolResult business failures remain JavaScript values and do not become this field."
+    })
+}
+
 pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
     match name {
         "code_mode_exec" => Some(wrapped_output_schema(vec![
             ("content", content_schema()),
             ("stats", stats_schema()),
-            ("message", {
-                let mut schema = schema_type(
-                        "string",
-                        "Model-facing bounded runtime detail for a failed Code Mode execution. Durable Session result audit omits this field.",
-                    );
-                schema["maxLength"] = json!(16_384);
-                schema
-            }),
-            (
-                "failure_kind",
-                json!({
-                    "type": "string",
-                    "enum": [
-                        "invalid_request",
-                        "runtime_error",
-                        "timeout",
-                        "tool_call_budget_exceeded",
-                        "output_limit_exceeded"
-                    ],
-                    "description": "Present on a bounded Code Mode runtime/host failure. Ordinary nested ToolResult business failures remain JavaScript values and do not become this field."
-                }),
-            ),
+            ("message", bounded_failure_message_schema()),
+            ("failure_kind", failure_kind_schema()),
+        ])),
+        "code_mode_exec_effectful" => Some(wrapped_output_schema(vec![
+            ("content", content_schema()),
+            ("stats", stats_schema()),
+            ("effect_receipt", effect_receipt_schema()),
+            ("message", bounded_failure_message_schema()),
+            ("failure_kind", failure_kind_schema()),
         ])),
         _ => None,
     }

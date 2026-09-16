@@ -3316,6 +3316,12 @@ impl ToolCall {
                 source,
                 timeout_ms,
                 ..
+            }
+            | Self::CodeModeExecEffectful {
+                project,
+                source,
+                timeout_ms,
+                ..
             } => serde_json::json!({
                 "project": project,
                 "source_bytes": source.len(),

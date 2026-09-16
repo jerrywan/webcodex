@@ -88,6 +88,62 @@ fn code_mode_exec_parses_outer_authority_and_omits_source_from_audit() {
     assert!(!result_audit_text.contains("NEVER_PERSIST_CODE_MODE_ERROR_DETAIL"));
 }
 
+#[cfg(feature = "experimental-code-mode")]
+#[test]
+fn code_mode_exec_effectful_parses_outer_authority_and_omits_source_from_audit() {
+    const PRIVATE_SOURCE: &str =
+        "const secret = 'NEVER_PERSIST_EFFECTFUL_CODE_MODE_SOURCE'; text(secret);";
+    let session_id = format!("wc_sess_{}", "2".repeat(32));
+    let call = ToolCall::from_tool_name(
+        "code_mode_exec_effectful",
+        json!({
+            "project": "agent:special:demo",
+            "session_id": session_id,
+            "source": PRIVATE_SOURCE,
+            "timeout_ms": 4_000,
+        }),
+    )
+    .unwrap();
+    assert_eq!(call.tool_name(), "code_mode_exec_effectful");
+    assert_eq!(call.project(), Some("agent:special:demo"));
+    assert_eq!(call.session_id(), Some(session_id.as_str()));
+    let audit = call.session_log_arguments();
+    assert_eq!(audit["project"], "agent:special:demo");
+    assert_eq!(audit["source_bytes"], PRIVATE_SOURCE.len());
+    assert_eq!(audit["timeout_ms"], 4_000);
+    assert!(!audit
+        .to_string()
+        .contains("NEVER_PERSIST_EFFECTFUL_CODE_MODE_SOURCE"));
+
+    let result_audit = crate::tool_audit::session_log_result_for_tool(
+        "code_mode_exec_effectful",
+        &json!({
+            "failure_kind": "timeout",
+            "message": "PRIVATE_EFFECTFUL_FRONTEND_DETAIL",
+            "effect_receipt": {
+                "consequential_calls": 2,
+                "known_results": 0,
+                "job_handoffs": 2,
+                "outcome_unknown": 0,
+                "children": [{
+                    "ordinal": 1,
+                    "tool": "cargo_check",
+                    "outcome": "job_handoff",
+                    "job_id": "PRIVATE_JOB_ID",
+                    "continuation": {"tool": "observe_jobs", "arguments": {"items": []}}
+                }]
+            }
+        }),
+    );
+    assert_eq!(result_audit["failure_kind"], "timeout");
+    assert_eq!(result_audit["consequential_calls"], 2);
+    assert_eq!(result_audit["job_handoffs"], 2);
+    let audit_text = result_audit.to_string();
+    assert!(!audit_text.contains("PRIVATE_JOB_ID"));
+    assert!(!audit_text.contains("PRIVATE_EFFECTFUL_FRONTEND_DETAIL"));
+    assert!(result_audit.get("children").is_none());
+}
+
 #[cfg(not(feature = "experimental-code-mode"))]
 #[test]
 fn code_mode_exec_is_not_a_tool_call_without_feature() {
@@ -106,6 +162,26 @@ fn code_mode_exec_is_not_a_tool_call_without_feature() {
     assert!(!registered_tool_specs()
         .iter()
         .any(|spec| spec.name == "code_mode_exec"));
+}
+
+#[cfg(not(feature = "experimental-code-mode"))]
+#[test]
+fn code_mode_exec_effectful_is_not_a_tool_call_without_feature() {
+    let error = ToolCall::from_tool_name(
+        "code_mode_exec_effectful",
+        json!({
+            "project": "agent:special:demo",
+            "session_id": format!("wc_sess_{}", "2".repeat(32)),
+            "source": "text('x')",
+        }),
+    )
+    .expect_err("feature-off parser must reject code_mode_exec_effectful");
+    assert!(error.contains("unknown tool 'code_mode_exec_effectful'"), "{error}");
+    assert!(!is_known_tool_name("code_mode_exec_effectful"));
+    assert!(!known_tool_names().any(|name| name == "code_mode_exec_effectful"));
+    assert!(!registered_tool_specs()
+        .iter()
+        .any(|spec| spec.name == "code_mode_exec_effectful"));
 }
 
 #[test]
