@@ -53,13 +53,22 @@ pub enum CodeModeTerminationMode {
     /// Preserve E1 behavior: the frontend deadline is the return boundary.
     ReturnAtFrontendDeadline,
     /// Close nested-call admission, terminate the frontend, and drain host calls
-    /// already started by the runtime before returning effect-sensitive truth.
-    DrainStartedChildren,
+    /// already started by the runtime for at most `max_drain_ms`. Any remaining
+    /// host work is cancelled after that bound; consequential hosts must retain
+    /// conservative outcome-unknown truth for already-dispatched effects.
+    DrainStartedChildren { max_drain_ms: u64 },
 }
 
 impl CodeModeTerminationMode {
+    pub const fn drain_timeout_ms(self) -> Option<u64> {
+        match self {
+            Self::ReturnAtFrontendDeadline => None,
+            Self::DrainStartedChildren { max_drain_ms } => Some(max_drain_ms),
+        }
+    }
+
     pub const fn drains_started_children(self) -> bool {
-        matches!(self, Self::DrainStartedChildren)
+        self.drain_timeout_ms().is_some()
     }
 }
 

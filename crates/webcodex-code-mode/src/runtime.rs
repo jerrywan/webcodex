@@ -149,7 +149,7 @@ pub async fn execute_with_termination_mode(
         }
     };
     let slot_wait_ms = elapsed_ms(slot_wait_started_at);
-    let _execution_slot = execution_slot;
+    let mut execution_slot = Some(execution_slot);
     let mut runtime =
         spawn_runtime(request.source, request.allowed_tools).map_err(|message| CodeModeError {
             kind: CodeModeErrorKind::Runtime,
@@ -203,8 +203,16 @@ pub async fn execute_with_termination_mode(
                 let _ = runtime.isolate_handle.terminate_execution();
                 let _ = runtime.command_tx.send(RuntimeCommand::Terminate);
                 join_runtime(runtime.join).await;
-                if termination_mode.drains_started_children() {
-                    drain_in_flight(&mut in_flight, &mut in_flight_count).await;
+                // The process-wide permit bounds active V8 cells, not post-frontend
+                // host reconciliation. Release it before the bounded child drain.
+                drop(execution_slot.take());
+                if let Some(max_drain_ms) = termination_mode.drain_timeout_ms() {
+                    let _ = drain_in_flight(
+                        &mut in_flight,
+                        &mut in_flight_count,
+                        Duration::from_millis(max_drain_ms),
+                    )
+                    .await;
                 }
                 let stats = finish_stats(started_at, tool_calls, max_in_flight, returned_bytes, slot_wait_ms);
                 return Err(CodeModeError {
@@ -229,6 +237,29 @@ pub async fn execute_with_termination_mode(
                             pending_calls.clear();
                         }
                         runtime_finished = Some(failure);
+                        // RuntimeEvent::Finished means the V8 decision phase has
+                        // ended. Host reconciliation must not consume V8 capacity.
+                        drop(execution_slot.take());
+                        if let Some(max_drain_ms) = termination_mode.drain_timeout_ms() {
+                            let drained = drain_in_flight(
+                                &mut in_flight,
+                                &mut in_flight_count,
+                                Duration::from_millis(max_drain_ms),
+                            )
+                            .await;
+                            if !drained
+                                && runtime_finished
+                                    .as_ref()
+                                    .is_some_and(|failure| failure.is_none())
+                            {
+                                runtime_finished = Some(Some(RuntimeFailure {
+                                    kind: RuntimeFailureKind::Runtime,
+                                    message: format!(
+                                        "code mode started-child drain exceeded {max_drain_ms} ms"
+                                    ),
+                                }));
+                            }
+                        }
                     }
                     None => {
                         if termination_mode.drains_started_children() {
@@ -239,6 +270,15 @@ pub async fn execute_with_termination_mode(
                             kind: RuntimeFailureKind::Runtime,
                             message: "code mode runtime thread ended without a terminal result".to_string(),
                         }));
+                        drop(execution_slot.take());
+                        if let Some(max_drain_ms) = termination_mode.drain_timeout_ms() {
+                            let _ = drain_in_flight(
+                                &mut in_flight,
+                                &mut in_flight_count,
+                                Duration::from_millis(max_drain_ms),
+                            )
+                            .await;
+                        }
                     }
                 }
             }
@@ -268,6 +308,7 @@ pub async fn execute_with_termination_mode(
     }
 
     let failure = runtime_finished.flatten();
+    drop(execution_slot.take());
     join_runtime(runtime.join).await;
     let stats = finish_stats(
         started_at,
@@ -351,14 +392,29 @@ async fn next_in_flight(
 async fn drain_in_flight(
     in_flight: &mut tokio::task::JoinSet<(String, Result<CodeModeToolResponse, String>)>,
     in_flight_count: &mut usize,
-) {
-    while *in_flight_count > 0 {
-        if next_in_flight(in_flight).await.is_none() {
-            *in_flight_count = 0;
-            break;
+    max_drain: Duration,
+) -> bool {
+    let drain = async {
+        while *in_flight_count > 0 {
+            if next_in_flight(in_flight).await.is_none() {
+                *in_flight_count = 0;
+                break;
+            }
+            *in_flight_count -= 1;
         }
-        *in_flight_count -= 1;
+    };
+    if tokio::time::timeout(max_drain, drain).await.is_ok() {
+        return true;
     }
+
+    // Frontend termination must remain bounded even if an admitted read or
+    // consequential host future stalls. Cancelling a consequential host future
+    // leaves the host's pre-dispatch receipt at outcome_unknown; domain cleanup
+    // guards retain their own canonical cancellation/reconciliation semantics.
+    in_flight.abort_all();
+    while in_flight.join_next().await.is_some() {}
+    *in_flight_count = 0;
+    false
 }
 
 async fn join_runtime(join: thread::JoinHandle<()>) {
@@ -1122,7 +1178,9 @@ mod tests {
             execute_with_termination_mode(
                 host_for_execute,
                 req,
-                CodeModeTerminationMode::DrainStartedChildren,
+                CodeModeTerminationMode::DrainStartedChildren {
+                    max_drain_ms: 5_000,
+                },
             )
             .await
         });
@@ -1145,6 +1203,61 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn effectful_timeout_bounds_drain_and_cancels_stuck_host_work() {
+        let host = Arc::new(LifecycleHost::new());
+        let mut req = request(
+            "const child = tools.effect({}); while (true) {}",
+            &["effect"],
+        );
+        req.timeout_ms = Some(50);
+        let host_for_execute = host.clone();
+        let task = tokio::spawn(async move {
+            execute_with_termination_mode(
+                host_for_execute,
+                req,
+                CodeModeTerminationMode::DrainStartedChildren { max_drain_ms: 50 },
+            )
+            .await
+        });
+
+        host.wait_for_started(1).await;
+        host.wait_for_stopped().await;
+        let result = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("bounded effect-aware drain must not wait forever")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(result.kind, CodeModeErrorKind::Timeout);
+        assert_eq!(host.completed.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn effectful_frontend_success_does_not_hide_stuck_host_work() {
+        let host = Arc::new(LifecycleHost::new());
+        let req = request("tools.effect({}); text('frontend done');", &["effect"]);
+        let host_for_execute = host.clone();
+        let task = tokio::spawn(async move {
+            execute_with_termination_mode(
+                host_for_execute,
+                req,
+                CodeModeTerminationMode::DrainStartedChildren { max_drain_ms: 50 },
+            )
+            .await
+        });
+
+        host.wait_for_started(1).await;
+        host.wait_for_stopped().await;
+        let error = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("bounded drain must terminate a frontend-success call with stuck host work")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.kind, CodeModeErrorKind::Runtime);
+        assert!(error.message.contains("started-child drain exceeded 50 ms"));
+        assert_eq!(host.completed.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn effectful_timeout_discards_runtime_queue_before_new_host_calls_start() {
         let host = Arc::new(LifecycleHost::new());
         let mut req = request(
@@ -1160,7 +1273,9 @@ mod tests {
             execute_with_termination_mode(
                 host_for_execute,
                 req,
-                CodeModeTerminationMode::DrainStartedChildren,
+                CodeModeTerminationMode::DrainStartedChildren {
+                    max_drain_ms: 5_000,
+                },
             )
             .await
         });

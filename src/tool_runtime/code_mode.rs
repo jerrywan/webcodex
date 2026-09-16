@@ -64,6 +64,7 @@ pub(crate) fn is_admitted_nested_tool(tool_name: &str) -> bool {
 }
 
 pub(crate) const MAX_MODEL_ERROR_BYTES: usize = 16 * 1024;
+const E2A_MAX_STARTED_CHILD_DRAIN_MS: u64 = 5_000;
 
 fn bounded_model_error(message: &str) -> String {
     if message.len() <= MAX_MODEL_ERROR_BYTES {
@@ -239,7 +240,9 @@ impl ToolRuntime {
                     .collect(),
                 timeout_ms,
             },
-            CodeModeTerminationMode::DrainStartedChildren,
+            CodeModeTerminationMode::DrainStartedChildren {
+                max_drain_ms: E2A_MAX_STARTED_CHILD_DRAIN_MS,
+            },
         )
         .await;
         let effect_receipt = orchestration.effect_receipt();
