@@ -5,13 +5,13 @@ use super::metadata::{
 };
 use super::tool_definition::{
     tool_definitions, RunnerCapabilityRequirement, ToolActivityInteraction, ToolActivityKind,
-    ToolActivityPresentation, ToolActivitySemantics, ToolAuditPolicy, ToolContextContinuityPolicy,
-    ToolCompositionPolicy, ToolDefinition, ToolDiffReviewEvidence, ToolEffectAnnotations,
-    ToolExecutionContract,
-    ToolExecutionForm, ToolExplorationEvidence, ToolGptActionExposure, ToolOperatorExtensionFamily,
-    ToolReviewEvidence, ToolSessionEvidencePolicy, ToolValidationIdentityKind,
-    PERMISSION_RISK_ARTIFACT_WRITE, PERMISSION_RISK_DESTRUCTIVE, PERMISSION_RISK_PATCH,
-    PERMISSION_RISK_SHELL, PERMISSION_RISK_VALIDATION, PERMISSION_RISK_WRITE, TOOL_CATEGORY_JOB,
+    ToolActivityPresentation, ToolActivitySemantics, ToolAuditPolicy, ToolCompositionPolicy,
+    ToolContextContinuityPolicy, ToolDefinition, ToolDiffReviewEvidence, ToolEffectAnnotations,
+    ToolExecutionContract, ToolExecutionForm, ToolExplorationEvidence, ToolGptActionExposure,
+    ToolOperatorExtensionFamily, ToolReviewEvidence, ToolSessionEvidencePolicy,
+    ToolValidationIdentityKind, PERMISSION_RISK_ARTIFACT_WRITE, PERMISSION_RISK_DESTRUCTIVE,
+    PERMISSION_RISK_PATCH, PERMISSION_RISK_SHELL, PERMISSION_RISK_VALIDATION,
+    PERMISSION_RISK_WRITE, TOOL_CATEGORY_JOB,
 };
 
 impl ToolDefinition {

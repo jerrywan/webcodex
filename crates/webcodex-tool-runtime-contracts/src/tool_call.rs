@@ -3384,8 +3384,9 @@ impl ToolCall {
     pub fn project(&self) -> Option<&str> {
         match self {
             #[cfg(feature = "experimental-code-mode")]
-            Self::CodeModeExec { project, .. }
-            | Self::CodeModeExecEffectful { project, .. } => Some(project.as_str()),
+            Self::CodeModeExec { project, .. } | Self::CodeModeExecEffectful { project, .. } => {
+                Some(project.as_str())
+            }
             Self::RunProcess { project, .. }
             | Self::RunDetachedProcess { project, .. }
             | Self::CodingAgentStart { project, .. }

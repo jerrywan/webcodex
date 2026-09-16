@@ -5,10 +5,10 @@
 
 use crate::{
     normalized_max_concurrent_executions, normalized_timeout_ms, CodeModeError, CodeModeErrorKind,
-    CodeModeExecuteRequest, CodeModeExecution, CodeModeHost, CodeModeStats, CodeModeTerminationMode,
-    CodeModeToolRequest, CodeModeToolResponse, MAX_CONCURRENT_EXECUTIONS_ENV,
-    MAX_CONCURRENT_TOOL_CALLS,
-    MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS, MAX_SOURCE_BYTES, MAX_TOOL_CALLS,
+    CodeModeExecuteRequest, CodeModeExecution, CodeModeHost, CodeModeStats,
+    CodeModeTerminationMode, CodeModeToolRequest, CodeModeToolResponse,
+    MAX_CONCURRENT_EXECUTIONS_ENV, MAX_CONCURRENT_TOOL_CALLS, MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS,
+    MAX_SOURCE_BYTES, MAX_TOOL_CALLS,
 };
 use serde_json::{json, Value as JsonValue};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1130,7 +1130,10 @@ mod tests {
         host.wait_for_started(1).await;
         host.wait_for_stopped().await;
         assert_eq!(host.started.load(Ordering::SeqCst), 1);
-        assert!(!task.is_finished(), "effect-aware return must wait for started host work");
+        assert!(
+            !task.is_finished(),
+            "effect-aware return must wait for started host work"
+        );
         host.release.add_permits(1);
         let result = tokio::time::timeout(Duration::from_secs(5), task)
             .await
@@ -1176,8 +1179,14 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert_eq!(result.kind, CodeModeErrorKind::Timeout);
-        assert_eq!(host.started.load(Ordering::SeqCst), MAX_CONCURRENT_TOOL_CALLS);
-        assert_eq!(host.completed.load(Ordering::SeqCst), MAX_CONCURRENT_TOOL_CALLS);
+        assert_eq!(
+            host.started.load(Ordering::SeqCst),
+            MAX_CONCURRENT_TOOL_CALLS
+        );
+        assert_eq!(
+            host.completed.load(Ordering::SeqCst),
+            MAX_CONCURRENT_TOOL_CALLS
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

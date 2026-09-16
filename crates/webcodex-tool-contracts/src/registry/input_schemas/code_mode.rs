@@ -36,7 +36,6 @@ pub fn code_mode_exec_input_schema() -> Value {
     schema
 }
 
-
 pub fn code_mode_exec_effectful_input_schema() -> Value {
     let mut schema = object_schema(vec![
         (

@@ -1,11 +1,11 @@
 //! Feature-gated integration evidence for Experimental Code Mode E1.
 
 use super::support::*;
+use crate::runner_protocol::RunnerCapabilities;
 use crate::tool_runtime::kernel::{
     HostFileImportTrust, ToolCallContext, ToolCallOutcome, ToolCallRequest, ToolTransport,
 };
 use crate::tool_runtime::orchestration_host::{CanonicalOrchestrationHost, OrchestrationPolicy};
-use crate::runner_protocol::RunnerCapabilities;
 use crate::tool_runtime::{ObserveJobsItem, ObserveJobsWakeOn, ToolRuntime};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -54,8 +54,8 @@ fn spawn_code_mode_call(
 }
 
 async fn e2a_validation_runtime(client_id: &str) -> (ToolRuntime, String, String) {
-    let runtime = runtime_with_agent_project(client_id)
-        .with_validation_sync_wait(Duration::from_millis(20));
+    let runtime =
+        runtime_with_agent_project(client_id).with_validation_sync_wait(Duration::from_millis(20));
     register_agent(
         &runtime,
         client_id,
@@ -68,9 +68,10 @@ async fn e2a_validation_runtime(client_id: &str) -> (ToolRuntime, String, String
     )
     .await;
     let project = agent_test_project_id(client_id);
-    let session = runtime
-        .sessions
-        .start_session(Some(project.clone()), Some("Code Mode E2a integration".to_string()));
+    let session = runtime.sessions.start_session(
+        Some(project.clone()),
+        Some("Code Mode E2a integration".to_string()),
+    );
     (runtime, project, session.session_id)
 }
 
@@ -170,7 +171,9 @@ async fn e1_still_rejects_structured_validation_before_runner_dispatch() {
     .unwrap();
     let result = outcome.result.expect("outer E1 ToolResult");
     assert!(!result.success, "E1 must reject cargo_check: {result:?}");
-    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -198,8 +201,7 @@ async fn e2a_cargo_check_handoff_preserves_same_canonical_job_and_sparse_receipt
     assert_eq!(request.job_id.as_deref(), Some(job_id.as_str()));
     let request_json = serde_json::to_value(&request).unwrap();
     assert_eq!(
-        request_json["job_context"]["validation"]["sync_wait_secs"],
-        5,
+        request_json["job_context"]["validation"]["sync_wait_secs"], 5,
         "E2a clamps only the synchronous Job-handoff preference"
     );
     assert_eq!(
@@ -257,7 +259,12 @@ async fn e2a_cargo_check_handoff_preserves_same_canonical_job_and_sparse_receipt
     assert!(baseline.success, "{:?}", baseline.error);
     assert_eq!(baseline.output["items"][0]["job_id"], job_id);
     assert_eq!(baseline.output["items"][0]["output"]["status"], "running");
-    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none(), "Job observation must not restart validation");
+    assert!(
+        probe_patch_agent_request(&runtime, client_id)
+            .await
+            .is_none(),
+        "Job observation must not restart validation"
+    );
 
     runtime
         .runner_registry
@@ -331,9 +338,15 @@ async fn e2a_failed_cargo_test_is_known_result_not_outcome_unknown() {
         .unwrap();
 
     let outcome = task.await.unwrap();
-    assert!(outcome.success, "frontend itself should finish: {outcome:?}");
+    assert!(
+        outcome.success,
+        "frontend itself should finish: {outcome:?}"
+    );
     let result = outcome.result.expect("outer E2a ToolResult");
-    assert!(result.success, "frontend business result remains known: {result:?}");
+    assert!(
+        result.success,
+        "frontend business result remains known: {result:?}"
+    );
     assert_eq!(result.output["effect_receipt"]["consequential_calls"], 1);
     assert_eq!(result.output["effect_receipt"]["known_results"], 1);
     assert_eq!(result.output["effect_receipt"]["job_handoffs"], 0);
@@ -370,7 +383,11 @@ async fn e2a_promise_all_validators_handoff_sequentially_then_jobs_remain_indepe
     let first_tool = first_request_json["job_context"]["validation"]["tool"]
         .as_str()
         .expect("first structured validation tool");
-    let first_step = if first_tool == "cargo_test" { "test" } else { "check" };
+    let first_step = if first_tool == "cargo_test" {
+        "test"
+    } else {
+        "check"
+    };
     runtime
         .runner_registry
         .update_job(super::validation_handoff::cargo_test_update(
@@ -389,13 +406,23 @@ async fn e2a_promise_all_validators_handoff_sequentially_then_jobs_remain_indepe
 
     let (second_request, second_job) =
         super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
-    assert_ne!(first_job, second_job, "each canonical validator owns one Job");
+    assert_ne!(
+        first_job, second_job,
+        "each canonical validator owns one Job"
+    );
     let second_request_json = serde_json::to_value(&second_request).unwrap();
     let second_tool = second_request_json["job_context"]["validation"]["tool"]
         .as_str()
         .expect("second structured validation tool");
-    let second_step = if second_tool == "cargo_test" { "test" } else { "check" };
-    assert_ne!(first_tool, second_tool, "Promise.all must dispatch both requested validators");
+    let second_step = if second_tool == "cargo_test" {
+        "test"
+    } else {
+        "check"
+    };
+    assert_ne!(
+        first_tool, second_tool,
+        "Promise.all must dispatch both requested validators"
+    );
     runtime
         .runner_registry
         .update_job(super::validation_handoff::cargo_test_update(
@@ -418,7 +445,10 @@ async fn e2a_promise_all_validators_handoff_sequentially_then_jobs_remain_indepe
     assert!(result.success, "{result:?}");
     let receipt = &result.output["effect_receipt"];
     assert_eq!(receipt["consequential_calls"], 2);
-    assert_eq!(receipt["job_handoffs"], 2, "unexpected receipt/result: {result:?}");
+    assert_eq!(
+        receipt["job_handoffs"], 2,
+        "unexpected receipt/result: {result:?}"
+    );
     assert_eq!(receipt["known_results"], 0);
     assert_eq!(receipt["outcome_unknown"], 0);
     let mut receipt_jobs = receipt["children"]
@@ -492,7 +522,9 @@ async fn e2a_promise_all_validators_handoff_sequentially_then_jobs_remain_indepe
     assert!(terminal.success, "{:?}", terminal.error);
     assert_eq!(terminal.output["items"][0]["output"]["status"], "completed");
     assert_eq!(terminal.output["items"][1]["output"]["status"], "completed");
-    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -534,7 +566,10 @@ async fn e2a_js_error_after_job_handoff_preserves_effect_receipt_and_no_retry_cl
     let result = outcome.result.expect("outer failed E2a ToolResult");
     assert!(!result.success);
     assert_eq!(result.output["effect_receipt"]["job_handoffs"], 1);
-    assert_eq!(result.output["effect_receipt"]["children"][0]["job_id"], job_id);
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["job_id"],
+        job_id
+    );
     let message = result.output["message"].as_str().unwrap_or_default();
     assert!(message.contains("E2A_AFTER_CHILD"));
     assert!(message.contains("Do not blindly rerun the whole orchestration"));
@@ -597,12 +632,17 @@ async fn e2a_cpu_timeout_after_child_dispatch_preserves_started_job_truth() {
     assert_eq!(result.output["failure_kind"], "timeout");
     assert_eq!(result.output["effect_receipt"]["consequential_calls"], 1);
     assert_eq!(result.output["effect_receipt"]["job_handoffs"], 1);
-    assert_eq!(result.output["effect_receipt"]["children"][0]["job_id"], job_id);
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["job_id"],
+        job_id
+    );
     assert!(result.output["message"]
         .as_str()
         .unwrap_or_default()
         .contains("Do not blindly rerun the whole orchestration"));
-    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
 
     runtime
         .runner_registry
@@ -630,7 +670,10 @@ async fn e2a_denies_mutation_shell_recursion_and_invalid_validator_before_busine
             "apply_text_edits",
             "await tools.apply_text_edits({changes: []});",
         ),
-        ("run_shell", "await tools.run_shell({command: 'echo forbidden'});"),
+        (
+            "run_shell",
+            "await tools.run_shell({command: 'echo forbidden'});",
+        ),
         (
             "recursive_e1",
             "await tools.code_mode_exec({source: `text('nested')`});",
@@ -654,7 +697,9 @@ async fn e2a_denies_mutation_shell_recursion_and_invalid_validator_before_busine
         .await
         .unwrap();
         assert!(!outcome.success, "{label} unexpectedly succeeded");
-        assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+        assert!(probe_patch_agent_request(&runtime, client_id)
+            .await
+            .is_none());
     }
 
     let session = runtime
@@ -674,12 +719,20 @@ async fn e2a_denies_mutation_shell_recursion_and_invalid_validator_before_busine
     )
     .await
     .unwrap();
-    assert!(!outcome.success, "canonical parser rejection must fail the frontend call: {outcome:?}");
+    assert!(
+        !outcome.success,
+        "canonical parser rejection must fail the frontend call: {outcome:?}"
+    );
     let result = outcome.result.expect("invalid child result");
     assert!(!result.success);
     assert_eq!(result.output["failure_kind"], "runtime_error");
-    assert!(result.output.get("effect_receipt").is_none(), "prestart rejection is not an effect");
-    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+    assert!(
+        result.output.get("effect_receipt").is_none(),
+        "prestart rejection is not an effect"
+    );
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -805,7 +858,10 @@ async fn e2a_outer_job_run_scope_denial_starts_no_validation_process() {
             structured_validation_argv: true,
             ..Default::default()
         },
-        vec![registered_project("agent-proj", "/tmp/code-mode-e2a-scope-denied")],
+        vec![registered_project(
+            "agent-proj",
+            "/tmp/code-mode-e2a-scope-denied",
+        )],
     )
     .await;
     let project = agent_test_project_id(client_id);
@@ -843,7 +899,9 @@ async fn e2a_outer_job_run_scope_denial_starts_no_validation_process() {
         ),
         "expected canonical scope denial before outer E2a execution: {outcome:?}"
     );
-    assert!(probe_agent_request_for_client(&runtime, client_id).await.is_none());
+    assert!(probe_agent_request_for_client(&runtime, client_id)
+        .await
+        .is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

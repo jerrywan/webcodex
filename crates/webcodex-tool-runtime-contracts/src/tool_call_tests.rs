@@ -176,7 +176,10 @@ fn code_mode_exec_effectful_is_not_a_tool_call_without_feature() {
         }),
     )
     .expect_err("feature-off parser must reject code_mode_exec_effectful");
-    assert!(error.contains("unknown tool 'code_mode_exec_effectful'"), "{error}");
+    assert!(
+        error.contains("unknown tool 'code_mode_exec_effectful'"),
+        "{error}"
+    );
     assert!(!is_known_tool_name("code_mode_exec_effectful"));
     assert!(!known_tool_names().any(|name| name == "code_mode_exec_effectful"));
     assert!(!registered_tool_specs()
