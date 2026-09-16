@@ -119,6 +119,11 @@ pub struct ToolRuntime {
     /// Process-local model-facing handles for exact full-file read snapshots.
     /// Clones share the registry; a Server runtime restart creates a new epoch.
     pub(crate) read_revisions: Arc<super::read_revisions::ReadRevisionRegistry>,
+    /// Process-local Project mutation serialization used only by orchestration
+    /// frontends. Direct first-class mutations deliberately bypass this registry.
+    #[cfg(feature = "experimental-code-mode")]
+    pub(crate) orchestration_mutation_fences:
+        Arc<super::orchestration_host::OrchestrationMutationFenceRegistry>,
     /// One deadline shared by every item in a `read_files` batch.
     pub(crate) read_files_deadline: Duration,
     /// One deadline shared by every query in a `search_project_texts` batch.
@@ -198,6 +203,10 @@ impl ToolRuntime {
             repository_overview_probe_timeout:
                 super::coding_task::DEFAULT_REPOSITORY_OVERVIEW_PROBE_TIMEOUT,
             read_revisions: Arc::new(super::read_revisions::ReadRevisionRegistry::new()),
+            #[cfg(feature = "experimental-code-mode")]
+            orchestration_mutation_fences: Arc::new(
+                super::orchestration_host::OrchestrationMutationFenceRegistry::default(),
+            ),
             read_files_deadline: super::read_files::DEFAULT_READ_FILES_DEADLINE,
             search_project_texts_deadline:
                 super::search_project_texts::DEFAULT_SEARCH_PROJECT_TEXTS_DEADLINE,

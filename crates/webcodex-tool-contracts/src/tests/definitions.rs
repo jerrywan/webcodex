@@ -134,7 +134,7 @@ fn code_mode_composition_policy_is_canonical_closed_and_independent_from_fronten
         assert_eq!(metadata.risk, ToolRisk::Read, "{name}");
     }
 
-    for name in ["cargo_check", "cargo_test"] {
+    for name in ["cargo_check", "cargo_test", "apply_text_edits"] {
         assert_eq!(
             runtime_tool_composition_policy(name),
             ToolCompositionPolicy::Sequential,
@@ -150,7 +150,6 @@ fn code_mode_composition_policy_is_canonical_closed_and_independent_from_fronten
         "run_job",
         "run_detached_process",
         "observe_jobs",
-        "apply_text_edits",
         "apply_patch",
         "write_project_file",
         "code_mode_exec",

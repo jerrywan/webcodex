@@ -8,8 +8,8 @@ use crate::json_measurement::serialized_json_len;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, Weak};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use webcodex_core::workflow_session_contract::{
     TOOL_ACCEPTED_EXIT_CODES_FIELD, TOOL_ASSERTION_NAME_FIELD,
     TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD, TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
@@ -20,6 +20,36 @@ use webcodex_tool_contracts::{
     runtime_tool_composition_policy, runtime_tool_execution_contract, runtime_tool_metadata,
     ToolCompositionPolicy, ToolEffect, ToolExecutionContinuation,
 };
+
+/// Process-local serialization for orchestration-originated Project mutation.
+///
+/// This deliberately does not participate in direct mutation dispatch. It only
+/// contains concurrent orchestration frontends targeting the same canonical
+/// resolved Project, while unrelated Projects retain independent mutation lanes.
+#[derive(Debug, Default)]
+pub(crate) struct OrchestrationMutationFenceRegistry {
+    projects: Mutex<BTreeMap<String, Weak<AsyncMutex<()>>>>,
+}
+
+impl OrchestrationMutationFenceRegistry {
+    async fn acquire(&self, project: &str) -> OwnedMutexGuard<()> {
+        let fence = {
+            let mut projects = self
+                .projects
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            projects.retain(|_, fence| fence.strong_count() > 0);
+            if let Some(fence) = projects.get(project).and_then(Weak::upgrade) {
+                fence
+            } else {
+                let fence = Arc::new(AsyncMutex::new(()));
+                projects.insert(project.to_string(), Arc::downgrade(&fence));
+                fence
+            }
+        };
+        fence.lock_owned().await
+    }
+}
 
 /// Immutable admission and authority-shaping policy for one orchestration frontend.
 ///
@@ -553,6 +583,16 @@ impl CanonicalOrchestrationHost {
     ) -> Result<OrchestrationToolResponse, OrchestrationHostError> {
         let arguments = self.prepare_arguments(&tool_name, arguments)?;
         let scheduling_guard = self.acquire_scheduling_guard(&tool_name).await?;
+        let mutation_guard = if runtime_tool_metadata(&tool_name).effect == ToolEffect::Mutate {
+            Some(
+                self.tools
+                    .orchestration_mutation_fences
+                    .acquire(&self.project)
+                    .await,
+            )
+        } else {
+            None
+        };
         let (child_ordinal, child_guard) = {
             let accepting = self
                 .accepting_nested_calls
@@ -602,8 +642,10 @@ impl CanonicalOrchestrationHost {
                 },
             )
             .await;
-        // Sequential policy fences only the canonical ToolRuntime invocation.
-        // A returned durable Job owns its own lifecycle after this point.
+        // Both orchestration fences cover exactly the canonical ToolRuntime
+        // invocation. Direct mutations never acquire the Project fence, and a
+        // returned durable Job owns its own lifecycle after this point.
+        drop(mutation_guard);
         drop(scheduling_guard);
         {
             let mut effects = self
