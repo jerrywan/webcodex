@@ -104,15 +104,6 @@
           "evidence_sha256": "2eea842958ca1c21934dbf7f31c526278313834d87d01c77b24d28e2ea1d7f17"
         },
         {
-          "scenario": "dns-rebinding-protection",
-          "check_id": "localhost-host-rebinding-rejected",
-          "classification": "genuine_protocol_failure",
-          "reason": "WebCodex accepted invalid Host/Origin input instead of rejecting the rebinding probe.",
-          "evidence": "MCP transport security / DNS rebinding protection; first GitHub Actions conformance baseline raw report",
-          "expected_status": "FAILURE",
-          "evidence_sha256": "55fef6d01afbb12e2235724cc78cef53e13ad7b61fb8b387d4b260c19ce74b89"
-        },
-        {
           "scenario": "elicitation-sep1034-defaults",
           "check_id": "elicitation-sep1034-general",
           "classification": "missing_harness_fixture",
@@ -327,15 +318,6 @@
           "evidence": "MCP server capability model plus first GitHub Actions conformance baseline raw report",
           "expected_status": "FAILURE",
           "evidence_sha256": "96a058e400b47135503f462d35b6865092c786aee626904bcfd88ffa4f51aa02"
-        },
-        {
-          "scenario": "dns-rebinding-protection",
-          "check_id": "localhost-host-rebinding-rejected",
-          "classification": "genuine_protocol_failure",
-          "reason": "WebCodex accepted invalid Host/Origin input instead of rejecting the rebinding probe.",
-          "evidence": "MCP transport security / DNS rebinding protection; first GitHub Actions conformance baseline raw report",
-          "expected_status": "FAILURE",
-          "evidence_sha256": "56f4a8d9b0ea3df7f9ad8f42edb3f6dc249c7f119daa83c9ca4da22bd8f86b16"
         },
         {
           "scenario": "input-required-result-basic-elicitation",
