@@ -27,6 +27,31 @@ fn validation_job_projection_schema() -> Value {
     })
 }
 
+fn run_process_shell_recovery_arguments_schema() -> Value {
+    fn scrub_exact_tool_name(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                if let Some(Value::String(description)) = object.get_mut("description") {
+                    *description = description.replace("run_shell", "shell execution");
+                }
+                for child in object.values_mut() {
+                    scrub_exact_tool_name(child);
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    scrub_exact_tool_name(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut schema = crate::registry::input_schemas::run_shell_input_schema();
+    scrub_exact_tool_name(&mut schema);
+    schema
+}
+
 fn process_execution_state_schema() -> Value {
     json!({
         "type": "string",
@@ -755,7 +780,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
         "run_process" => {
             let mut properties = vec![
                 ("suggested_call", suggested_tool_call_schema(
-                    "run_shell", crate::registry::input_schemas::run_shell_input_schema(),
+                    "run_shell", run_process_shell_recovery_arguments_schema(),
                     "Optional failure-only advisory call for a proven lossless shell-command-mode conversion rejected before process start. It grants no retry or execution authority."
                 )),
                 (
