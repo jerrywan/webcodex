@@ -547,6 +547,12 @@ impl ToolRuntime {
                 if let Some(result) = registration_scope_denied(auth, "project path registration") {
                     return result;
                 }
+                if let Err(result) = self
+                    .project_scoped_visible_project_for_exact_path(&client_id, &path, auth)
+                    .await
+                {
+                    return result;
+                }
                 let permission = super::permissions::evaluate_permission_for_tool(
                     &self.permission_evaluator,
                     "register_project",
@@ -1066,7 +1072,6 @@ impl ToolRuntime {
                     "server_transport": {"status": "not_observed"},
                     "server_registration": {"status": "not_observed"},
                     "project_registry": {"status": "resolved", "resolved_project": resolved.resolved_id},
-                    "connector_endpoint": {"status": "not_observed"},
                     "last_successful_tool_call": {"status": "not_observed"},
                 })
             });
