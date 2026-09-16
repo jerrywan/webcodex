@@ -14,6 +14,8 @@ mod checkpoint;
 #[cfg(feature = "experimental-code-mode")]
 mod code_mode;
 #[cfg(feature = "experimental-code-mode")]
+mod orchestration_host;
+#[cfg(feature = "experimental-code-mode")]
 pub(crate) use code_mode::is_admitted_nested_tool as code_mode_nested_tool_is_admitted;
 mod coding_agent;
 mod coding_task;

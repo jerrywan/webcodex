@@ -4,8 +4,10 @@ use super::support::*;
 use crate::tool_runtime::kernel::{
     HostFileImportTrust, ToolCallContext, ToolCallOutcome, ToolCallRequest, ToolTransport,
 };
+use crate::tool_runtime::orchestration_host::{CanonicalOrchestrationHost, OrchestrationPolicy};
 use crate::tool_runtime::ToolRuntime;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -92,6 +94,107 @@ fn init_git_repo(path: &std::path::Path) {
         .output()
         .expect("git init");
     assert!(output.status.success(), "git init failed: {output:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("README.md"), "frontend-independent host\n").unwrap();
+
+    let runtime = test_runtime();
+    let client_id = "orchestration-host-direct";
+    let exact_project =
+        register_runner_project_at_path(&runtime, client_id, "demo", tmp.path()).await;
+    let session = runtime.sessions.start_session(
+        Some(exact_project.clone()),
+        Some("orchestration host direct test".to_string()),
+    );
+    let auth = bootstrap_auth_context();
+    let policy = OrchestrationPolicy {
+        frontend: "test_structured_plan",
+        policy_name: "test structured plan",
+        admitted_tools: &["read_files"],
+        denied_tools: &[],
+        forbidden_argument_fields: &["project", "session_id", "recording_session_id"],
+    };
+    let host = Arc::new(CanonicalOrchestrationHost::new(
+        runtime.clone(),
+        Some(&auth),
+        exact_project.clone(),
+        session.session_id.clone(),
+        ToolTransport::Mcp,
+        Some("test-parent".to_string()),
+        policy,
+    ));
+    let host_for_task = Arc::clone(&host);
+    let task = tokio::spawn(async move {
+        host_for_task
+            .invoke_tool(
+                "read_files".to_string(),
+                json!({"items": [{"path": "README.md", "start_line": 1, "limit": 20}]}),
+            )
+            .await
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !task.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "direct orchestration host call did not finish within the test deadline"
+        );
+        let request = runtime
+            .runner_registry
+            .poll(crate::runner_protocol::RunnerPollRequest {
+                client_id: client_id.to_string(),
+                runner_instance_id: "inst".to_string(),
+            })
+            .await
+            .unwrap();
+        if let Some(request) = request {
+            complete_agent_request_by_running_locally(&runtime, client_id, request).await;
+        } else {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    }
+
+    let response = task.await.unwrap().expect("canonical nested read");
+    assert!(response.success, "{response:?}");
+    let composition = host.composition_summary(17, 123);
+    assert_eq!(composition.nested_calls, 1);
+    assert_eq!(composition.nested_successes, 1);
+    assert_eq!(composition.nested_failures, 0);
+    assert_eq!(composition.max_in_flight, 1);
+    assert_eq!(composition.duration_ms, 17);
+    assert_eq!(composition.returned_bytes, 123);
+    assert_eq!(composition.nested_tool_counts.get("read_files"), Some(&1));
+
+    let summary = runtime
+        .sessions
+        .summary(&session.session_id, Some(20))
+        .expect("session summary");
+    let read_start = summary
+        .events
+        .iter()
+        .find(|event| {
+            event.kind == "tool_call_started"
+                && event.tool_name == "read_files"
+                && event.logical_invocation_role.as_deref() == Some("business")
+        })
+        .expect("canonical child business evidence");
+    assert_eq!(read_start.session_id, session.session_id);
+    assert_eq!(
+        read_start.resolved_project.as_deref(),
+        Some(exact_project.as_str())
+    );
+    let input_summary = read_start
+        .input_summary
+        .as_ref()
+        .expect("canonical child input summary");
+    assert_eq!(input_summary["project"], exact_project);
+    assert!(summary
+        .events
+        .iter()
+        .all(|event| event.tool_name != "code_mode_exec"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
