@@ -271,6 +271,7 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
             "tool_manifest",
             "plugin_tool",
             "skill_load",
+            "run_skill_resource",
             "ssh_resource",
         ],
     },

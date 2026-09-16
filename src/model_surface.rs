@@ -380,6 +380,7 @@ mod tests {
         "project_artifact",
         "apply_text_edits",
         "run_process",
+        "run_skill_resource",
         "run_detached_process",
         "run_shell",
         "observe_jobs",

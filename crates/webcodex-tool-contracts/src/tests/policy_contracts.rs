@@ -653,6 +653,11 @@ fn required_runner_capability_matches_metadata_risk_table() {
             RunnerCapabilityRequirement::StructuredProcess,
         ),
         (
+            "run_skill_resource",
+            ToolRisk::JobRun,
+            RunnerCapabilityRequirement::StructuredProcess,
+        ),
+        (
             "run_detached_process",
             ToolRisk::JobRun,
             RunnerCapabilityRequirement::DetachedProcess,
