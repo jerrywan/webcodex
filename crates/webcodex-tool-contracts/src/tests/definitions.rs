@@ -119,7 +119,10 @@ fn experimental_code_mode_mutating_has_conservative_e2b_envelope() {
     assert_eq!(metadata.risk, ToolRisk::ProjectWrite);
     assert_eq!(metadata.approval, ToolApprovalPolicy::Standard);
     assert_eq!(metadata.idempotency, ToolIdempotency::NonIdempotent);
-    assert_eq!(metadata.authority, ToolAuthorityPolicy::Require(PROJECT_WRITE));
+    assert_eq!(
+        metadata.authority,
+        ToolAuthorityPolicy::Require(PROJECT_WRITE)
+    );
     assert_eq!(definition.permission_risk(), PERMISSION_RISK_WRITE);
     assert_eq!(definition.adaptive_runtime_direct_rank(), Some(47));
     assert!(definition.requires_explicit_business_session());
@@ -211,7 +214,10 @@ fn experimental_code_mode_is_absent_without_feature() {
     ] {
         assert!(lookup_tool_definition(name).is_none(), "{name}");
         assert!(!known_tool_names().any(|known| known == name), "{name}");
-        assert!(!registered_tool_specs().iter().any(|spec| spec.name == name), "{name}");
+        assert!(
+            !registered_tool_specs().iter().any(|spec| spec.name == name),
+            "{name}"
+        );
         assert!(
             TOOL_DISCOVERY_GROUPS
                 .iter()

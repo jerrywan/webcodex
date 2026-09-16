@@ -11,7 +11,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 #[cfg(test)]
 use tokio::sync::Semaphore;
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{
+    Mutex as AsyncMutex, OwnedMutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
+};
 use webcodex_core::workflow_session_contract::{
     TOOL_ACCEPTED_EXIT_CODES_FIELD, TOOL_ASSERTION_NAME_FIELD,
     TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD, TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
@@ -352,9 +354,10 @@ impl OrchestrationEffectAccumulator {
             self.children.remove(&ordinal);
             return;
         }
-        let is_mutation = self.children.get(&ordinal).is_some_and(|child| {
-            runtime_tool_metadata(&child.tool).effect == ToolEffect::Mutate
-        });
+        let is_mutation = self
+            .children
+            .get(&ordinal)
+            .is_some_and(|child| runtime_tool_metadata(&child.tool).effect == ToolEffect::Mutate);
         let mutation_state_changed = is_mutation
             .then(|| output.get("state_changed").and_then(Value::as_bool))
             .flatten();

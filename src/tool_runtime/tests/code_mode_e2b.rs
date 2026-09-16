@@ -179,7 +179,11 @@ async fn complete_mutation_fixture(
             let old_text = edit["old_text"].as_str().unwrap();
             let new_text = edit["new_text"].as_str().unwrap_or_default();
             let current = fs::read_to_string(&full).unwrap();
-            assert_eq!(current.matches(old_text).count(), 1, "fixture only supports one exact match");
+            assert_eq!(
+                current.matches(old_text).count(),
+                1,
+                "fixture only supports one exact match"
+            );
             let next = current.replacen(old_text, new_text, 1);
             let would_change = next != current;
             let dry_run = payload["dry_run"].as_bool().unwrap_or(false);
@@ -290,18 +294,20 @@ async fn service_e2b_call(
             tokio::task::yield_now().await;
         }
     }
-    assert!(mutation_replies.is_empty(), "not all expected mutation requests were observed");
+    assert!(
+        mutation_replies.is_empty(),
+        "not all expected mutation requests were observed"
+    );
     mutation_requests
 }
 
-async fn service_tool_task(
-    runtime: &ToolRuntime,
-    client_id: &str,
-    task: &JoinHandle<ToolResult>,
-) {
+async fn service_tool_task(runtime: &ToolRuntime, client_id: &str, task: &JoinHandle<ToolResult>) {
     let deadline = Instant::now() + Duration::from_secs(20);
     while !task.is_finished() {
-        assert!(Instant::now() < deadline, "tool task did not finish for {client_id}");
+        assert!(
+            Instant::now() < deadline,
+            "tool task did not finish for {client_id}"
+        );
         if let Some(request) = probe_patch_agent_request(runtime, client_id).await {
             complete_agent_request_by_running_locally(runtime, client_id, request).await;
         } else {
@@ -344,7 +350,8 @@ async fn e2b_fixture(
 
 #[tokio::test]
 async fn e2b_read_guarded_edit_post_read_preserves_canonical_mutation_truth() {
-    let (root, runtime, project, session_id) = e2b_fixture("e2b-read-edit-read", "fn value() -> i32 { 1 }\n").await;
+    let (root, runtime, project, session_id) =
+        e2b_fixture("e2b-read-edit-read", "fn value() -> i32 { 1 }\n").await;
     let source = r#"
         const before = await tools.read_files({items:[{path:"src/example.rs"}]});
         const revision = before.output.items[0].output.read_revision;
@@ -374,18 +381,23 @@ async fn e2b_read_guarded_edit_post_read_preserves_canonical_mutation_truth() {
     assert_eq!(emitted["edit_success"], true);
     assert_eq!(emitted["changed"], true);
     assert!(emitted["after"].as_str().unwrap().contains("{ 2 }"));
-    assert_eq!(fs::read_to_string(root.path().join("src/example.rs")).unwrap(), "fn value() -> i32 { 2 }\n");
+    assert_eq!(
+        fs::read_to_string(root.path().join("src/example.rs")).unwrap(),
+        "fn value() -> i32 { 2 }\n"
+    );
     let receipt = &result.output["effect_receipt"];
     assert_eq!(receipt["consequential_calls"], 1);
     assert_eq!(receipt["known_results"], 1);
     assert_eq!(receipt["outcome_unknown"], 0);
     assert_eq!(receipt["children"][0]["tool"], "apply_text_edits");
     assert_eq!(receipt["children"][0]["state_changed"], true);
-    assert!(runtime
-        .sessions
-        .summary(&session_id, None)
-        .unwrap()
-        .repository_edit_observed);
+    assert!(
+        runtime
+            .sessions
+            .summary(&session_id, None)
+            .unwrap()
+            .repository_edit_observed
+    );
 }
 
 #[tokio::test]
@@ -410,20 +422,27 @@ async fn e2b_noop_mutation_is_known_false_without_edit_provenance() {
     .await;
     let result = task.await.unwrap();
     assert!(result.success, "{:?}", result.error);
-    assert_eq!(result.output["effect_receipt"]["children"][0]["outcome"], "known_result");
-    assert_eq!(result.output["effect_receipt"]["children"][0]["state_changed"], false);
-    assert!(!runtime
-        .sessions
-        .summary(&session_id, None)
-        .unwrap()
-        .repository_edit_observed);
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["outcome"],
+        "known_result"
+    );
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["state_changed"],
+        false
+    );
+    assert!(
+        !runtime
+            .sessions
+            .summary(&session_id, None)
+            .unwrap()
+            .repository_edit_observed
+    );
     assert!(result.output.get("state_changed").is_none());
 }
 
 #[tokio::test]
 async fn e2b_dry_run_is_known_false_and_never_creates_edit_provenance() {
-    let (root, runtime, project, session_id) =
-        e2b_fixture("e2b-dry-run", "before\n").await;
+    let (root, runtime, project, session_id) = e2b_fixture("e2b-dry-run", "before\n").await;
     let source = r#"
         const before = await tools.read_files({items:[{path:"src/example.rs"}]});
         const revision = before.output.items[0].output.read_revision;
@@ -462,11 +481,13 @@ async fn e2b_dry_run_is_known_false_and_never_creates_edit_provenance() {
         fs::read_to_string(root.path().join("src/example.rs")).unwrap(),
         "before\n"
     );
-    assert!(!runtime
-        .sessions
-        .summary(&session_id, None)
-        .unwrap()
-        .repository_edit_observed);
+    assert!(
+        !runtime
+            .sessions
+            .summary(&session_id, None)
+            .unwrap()
+            .repository_edit_observed
+    );
 }
 
 #[tokio::test]
@@ -498,22 +519,28 @@ async fn e2b_stale_revision_preserves_newer_workspace_and_recovery() {
     .await;
     let result = task.await.unwrap();
     assert!(result.success, "{:?}", result.error);
-    assert_eq!(fs::read_to_string(root.path().join("src/example.rs")).unwrap(), "newer\n");
+    assert_eq!(
+        fs::read_to_string(root.path().join("src/example.rs")).unwrap(),
+        "newer\n"
+    );
     let emitted = emitted_json(&result);
     assert_eq!(emitted["success"], false);
     assert_eq!(emitted["state_changed"], false);
     assert_eq!(emitted["error_kind"], "stale_file_revision");
     assert!(emitted["recovery"].is_object(), "{emitted}");
-    assert!(!runtime
-        .sessions
-        .summary(&session_id, None)
-        .unwrap()
-        .repository_edit_observed);
+    assert!(
+        !runtime
+            .sessions
+            .summary(&session_id, None)
+            .unwrap()
+            .repository_edit_observed
+    );
 }
 
 #[tokio::test]
 async fn e2b_ambiguous_exact_match_fails_closed_and_consumes_mutation_attempt() {
-    let (root, runtime, project, session_id) = e2b_fixture("e2b-ambiguous", "dup\nother\ndup\n").await;
+    let (root, runtime, project, session_id) =
+        e2b_fixture("e2b-ambiguous", "dup\nother\ndup\n").await;
     let source = r#"
         const first = await tools.apply_text_edits({changes:[{
             kind:"edit", path:"src/example.rs",
@@ -538,8 +565,14 @@ async fn e2b_ambiguous_exact_match_fails_closed_and_consumes_mutation_attempt() 
     .await;
     let result = task.await.unwrap();
     assert!(result.success, "{:?}", result.error);
-    assert_eq!(count, 1, "second mutation must be rejected before Runner dispatch");
-    assert_eq!(fs::read_to_string(root.path().join("src/example.rs")).unwrap(), "dup\nother\ndup\n");
+    assert_eq!(
+        count, 1,
+        "second mutation must be rejected before Runner dispatch"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("src/example.rs")).unwrap(),
+        "dup\nother\ndup\n"
+    );
     let emitted = emitted_json(&result);
     assert_eq!(emitted["first_success"], false);
     assert_eq!(emitted["first_kind"], "multiple_matches");
@@ -571,9 +604,18 @@ async fn e2b_js_failure_after_successful_write_keeps_known_true_receipt() {
     .await;
     let result = task.await.unwrap();
     assert!(!result.success);
-    assert_eq!(fs::read_to_string(root.path().join("src/example.rs")).unwrap(), "after\n");
-    assert_eq!(result.output["effect_receipt"]["children"][0]["outcome"], "known_result");
-    assert_eq!(result.output["effect_receipt"]["children"][0]["state_changed"], true);
+    assert_eq!(
+        fs::read_to_string(root.path().join("src/example.rs")).unwrap(),
+        "after\n"
+    );
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["outcome"],
+        "known_result"
+    );
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["state_changed"],
+        true
+    );
     let message = result.output["message"].as_str().unwrap();
     assert!(message.contains("Do not blindly rerun"), "{message}");
     assert!(!message.contains("retry_same"), "{message}");
@@ -600,7 +642,9 @@ async fn e2b_promise_all_never_dispatches_two_mutations() {
     assert!(!result.success);
     assert_eq!(count, 1);
     assert!(matches!(
-        fs::read_to_string(root.path().join("src/example.rs")).unwrap().as_str(),
+        fs::read_to_string(root.path().join("src/example.rs"))
+            .unwrap()
+            .as_str(),
         "first\n" | "second\n"
     ));
     assert_eq!(result.output["effect_receipt"]["consequential_calls"], 1);
@@ -608,8 +652,7 @@ async fn e2b_promise_all_never_dispatches_two_mutations() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn e2b_timeout_after_mutation_dispatch_reconciles_known_true_result() {
-    let (root, runtime, project, session_id) =
-        e2b_fixture("e2b-timeout-known", "before\n").await;
+    let (root, runtime, project, session_id) = e2b_fixture("e2b-timeout-known", "before\n").await;
     let source = r#"
         tools.apply_text_edits({changes:[{
             kind:"edit", path:"src/example.rs",
@@ -647,8 +690,7 @@ async fn e2b_timeout_after_mutation_dispatch_reconciles_known_true_result() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn e2b_mutation_stall_beyond_bounded_drain_returns_outcome_unknown() {
-    let (root, runtime, project, session_id) =
-        e2b_fixture("e2b-timeout-unknown", "before\n").await;
+    let (root, runtime, project, session_id) = e2b_fixture("e2b-timeout-unknown", "before\n").await;
     let source = r#"
         tools.apply_text_edits({changes:[{
             kind:"edit", path:"src/example.rs",
@@ -685,8 +727,7 @@ async fn e2b_mutation_stall_beyond_bounded_drain_returns_outcome_unknown() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn e2b_same_project_mutation_fence_serializes_independent_hosts() {
-    let (root, runtime, project, first_session_id) =
-        e2b_fixture("e2b-fence-same", "one\n").await;
+    let (root, runtime, project, first_session_id) = e2b_fixture("e2b-fence-same", "one\n").await;
     let second_session = runtime
         .sessions
         .start_session(Some(project.clone()), Some("second E2b host".to_string()));
@@ -855,8 +896,7 @@ async fn e2b_mutation_fence_is_project_scoped_not_process_global() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn read_only_orchestration_does_not_acquire_project_mutation_fence() {
-    let (_root, runtime, project, session_id) =
-        e2b_fixture("e2b-fence-read", "readable\n").await;
+    let (_root, runtime, project, session_id) = e2b_fixture("e2b-fence-read", "readable\n").await;
     let project_guard = runtime
         .orchestration_mutation_fences
         .hold_project_for_test(&project)
@@ -909,9 +949,10 @@ async fn e2a_validation_does_not_acquire_project_mutation_fence() {
         },
     )
     .await;
-    let session = runtime
-        .sessions
-        .start_session(Some(project.clone()), Some("E2a fence isolation".to_string()));
+    let session = runtime.sessions.start_session(
+        Some(project.clone()),
+        Some("E2a fence isolation".to_string()),
+    );
     let project_guard = runtime
         .orchestration_mutation_fences
         .hold_project_for_test(&project)
@@ -1075,7 +1116,11 @@ async fn e2b_nested_edit_drives_real_final_changes_baseline_to_full_final_worksp
         let project = project.clone();
         let session_id = session.session_id.clone();
         let auth = auth.clone();
-        async move { runtime.present_changes(project, session_id, Some(&auth)).await }
+        async move {
+            runtime
+                .present_changes(project, session_id, Some(&auth))
+                .await
+        }
     });
     service_tool_task(&runtime, client_id, &present).await;
     let present = present.await.unwrap();
@@ -1137,7 +1182,10 @@ async fn e2b_outer_only_noop_and_prestart_failure_do_not_create_final_changes_el
     );
     service_e2b_call(&runtime, client_id, &read, VecDeque::new()).await;
     assert!(read.await.unwrap().success);
-    let summary = runtime.sessions.summary(&outer_only.session_id, None).unwrap();
+    let summary = runtime
+        .sessions
+        .summary(&outer_only.session_id, None)
+        .unwrap();
     assert!(!summary.repository_edit_observed);
     assert!(!runtime
         .final_changes_presentation_needed(&project, &summary)
@@ -1191,8 +1239,13 @@ async fn e2b_outer_only_noop_and_prestart_failure_do_not_create_final_changes_el
     .unwrap();
     assert!(prestart_result.success, "{prestart_result:?}");
     assert!(prestart_result.output.get("effect_receipt").is_none());
-    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
-    let summary = runtime.sessions.summary(&prestart.session_id, None).unwrap();
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
+    let summary = runtime
+        .sessions
+        .summary(&prestart.session_id, None)
+        .unwrap();
     assert!(!summary.repository_edit_observed);
     assert!(!runtime
         .final_changes_presentation_needed(&project, &summary)
@@ -1202,8 +1255,7 @@ async fn e2b_outer_only_noop_and_prestart_failure_do_not_create_final_changes_el
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn direct_apply_text_edits_does_not_acquire_experimental_orchestration_fence() {
-    let (root, runtime, project, session_id) =
-        e2b_fixture("e2b-direct-unlocked", "before\n").await;
+    let (root, runtime, project, session_id) = e2b_fixture("e2b-direct-unlocked", "before\n").await;
     let project_guard = runtime
         .orchestration_mutation_fences
         .hold_project_for_test(&project)
@@ -1261,9 +1313,10 @@ async fn e1_and_e2a_remain_unable_to_dispatch_apply_text_edits_after_e2b() {
     let (_root, runtime, project, _session_id) =
         e2b_fixture("e2b-stage-isolation", "before\n").await;
     for tool_name in ["code_mode_exec", "code_mode_exec_effectful"] {
-        let session = runtime
-            .sessions
-            .start_session(Some(project.clone()), Some(format!("isolation {tool_name}")));
+        let session = runtime.sessions.start_session(
+            Some(project.clone()),
+            Some(format!("isolation {tool_name}")),
+        );
         let result = runtime
             .dispatch_with_auth(
                 match tool_name {
@@ -1372,10 +1425,15 @@ async fn e2b_parent_continuity_projects_latest_session_revision_after_nested_edi
 #[tokio::test]
 async fn e2b_denies_validation_shell_other_mutation_and_recursion_before_business_dispatch() {
     let (_root, runtime, project, session_id) = e2b_fixture("e2b-denials", "x\n").await;
-    for tool in ["cargo_check", "cargo_test", "run_shell", "apply_patch", "code_mode_exec_mutating"] {
-        let source = format!(
-            "try {{ await tools.{tool}({{}}); }} catch (error) {{ text(String(error)); }}"
-        );
+    for tool in [
+        "cargo_check",
+        "cargo_test",
+        "run_shell",
+        "apply_patch",
+        "code_mode_exec_mutating",
+    ] {
+        let source =
+            format!("try {{ await tools.{tool}({{}}); }} catch (error) {{ text(String(error)); }}");
         let task = spawn_e2b_call(&runtime, &project, &session_id, &source, None);
         let count = service_e2b_call(&runtime, "e2b-denials", &task, VecDeque::new()).await;
         let result = task.await.unwrap();
@@ -1428,23 +1486,20 @@ async fn e2b_missing_outer_write_scope_rejects_before_nested_dispatch() {
         outcome.error_status,
         Some(crate::tool_runtime::kernel::ToolCallErrorStatus::InsufficientScope { .. })
     ));
-    assert!(probe_patch_agent_request(&runtime, "oauth-client").await.is_none());
+    assert!(probe_patch_agent_request(&runtime, "oauth-client")
+        .await
+        .is_none());
 }
 
 #[tokio::test]
 async fn e2b_child_permission_denial_is_canonical_and_non_effectful() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join("example.rs"), "x\n").unwrap();
-    let runtime = test_runtime().with_permission_evaluator(PermissionEvaluator::with_mode(
-        AuthorityMode::Restricted,
-    ));
-    let project = register_runner_project_at_path(
-        &runtime,
-        "e2b-child-permission",
-        "demo",
-        root.path(),
-    )
-    .await;
+    let runtime = test_runtime()
+        .with_permission_evaluator(PermissionEvaluator::with_mode(AuthorityMode::Restricted));
+    let project =
+        register_runner_project_at_path(&runtime, "e2b-child-permission", "demo", root.path())
+            .await;
     let session = runtime.sessions.start_session(Some(project.clone()), None);
     let host = CanonicalOrchestrationHost::new(
         runtime.clone(),
@@ -1516,6 +1571,9 @@ async fn e2b_runner_capability_failure_never_claims_mutation() {
     assert_eq!(emitted["success"], false);
     assert_eq!(emitted["kind"], "capability_unavailable");
     assert_eq!(emitted["changed"], false);
-    assert_eq!(fs::read_to_string(root.path().join("example.rs")).unwrap(), "dup\ndup\n");
+    assert_eq!(
+        fs::read_to_string(root.path().join("example.rs")).unwrap(),
+        "dup\ndup\n"
+    );
     assert!(result.output.get("effect_receipt").is_none());
 }

@@ -445,7 +445,6 @@ impl ToolRuntime {
         );
         (result, composition)
     }
-
 }
 
 #[cfg(test)]
