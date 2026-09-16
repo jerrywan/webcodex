@@ -192,14 +192,13 @@ pub(crate) enum SpecializedAuthorityRequirement {
 
 impl SpecializedAuthorityRequirement {
     pub(crate) fn first_missing(self, auth: Option<&AuthContext>) -> Option<&'static str> {
+        let scope_missing = |scope: &'static str| match auth {
+            Some(auth) => !auth.has_scope(scope),
+            None => crate::auth::scopes::scope_requires_explicit_unauthenticated_authority(scope),
+        };
         match self {
-            Self::Scope(scope) => {
-                (!auth.is_some_and(|auth| auth.has_scope(scope))).then_some(scope)
-            }
-            Self::All(scopes) => scopes
-                .iter()
-                .copied()
-                .find(|scope| !auth.is_some_and(|auth| auth.has_scope(scope))),
+            Self::Scope(scope) => scope_missing(scope).then_some(scope),
+            Self::All(scopes) => scopes.iter().copied().find(|scope| scope_missing(*scope)),
         }
     }
 
@@ -591,6 +590,14 @@ mod tests {
                 .with_owner_authority_fingerprint(Some(fingerprint)),
             )
             .unwrap()
+    }
+
+    #[test]
+    fn specialized_scope_checks_preserve_explicit_gateway_authority_without_auth() {
+        assert_eq!(
+            SpecializedAuthorityRequirement::Scope(SCOPE_PLUGIN_INSPECT).first_missing(None),
+            Some(SCOPE_PLUGIN_INSPECT)
+        );
     }
 
     #[tokio::test]

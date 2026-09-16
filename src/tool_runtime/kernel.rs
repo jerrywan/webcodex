@@ -144,10 +144,21 @@ pub(crate) fn check_runtime_tool_scope(
         // authority policy; it is not a tool-name registry.
         let required_explicit_scope = match policy {
             OAuthToolScopePolicy::RequireAny(scopes) => {
-                return Err(ToolCallErrorStatus::InsufficientScope {
-                    required_scope: None,
-                    description: format!("missing any required scope: {}", scopes.join(", ")),
-                });
+                // RequireAny used to be exclusive to explicit-only Plugin
+                // authority. Computer consolidation also needs an OR policy for
+                // control-vs-launch discovery without changing the legacy
+                // unauthenticated compatibility of the underlying operations.
+                if scopes
+                    .iter()
+                    .copied()
+                    .all(crate::auth::scopes::scope_requires_explicit_unauthenticated_authority)
+                {
+                    return Err(ToolCallErrorStatus::InsufficientScope {
+                        required_scope: None,
+                        description: format!("missing any required scope: {}", scopes.join(", ")),
+                    });
+                }
+                None
             }
             OAuthToolScopePolicy::Require(scope)
                 if matches!(
@@ -1488,6 +1499,9 @@ mod tests {
 
     #[test]
     fn computer_gateway_outer_scopes_are_minimal_and_action_neutral() {
+        assert_eq!(check_runtime_tool_scope(None, "computer_control"), Ok(()));
+        assert!(check_runtime_tool_scope(None, "plugin_tool").is_err());
+
         let denied = oauth(&["runtime:read", "project:read"]);
         assert!(check_runtime_tool_scope(Some(&denied), "computer_observe").is_err());
         assert!(check_runtime_tool_scope(Some(&denied), "computer_control").is_err());

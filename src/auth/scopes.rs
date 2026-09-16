@@ -33,6 +33,21 @@ pub(crate) fn is_agent_scope(scope: &str) -> bool {
     AGENT_SCOPES.contains(&scope)
 }
 
+/// Scopes that require an explicit principal even when legacy unauthenticated
+/// runtime-tool access is otherwise preserved.
+pub(crate) fn scope_requires_explicit_unauthenticated_authority(scope: &str) -> bool {
+    matches!(
+        scope,
+        SCOPE_ADMIN
+            | SCOPE_MEMORY_READ
+            | SCOPE_MEMORY_MANAGE
+            | SCOPE_PLUGIN_INSPECT
+            | SCOPE_PLUGIN_INVOKE
+            | SCOPE_PLUGIN_MANAGE
+            | SCOPE_SSH_LOCAL
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Scope validation
 // ---------------------------------------------------------------------------

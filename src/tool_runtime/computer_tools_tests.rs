@@ -194,6 +194,11 @@ fn computer_gateway_action_policies_preserve_exact_independent_authority() {
         Some(SCOPE_COMPUTER_DISPLAY_READ),
         "computer:read alone must not authorize pointer control"
     );
+    assert_eq!(
+        pointer.authority.first_missing(None),
+        None,
+        "unauthenticated compatibility must remain equivalent to the legacy Computer tools"
+    );
     let generic_control = computer_auth(&[SCOPE_COMPUTER_CONTROL]);
     assert_eq!(
         pointer.authority.first_missing(Some(&generic_control)),

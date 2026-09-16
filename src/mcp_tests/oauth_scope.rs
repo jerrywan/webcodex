@@ -1039,8 +1039,9 @@ async fn oauth2_pointer_tool_call_still_requires_display_scope_even_if_invoked_d
         &token,
         "tools/call",
         json!({
-            "name": "computer_pointer_move",
+            "name": "computer_control",
             "arguments": {
+                "action": "pointer_move",
                 "client_id": "missing-runner",
                 "display_id": "display_AAAAAAAAAAAAAAAA",
                 "snapshot_generation": 1,

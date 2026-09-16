@@ -10,9 +10,10 @@ pub(crate) use webcodex_core::plugin::*;
 use crate::auth::{AuthContext, SCOPE_PLUGIN_INSPECT, SCOPE_PLUGIN_INVOKE, SCOPE_PLUGIN_MANAGE};
 use crate::json_measurement::serialized_json_len;
 use crate::tool_runtime::sessions::SessionTransport;
+#[cfg(test)]
+use crate::tool_runtime::specialized::SpecializedAuthorityRequirement;
 use crate::tool_runtime::specialized::{
-    SpecializedAuthorityRequirement, SpecializedGovernanceDenial, SpecializedOperationPolicy,
-    SpecializedSource,
+    SpecializedGovernanceDenial, SpecializedOperationPolicy, SpecializedSource,
 };
 use crate::tool_runtime::{PluginToolCall, ToolResult, ToolRuntime};
 use serde::Serialize;
