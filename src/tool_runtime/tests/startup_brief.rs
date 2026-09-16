@@ -108,7 +108,7 @@ fn instruction_source<'a>(output: &'a Value, path: &str) -> &'a Value {
 fn assert_builtin_workflow(output: &Value) {
     let workflow = &output["workflow"];
     assert_eq!(workflow["contract"], "webcodex.coding_workflow");
-    assert_eq!(workflow["version"], 12);
+    assert_eq!(workflow["version"], 13);
     assert_eq!(workflow["authority"], "model_guidance_only");
     assert!(workflow["role_selection"]
         .as_str()
@@ -219,6 +219,10 @@ fn assert_builtin_workflow(output: &Value) {
         .as_str()
         .expect("normal closeout guidance");
     assert!(closeout_guidance.contains("finish_coding_task(summary_only=true)"));
+    assert!(closeout_guidance.contains("source implementation"));
+    assert!(closeout_guidance.contains("Pure read-only, planning, investigation, or artifact work"));
+    assert!(closeout_guidance.contains("finalize directly"));
+    assert!(closeout_guidance.contains("project rules require closeout"));
     assert!(closeout_guidance.contains("full closeout only"));
     let roles = workflow["roles"]
         .as_object()
