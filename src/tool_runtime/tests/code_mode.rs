@@ -5,15 +5,73 @@ use crate::tool_runtime::kernel::{
     HostFileImportTrust, ToolCallContext, ToolCallOutcome, ToolCallRequest, ToolTransport,
 };
 use crate::tool_runtime::orchestration_host::{CanonicalOrchestrationHost, OrchestrationPolicy};
-use crate::tool_runtime::ToolRuntime;
+use crate::runner_protocol::RunnerCapabilities;
+use crate::tool_runtime::{ObserveJobsItem, ObserveJobsWakeOn, ToolRuntime};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::task::JoinHandle;
 
 #[derive(Debug)]
 struct ObservedRunnerRequest {
     client_id: String,
     cwd: Option<String>,
+}
+
+fn spawn_code_mode_call(
+    runtime: &ToolRuntime,
+    tool_name: &'static str,
+    project: String,
+    session_id: String,
+    source: String,
+    timeout_ms: u64,
+) -> JoinHandle<ToolCallOutcome> {
+    let runtime = runtime.clone();
+    tokio::spawn(async move {
+        let auth = bootstrap_auth_context();
+        runtime
+            .call_tool_with_context(
+                ToolCallRequest {
+                    tool_name: tool_name.to_string(),
+                    arguments: json!({
+                        "project": project,
+                        "session_id": session_id,
+                        "source": source,
+                        "timeout_ms": timeout_ms,
+                    }),
+                },
+                ToolCallContext {
+                    transport: ToolTransport::Mcp,
+                    session_id: Some(&session_id),
+                    auth: Some(&auth),
+                    window: None,
+                    record_oauth_scope_denials: true,
+                    host_file_import_trust: HostFileImportTrust::Untrusted,
+                },
+            )
+            .await
+    })
+}
+
+async fn e2a_validation_runtime(client_id: &str) -> (ToolRuntime, String, String) {
+    let runtime = runtime_with_agent_project(client_id)
+        .with_validation_sync_wait(Duration::from_millis(20));
+    register_agent(
+        &runtime,
+        client_id,
+        None,
+        RunnerCapabilities {
+            async_shell_jobs: true,
+            structured_validation_argv: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let project = agent_test_project_id(client_id);
+    let session = runtime
+        .sessions
+        .start_session(Some(project.clone()), Some("Code Mode E2a integration".to_string()));
+    (runtime, project, session.session_id)
 }
 
 async fn call_code_mode_with_local_runners(
@@ -97,6 +155,698 @@ fn init_git_repo(path: &std::path::Path) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e1_still_rejects_structured_validation_before_runner_dispatch() {
+    let client_id = "code-mode-e1-validation-denied";
+    let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
+    let outcome = spawn_code_mode_call(
+        &runtime,
+        "code_mode_exec",
+        project,
+        session_id,
+        "await tools.cargo_check({sync_wait_secs: 1, timeout_secs: 600});".to_string(),
+        5_000,
+    )
+    .await
+    .unwrap();
+    let result = outcome.result.expect("outer E1 ToolResult");
+    assert!(!result.success, "E1 must reject cargo_check: {result:?}");
+    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_cargo_check_handoff_preserves_same_canonical_job_and_sparse_receipt() {
+    let client_id = "code-mode-e2a-check-handoff";
+    let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
+    let task = spawn_code_mode_call(
+        &runtime,
+        "code_mode_exec_effectful",
+        project.clone(),
+        session_id.clone(),
+        r#"
+        const check = await tools.cargo_check({
+            sync_wait_secs: 99,
+            timeout_secs: 600
+        });
+        text({job_id: check.output?.job_id ?? null, terminal: check.output?.terminal ?? null});
+        "#
+        .to_string(),
+        5_000,
+    );
+
+    let (request, job_id) =
+        super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
+    assert_eq!(request.job_id.as_deref(), Some(job_id.as_str()));
+    let request_json = serde_json::to_value(&request).unwrap();
+    assert_eq!(
+        request_json["job_context"]["validation"]["sync_wait_secs"],
+        5,
+        "E2a clamps only the synchronous Job-handoff preference"
+    );
+    assert_eq!(
+        request_json["job_context"]["validation"]["effective_timeout_secs"],
+        600
+    );
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "running",
+            "Checking e2a v0.1.0\n",
+            "",
+            None,
+            super::validation_handoff::running_progress("check"),
+            false,
+        ))
+        .await
+        .unwrap();
+
+    let outcome = task.await.unwrap();
+    assert!(outcome.success, "{outcome:?}");
+    let result = outcome.result.expect("outer E2a ToolResult");
+    assert!(result.success, "{result:?}");
+    let receipt = &result.output["effect_receipt"];
+    assert_eq!(receipt["consequential_calls"], 1);
+    assert_eq!(receipt["known_results"], 0);
+    assert_eq!(receipt["job_handoffs"], 1);
+    assert_eq!(receipt["outcome_unknown"], 0);
+    assert_eq!(receipt["children"][0]["tool"], "cargo_check");
+    assert_eq!(receipt["children"][0]["outcome"], "job_handoff");
+    assert_eq!(receipt["children"][0]["job_id"], job_id);
+    assert_eq!(
+        receipt["children"][0]["continuation"]["tool"],
+        "observe_jobs"
+    );
+    let continuation_text = receipt["children"][0]["continuation"].to_string();
+    assert!(continuation_text.contains(&job_id));
+    assert!(!receipt.to_string().contains("Checking e2a"));
+
+    let baseline = runtime
+        .observe_jobs_for_auth(
+            vec![ObserveJobsItem {
+                job_id: job_id.clone(),
+                after_observation_token: None,
+            }],
+            20,
+            None,
+            ObserveJobsWakeOn::Change,
+            Some(&bootstrap_auth_context()),
+        )
+        .await;
+    assert!(baseline.success, "{:?}", baseline.error);
+    assert_eq!(baseline.output["items"][0]["job_id"], job_id);
+    assert_eq!(baseline.output["items"][0]["output"]["status"], "running");
+    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none(), "Job observation must not restart validation");
+
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "completed",
+            "Finished check\n",
+            "",
+            Some(0),
+            super::validation_handoff::completed_progress(),
+            true,
+        ))
+        .await
+        .unwrap();
+    let terminal = runtime
+        .observe_jobs_for_auth(
+            vec![ObserveJobsItem {
+                job_id: job_id.clone(),
+                after_observation_token: None,
+            }],
+            20,
+            None,
+            ObserveJobsWakeOn::Change,
+            Some(&bootstrap_auth_context()),
+        )
+        .await;
+    assert!(terminal.success, "{:?}", terminal.error);
+    assert_eq!(terminal.output["items"][0]["job_id"], job_id);
+    assert_eq!(terminal.output["items"][0]["output"]["status"], "completed");
+
+    let summary = runtime.sessions.summary(&session_id, Some(100)).unwrap();
+    let serialized = serde_json::to_string(&summary).unwrap();
+    assert!(serialized.contains("cargo_check"));
+    assert!(serialized.contains(&job_id));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_failed_cargo_test_is_known_result_not_outcome_unknown() {
+    let client_id = "code-mode-e2a-known-failure";
+    let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
+    let task = spawn_code_mode_call(
+        &runtime,
+        "code_mode_exec_effectful",
+        project,
+        session_id,
+        r#"
+        const test = await tools.cargo_test({sync_wait_secs: 5, timeout_secs: 600});
+        text({child_success: test.success});
+        "#
+        .to_string(),
+        5_000,
+    );
+    let (request, job_id) =
+        super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "failed",
+            "test example ... FAILED\n",
+            "",
+            Some(101),
+            super::validation_handoff::completed_progress(),
+            true,
+        ))
+        .await
+        .unwrap();
+
+    let outcome = task.await.unwrap();
+    assert!(outcome.success, "frontend itself should finish: {outcome:?}");
+    let result = outcome.result.expect("outer E2a ToolResult");
+    assert!(result.success, "frontend business result remains known: {result:?}");
+    assert_eq!(result.output["effect_receipt"]["consequential_calls"], 1);
+    assert_eq!(result.output["effect_receipt"]["known_results"], 1);
+    assert_eq!(result.output["effect_receipt"]["job_handoffs"], 0);
+    assert_eq!(result.output["effect_receipt"]["outcome_unknown"], 0);
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["outcome"],
+        "known_result"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_promise_all_validators_handoff_sequentially_then_jobs_remain_independent() {
+    let client_id = "code-mode-e2a-two-validations";
+    let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
+    let task = spawn_code_mode_call(
+        &runtime,
+        "code_mode_exec_effectful",
+        project,
+        session_id,
+        r#"
+        const [check, test] = await Promise.all([
+            tools.cargo_check({sync_wait_secs: 1, timeout_secs: 600}),
+            tools.cargo_test({sync_wait_secs: 1, timeout_secs: 600})
+        ]);
+        text({check_job: check.output?.job_id ?? null, test_job: test.output?.job_id ?? null});
+        "#
+        .to_string(),
+        5_000,
+    );
+
+    let (first_request, first_job) =
+        super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
+    let first_request_json = serde_json::to_value(&first_request).unwrap();
+    let first_tool = first_request_json["job_context"]["validation"]["tool"]
+        .as_str()
+        .expect("first structured validation tool");
+    let first_step = if first_tool == "cargo_test" { "test" } else { "check" };
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &first_request.request_id,
+            &first_job,
+            "running",
+            "first validation running\n",
+            "",
+            None,
+            super::validation_handoff::running_progress(first_step),
+            false,
+        ))
+        .await
+        .unwrap();
+
+    let (second_request, second_job) =
+        super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
+    assert_ne!(first_job, second_job, "each canonical validator owns one Job");
+    let second_request_json = serde_json::to_value(&second_request).unwrap();
+    let second_tool = second_request_json["job_context"]["validation"]["tool"]
+        .as_str()
+        .expect("second structured validation tool");
+    let second_step = if second_tool == "cargo_test" { "test" } else { "check" };
+    assert_ne!(first_tool, second_tool, "Promise.all must dispatch both requested validators");
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &second_request.request_id,
+            &second_job,
+            "running",
+            "second validation running\n",
+            "",
+            None,
+            super::validation_handoff::running_progress(second_step),
+            false,
+        ))
+        .await
+        .unwrap();
+
+    let outcome = task.await.unwrap();
+    assert!(outcome.success, "{outcome:?}");
+    let result = outcome.result.expect("outer E2a ToolResult");
+    assert!(result.success, "{result:?}");
+    let receipt = &result.output["effect_receipt"];
+    assert_eq!(receipt["consequential_calls"], 2);
+    assert_eq!(receipt["job_handoffs"], 2, "unexpected receipt/result: {result:?}");
+    assert_eq!(receipt["known_results"], 0);
+    assert_eq!(receipt["outcome_unknown"], 0);
+    let mut receipt_jobs = receipt["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|child| child["job_id"].as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    receipt_jobs.sort();
+    let mut expected_jobs = vec![first_job.clone(), second_job.clone()];
+    expected_jobs.sort();
+    assert_eq!(receipt_jobs, expected_jobs);
+
+    let baseline = runtime
+        .observe_jobs_for_auth(
+            vec![
+                ObserveJobsItem {
+                    job_id: first_job.clone(),
+                    after_observation_token: None,
+                },
+                ObserveJobsItem {
+                    job_id: second_job.clone(),
+                    after_observation_token: None,
+                },
+            ],
+            20,
+            None,
+            ObserveJobsWakeOn::AllTerminal,
+            Some(&bootstrap_auth_context()),
+        )
+        .await;
+    assert!(baseline.success, "{:?}", baseline.error);
+    assert_eq!(baseline.output["items"][0]["output"]["status"], "running");
+    assert_eq!(baseline.output["items"][1]["output"]["status"], "running");
+
+    for (request, job) in [(&first_request, &first_job), (&second_request, &second_job)] {
+        runtime
+            .runner_registry
+            .update_job(super::validation_handoff::cargo_test_update(
+                client_id,
+                &request.request_id,
+                job,
+                "completed",
+                "validation completed\n",
+                "",
+                Some(0),
+                super::validation_handoff::completed_progress(),
+                true,
+            ))
+            .await
+            .unwrap();
+    }
+    let terminal = runtime
+        .observe_jobs_for_auth(
+            vec![
+                ObserveJobsItem {
+                    job_id: first_job.clone(),
+                    after_observation_token: None,
+                },
+                ObserveJobsItem {
+                    job_id: second_job.clone(),
+                    after_observation_token: None,
+                },
+            ],
+            20,
+            None,
+            ObserveJobsWakeOn::AllTerminal,
+            Some(&bootstrap_auth_context()),
+        )
+        .await;
+    assert!(terminal.success, "{:?}", terminal.error);
+    assert_eq!(terminal.output["items"][0]["output"]["status"], "completed");
+    assert_eq!(terminal.output["items"][1]["output"]["status"], "completed");
+    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_js_error_after_job_handoff_preserves_effect_receipt_and_no_retry_claim() {
+    let client_id = "code-mode-e2a-after-child-error";
+    let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
+    let task = spawn_code_mode_call(
+        &runtime,
+        "code_mode_exec_effectful",
+        project,
+        session_id,
+        r#"
+        const check = await tools.cargo_check({sync_wait_secs: 1, timeout_secs: 600});
+        throw new Error("E2A_AFTER_CHILD");
+        "#
+        .to_string(),
+        5_000,
+    );
+    let (request, job_id) =
+        super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "running",
+            "check running\n",
+            "",
+            None,
+            super::validation_handoff::running_progress("check"),
+            false,
+        ))
+        .await
+        .unwrap();
+
+    let outcome = task.await.unwrap();
+    assert!(!outcome.success);
+    let result = outcome.result.expect("outer failed E2a ToolResult");
+    assert!(!result.success);
+    assert_eq!(result.output["effect_receipt"]["job_handoffs"], 1);
+    assert_eq!(result.output["effect_receipt"]["children"][0]["job_id"], job_id);
+    let message = result.output["message"].as_str().unwrap_or_default();
+    assert!(message.contains("E2A_AFTER_CHILD"));
+    assert!(message.contains("Do not blindly rerun the whole orchestration"));
+    assert!(!message.contains("retry_same"));
+
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "completed",
+            "done\n",
+            "",
+            Some(0),
+            super::validation_handoff::completed_progress(),
+            true,
+        ))
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_cpu_timeout_after_child_dispatch_preserves_started_job_truth() {
+    let client_id = "code-mode-e2a-timeout-after-child";
+    let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
+    let task = spawn_code_mode_call(
+        &runtime,
+        "code_mode_exec_effectful",
+        project,
+        session_id,
+        r#"
+        const child = tools.cargo_check({sync_wait_secs: 1, timeout_secs: 600});
+        while (true) {}
+        "#
+        .to_string(),
+        300,
+    );
+    let (request, job_id) =
+        super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "running",
+            "check running before frontend timeout\n",
+            "",
+            None,
+            super::validation_handoff::running_progress("check"),
+            false,
+        ))
+        .await
+        .unwrap();
+
+    let outcome = task.await.unwrap();
+    assert!(!outcome.success);
+    let result = outcome.result.expect("outer timeout ToolResult");
+    assert_eq!(result.output["failure_kind"], "timeout");
+    assert_eq!(result.output["effect_receipt"]["consequential_calls"], 1);
+    assert_eq!(result.output["effect_receipt"]["job_handoffs"], 1);
+    assert_eq!(result.output["effect_receipt"]["children"][0]["job_id"], job_id);
+    assert!(result.output["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Do not blindly rerun the whole orchestration"));
+    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "completed",
+            "done\n",
+            "",
+            Some(0),
+            super::validation_handoff::completed_progress(),
+            true,
+        ))
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_denies_mutation_shell_recursion_and_invalid_validator_before_business_dispatch() {
+    let client_id = "code-mode-e2a-denied-effects";
+    let (runtime, project, _) = e2a_validation_runtime(client_id).await;
+    for (label, source) in [
+        (
+            "apply_text_edits",
+            "await tools.apply_text_edits({changes: []});",
+        ),
+        ("run_shell", "await tools.run_shell({command: 'echo forbidden'});"),
+        (
+            "recursive_e1",
+            "await tools.code_mode_exec({source: `text('nested')`});",
+        ),
+        (
+            "recursive_e2a",
+            "await tools.code_mode_exec_effectful({source: `text('nested')`});",
+        ),
+    ] {
+        let session = runtime
+            .sessions
+            .start_session(Some(project.clone()), Some(format!("deny {label}")));
+        let outcome = spawn_code_mode_call(
+            &runtime,
+            "code_mode_exec_effectful",
+            project.clone(),
+            session.session_id,
+            source.to_string(),
+            2_000,
+        )
+        .await
+        .unwrap();
+        assert!(!outcome.success, "{label} unexpectedly succeeded");
+        assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+    }
+
+    let session = runtime
+        .sessions
+        .start_session(Some(project.clone()), Some("invalid sync wait".to_string()));
+    let outcome = spawn_code_mode_call(
+        &runtime,
+        "code_mode_exec_effectful",
+        project,
+        session.session_id,
+        r#"
+        const check = await tools.cargo_check({sync_wait_secs: 0, timeout_secs: 600});
+        text({success: check.success, state: check.output?.execution_state ?? null});
+        "#
+        .to_string(),
+        2_000,
+    )
+    .await
+    .unwrap();
+    assert!(!outcome.success, "canonical parser rejection must fail the frontend call: {outcome:?}");
+    let result = outcome.result.expect("invalid child result");
+    assert!(!result.success);
+    assert_eq!(result.output["failure_kind"], "runtime_error");
+    assert!(result.output.get("effect_receipt").is_none(), "prestart rejection is not an effect");
+    assert!(probe_patch_agent_request(&runtime, client_id).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_parent_continuity_uses_latest_session_revision_after_child_evidence() {
+    use crate::tool_runtime::kernel::{ToolInvocationMetadata, ToolProtocolCapabilities};
+    use crate::tool_runtime::sessions::SessionContextRevisionAck;
+
+    let client_id = "code-mode-e2a-session-continuity";
+    let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
+    let initial_revision = runtime
+        .sessions
+        .context_revision(&session_id)
+        .expect("initial Session context revision");
+    let runtime_for_call = runtime.clone();
+    let project_for_call = project.clone();
+    let session_for_call = session_id.clone();
+    let task = tokio::spawn(async move {
+        let auth = bootstrap_auth_context();
+        runtime_for_call
+            .call_tool_with_invocation_metadata(
+                ToolCallRequest {
+                    tool_name: "code_mode_exec_effectful".to_string(),
+                    arguments: json!({
+                        "project": project_for_call,
+                        "session_id": session_for_call,
+                        "source": "const check = await tools.cargo_check({sync_wait_secs: 1, timeout_secs: 600}); text({job_id: check.output?.job_id ?? null});",
+                        "timeout_ms": 5_000,
+                    }),
+                },
+                ToolCallContext {
+                    transport: ToolTransport::Mcp,
+                    session_id: Some(&session_for_call),
+                    auth: Some(&auth),
+                    window: None,
+                    record_oauth_scope_denials: true,
+                    host_file_import_trust: HostFileImportTrust::Untrusted,
+                },
+                ToolInvocationMetadata {
+                    ack_session_context_revision: SessionContextRevisionAck::Revision(
+                        initial_revision,
+                    ),
+                    ..Default::default()
+                },
+                ToolProtocolCapabilities {
+                    context_continuity: true,
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+
+    let (request, job_id) =
+        super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "running",
+            "Checking continuity v0.1.0\n",
+            "",
+            None,
+            super::validation_handoff::running_progress("check"),
+            false,
+        ))
+        .await
+        .unwrap();
+
+    let outcome = task.await.unwrap();
+    assert!(outcome.success, "{outcome:?}");
+    let result = outcome.result.expect("E2a result");
+    assert!(result.success, "{result:?}");
+    let latest_revision = runtime
+        .sessions
+        .context_revision(&session_id)
+        .expect("latest Session context revision");
+    assert!(latest_revision > initial_revision);
+    assert_eq!(
+        result.output["session_context_revision"].as_u64(),
+        Some(latest_revision),
+        "parent continuity must be projected after nested child and parent evidence are recorded"
+    );
+    assert_eq!(result.output["session_continuity"]["status"], "behind");
+    assert_eq!(result.output["effect_receipt"]["job_handoffs"], 1);
+
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "completed",
+            "Finished continuity check\n",
+            "",
+            Some(0),
+            super::validation_handoff::completed_progress(),
+            true,
+        ))
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_outer_job_run_scope_denial_starts_no_validation_process() {
+    let client_id = "code-mode-e2a-scope-denied";
+    let shared_key_hash = "code-mode-e2a-scope-shared-key";
+    let runtime = test_runtime().with_validation_sync_wait(Duration::from_millis(20));
+    let auth = oauth_bridge_auth_context(
+        shared_key_hash,
+        &[
+            crate::auth::SCOPE_RUNTIME_READ,
+            crate::auth::SCOPE_PROJECT_READ,
+            crate::auth::SCOPE_AGENT_REGISTER,
+        ],
+    );
+    register_agent_projects_for_auth(
+        &runtime,
+        client_id,
+        &auth,
+        RunnerCapabilities {
+            async_shell_jobs: true,
+            structured_validation_argv: true,
+            ..Default::default()
+        },
+        vec![registered_project("agent-proj", "/tmp/code-mode-e2a-scope-denied")],
+    )
+    .await;
+    let project = agent_test_project_id(client_id);
+    let session = runtime.sessions.start_session(
+        Some(project.clone()),
+        Some("Code Mode E2a scope denial".to_string()),
+    );
+    let session_id = session.session_id;
+    let outcome = runtime
+        .call_tool_with_context(
+            ToolCallRequest {
+                tool_name: "code_mode_exec_effectful".to_string(),
+                arguments: json!({
+                    "project": project,
+                    "session_id": session_id,
+                    "source": "await tools.cargo_check({sync_wait_secs: 1, timeout_secs: 600});",
+                    "timeout_ms": 2_000,
+                }),
+            },
+            ToolCallContext {
+                transport: ToolTransport::Mcp,
+                session_id: Some(&session_id),
+                auth: Some(&auth),
+                window: None,
+                record_oauth_scope_denials: true,
+                host_file_import_trust: HostFileImportTrust::Untrusted,
+            },
+        )
+        .await;
+    assert!(!outcome.success);
+    assert!(
+        matches!(
+            outcome.error_status,
+            Some(crate::tool_runtime::kernel::ToolCallErrorStatus::InsufficientScope { .. })
+        ),
+        "expected canonical scope denial before outer E2a execution: {outcome:?}"
+    );
+    assert!(probe_agent_request_for_client(&runtime, client_id).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("README.md"), "frontend-independent host\n").unwrap();
@@ -116,6 +866,7 @@ async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
         admitted_tools: &["read_files"],
         denied_tools: &[],
         additional_forbidden_argument_fields: &[],
+        nested_sync_wait_max_secs: None,
     };
     let host = Arc::new(CanonicalOrchestrationHost::new(
         runtime.clone(),
@@ -126,6 +877,7 @@ async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
         Some("test-parent".to_string()),
         policy,
     ));
+    host.assert_scheduling_policy_fences_for_test().await;
     let host_for_task = Arc::clone(&host);
     let task = tokio::spawn(async move {
         host_for_task
@@ -211,6 +963,7 @@ async fn canonical_orchestration_host_rejects_server_owned_metadata_without_fron
         admitted_tools: &["read_files"],
         denied_tools: &[],
         additional_forbidden_argument_fields: &[],
+        nested_sync_wait_max_secs: None,
     };
     let host = CanonicalOrchestrationHost::new(
         runtime,

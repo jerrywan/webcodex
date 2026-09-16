@@ -23,7 +23,7 @@ use serde_json::json;
 
 /// Fetch the `start_validation_job` request that the agent should have polled
 /// and return the job id embedded in it.
-async fn poll_start_validation_job(
+pub(super) async fn poll_start_validation_job(
     runtime: &ToolRuntime,
     client_id: &str,
 ) -> (crate::runner_protocol::RunnerRequest, String) {
@@ -100,7 +100,7 @@ async fn complete_sync_shell_lifecycle(
         .unwrap();
 }
 
-fn cargo_test_update(
+pub(super) fn cargo_test_update(
     client_id: &str,
     request_id: &str,
     job_id: &str,
@@ -147,7 +147,7 @@ fn cargo_test_update(
     }
 }
 
-fn running_progress(step: &str) -> ShellJobValidationProgress {
+pub(super) fn running_progress(step: &str) -> ShellJobValidationProgress {
     ShellJobValidationProgress {
         completed: 0,
         current_step: Some(step.to_string()),
@@ -155,7 +155,7 @@ fn running_progress(step: &str) -> ShellJobValidationProgress {
     }
 }
 
-fn completed_progress() -> ShellJobValidationProgress {
+pub(super) fn completed_progress() -> ShellJobValidationProgress {
     ShellJobValidationProgress {
         completed: 1,
         current_step: None,

@@ -1,14 +1,10 @@
 # Tool composition research and development plan
 
-Status: deferred exploratory design note. This document records research findings
-and a staged direction for reducing model/tool round trips. It is intentionally
-**downstream** of the current tool-contract friction/style work in
-[`../agent/tool-contract-guidelines.md`](../agent/tool-contract-guidelines.md):
-first make primitive tools consistent and low-friction, then evaluate surface
-pruning, and only then decide whether composition still removes meaningful outer
-turns. It is not a current runtime contract and does not authorize implementation
-shortcuts around existing tool, Session, Job, permission, audit, or Project
-boundaries.
+Status: active experimental design record. E1 read-only orchestration and the E2a
+structured-validation/Job foundation are now implemented behind the experimental
+Code Mode feature; E2b mutation remains unimplemented. The governing rule is still
+that composition may reduce model-facing round trips but may not shortcut existing
+tool, Session, Job, permission, audit, Project, recovery, or Runner boundaries.
 
 ## Motivation
 
@@ -276,18 +272,17 @@ boundary rather than becoming generic nested callbacks.
 
 ## Concurrency contract
 
-The first useful runtime contract can remain small:
+The implemented E2a runtime contract is deliberately smaller than the earlier two-axis sketch:
 
 ```text
-ToolConcurrencyPolicy::Parallel
-ToolConcurrencyPolicy::Sequential
-CompositionPolicy::Allowed | Denied
+ToolCompositionPolicy::Denied
+ToolCompositionPolicy::Sequential
+ToolCompositionPolicy::Parallel
 ```
 
-The default should be denied or sequential until a tool is reviewed. Read-only,
-independent inspection tools are the first candidates for `Parallel`. Mutation,
-Session-management, publication, release, Git-index/worktree mutation, and other
-shared-state tools stay sequential initially.
+This policy is canonical `ToolDefinition` metadata. The default, including unknown/future tools, is `Denied`. The exact E1 read allowlist is `Parallel`; `cargo_check` and `cargo_test` are `Sequential`; everything else remains denied unless deliberately reviewed later. Frontend admission is separate and explicit: composition policy never makes a tool reachable and grants no scope, permission, Project, Runner, retry, or idempotency authority.
+
+`CanonicalOrchestrationHost` enforces this with one composition-local shared/exclusive scheduling fence. `Parallel` canonical child invocation intervals can overlap; `Sequential` is exclusive against every child interval. The fence ends when canonical ToolRuntime invocation returns, including an existing same-execution Job handoff. Durable Jobs then own their ordinary lifetime independently, so two predetermined validators can enter sequentially yet later run concurrently as Jobs. No path/file resource-key framework exists in E2a.
 
 A later, evidence-driven extension may add a resource key such as:
 
@@ -316,12 +311,7 @@ tool, resource-budget exhaustion, runtime exception, cancellation, or a hard
 orchestration timeout. Such a parent failure must not claim that already-entered
 child effects did not occur.
 
-Long-running child execution needs special care. Existing WebCodex Jobs already
-provide the durable same-execution handoff path, so composition should not invent
-a second background-process or cell lifecycle. A nested tool may eventually
-return its normal `job_id`; the parent can emit that result and the model can use
-ordinary Job observation. The first implementation can avoid long-running
-children until this projection is proven.
+Long-running child execution now uses the existing WebCodex Job path directly. E2a admits only structured `cargo_check` / `cargo_test` as consequential children and caps their nested synchronous handoff preference at five seconds without changing total `timeout_secs`. An unfinished validator returns the same canonical `job_id` and parser-ready ordinary Job continuation; E2a creates no second background-process or cell lifecycle and does not restart the child. `observe_jobs` intentionally remains outside nested Code Mode in E2a.
 
 A Server restart should not attempt to resume arbitrary process-local
 orchestration code. Canonical child effects keep their existing recovery truth.
@@ -337,15 +327,7 @@ recorder context to admitted child calls, but each child must record through the
 same existing Session path it would use directly. The composition wrapper must
 not become a second authoritative business event that double-counts the children.
 
-Read-only/re-observable children are a suitable first slice because they do not
-usually advance the Session context checkpoint. Consequential child tools are
-harder: several children may independently advance `context_revision`, produce
-permission evidence, or create Jobs while the host receives only one parent
-response. Before mutation or consequential execution is admitted, WebCodex needs
-a deterministic rule for the final parent Session continuity projection and for
-intermediate child revisions. It must preserve the existing monotonic revision,
-ACK, recovery, and message semantics rather than compressing them into a fake
-single child result.
+E1 read-only/re-observable children established the first slice. E2a now proves the consequential rule: every child records through its ordinary canonical Session path; the parent does not become a fake validation identity or transaction. Once all already-started children have drained to a known result, same-execution Job handoff, or truthful uncertainty, the consequential E2a parent is decorated from the latest monotonic Session state. It accepts only trusted outer ACK metadata, never lets JavaScript ACK guidance, and never compresses child revisions or evidence into a synthetic single validation event.
 
 Composition must never use Window affinity or recorder-gap hints to fill in a
 missing recorder. The Window work remains diagnostic only.
@@ -407,92 +389,50 @@ must remain separate because only the former are wholly service-owned.
 
 ## Staged implementation plan
 
-### Phase 0 — Measurement and contract inventory
+The concrete Direct-vs-Code-Mode capture/report protocol is documented in
+[`../experiments/agent-loop-baseline.md`](../experiments/agent-loop-baseline.md).
 
-- Use Window/server-trace correlation to measure model-facing outer-call counts,
-  tool durations, Runner timing available today, and gaps outside WebCodex.
-- Classify existing direct tools by composition eligibility and concurrency safety.
-- Identify which current ToolDefinition fields can own the policy without a
-  parallel registry.
-- Define parent/child diagnostic identity and bounded audit projection before
-  changing execution behavior.
-- Establish representative review/implementation traces to compare outer MCP
-  calls, canonical child calls, Runner calls, and wall time separately.
-  The concrete Direct-vs-Code-Mode capture/report protocol is documented in
-  [`../experiments/agent-loop-baseline.md`](../experiments/agent-loop-baseline.md).
-
-Success means we can explain where elapsed time is spent without claiming access
-to model-private state.
-
-### Phase 1 — Read-only bounded composition prototype
-
-Expose one experimental operator tool with a simple outer schema and a restricted
-orchestration program. Start with a closed allowlist of independent inspection
-operations such as multi-file reads, source search, Git review/diff inspection,
-and other already-direct read-only coding tools.
-
-Initial hard rules:
-
-- no recursive composition;
-- no file/Git/Session mutation;
-- no generic shell/process execution;
-- no plugin/MCP/SSH gateway calls;
-- no adaptive long-tail bypass;
-- small program-size and child-call limits;
-- small parallelism cap;
-- shared wall-clock and serialized-output ceilings;
-- every child uses canonical ToolRuntime dispatch.
-
-Synthetic delayed-tool tests should prove that independent children actually run
-concurrently while a sequential child fences execution as designed. Authority
-negative tests should prove that composition cannot call a child the caller could
-not invoke directly.
-
-### Phase 2 — Review dogfood and latency comparison
-
-Dogfood the read-only slice on real branch review. Compare:
+The experiment now uses these concrete stage names:
 
 ```text
-outer model/tool round trips
-canonical tool invocations
-Runner requests
-WebCodex-owned wall time
-end-to-end task wall time
-findings / validation quality
+E1   read-only orchestration
+E2a  effectful foundation + structured validation / Jobs
+E2b  guarded source mutation, likely apply_text_edits first
+E2c  selective generic process/shell only if telemetry justifies it
+E3   Async Event Delivery
+E4   product/stability decision
 ```
 
-The target is not fewer canonical facts. The target is fewer *outer model-facing
-round trips* for evidence that was already known to be independent.
+### E1 — implemented read-only control
 
-Keep direct-tool traces as the control. If composition does not materially reduce
-latency or makes model behavior less reliable, stop before adding mutation.
+`code_mode_exec` remains a separate `Observe / Read / PureRead / project:read` control surface. Its closed read allowlist, V8 limits, canonical host boundary, composition telemetry, and direct-tools-vs-Code-Mode dogfood establish whether moving inspection decisions below the outer model round trip is actually useful.
 
-### Phase 3 — Structured execution and Job-aware composition
+### E2a — implemented consequential foundation
 
-After read-only dogfood is stable, consider bounded structured process/validation
-children. Preserve existing same-execution Job handoff and observation rather than
-creating a new composition-specific background lifecycle. Define cancellation and
-parent timeout behavior before allowing parallel long-running executions.
+`code_mode_exec_effectful` is feature-gated and conservatively declares `Execute / JobRun / Standard / NonIdempotent / job:run`. It admits all E1 reads plus only `cargo_check` and `cargo_test`. It adds no source mutation.
 
-This phase should also prove that a child Job remains observable and recoverable
-after the parent composition request has returned.
+E2a closes the correctness prerequisites that were previously future work:
 
-### Phase 4 — Guarded mutation, only if justified
+- `ToolDefinition` owns default-denied Parallel/Sequential composition policy;
+- the canonical host, not JavaScript, owns scheduling and a monotonic close gate;
+- a Sequential waiter cannot begin canonical dispatch after frontend termination;
+- timeout/JS failure drains children that already crossed canonical dispatch;
+- a separate sparse effect receipt distinguishes known results, same-execution Job handoffs, and outcome uncertainty;
+- failed validation is a known business result, not uncertainty;
+- outer failure never claims no effect or whole-program retry safety after consequential dispatch;
+- Job handoff preserves ordinary `job_id`/continuation and ordinary later observation;
+- final parent Session continuity is projected from the latest canonical Session state after child evidence;
+- outer durable audit stores only bounded effect counters, not Job tokens or child payloads.
 
-Mutation should be last. Before enabling it, close:
+`observe_jobs` is deliberately not nested: Code Mode has a 30-second frontend maximum while ordinary Job observation may wait up to 100 seconds. The parent returns the canonical handoff and the model later observes it normally.
 
-- Workflow Session context-revision projection for multiple consequential child
-  calls;
-- resource-level serialization for file and Git/worktree mutation;
-- partial-success/failure presentation with no rollback fiction;
-- stale SHA/context recovery per child;
-- permission evidence and audit ordering;
-- parent retry behavior after an uncertain response.
+### E2b — next decision, not implemented
 
-Start with independent guarded file edits only if dogfood shows a substantial
-round-trip benefit beyond existing `apply_text_edits` batching. Git publication,
-Session messaging, release/deploy actions, and heterogeneous gateways should stay
-outside until they have their own demonstrated composition need.
+Only clean E2a effect/Job/timeout dogfood can justify considering guarded source mutation. The likely first candidate is canonical `apply_text_edits`, not shell. E2b must define concrete mutation scheduling/resource rules, stale-read/revision behavior, partial-effect presentation, permission evidence, and Final Changes interaction without inventing transaction/rollback semantics.
+
+### E2c / E3 / E4
+
+Generic process/shell admission remains a later telemetry-driven question. Async Event Delivery remains a separate stage rather than a Code Mode-specific waiter. Product/stability commitment comes only after the experimental execution and dogfood evidence are mature.
 
 ## What not to build
 
@@ -547,12 +487,9 @@ A production-ready first slice should satisfy all of the following:
    without prematurely designing resource locks for mutation?
 5. How should parent/child invocation identities appear in ActionAudit and the
    Windows view while preserving current privacy policy?
-6. What final Session continuity projection is correct once one parent response
-   contains several consequential child revisions?
-7. How should a parent request report a mixture of synchronous results and child
-   Jobs without creating a second Job lifecycle?
-8. Which timing boundaries can the current Runner protocol prove directly, and
-   which require additive privacy-safe telemetry?
+6. Which concrete resource fence is necessary for E2b guarded mutation without prematurely building a generic lock manager?
+7. Does nested short Job observation remove enough outer turns to justify widening E2a, or is ordinary `observe_jobs` the better boundary?
+8. Which timing boundaries can the current Runner protocol prove directly, and which require additive privacy-safe telemetry?
 
 These questions should be answered with focused prototypes and dogfood traces,
 not by widening the first implementation preemptively.

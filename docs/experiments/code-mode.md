@@ -1,4 +1,4 @@
-# Experimental Code Mode E1 — Read-Only Nested Tool Orchestration
+# Experimental Code Mode — E1 Read-Only and E2a Effectful Foundation
 
 > This is an experiment, not a stable compatibility surface.
 
@@ -27,7 +27,7 @@ The root `experimental-code-mode` feature enables:
 - `webcodex-tool-contracts/experimental-code-mode`;
 - `webcodex-tool-runtime-contracts/experimental-code-mode`.
 
-Without that feature, `code_mode_exec` is absent from the canonical `ToolDefinition`, `ToolSpec`, `ToolCall`, discovery, Adaptive Runtime, OpenAPI, and MCP surfaces. The default `webcodex-code-mode` crate contains only lightweight transport-neutral contracts and does not compile or link V8.
+Without that feature, both `code_mode_exec` and `code_mode_exec_effectful` are absent from the canonical `ToolDefinition`, `ToolSpec`, `ToolCall`, discovery, Adaptive Runtime, OpenAPI, and MCP surfaces. The default `webcodex-code-mode` crate contains only lightweight transport-neutral contracts and does not compile or link V8.
 
 ## Architecture
 
@@ -309,6 +309,90 @@ Canonical child calls are expected to remain visible as canonical runtime and Se
 
 Prefer real ChatGPT dogfood traces over a bespoke benchmark runner while the existing telemetry is sufficient. If repeated real branch reviews do not show a meaningful round-trip, wall-time, or workflow-quality benefit, do not advance to effectful Code Mode merely because the local JavaScript runtime is fast.
 
+## E2a — Effectful orchestration foundation
+
+E2a adds a separate experimental entry point, `code_mode_exec_effectful`. It does **not** upgrade or widen `code_mode_exec`; E1 remains the read-only control surface with the same `Observe / Read / PureRead / project:read` contract and the same explicit read allowlist.
+
+The E2a outer tool is a conservative consequential envelope (`Execute / JobRun / Standard / NonIdempotent / job:run`) and requires an explicit business Workflow Session. That envelope is not child authority. Every nested call still re-enters canonical `ToolRuntime` with the caller's exact authentication, resolved Project, Workflow Session, scope checks, permissions, Runner capability checks, validation semantics, Job lifecycle, and Session evidence.
+
+E2a admits exactly the E1 read tools plus:
+
+```text
+cargo_check
+cargo_test
+```
+
+It intentionally does not admit `cargo_fmt`, generic process/shell tools, `observe_jobs`, edit/write/delete/rename tools, Git mutation, Session mutation, plugins/MCP, Computer control, release/deploy tools, or either Code Mode entry point. **E2a does not add source mutation.** Final Changes / `present_changes` semantics therefore remain unrelated to E2a; guarded source mutation is an E2b question.
+
+### Canonical composition policy and scheduling
+
+Nested scheduling is owned by canonical `ToolDefinition`, not by JavaScript. `ToolCompositionPolicy` has only three states:
+
+```text
+Denied      default, including unknown/future tools
+Sequential  cargo_check, cargo_test
+Parallel    the exact E1 read allowlist
+```
+
+Frontend admission remains a separate explicit policy. A tool becoming `Parallel` never makes it automatically reachable from Code Mode, and orchestration metadata never grants scope, permission, Project, Runner, or retry authority.
+
+`CanonicalOrchestrationHost` enforces the policy with one composition-local shared/exclusive fence. `Parallel` child invocation intervals may overlap. A `Sequential` child has exclusive access through the canonical ToolRuntime invocation. The lock ends when that invocation returns, including when structured validation returns its existing same-execution Job handoff; it does not remain held for the durable Job's lifetime. Consequently two predetermined validators can enter canonical dispatch sequentially, hand off as two ordinary Jobs, and later run concurrently under existing Job ownership.
+
+For E2a only, validators whose canonical execution continuation is `observe_jobs` get a frontend handoff preference cap of five seconds: omitted values become 5, values above 5 are clamped, 1..5 are preserved, and invalid values such as 0 remain invalid for the canonical parser. `timeout_secs` is never shortened by this policy. E2a does not add a second Job lifecycle or restart a validation.
+
+### Frontend termination and effect truth
+
+E2a treats `timeout_ms` as the JavaScript/frontend decision deadline, not as a promise that the model-facing response is handed off at that exact millisecond. On frontend timeout or termination the host first closes a monotonic nested-call admission gate, then V8 is terminated and runtime-queued requests are discarded. A child still waiting for a Sequential fence sees the closed gate when it wakes and never crosses canonical dispatch. A child that already crossed the canonical dispatch boundary is drained to a truthful canonical result, same-execution Job handoff, or `outcome_unknown` before the parent result is formed. Completed child results are not sent back into an already terminated isolate.
+
+E1 deliberately keeps its original return-at-frontend-deadline behavior and does not acquire this consequential drain burden.
+
+### Effect receipt
+
+Composition performance telemetry is not effect truth. E2a therefore has a separate sparse `effect_receipt`, emitted only when a consequential child actually crossed canonical dispatch:
+
+```json
+{
+  "consequential_calls": 2,
+  "known_results": 0,
+  "job_handoffs": 2,
+  "outcome_unknown": 0,
+  "children": [
+    {
+      "ordinal": 1,
+      "tool": "cargo_check",
+      "outcome": "job_handoff",
+      "job_id": "...",
+      "continuation": {"tool": "observe_jobs", "arguments": {}}
+    }
+  ]
+}
+```
+
+Consequential classification comes from canonical `ToolDefinition.effect != Observe`. A completed failing test is a `known_result`, not uncertainty. Parse/scope/admission rejection before dispatch is not an effect. A normal active validation Job preserves only the canonical `job_id` and parser-ready continuation; the receipt does not copy command text, argv, paths, stdout/stderr, raw ToolResult, validation payload, credentials, or secrets. The durable outer Action/Session audit retains only the four counters (plus ordinary bounded failure metadata), not child Job identities or continuation tokens.
+
+If JavaScript throws or times out after consequential dispatch, the parent failure keeps the receipt and explicitly warns against blindly rerunning the whole JavaScript program. E2a provides no `retry_same`, rollback fiction, or whole-program retry authority.
+
+### Session and Job continuation
+
+Each nested validator records its own ordinary canonical `tool_call_started` / `tool_call_finished`, validation, permission/scope, and Job evidence in the exact outer Workflow Session. The parent is not a fake validation event and does not compress children into one transaction. Server-owned nested fields, including Project/Session selection, context ACK, Session-message resolution, result expectations, and private `__webcodex_*` fields, remain forbidden inside JavaScript.
+
+Unlike re-observable E1, consequential E2a participates in normal Session continuity. After already-started children have drained, the outer response is decorated from the latest monotonic Session state; it never fabricates an ACK and never derives authority from `ClientWindow`.
+
+`observe_jobs` remains intentionally outside nested E2a. A validator uses a short sync grace, may return its existing Job handoff, and Code Mode returns. The model then observes that exact Job through ordinary `observe_jobs`, including `wake_on=all_terminal` for a predetermined set when later work genuinely depends on all of them.
+
+### Current stage sequence
+
+```text
+E1   read-only orchestration
+E2a  effectful foundation + structured validation / Jobs
+E2b  guarded source mutation, likely apply_text_edits first
+E2c  selective generic process/shell only if telemetry justifies it
+E3   Async Event Delivery
+E4   product/stability decision
+```
+
+Progress to E2b is contingent on clean E2a effect/Job/timeout dogfood; E2a itself is not evidence that mutation is ready.
+
 ## Known limitations / non-goals
 
 E1 intentionally has no:
@@ -323,12 +407,4 @@ E1 intentionally has no:
 - Windows/macOS Code Mode packaging guarantee;
 - stable compatibility promise.
 
-Potential later phases, only if E1 dogfood is useful:
-
-```text
-E2: effectful tools with explicit sequential effect boundaries
-E3: Jobs plus event delivery
-E4: decide whether Code Mode should become a durable/stable product surface
-```
-
-Do not infer E2/E3/E4 semantics from this experiment.
+The implemented stage sequence is documented above. Current E2a remains deliberately narrower than source mutation, generic shell/process orchestration, nested Job waiting, Async Event Delivery, or a stable product commitment.
