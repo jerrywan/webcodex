@@ -501,24 +501,6 @@
         },
         {
           "scenario": "server-stateless",
-          "check_id": "sep-2575-request-meta-invalid-missing-meta",
-          "classification": "genuine_protocol_failure",
-          "reason": "The request is rejected with WebCodex header-mismatch code -32020 instead of the required -32602 Invalid params.",
-          "evidence": "SEP-2575 request metadata validation; first GitHub Actions conformance baseline raw report",
-          "expected_status": "FAILURE",
-          "evidence_sha256": "f72e87a4dcd615f71164cc3d3a94bc2e9a8db5fd4da6364c1379115262c62a15"
-        },
-        {
-          "scenario": "server-stateless",
-          "check_id": "sep-2575-request-meta-invalid-missing-protocol-version",
-          "classification": "genuine_protocol_failure",
-          "reason": "The request is rejected with WebCodex header-mismatch code -32020 instead of the required -32602 Invalid params.",
-          "evidence": "SEP-2575 request metadata validation; first GitHub Actions conformance baseline raw report",
-          "expected_status": "FAILURE",
-          "evidence_sha256": "453717c56bda626408c987bb9e6c8dd5c2582e1523481557197a85f3169fc463"
-        },
-        {
-          "scenario": "server-stateless",
           "check_id": "sep-2575-server-honors-notification-filter",
           "classification": "optional_capability_not_implemented",
           "reason": "The referee marked this check not applicable because WebCodex did not advertise the related subscription/listChanged capability.",
