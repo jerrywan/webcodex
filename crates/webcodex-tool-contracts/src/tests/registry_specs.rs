@@ -452,7 +452,9 @@ fn tool_specs_describe_default_coding_loop_preferences() {
     assert!(!go_test_desc.contains("preferred structured"));
     let cargo_fmt_desc = desc("cargo_fmt");
     for phrase in [
-        "ensure rust formatting",
+        "final formatting after relevant rust source stabilizes",
+        "do not use cargo_fmt as a per-edit ritual",
+        "read-only formatting validation",
         "precheck",
         "changed/state_changed",
     ] {
