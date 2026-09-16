@@ -129,6 +129,14 @@ e.window_transition_kind, e.response_streaming,
 e.window_continuity_eligible, e.window_meaningful, e.started_at
 """.strip()
 
+_CONTINUITY_COLUMNS = """
+e.event_id, e.action_name, e.client_window_key,
+e.principal_correlation_kind, e.principal_correlation_id,
+e.window_started_at_ms, e.request_observed_at_ms, e.response_handed_at_ms,
+e.window_transition_kind, e.window_continuity_eligible,
+e.window_meaningful, e.started_at
+""".strip()
+
 
 def _open_sqlite_readonly(path: Path) -> sqlite3.Connection:
     if not path.is_file():
@@ -172,6 +180,23 @@ def _row_to_audit_event(row: sqlite3.Row) -> dict[str, Any]:
         "response_handed_at_ms": row["response_handed_at_ms"],
         "window_transition_kind": row["window_transition_kind"],
         "response_streaming": None if row["response_streaming"] is None else bool(row["response_streaming"]),
+        "window_continuity_eligible": None if row["window_continuity_eligible"] is None else bool(row["window_continuity_eligible"]),
+        "window_meaningful": bool(row["window_meaningful"]),
+        "started_at": row["started_at"],
+    }
+
+
+def _row_to_continuity_event(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_id": str(row["event_id"]),
+        "action_name": row["action_name"],
+        "client_window_key": row["client_window_key"],
+        "principal_correlation_kind": row["principal_correlation_kind"],
+        "principal_correlation_id": row["principal_correlation_id"],
+        "window_started_at_ms": row["window_started_at_ms"],
+        "request_observed_at_ms": row["request_observed_at_ms"],
+        "response_handed_at_ms": row["response_handed_at_ms"],
+        "window_transition_kind": row["window_transition_kind"],
         "window_continuity_eligible": None if row["window_continuity_eligible"] is None else bool(row["window_continuity_eligible"]),
         "window_meaningful": bool(row["window_meaningful"]),
         "started_at": row["started_at"],
@@ -223,6 +248,77 @@ def load_audit_events(audit_db: Path, *, workflow_session_id: str | None, trace_
         connection.close()
 
 
+def load_audit_continuity_events(
+    audit_db: Path, selected_events: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    selected_meaningful = [
+        event
+        for event in selected_events
+        if event.get("action_name") == "toolsCall" and event.get("window_meaningful")
+    ]
+    keyed = [
+        event
+        for event in selected_meaningful
+        if all(
+            isinstance(event.get(field), str) and event.get(field)
+            for field in (
+                "client_window_key",
+                "principal_correlation_kind",
+                "principal_correlation_id",
+            )
+        )
+        and isinstance(event.get("request_observed_at_ms"), int)
+    ]
+    if not keyed:
+        return selected_meaningful
+
+    keys = {
+        (
+            event["client_window_key"],
+            event["principal_correlation_kind"],
+            event["principal_correlation_id"],
+        )
+        for event in keyed
+    }
+    windows = sorted({key[0] for key in keys})
+    first_started = min(event["request_observed_at_ms"] for event in keyed)
+    last_started = max(event["request_observed_at_ms"] for event in keyed)
+    connection = _open_sqlite_readonly(audit_db)
+    rows: list[sqlite3.Row] = []
+    try:
+        for start in range(0, len(windows), 400):
+            chunk = windows[start:start + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            sql = f"""
+                SELECT {_CONTINUITY_COLUMNS}
+                FROM action_events e
+                WHERE e.action_name = 'toolsCall'
+                  AND e.window_meaningful = 1
+                  AND e.request_observed_at_ms BETWEEN ? AND ?
+                  AND e.client_window_key IN ({placeholders})
+                ORDER BY COALESCE(e.request_observed_at_ms, e.window_started_at_ms, e.started_at * 1000), e.event_id
+            """
+            rows.extend(
+                connection.execute(sql, [first_started, last_started, *chunk]).fetchall()
+            )
+    except sqlite3.Error as exc:
+        raise ReportError(f"could not query audit continuity context: {exc}") from exc
+    finally:
+        connection.close()
+
+    by_id = {event["event_id"]: event for event in selected_meaningful}
+    for row in rows:
+        event = _row_to_continuity_event(row)
+        key = (
+            event.get("client_window_key"),
+            event.get("principal_correlation_kind"),
+            event.get("principal_correlation_id"),
+        )
+        if key in keys:
+            by_id[event["event_id"]] = event
+    return sorted(by_id.values(), key=_audit_sort_key)
+
+
 def _telemetry(event: dict[str, Any]) -> dict[str, Any] | None:
     value = event.get("summary", {}).get("model_ergonomics")
     return value if isinstance(value, dict) else None
@@ -257,30 +353,45 @@ def _audit_sort_key(event: dict[str, Any]) -> tuple[int, str]:
     return (int(started_at) * 1000 if isinstance(started_at, int) else 0, str(event["event_id"]))
 
 
-def _window_timing(outer: list[dict[str, Any]]) -> tuple[dict[str, Any], int, int]:
+def _window_timing(
+    outer: list[dict[str, Any]],
+    continuity_events: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], int, int]:
+    selected_ids = {str(event["event_id"]) for event in outer}
     previous: dict[tuple[str, str, str], dict[str, Any]] = {}
     gaps: list[int] = []
     missing_serial = 0
     overlap_count = 0
-    for event in sorted(outer, key=_audit_sort_key):
+    source = continuity_events if continuity_events is not None else outer
+    for event in sorted(source, key=_audit_sort_key):
         if not event.get("window_meaningful"):
             continue
+        selected = str(event["event_id"]) in selected_ids
         window_key = event.get("client_window_key")
         principal_kind = event.get("principal_correlation_kind")
         principal_id = event.get("principal_correlation_id")
         if not all(isinstance(value, str) and value for value in (window_key, principal_kind, principal_id)):
-            if event.get("window_transition_kind") == "serial":
+            if selected and event.get("window_transition_kind") == "serial":
                 missing_serial += 1
             continue
         key = (window_key, principal_kind, principal_id)
         predecessor = previous.pop(key, None)
         transition = event.get("window_transition_kind")
-        if transition == "overlap":
+        if selected and transition == "overlap":
             overlap_count += 1
-        if transition == "serial":
+        if selected and transition == "serial":
             current_started = event.get("request_observed_at_ms")
             previous_handed = predecessor.get("response_handed_at_ms") if predecessor else None
-            if isinstance(current_started, int) and isinstance(previous_handed, int) and current_started >= previous_handed:
+            predecessor_selected = (
+                predecessor is not None
+                and str(predecessor["event_id"]) in selected_ids
+            )
+            if (
+                predecessor_selected
+                and isinstance(current_started, int)
+                and isinstance(previous_handed, int)
+                and current_started >= previous_handed
+            ):
                 gaps.append(current_started - previous_handed)
             else:
                 missing_serial += 1
@@ -298,7 +409,11 @@ def _observed_span_ms(outer: list[dict[str, Any]]) -> int | None:
     return span if span >= 0 else None
 
 
-def _summarize_audit(audit_events: list[dict[str, Any]], variant: str | None) -> dict[str, Any]:
+def _summarize_audit(
+    audit_events: list[dict[str, Any]],
+    variant: str | None,
+    continuity_events: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     outer = [event for event in audit_events if event.get("action_name") == "toolsCall"]
     statuses = Counter(str(event.get("status") or "unknown") for event in outer)
     outer_tools = Counter(event["operation"] for event in outer if isinstance(event.get("operation"), str))
@@ -327,7 +442,7 @@ def _summarize_audit(audit_events: list[dict[str, Any]], variant: str | None) ->
             if isinstance(item, str) and item:
                 counter[item] += 1
 
-    gaps, overlap_count, missing_serial = _window_timing(outer)
+    gaps, overlap_count, missing_serial = _window_timing(outer, continuity_events)
     canonical_observed = len(present_telemetries)
     canonical_by_name = Counter(value["tool_name"] for _, value in present_telemetries if isinstance(value.get("tool_name"), str) and value["tool_name"])
     if variant == "direct":
@@ -470,6 +585,14 @@ def _job_summary(trace_events: list[dict[str, Any]], trace_root_present: bool) -
     )
 
 
+def _is_exact_git_revision(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(char in "0123456789abcdefABCDEF" for char in value)
+    )
+
+
 def _benchmark_metadata(*, case_manifest: Path | None, case_id: str | None, variant: str | None, base_revision: str | None) -> dict[str, Any] | None:
     if case_id is None:
         if case_manifest is not None or base_revision is not None:
@@ -477,6 +600,8 @@ def _benchmark_metadata(*, case_manifest: Path | None, case_id: str | None, vari
         return None
     if variant is None:
         raise ReportError("--case-id requires --variant")
+    if not _is_exact_git_revision(base_revision):
+        raise ReportError("--case-id requires --base-revision as an exact 40-hex Git commit")
     manifest = load_case_manifest(case_manifest or DEFAULT_CASE_MANIFEST)
     case = _case_by_id(manifest, case_id)
     return {"manifest_schema_version": manifest["schema_version"], "case_id": case_id, "case_title": case["title"], "target": case["target"], "variant": variant, "base_revision": base_revision}
@@ -485,6 +610,8 @@ def _benchmark_metadata(*, case_manifest: Path | None, case_id: str | None, vari
 def summarize(*, trace_root: Path | None, audit_db: Path | None, workflow_session_id: str | None, case_manifest: Path | None, case_id: str | None, variant: str | None, base_revision: str | None) -> dict[str, Any]:
     if trace_root is None and audit_db is None:
         raise ReportError("summarize requires --trace-root and/or --audit-db")
+    if workflow_session_id is not None and audit_db is None:
+        raise ReportError("--workflow-session-id requires --audit-db for authoritative Session selection")
     if audit_db is not None and workflow_session_id is None and trace_root is None:
         raise ReportError("--audit-db without --trace-root requires --workflow-session-id")
     trace_ids: set[str] = set()
@@ -493,15 +620,22 @@ def summarize(*, trace_root: Path | None, audit_db: Path | None, workflow_sessio
     if trace_root is not None:
         trace_ids, trace_events, trace_files = load_trace_events(trace_root)
     audit_events: list[dict[str, Any]] = []
+    continuity_events: list[dict[str, Any]] | None = None
     if audit_db is not None:
         audit_events = load_audit_events(audit_db, workflow_session_id=workflow_session_id, trace_ids=trace_ids)
-    if workflow_session_id is not None and audit_events and trace_events:
+        continuity_events = load_audit_continuity_events(audit_db, audit_events)
+    if workflow_session_id is not None and trace_events:
         selected_trace_ids = {event["server_trace_id"] for event in audit_events if isinstance(event.get("server_trace_id"), str) and event["server_trace_id"]}
         trace_events = [event for event in trace_events if event.get("server_trace_id") in selected_trace_ids]
         trace_ids = {trace_id for trace_id in trace_ids if trace_id in selected_trace_ids}
-    core = _summarize_audit(audit_events, variant) if audit_db is not None else _summarize_trace_only(trace_events)
-    runner, runner_availability = _runner_summary(trace_events, trace_root is not None)
-    jobs, jobs_availability = _job_summary(trace_events, trace_root is not None)
+    core = (
+        _summarize_audit(audit_events, variant, continuity_events)
+        if audit_db is not None
+        else _summarize_trace_only(trace_events)
+    )
+    trace_metadata_present = trace_files > 0
+    runner, runner_availability = _runner_summary(trace_events, trace_metadata_present)
+    jobs, jobs_availability = _job_summary(trace_events, trace_metadata_present)
     core["runner"] = runner
     core["jobs"] = jobs
     core["availability"]["runner_requests"] = runner_availability
@@ -551,8 +685,8 @@ def _case_compatibility(baseline: dict[str, Any], candidate: dict[str, Any]) -> 
     if left.get("case_id") != right.get("case_id"):
         return {"comparable": False, "reason": "benchmark case ids differ"}
     left_base, right_base = left.get("base_revision"), right.get("base_revision")
-    if not left_base or not right_base:
-        return {"comparable": False, "reason": "both reports must record the exact base revision"}
+    if not _is_exact_git_revision(left_base) or not _is_exact_git_revision(right_base):
+        return {"comparable": False, "reason": "both reports must record an exact 40-hex Git base revision"}
     if left_base != right_base:
         return {"comparable": False, "reason": "benchmark base revisions differ"}
     return {"comparable": True, "reason": None}

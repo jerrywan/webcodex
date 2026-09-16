@@ -314,6 +314,65 @@ class AgentLoopReportTests(unittest.TestCase):
         self.assertEqual(result["runner"]["requests_observed"], 1)
         self.assertEqual(result["runner"]["by_kind"], {"read_files": 1})
 
+    def test_empty_session_selection_excludes_unrelated_trace_supplement(self) -> None:
+        self.insert_event("other", session="wc_sess_other", trace_id="trace-other")
+        trace_root = self.write_trace(
+            "trace-other",
+            [
+                {
+                    "event": "tool_runner_request_enqueued",
+                    "server_trace_id": "trace-other",
+                    "runner_request_id": "req-other",
+                    "runner_request_kind": "run_process",
+                }
+            ],
+        )
+
+        result = self.summarize(
+            trace_root=trace_root,
+            workflow_session_id="wc_sess_empty",
+        )
+
+        self.assertEqual(result["evidence"]["audit_events"], 0)
+        self.assertEqual(result["outer_calls"]["total"], 0)
+        self.assertEqual(result["runner"]["requests_observed"], 0)
+        self.assertEqual(result["runner"]["by_kind"], {})
+
+    def test_workflow_session_selection_requires_action_audit(self) -> None:
+        trace_root = self.write_trace(
+            "trace-a",
+            [{"event": "tool_handler_returned", "server_trace_id": "trace-a"}],
+        )
+
+        with self.assertRaisesRegex(report.ReportError, "requires --audit-db"):
+            report.summarize(
+                trace_root=trace_root,
+                audit_db=None,
+                workflow_session_id="wc_sess_test",
+                case_manifest=None,
+                case_id=None,
+                variant=None,
+                base_revision=None,
+            )
+
+    def test_empty_trace_root_does_not_turn_missing_runner_evidence_into_zero(self) -> None:
+        trace_root = self.root / "empty-traces"
+        trace_root.mkdir()
+
+        result = report.summarize(
+            trace_root=trace_root,
+            audit_db=None,
+            workflow_session_id=None,
+            case_manifest=None,
+            case_id=None,
+            variant=None,
+            base_revision=None,
+        )
+
+        self.assertIsNone(result["runner"]["requests_observed"])
+        self.assertFalse(result["availability"]["runner_requests"]["available"])
+        self.assertIsNone(result["jobs"]["runner_job_ids_observed"])
+
     def test_malformed_jsonl_fails_closed(self) -> None:
         trace_root = self.root / "traces"
         path = trace_root / "trace-a" / "events.jsonl"
@@ -337,6 +396,47 @@ class AgentLoopReportTests(unittest.TestCase):
         self.assertEqual(trace_ids, {"trace-a"})
         self.assertEqual(len(events), 1)
         self.assertEqual(files, 1)
+
+    def test_other_session_meaningful_call_blocks_selected_session_gap(self) -> None:
+        self.insert_event(
+            "selected-1",
+            session="wc_sess_test",
+            started=100,
+            handed=120,
+            window="hashed-window-a",
+        )
+        self.insert_event(
+            "other-session",
+            session="wc_sess_other",
+            tool="run_process",
+            started=150,
+            handed=170,
+            transition="serial",
+            window="hashed-window-a",
+        )
+        self.insert_event(
+            "selected-2",
+            session="wc_sess_test",
+            started=200,
+            handed=220,
+            transition="serial",
+            window="hashed-window-a",
+        )
+        with sqlite3.connect(self.audit_db) as connection:
+            connection.execute(
+                "UPDATE action_events SET summary_json = 'not-json' WHERE event_id = 'other-session'"
+            )
+
+        result = self.summarize()
+        metric = result["timing"]["outside_webcodex_gap_ms"]
+
+        self.assertEqual(result["outer_calls"]["total"], 2)
+        self.assertEqual(result["tools"]["outer_by_name"], {"read_files": 2})
+        self.assertIsNone(metric["total"])
+        self.assertEqual(metric["observed_total"], 0)
+        self.assertEqual(metric["samples"], 0)
+        self.assertEqual(metric["missing"], 1)
+        self.assertFalse(result["availability"]["window_timing"]["available"])
 
     def test_unrelated_window_does_not_participate_in_gap(self) -> None:
         self.insert_event("a1", started=100, handed=120, window="hashed-window-a")
@@ -463,6 +563,26 @@ class AgentLoopReportTests(unittest.TestCase):
         del broken["cases"][0]["validation"]
         with self.assertRaisesRegex(report.ReportError, "validation"):
             report.validate_case_manifest(broken)
+
+    def test_benchmark_case_requires_exact_git_base_revision(self) -> None:
+        with self.assertRaisesRegex(report.ReportError, "exact 40-hex Git commit"):
+            report._benchmark_metadata(
+                case_manifest=None,
+                case_id="focused_edit_validation",
+                variant="direct",
+                base_revision="main",
+            )
+
+    def test_compare_case_compatibility_requires_exact_git_base_revision(self) -> None:
+        baseline = {"benchmark": {"case_id": "focused_edit_validation", "base_revision": "main"}}
+        candidate = {"benchmark": {"case_id": "focused_edit_validation", "base_revision": "main"}}
+        self.assertEqual(
+            report._case_compatibility(baseline, candidate),
+            {
+                "comparable": False,
+                "reason": "both reports must record an exact 40-hex Git base revision",
+            },
+        )
 
     def test_compare_case_compatibility_requires_same_case_and_base(self) -> None:
         self.insert_event("event")

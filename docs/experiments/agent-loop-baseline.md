@@ -53,7 +53,12 @@ outside_webcodex_gap_i = request_observed_at_(i+1) - response_handed_at_i
 
 The latter may include model inference, host scheduling, network delay, UI delay,
 or user delay. It must not be named `model_think_time` or `reasoning_time`.
-Non-meaningful calls do not consume the meaningful predecessor. Overlap is counted
+Non-meaningful calls do not consume the meaningful predecessor. When a report is
+scoped to one Workflow Session or trace set, the profiler privately replays
+same-Window/same-principal meaningful ActionAudit rows across the selected span so
+an interleaved call outside the selection cannot be skipped over. Such context
+rows never contribute call/tool/failure counts; if the real canonical predecessor
+is outside the selection, that selected gap remains unavailable. Overlap is counted
 separately and never converted into a negative gap. Streaming handoff does not
 prove response completion. Continuity breaks remain missing evidence.
 
@@ -92,8 +97,10 @@ work.
 
 ## Capture and summarize a run
 
-Record the exact Workflow Session id and base revision for each real run. The core
-report needs only the server's ActionAudit SQLite database:
+Record the exact Workflow Session id and 40-hex Git base revision for each real
+run. Session selection is authoritative only through ActionAudit; trace-only input
+cannot apply `--workflow-session-id`. The core report needs only the server's
+ActionAudit SQLite database:
 
 ```bash
 python3 scripts/agent_loop_report.py summarize \
