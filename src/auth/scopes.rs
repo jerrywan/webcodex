@@ -656,12 +656,12 @@ mod tests {
                 OAuthToolScopePolicy::Require(SCOPE_PROJECT_WRITE),
             ),
             (
-                "computer_list_windows",
+                "computer_observe",
                 OAuthToolScopePolicy::Require(SCOPE_COMPUTER_READ),
             ),
             (
-                "computer_snapshot",
-                OAuthToolScopePolicy::Require(SCOPE_COMPUTER_READ),
+                "computer_control",
+                OAuthToolScopePolicy::RequireAny(&[SCOPE_COMPUTER_CONTROL, SCOPE_COMPUTER_LAUNCH]),
             ),
             (
                 "computer_save_snapshot",
@@ -740,11 +740,9 @@ mod tests {
             "artifact_upload_finish",
             "artifact_upload_abort",
             "apply_unified_diff",
-            "computer_list_windows",
-            "computer_find_elements",
-            "computer_element_state",
-            "computer_activate_window",
-            "computer_snapshot",
+            "computer_observe",
+            "computer_control",
+            "computer_save_snapshot",
             "run_shell",
             "cargo_test",
         ] {
