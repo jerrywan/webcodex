@@ -187,6 +187,24 @@ async fn skill_load_is_exact_case_insensitive_and_fails_closed_on_ambiguity() {
     );
     assert!(loaded.output["catalog_revision"].as_str().is_some());
 
+    write_skill(
+        root.path(),
+        "unicode-name",
+        "Maße",
+        "Unicode case-fold guidance",
+        "unicode body\n",
+    );
+    let (unicode_loaded, _) = call_kernel_with_local_agent(
+        &runtime,
+        "skill-load-project",
+        "skill_load",
+        json!({"project": project, "name": "MASSE"}),
+        true,
+    )
+    .await;
+    assert!(unicode_loaded.success, "{:?}", unicode_loaded.error);
+    assert_eq!(unicode_loaded.output["name"], "Maße");
+
     let (substring, _) = call_kernel_with_local_agent(
         &runtime,
         "skill-load-project",
@@ -218,6 +236,32 @@ async fn skill_load_is_exact_case_insensitive_and_fails_closed_on_ambiguity() {
     assert_eq!(ambiguous.output["candidate_count"], 2);
     assert_eq!(ambiguous.output["candidates"].as_array().unwrap().len(), 2);
     assert!(ambiguous.output.get("text").is_none());
+    assert!(ambiguous.output.get("name").is_none());
+
+    let (listed, _) = call_kernel_with_local_agent(
+        &runtime,
+        "skill-load-project",
+        "skill_list",
+        json!({"project": project, "query": "time-tracking", "limit": 10}),
+        true,
+    )
+    .await;
+    assert!(listed.success, "{:?}", listed.error);
+    let collisions = listed.output["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|skill| {
+            matches!(
+                skill["name"].as_str(),
+                Some("time-tracking" | "Time-Tracking")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(collisions.len(), 2);
+    assert!(collisions
+        .iter()
+        .all(|skill| skill["name_conflict"] == true));
 }
 
 #[derive(Debug, Clone)]

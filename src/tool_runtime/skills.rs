@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Component;
 use std::time::{Duration, Instant};
+use unicase::UniCase;
 use webcodex_core::runner_skill::{
     RunnerSkillDescriptor, RunnerSkillListResponse, RunnerSkillReadResponse, RunnerSkillRequest,
     RunnerSkillResolveResponse, RunnerSkillSource,
@@ -845,17 +846,21 @@ impl ToolRuntime {
             Ok(catalog) => catalog,
             Err(_) => return skill_error("skill_catalog_unavailable", &project.resolved_id, None),
         };
-        let matches = catalog
-            .skills
-            .iter()
-            .filter(|skill| skill.descriptor.name.eq_ignore_ascii_case(&name))
-            .collect::<Vec<_>>();
+        let matches = match exact_skill_name_matches(&catalog, &name) {
+            Ok(matches) => matches,
+            Err(kind) => {
+                return skill_error(
+                    kind,
+                    &project.resolved_id,
+                    Some(json!({
+                        "catalog_revision": catalog.catalog_revision,
+                        "discovery_truncated": true,
+                    })),
+                )
+            }
+        };
         if matches.is_empty() {
-            return skill_error(
-                "skill_not_found",
-                &project.resolved_id,
-                Some(json!({"name": name})),
-            );
+            return skill_error("skill_not_found", &project.resolved_id, None);
         }
         if matches.len() != 1 {
             let candidates = matches
@@ -876,7 +881,6 @@ impl ToolRuntime {
                 "skill_name_ambiguous",
                 &project.resolved_id,
                 Some(json!({
-                    "name": name,
                     "candidate_count": matches.len(),
                     "candidates": candidates,
                     "candidates_truncated": matches.len() > 8,
@@ -1672,17 +1676,7 @@ impl ToolRuntime {
             });
         }
         skills.sort_by(|left, right| left.order_key.cmp(&right.order_key));
-        let mut counts = BTreeMap::<String, usize>::new();
-        for skill in &skills {
-            *counts.entry(skill.descriptor.name.clone()).or_default() += 1;
-        }
-        for skill in &mut skills {
-            skill.descriptor.name_conflict = counts
-                .get(&skill.descriptor.name)
-                .copied()
-                .unwrap_or_default()
-                > 1;
-        }
+        recompute_name_conflicts(&mut skills);
         let catalog_revision =
             catalog_revision(&skills, invalid_count, &diagnostics, discovery_truncated);
         Ok(SkillCatalog {
@@ -2203,14 +2197,35 @@ fn uncertain_skill_store_error(kind: &str) -> bool {
     )
 }
 
+fn skill_name_key(name: &str) -> String {
+    UniCase::unicode(name).to_folded_case()
+}
+
+fn exact_skill_name_matches<'a>(
+    catalog: &'a SkillCatalog,
+    name: &str,
+) -> Result<Vec<&'a CatalogSkill>, &'static str> {
+    if catalog.discovery_truncated {
+        return Err("skill_catalog_truncated");
+    }
+    let key = skill_name_key(name);
+    Ok(catalog
+        .skills
+        .iter()
+        .filter(|skill| skill_name_key(&skill.descriptor.name) == key)
+        .collect())
+}
+
 fn recompute_name_conflicts(skills: &mut [CatalogSkill]) {
     let mut counts = BTreeMap::<String, usize>::new();
     for skill in skills.iter() {
-        *counts.entry(skill.descriptor.name.clone()).or_default() += 1;
+        *counts
+            .entry(skill_name_key(&skill.descriptor.name))
+            .or_default() += 1;
     }
     for skill in skills {
         skill.descriptor.name_conflict = counts
-            .get(&skill.descriptor.name)
+            .get(&skill_name_key(&skill.descriptor.name))
             .copied()
             .unwrap_or_default()
             > 1;
@@ -2396,6 +2411,34 @@ mod tests {
         assert_ne!(a, skill_id("agent:a:demo", "bar"));
         assert!(valid_skill_id(&a));
         assert!(!a.contains(SKILL_ROOT));
+    }
+
+    #[test]
+    fn exact_name_selection_fails_closed_when_catalog_discovery_is_truncated() {
+        let skills = vec![CatalogSkill {
+            descriptor: SkillDescriptor {
+                skill_id: "wc_skill_AAAAAAAAAAAAAAAAAAAAAg".to_string(),
+                name: "demo".to_string(),
+                description: "demo".to_string(),
+                definition_revision: "a".repeat(64),
+                package_revision: None,
+                source_scope: "project",
+                trust: "project_content",
+                name_conflict: false,
+            },
+            order_key: "demo".to_string(),
+        }];
+        let catalog = SkillCatalog {
+            catalog_revision: catalog_revision(&skills, 0, &[], true),
+            skills,
+            invalid_count: 0,
+            diagnostics: Vec::new(),
+            discovery_truncated: true,
+        };
+        assert_eq!(
+            exact_skill_name_matches(&catalog, "demo").unwrap_err(),
+            "skill_catalog_truncated"
+        );
     }
 
     #[test]
