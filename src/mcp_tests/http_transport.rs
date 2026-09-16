@@ -912,6 +912,141 @@ async fn mcp_oauth_tools_call_persists_user_and_client_attribution() {
     assert_eq!(attrs.1.as_deref(), Some(user.id.as_str()));
     assert_eq!(attrs.2.as_deref(), Some(client.client_id.as_str()));
 }
+async fn authority_probe(
+    service: &Service,
+    host: &str,
+    origin: Option<&str>,
+    forwarded_host: Option<&str>,
+) -> StatusCode {
+    let mut request = TestClient::post("http://localhost/mcp")
+        .add_header("host", host, true)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {}
+        }));
+    if let Some(origin) = origin {
+        request = request.add_header("origin", origin, true);
+    }
+    if let Some(forwarded_host) = forwarded_host {
+        request = request
+            .add_header("x-forwarded-host", forwarded_host, true)
+            .add_header("x-forwarded-proto", "http", true);
+    }
+    let response = request.send(service).await;
+    effective_status(&response)
+}
+
+#[tokio::test]
+async fn http_mcp_rejects_dns_rebinding_authority_before_jsonrpc_dispatch() {
+    let config = test_config(None);
+    let (_tmp, db) = test_db();
+    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let service = Service::new(build_test_router(config, db, runtime));
+
+    assert_eq!(
+        authority_probe(
+            &service,
+            "evil.example.com",
+            Some("http://evil.example.com"),
+            None,
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        authority_probe(
+            &service,
+            "evil.example.com",
+            Some("http://evil.example.com"),
+            Some("localhost"),
+        )
+        .await,
+        StatusCode::FORBIDDEN,
+        "client-supplied forwarded authority must not bypass Host validation"
+    );
+}
+
+#[tokio::test]
+async fn http_mcp_accepts_loopback_authorities_without_requiring_origin() {
+    let config = test_config(None);
+    let (_tmp, db) = test_db();
+    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let service = Service::new(build_test_router(config, db, runtime));
+
+    for host in ["localhost", "127.0.0.1", "[::1]"] {
+        assert_eq!(
+            authority_probe(&service, host, None, None).await,
+            StatusCode::OK,
+            "loopback Host {host} should remain valid without Origin"
+        );
+    }
+}
+
+#[tokio::test]
+async fn http_mcp_accepts_configured_public_authority_and_matching_origin() {
+    let mut env = crate::test_support::TestEnvGuard::new();
+    env.set("WEBCODEX_PUBLIC_URL", "https://mcp.example.test");
+    let config = test_config(None);
+    let (_tmp, db) = test_db();
+    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let service = Service::new(build_test_router(config, db, runtime));
+
+    assert_eq!(
+        authority_probe(
+            &service,
+            "mcp.example.test",
+            Some("https://mcp.example.test"),
+            None,
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        authority_probe(
+            &service,
+            "mcp.example.test:443",
+            Some("https://mcp.example.test"),
+            None,
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        authority_probe(
+            &service,
+            "mcp.example.test",
+            Some("http://mcp.example.test"),
+            None,
+        )
+        .await,
+        StatusCode::FORBIDDEN,
+        "configured HTTPS public origin must not accept an HTTP Origin"
+    );
+}
+
+#[tokio::test]
+async fn http_mcp_rejects_malformed_host_and_origin() {
+    let config = test_config(None);
+    let (_tmp, db) = test_db();
+    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let service = Service::new(build_test_router(config, db, runtime));
+
+    assert_eq!(
+        authority_probe(&service, "localhost:notaport", None, None).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        authority_probe(&service, "localhost", Some("not-an-origin"), None).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        authority_probe(&service, "localhost", Some("http://localhost/extra"), None,).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
 #[tokio::test]
 async fn http_mcp_initialize_success() {
     let config = test_config(Some("secret"));
