@@ -10,7 +10,10 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use webcodex_tool_contracts::{runtime_tool_composition_policy, ToolCompositionPolicy};
+use webcodex_tool_contracts::{
+    runtime_tool_composition_policy, runtime_tool_execution_contract, runtime_tool_metadata,
+    ToolCompositionPolicy, ToolEffect, ToolExecutionContinuation,
+};
 use webcodex_core::workflow_session_contract::{
     TOOL_ACCEPTED_EXIT_CODES_FIELD, TOOL_ASSERTION_NAME_FIELD,
     TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD, TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
@@ -33,6 +36,10 @@ pub(crate) struct OrchestrationPolicy {
     /// canonical Server-owned target/invocation fields below are always denied
     /// by the host and cannot be weakened by a frontend policy.
     pub(crate) additional_forbidden_argument_fields: &'static [&'static str],
+    /// Optional frontend-only cap for the synchronous handoff preference of
+    /// canonical tools whose continuation is observe_jobs. It never changes the
+    /// child's total execution timeout or Job identity.
+    pub(crate) nested_sync_wait_max_secs: Option<u64>,
 }
 
 impl OrchestrationPolicy {
@@ -78,6 +85,10 @@ pub(crate) struct OrchestrationCompositionSummary {
     pub(crate) returned_bytes: usize,
     pub(crate) nested_raw_result_bytes_total: usize,
     pub(crate) nested_tool_counts: BTreeMap<String, usize>,
+    pub(crate) consequential_calls: usize,
+    pub(crate) known_results: usize,
+    pub(crate) job_handoffs: usize,
+    pub(crate) outcome_unknown: usize,
 }
 
 #[derive(Debug, Default)]
@@ -131,6 +142,10 @@ impl OrchestrationCompositionAccumulator {
             returned_bytes,
             nested_raw_result_bytes_total: self.nested_raw_result_bytes_total,
             nested_tool_counts: self.nested_tool_counts.clone(),
+            consequential_calls: 0,
+            known_results: 0,
+            job_handoffs: 0,
+            outcome_unknown: 0,
         }
     }
 }
@@ -157,6 +172,124 @@ impl Drop for NestedCallGuard<'_> {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .finish_call(false, 0);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ConsequentialChildOutcome {
+    KnownResult,
+    JobHandoff,
+    OutcomeUnknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct ConsequentialChildReceipt {
+    pub(crate) ordinal: usize,
+    pub(crate) tool: String,
+    pub(crate) outcome: ConsequentialChildOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) continuation: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub(crate) struct OrchestrationEffectReceipt {
+    pub(crate) consequential_calls: usize,
+    pub(crate) known_results: usize,
+    pub(crate) job_handoffs: usize,
+    pub(crate) outcome_unknown: usize,
+    pub(crate) children: Vec<ConsequentialChildReceipt>,
+}
+
+#[derive(Debug, Default)]
+struct OrchestrationEffectAccumulator {
+    children: BTreeMap<usize, ConsequentialChildReceipt>,
+}
+
+impl OrchestrationEffectAccumulator {
+    fn begin_if_consequential(&mut self, ordinal: usize, tool_name: &str) {
+        if runtime_tool_metadata(tool_name).effect == ToolEffect::Observe {
+            return;
+        }
+        self.children.insert(
+            ordinal,
+            ConsequentialChildReceipt {
+                ordinal,
+                tool: tool_name.to_string(),
+                // Until canonical ToolRuntime returns trustworthy evidence, an
+                // already-dispatched consequential child is conservatively unknown.
+                outcome: ConsequentialChildOutcome::OutcomeUnknown,
+                job_id: None,
+                continuation: None,
+            },
+        );
+    }
+
+    fn remove(&mut self, ordinal: usize) {
+        self.children.remove(&ordinal);
+    }
+
+    fn finish(&mut self, ordinal: usize, result: &super::ToolResult) {
+        let output = &result.output;
+        let execution_state = output.get("execution_state").and_then(Value::as_str);
+        let failure_kind = output.get("failure_kind").and_then(Value::as_str);
+        if execution_state == Some("outcome_unknown") || failure_kind == Some("outcome_unknown") {
+            if let Some(child) = self.children.get_mut(&ordinal) {
+                child.outcome = ConsequentialChildOutcome::OutcomeUnknown;
+                child.job_id = None;
+                child.continuation = None;
+            }
+            return;
+        }
+        if output.get("terminal").and_then(Value::as_bool) != Some(true) {
+            if let (Some(job_id), Some(continuation)) = (
+                output.get("job_id").and_then(Value::as_str),
+                output.get("continuation").filter(|value| value.is_object()),
+            ) {
+                if let Some(child) = self.children.get_mut(&ordinal) {
+                    child.outcome = ConsequentialChildOutcome::JobHandoff;
+                    child.job_id = Some(job_id.to_string());
+                    child.continuation = Some(continuation.clone());
+                }
+                return;
+            }
+        }
+        if execution_state == Some("not_started")
+            || output.get("command_started").and_then(Value::as_bool) == Some(false)
+        {
+            self.children.remove(&ordinal);
+            return;
+        }
+        if let Some(child) = self.children.get_mut(&ordinal) {
+            child.outcome = ConsequentialChildOutcome::KnownResult;
+            child.job_id = None;
+            child.continuation = None;
+        }
+    }
+
+    fn receipt(&self) -> OrchestrationEffectReceipt {
+        let children = self.children.values().cloned().collect::<Vec<_>>();
+        let known_results = children
+            .iter()
+            .filter(|child| child.outcome == ConsequentialChildOutcome::KnownResult)
+            .count();
+        let job_handoffs = children
+            .iter()
+            .filter(|child| child.outcome == ConsequentialChildOutcome::JobHandoff)
+            .count();
+        let outcome_unknown = children
+            .iter()
+            .filter(|child| child.outcome == ConsequentialChildOutcome::OutcomeUnknown)
+            .count();
+        OrchestrationEffectReceipt {
+            consequential_calls: children.len(),
+            known_results,
+            job_handoffs,
+            outcome_unknown,
+            children,
         }
     }
 }
@@ -223,6 +356,7 @@ pub(crate) struct CanonicalOrchestrationHost {
     composition: Mutex<OrchestrationCompositionAccumulator>,
     scheduling: RwLock<()>,
     accepting_nested_calls: Mutex<bool>,
+    effects: Mutex<OrchestrationEffectAccumulator>,
 }
 
 impl CanonicalOrchestrationHost {
@@ -246,6 +380,7 @@ impl CanonicalOrchestrationHost {
             composition: Mutex::new(OrchestrationCompositionAccumulator::default()),
             scheduling: RwLock::new(()),
             accepting_nested_calls: Mutex::new(true),
+            effects: Mutex::new(OrchestrationEffectAccumulator::default()),
         }
     }
 
@@ -288,16 +423,69 @@ impl CanonicalOrchestrationHost {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) async fn assert_scheduling_policy_fences_for_test(&self) {
+        let first_parallel = self
+            .acquire_scheduling_guard("read_files")
+            .await
+            .expect("read_files is Parallel");
+        assert!(
+            self.scheduling.try_read().is_ok(),
+            "Parallel + Parallel must be able to overlap"
+        );
+        assert!(
+            self.scheduling.try_write().is_err(),
+            "a Sequential child may not overlap an active Parallel child"
+        );
+        drop(first_parallel);
+
+        let sequential = self
+            .acquire_scheduling_guard("cargo_check")
+            .await
+            .expect("cargo_check is Sequential");
+        assert!(
+            self.scheduling.try_read().is_err(),
+            "Sequential + Parallel must not overlap"
+        );
+        assert!(
+            self.scheduling.try_write().is_err(),
+            "Sequential + Sequential must not overlap"
+        );
+        drop(sequential);
+
+        assert!(self.scheduling.try_read().is_ok());
+        assert!(self.scheduling.try_write().is_ok());
+        assert!(self.acquire_scheduling_guard("run_shell").await.is_err());
+        assert!(self
+            .acquire_scheduling_guard("future_unknown_tool")
+            .await
+            .is_err());
+    }
+
     pub(crate) fn composition_summary(
         &self,
         duration_ms: u64,
         returned_bytes: usize,
         slot_wait_ms: u64,
     ) -> OrchestrationCompositionSummary {
-        self.composition
+        let effects = self.effect_receipt();
+        let mut summary = self
+            .composition
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .summary(duration_ms, returned_bytes, slot_wait_ms)
+            .summary(duration_ms, returned_bytes, slot_wait_ms);
+        summary.consequential_calls = effects.consequential_calls;
+        summary.known_results = effects.known_results;
+        summary.job_handoffs = effects.job_handoffs;
+        summary.outcome_unknown = effects.outcome_unknown;
+        summary
+    }
+
+    pub(crate) fn effect_receipt(&self) -> OrchestrationEffectReceipt {
+        self.effects
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .receipt()
     }
 
     fn prepare_arguments(
@@ -334,6 +522,22 @@ impl CanonicalOrchestrationHost {
                 "nested tool arguments may not set frontend-reserved field `{field}`"
             )));
         }
+        if let Some(max_secs) = self.policy.nested_sync_wait_max_secs {
+            if runtime_tool_execution_contract(tool_name).is_some_and(|execution| {
+                execution.continuation == ToolExecutionContinuation::ObserveJobs
+            }) {
+                match arguments.get_mut("sync_wait_secs") {
+                    None => {
+                        arguments.insert("sync_wait_secs".to_string(), Value::from(max_secs));
+                    }
+                    Some(value) => {
+                        if value.as_u64().is_some_and(|seconds| seconds > max_secs) {
+                            *value = Value::from(max_secs);
+                        }
+                    }
+                }
+            }
+        }
         arguments.insert("project".to_string(), Value::String(self.project.clone()));
         arguments.insert(
             "session_id".to_string(),
@@ -364,6 +568,10 @@ impl CanonicalOrchestrationHost {
             // closes, a waiter that later acquires the scheduling fence cannot start.
             self.begin_nested_call(&tool_name)
         };
+        self.effects
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .begin_if_consequential(child_ordinal, &tool_name);
         scheduling_guard.keep_alive();
         tracing::debug!(
             orchestration_frontend = self.policy.frontend,
@@ -397,6 +605,17 @@ impl CanonicalOrchestrationHost {
         // Sequential policy fences only the canonical ToolRuntime invocation.
         // A returned durable Job owns its own lifecycle after this point.
         drop(scheduling_guard);
+        {
+            let mut effects = self
+                .effects
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if outcome.error_status.is_some() {
+                effects.remove(child_ordinal);
+            } else if let Some(result) = outcome.result.as_ref() {
+                effects.finish(child_ordinal, result);
+            }
+        }
         let nested_success = outcome.error_status.is_none()
             && outcome.result.as_ref().is_some_and(|result| result.success);
         let raw_result_bytes = outcome

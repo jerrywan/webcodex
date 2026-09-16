@@ -411,6 +411,10 @@ mod tests {
             returned_bytes: 3,
             nested_raw_result_bytes_total: 9,
             nested_tool_counts: std::collections::BTreeMap::from([("read_files".to_string(), 1)]),
+            consequential_calls: 0,
+            known_results: 0,
+            job_handoffs: 0,
+            outcome_unknown: 0,
         };
         observe_code_mode_composition(&PanicMetrics, &observation);
     }

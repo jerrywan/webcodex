@@ -5,8 +5,9 @@
 
 use crate::{
     normalized_max_concurrent_executions, normalized_timeout_ms, CodeModeError, CodeModeErrorKind,
-    CodeModeExecuteRequest, CodeModeExecution, CodeModeHost, CodeModeStats, CodeModeToolRequest,
-    CodeModeToolResponse, MAX_CONCURRENT_EXECUTIONS_ENV, MAX_CONCURRENT_TOOL_CALLS,
+    CodeModeExecuteRequest, CodeModeExecution, CodeModeHost, CodeModeStats, CodeModeTerminationMode,
+    CodeModeToolRequest, CodeModeToolResponse, MAX_CONCURRENT_EXECUTIONS_ENV,
+    MAX_CONCURRENT_TOOL_CALLS,
     MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS, MAX_SOURCE_BYTES, MAX_TOOL_CALLS,
 };
 use serde_json::{json, Value as JsonValue};
@@ -102,6 +103,19 @@ pub async fn execute(
     host: Arc<dyn CodeModeHost>,
     request: CodeModeExecuteRequest,
 ) -> Result<CodeModeExecution, CodeModeError> {
+    execute_with_termination_mode(
+        host,
+        request,
+        CodeModeTerminationMode::ReturnAtFrontendDeadline,
+    )
+    .await
+}
+
+pub async fn execute_with_termination_mode(
+    host: Arc<dyn CodeModeHost>,
+    request: CodeModeExecuteRequest,
+    termination_mode: CodeModeTerminationMode,
+) -> Result<CodeModeExecution, CodeModeError> {
     let started_at = Instant::now();
     validate_request(&request).map_err(|message| CodeModeError {
         kind: CodeModeErrorKind::InvalidRequest,
@@ -121,6 +135,9 @@ pub async fn execute(
             },
         })?,
         _ = tokio::time::sleep_until(deadline) => {
+            if termination_mode.drains_started_children() {
+                host.stop_accepting_calls();
+            }
             return Err(CodeModeError {
                 kind: CodeModeErrorKind::Timeout,
                 message: format!("code mode execution exceeded {timeout_ms} ms while waiting for a runtime slot"),
@@ -176,10 +193,20 @@ pub async fn execute(
 
         tokio::select! {
             _ = &mut deadline_sleep => {
+                if termination_mode.drains_started_children() {
+                    // Frontend failure closes admission before V8 termination. Runtime-queued
+                    // requests are discarded, while host tasks already started are drained
+                    // without attempting to resolve their Promises back into the terminated isolate.
+                    host.stop_accepting_calls();
+                    pending_calls.clear();
+                }
                 let _ = runtime.isolate_handle.terminate_execution();
                 let _ = runtime.command_tx.send(RuntimeCommand::Terminate);
-                let stats = finish_stats(started_at, tool_calls, max_in_flight, returned_bytes, slot_wait_ms);
                 join_runtime(runtime.join).await;
+                if termination_mode.drains_started_children() {
+                    drain_in_flight(&mut in_flight, &mut in_flight_count).await;
+                }
+                let stats = finish_stats(started_at, tool_calls, max_in_flight, returned_bytes, slot_wait_ms);
                 return Err(CodeModeError {
                     kind: CodeModeErrorKind::Timeout,
                     message: format!("code mode execution exceeded {timeout_ms} ms"),
@@ -196,8 +223,18 @@ pub async fn execute(
                         returned_bytes = returned_bytes.saturating_add(text.len());
                         content.push(text);
                     }
-                    Some(RuntimeEvent::Finished(failure)) => runtime_finished = Some(failure),
+                    Some(RuntimeEvent::Finished(failure)) => {
+                        if termination_mode.drains_started_children() {
+                            host.stop_accepting_calls();
+                            pending_calls.clear();
+                        }
+                        runtime_finished = Some(failure);
+                    }
                     None => {
+                        if termination_mode.drains_started_children() {
+                            host.stop_accepting_calls();
+                            pending_calls.clear();
+                        }
                         runtime_finished = Some(Some(RuntimeFailure {
                             kind: RuntimeFailureKind::Runtime,
                             message: "code mode runtime thread ended without a terminal result".to_string(),
@@ -308,6 +345,19 @@ async fn next_in_flight(
             Err(format!("nested tool host task failed: {error}")),
         )),
         None => None,
+    }
+}
+
+async fn drain_in_flight(
+    in_flight: &mut tokio::task::JoinSet<(String, Result<CodeModeToolResponse, String>)>,
+    in_flight_count: &mut usize,
+) {
+    while *in_flight_count > 0 {
+        if next_in_flight(in_flight).await.is_none() {
+            *in_flight_count = 0;
+            break;
+        }
+        *in_flight_count -= 1;
     }
 }
 
@@ -757,9 +807,9 @@ fn dynamic_import_callback<'s>(
 mod tests {
     use super::*;
     use crate::{CodeModeHostError, CodeModeHostFuture};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Mutex;
-    use tokio::sync::Barrier;
+    use tokio::sync::{Barrier, Notify, Semaphore};
 
     #[derive(Default)]
     struct RecordingHost {
@@ -989,6 +1039,167 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind, CodeModeErrorKind::OutputLimitExceeded);
         assert_eq!(error.stats.returned_bytes, 0);
+    }
+
+    struct LifecycleHost {
+        started: AtomicUsize,
+        completed: AtomicUsize,
+        stopped: AtomicBool,
+        state_changed: Notify,
+        release: Semaphore,
+    }
+
+    impl LifecycleHost {
+        fn new() -> Self {
+            Self {
+                started: AtomicUsize::new(0),
+                completed: AtomicUsize::new(0),
+                stopped: AtomicBool::new(false),
+                state_changed: Notify::new(),
+                release: Semaphore::new(0),
+            }
+        }
+
+        async fn wait_for_started(&self, expected: usize) {
+            loop {
+                let changed = self.state_changed.notified();
+                if self.started.load(Ordering::SeqCst) >= expected {
+                    return;
+                }
+                changed.await;
+            }
+        }
+
+        async fn wait_for_stopped(&self) {
+            loop {
+                let changed = self.state_changed.notified();
+                if self.stopped.load(Ordering::SeqCst) {
+                    return;
+                }
+                changed.await;
+            }
+        }
+    }
+
+    impl CodeModeHost for LifecycleHost {
+        fn invoke_tool(
+            &self,
+            _request: CodeModeToolRequest,
+        ) -> CodeModeHostFuture<'_, Result<CodeModeToolResponse, CodeModeHostError>> {
+            Box::pin(async move {
+                self.started.fetch_add(1, Ordering::SeqCst);
+                self.state_changed.notify_waiters();
+                let permit = self.release.acquire().await.map_err(|_| {
+                    CodeModeHostError::new("lifecycle test release semaphore closed")
+                })?;
+                permit.forget();
+                self.completed.fetch_add(1, Ordering::SeqCst);
+                self.state_changed.notify_waiters();
+                Ok(CodeModeToolResponse {
+                    success: true,
+                    output: json!({"ok": true}),
+                    error: None,
+                })
+            })
+        }
+
+        fn stop_accepting_calls(&self) {
+            self.stopped.store(true, Ordering::SeqCst);
+            self.state_changed.notify_waiters();
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn effectful_timeout_closes_frontend_and_drains_started_host_call() {
+        let host = Arc::new(LifecycleHost::new());
+        let mut req = request(
+            "const child = tools.effect({}); while (true) {}",
+            &["effect"],
+        );
+        req.timeout_ms = Some(1_000);
+        let host_for_execute = host.clone();
+        let task = tokio::spawn(async move {
+            execute_with_termination_mode(
+                host_for_execute,
+                req,
+                CodeModeTerminationMode::DrainStartedChildren,
+            )
+            .await
+        });
+
+        host.wait_for_started(1).await;
+        host.wait_for_stopped().await;
+        assert_eq!(host.started.load(Ordering::SeqCst), 1);
+        assert!(!task.is_finished(), "effect-aware return must wait for started host work");
+        host.release.add_permits(1);
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("drain must finish after the started host call completes")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(result.kind, CodeModeErrorKind::Timeout);
+        assert_eq!(host.completed.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn effectful_timeout_discards_runtime_queue_before_new_host_calls_start() {
+        let host = Arc::new(LifecycleHost::new());
+        let mut req = request(
+            r#"
+            for (let i = 0; i < 9; i++) tools.effect({i});
+            while (true) {}
+            "#,
+            &["effect"],
+        );
+        req.timeout_ms = Some(1_000);
+        let host_for_execute = host.clone();
+        let task = tokio::spawn(async move {
+            execute_with_termination_mode(
+                host_for_execute,
+                req,
+                CodeModeTerminationMode::DrainStartedChildren,
+            )
+            .await
+        });
+
+        host.wait_for_started(MAX_CONCURRENT_TOOL_CALLS).await;
+        host.wait_for_stopped().await;
+        assert_eq!(
+            host.started.load(Ordering::SeqCst),
+            MAX_CONCURRENT_TOOL_CALLS,
+            "the runtime-queued ninth call must not start after frontend closure"
+        );
+        host.release.add_permits(MAX_CONCURRENT_TOOL_CALLS);
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("started host calls must drain")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(result.kind, CodeModeErrorKind::Timeout);
+        assert_eq!(host.started.load(Ordering::SeqCst), MAX_CONCURRENT_TOOL_CALLS);
+        assert_eq!(host.completed.load(Ordering::SeqCst), MAX_CONCURRENT_TOOL_CALLS);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn e1_timeout_does_not_wait_for_blocked_host_call() {
+        let host = Arc::new(LifecycleHost::new());
+        let mut req = request(
+            "const child = tools.fake_read({}); while (true) {}",
+            &["fake_read"],
+        );
+        req.timeout_ms = Some(1_000);
+        let host_for_execute = host.clone();
+        let task = tokio::spawn(async move { execute(host_for_execute, req).await });
+
+        host.wait_for_started(1).await;
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("E1 timeout must remain the return boundary")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(result.kind, CodeModeErrorKind::Timeout);
+        assert!(!host.stopped.load(Ordering::SeqCst));
+        assert_eq!(host.completed.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

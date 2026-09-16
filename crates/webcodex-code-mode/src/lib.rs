@@ -41,6 +41,26 @@ pub trait CodeModeHost: Send + Sync {
         &self,
         request: CodeModeToolRequest,
     ) -> CodeModeHostFuture<'_, Result<CodeModeToolResponse, CodeModeHostError>>;
+
+    /// Monotonic frontend lifecycle fence. Effect-aware hosts use this to reject
+    /// nested calls that have not crossed their canonical dispatch boundary when
+    /// the frontend can no longer make decisions. Read-only/test hosts may no-op.
+    fn stop_accepting_calls(&self) {}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeModeTerminationMode {
+    /// Preserve E1 behavior: the frontend deadline is the return boundary.
+    ReturnAtFrontendDeadline,
+    /// Close nested-call admission, terminate the frontend, and drain host calls
+    /// already started by the runtime before returning effect-sensitive truth.
+    DrainStartedChildren,
+}
+
+impl CodeModeTerminationMode {
+    pub const fn drains_started_children(self) -> bool {
+        matches!(self, Self::DrainStartedChildren)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -164,4 +184,4 @@ mod tests {
 mod runtime;
 
 #[cfg(feature = "v8-runtime")]
-pub use runtime::execute;
+pub use runtime::{execute, execute_with_termination_mode};
