@@ -455,15 +455,6 @@
           "evidence_sha256": "ae122f912511f271c31f53fee8245c1dde3acfcff41c5db301341055cc9917e0"
         },
         {
-          "scenario": "sep-2164-resource-not-found",
-          "check_id": "sep-2164-data-uri",
-          "classification": "genuine_protocol_failure",
-          "reason": "The resource-not-found error omits the recommended data.uri echo.",
-          "evidence": "SEP-2164 resource-not-found error data; first GitHub Actions conformance baseline raw report",
-          "expected_status": "WARNING",
-          "evidence_sha256": "03e182c64ad2607c2749b90609cbf22dc87eda95ae0951f9c7a4c2f1227aabe0"
-        },
-        {
           "scenario": "server-stateless",
           "check_id": "sep-2575-http-server-no-independent-requests-on-stream",
           "classification": "missing_harness_fixture",
@@ -619,18 +610,5 @@
       }
     }
   },
-  "supplemental_findings": [
-    {
-      "id": "2026-streamed-resource-cache-hints",
-      "classification": "genuine_protocol_failure",
-      "evidence": "src/mcp_tests/artifact_export.rs::http_mcp_artifact_export_resources_read_streams_valid_json_blob",
-      "summary": "The streamed artifact resources/read result currently omits ttlMs and cacheScope. This baseline records the finding but does not change production framing."
-    },
-    {
-      "id": "2026-completed-task-nested-result-type",
-      "classification": "genuine_protocol_failure",
-      "evidence": "src/mcp_tests/project_connector.rs::http_project_connector_2026_tasks_poll_durable_execution_across_reopen",
-      "summary": "A completed Connector Task currently embeds its original tool result without resultType. This baseline records the finding but does not change production framing."
-    }
-  ]
+  "supplemental_findings": []
 }
