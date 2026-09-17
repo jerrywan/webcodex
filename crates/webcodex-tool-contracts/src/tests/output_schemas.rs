@@ -99,6 +99,34 @@ fn suggested_tool_call_schema_recognizer_is_strict_and_structural() {
 }
 
 #[test]
+fn session_summary_output_schema_exposes_durable_retention_separately_from_response_slicing() {
+    let schema = output_schema_for_tool("session_summary");
+    let properties = schema["properties"]["output"]["properties"]
+        .as_object()
+        .expect("session_summary output properties");
+
+    for field in [
+        "events_total",
+        "events_retained",
+        "events_evicted",
+        "ledger_first_retained_sequence",
+        "events_returned",
+        "first_retained_sequence",
+    ] {
+        assert_eq!(properties[field]["type"], "integer", "{field}");
+    }
+    for field in ["retention_truncated", "events_truncated"] {
+        assert_eq!(properties[field]["type"], "boolean", "{field}");
+    }
+    assert!(properties["retention_truncated"]["description"]
+        .as_str()
+        .is_some_and(|description| description.contains("durable Session history")));
+    assert!(properties["events_truncated"]["description"]
+        .as_str()
+        .is_some_and(|description| description.contains("response")));
+}
+
+#[test]
 fn observation_schemas_do_not_repeat_static_continuation_semantics() {
     let specs = registered_tool_specs();
     for name in [

@@ -112,6 +112,62 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 array_schema(open_object_schema("Bounded session event."), "Recent events."),
             ),
             (
+                "events_total",
+                schema_type(
+                    "integer",
+                    "Total events ever observed for this Session, including events already evicted by durable retention.",
+                ),
+            ),
+            (
+                "events_retained",
+                schema_type(
+                    "integer",
+                    "Events currently retained in the durable Session ledger before model-facing tail slicing.",
+                ),
+            ),
+            (
+                "events_evicted",
+                schema_type(
+                    "integer",
+                    "Events already evicted by the durable per-Session retention bound.",
+                ),
+            ),
+            (
+                "retention_truncated",
+                schema_type(
+                    "boolean",
+                    "True only when durable Session history has actually been evicted.",
+                ),
+            ),
+            (
+                "ledger_first_retained_sequence",
+                schema_type(
+                    "integer",
+                    "Zero-based absolute sequence of the first event still retained in the durable ledger.",
+                ),
+            ),
+            (
+                "events_returned",
+                schema_type(
+                    "integer",
+                    "Number of events returned in this bounded summary response.",
+                ),
+            ),
+            (
+                "events_truncated",
+                schema_type(
+                    "boolean",
+                    "True when the Session has observed more events than this response returns, whether from response slicing or durable eviction.",
+                ),
+            ),
+            (
+                "first_retained_sequence",
+                schema_type(
+                    "integer",
+                    "Legacy-named zero-based absolute sequence of the first event returned in this response.",
+                ),
+            ),
+            (
                 "messages",
                 open_object_schema("Bounded session message-board summary: counts plus at most five recent progress messages; never the full message queue."),
             ),
