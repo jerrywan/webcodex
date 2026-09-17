@@ -33,6 +33,12 @@ edition.workspace = true
 
 [features]
 default = []
+experimental-code-mode = [
+    "dep:webcodex-code-mode",
+    "webcodex-code-mode/v8-runtime",
+    "webcodex-tool-contracts/experimental-code-mode",
+    "webcodex-tool-runtime-contracts/experimental-code-mode",
+]
 workspace-checkpoints = [
     "webcodex-tool-contracts/workspace-checkpoints",
     "webcodex-tool-runtime-contracts/workspace-checkpoints",
