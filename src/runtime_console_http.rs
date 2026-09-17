@@ -422,8 +422,14 @@ struct RuntimeConsoleCodeModeComposition {
     nested_failures: usize,
     max_in_flight: usize,
     duration_ms: u64,
+    slot_wait_ms: u64,
     returned_bytes: usize,
+    nested_raw_result_bytes_total: usize,
     nested_tool_counts: BTreeMap<String, usize>,
+    consequential_calls: usize,
+    known_results: usize,
+    job_handoffs: usize,
+    outcome_unknown: usize,
 }
 
 #[cfg(feature = "experimental-code-mode")]
@@ -434,6 +440,10 @@ fn project_code_mode_composition(value: &Value) -> Option<RuntimeConsoleCodeMode
         .nested_tool_counts
         .values()
         .try_fold(0usize, |total, value| total.checked_add(*value))?;
+    let consequential_counted = projection
+        .known_results
+        .checked_add(projection.job_handoffs)
+        .and_then(|total| total.checked_add(projection.outcome_unknown))?;
     if projection.nested_calls > 32
         || projection.max_in_flight > 8
         || projection
@@ -441,6 +451,8 @@ fn project_code_mode_composition(value: &Value) -> Option<RuntimeConsoleCodeMode
             .saturating_add(projection.nested_failures)
             != projection.nested_calls
         || counted != projection.nested_calls
+        || consequential_counted != projection.consequential_calls
+        || projection.consequential_calls > projection.nested_calls
         || projection.nested_tool_counts.len() > 32
         || projection
             .nested_tool_counts
@@ -4153,12 +4165,18 @@ mod tests {
                         "nested_failures": 1,
                         "max_in_flight": 2,
                         "duration_ms": 11,
+                        "slot_wait_ms": 3,
                         "returned_bytes": 19,
+                        "nested_raw_result_bytes_total": 31,
                         "nested_tool_counts": {
                             "git_status": 1,
                             "read_files": 1,
                             "search_project_texts": 1
-                        }
+                        },
+                        "consequential_calls": 1,
+                        "known_results": 1,
+                        "job_handoffs": 0,
+                        "outcome_unknown": 0
                     }
                 }),
                 request_bytes: None,
@@ -4209,8 +4227,14 @@ mod tests {
         assert_eq!(composition.nested_failures, 1);
         assert_eq!(composition.max_in_flight, 2);
         assert_eq!(composition.duration_ms, 11);
+        assert_eq!(composition.slot_wait_ms, 3);
         assert_eq!(composition.returned_bytes, 19);
+        assert_eq!(composition.nested_raw_result_bytes_total, 31);
         assert_eq!(composition.nested_tool_counts.len(), 3);
+        assert_eq!(composition.consequential_calls, 1);
+        assert_eq!(composition.known_results, 1);
+        assert_eq!(composition.job_handoffs, 0);
+        assert_eq!(composition.outcome_unknown, 0);
 
         let invalid = json!({
             "nested_calls": 1,
@@ -4218,8 +4242,14 @@ mod tests {
             "nested_failures": 0,
             "max_in_flight": 1,
             "duration_ms": 1,
+            "slot_wait_ms": 0,
             "returned_bytes": 1,
-            "nested_tool_counts": {"run_shell": 1}
+            "nested_raw_result_bytes_total": 1,
+            "nested_tool_counts": {"run_shell": 1},
+            "consequential_calls": 0,
+            "known_results": 0,
+            "job_handoffs": 0,
+            "outcome_unknown": 0
         });
         assert!(project_code_mode_composition(&invalid).is_none());
         let events = db.list_action_events("code-mode-window-audit", 10).unwrap();

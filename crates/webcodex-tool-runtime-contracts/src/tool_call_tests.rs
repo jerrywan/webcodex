@@ -187,6 +187,29 @@ fn code_mode_exec_effectful_is_not_a_tool_call_without_feature() {
         .any(|spec| spec.name == "code_mode_exec_effectful"));
 }
 
+#[cfg(not(feature = "experimental-code-mode"))]
+#[test]
+fn code_mode_exec_mutating_is_not_a_tool_call_without_feature() {
+    let error = ToolCall::from_tool_name(
+        "code_mode_exec_mutating",
+        json!({
+            "project": "agent:special:demo",
+            "session_id": format!("wc_sess_{}", "3".repeat(32)),
+            "source": "text('x')",
+        }),
+    )
+    .expect_err("feature-off parser must reject code_mode_exec_mutating");
+    assert!(
+        error.contains("unknown tool 'code_mode_exec_mutating'"),
+        "{error}"
+    );
+    assert!(!is_known_tool_name("code_mode_exec_mutating"));
+    assert!(!known_tool_names().any(|name| name == "code_mode_exec_mutating"));
+    assert!(!registered_tool_specs()
+        .iter()
+        .any(|spec| spec.name == "code_mode_exec_mutating"));
+}
+
 #[test]
 fn apply_text_edits_shorthand_normalizes_once_to_canonical_call() {
     let revision = 3817291045227_u64;

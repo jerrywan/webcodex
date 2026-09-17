@@ -76,7 +76,7 @@ fn experimental_code_mode_is_visible_read_only_and_feature_scoped() {
             "{intent}"
         );
     }
-    assert!(!LOCAL_CODING_TOOL_NAMES.contains(&"code_mode_exec"));
+    assert!(is_adaptive_runtime_direct_tool("code_mode_exec"));
 }
 
 #[cfg(feature = "experimental-code-mode")]
@@ -145,7 +145,7 @@ fn experimental_code_mode_mutating_has_conservative_e2b_envelope() {
         .tools
         .contains(&"code_mode_exec_mutating"));
     assert!(CODING_INTENT_TOOL_NAMES.contains(&"code_mode_exec_mutating"));
-    assert!(!LOCAL_CODING_TOOL_NAMES.contains(&"code_mode_exec_mutating"));
+    assert!(is_adaptive_runtime_direct_tool("code_mode_exec_mutating"));
 }
 
 #[cfg(feature = "experimental-code-mode")]
@@ -240,7 +240,7 @@ fn experimental_code_mode_is_absent_without_feature() {
                 .all(|flow| !flow.tools.contains(&name)),
             "{name}"
         );
-        assert!(!LOCAL_CODING_TOOL_NAMES.contains(&name), "{name}");
+        assert!(!is_adaptive_runtime_direct_tool(name), "{name}");
     }
 }
 

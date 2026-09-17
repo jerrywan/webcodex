@@ -403,13 +403,10 @@ async fn http_mcp_code_mode_persists_only_bounded_composition_telemetry() {
         }],
     )
     .await;
-    let runtime = Arc::new(
-        ToolRuntime::new(
-            runner_registry,
-            Arc::new(crate::tool_runtime::RuntimeInfo::default()),
-        )
-        .with_runtime_exposure(RuntimeExposure::Runtime(ModelSurface::FullOperatorRuntime)),
-    );
+    let runtime = Arc::new(ToolRuntime::new(
+        runner_registry,
+        Arc::new(crate::tool_runtime::RuntimeInfo::default()),
+    ));
     let exact_project = "agent:code-mode-audit:demo";
     let auth = crate::auth::AuthContext {
         role: Some("admin".to_string()),
