@@ -217,10 +217,14 @@ async fn unauthorized_registration_is_existence_hiding_and_session_window_are_no
         .find(|spec| spec.name == "wait_for_job_terminal")
         .unwrap();
     assert_eq!(spec.input_schema["additionalProperties"], false);
+    for field in ["job_id", "idempotency_key"] {
+        assert_eq!(spec.input_schema["properties"][field]["minLength"], 1);
+        assert_eq!(spec.input_schema["properties"][field]["maxLength"], 128);
+    }
     for absent in ["session_id", "client_window", "after_observation_token"] {
         assert!(spec.input_schema["properties"].get(absent).is_none());
     }
-    let parsed_with_old_token = ToolCall::from_tool_name(
+    let old_token_error = ToolCall::from_tool_name(
         "wait_for_job_terminal",
         json!({
             "job_id": job_id.clone(),
@@ -228,14 +232,11 @@ async fn unauthorized_registration_is_existence_hiding_and_session_window_are_no
             "after_observation_token": "obsolete-process-local-cursor"
         }),
     )
-    .unwrap();
-    assert!(matches!(
-        parsed_with_old_token,
-        ToolCall::WaitForJobTerminal {
-            job_id: parsed_job_id,
-            idempotency_key
-        } if parsed_job_id == job_id && idempotency_key == "old-token-must-not-participate"
-    ));
+    .expect_err("obsolete observation cursors must fail closed instead of being ignored");
+    assert!(
+        old_token_error.contains("unknown field `after_observation_token`"),
+        "{old_token_error}"
+    );
 }
 
 #[tokio::test]
