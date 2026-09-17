@@ -769,10 +769,10 @@ async fn context_material_registry_enforces_scope_and_surface_before_provider() 
         .to_string()
         .contains("PRIVATE_MEMORY_BODY_MUST_NOT_LEAK_ON_DENIAL"));
 
-    let mut skill_surface_denied = ToolResult::ok(json!({"main": true}));
+    let mut skill_capability_denied = ToolResult::ok(json!({"main": true}));
     runtime
         .add_requested_context_projection(
-            &mut skill_surface_denied,
+            &mut skill_capability_denied,
             &["skills.catalog".to_string()],
             Some(&project),
             Some(&full),
@@ -783,14 +783,14 @@ async fn context_material_registry_enforces_scope_and_surface_before_provider() 
         )
         .await;
     assert_eq!(
-        skill_surface_denied.output["context_projection"]["materials"][0]["reason_code"],
+        skill_capability_denied.output["context_projection"]["materials"][0]["reason_code"],
         "context_material_surface_unavailable"
     );
 
-    let mut memory_surface_denied = ToolResult::ok(json!({"main": true}));
+    let mut memory_capability_denied = ToolResult::ok(json!({"main": true}));
     runtime
         .add_requested_context_projection(
-            &mut memory_surface_denied,
+            &mut memory_capability_denied,
             &["memory.bootstrap".to_string()],
             Some(&project),
             Some(&read_memory),
@@ -798,7 +798,7 @@ async fn context_material_registry_enforces_scope_and_surface_before_provider() 
         )
         .await;
     assert_eq!(
-        memory_surface_denied.output["context_projection"]["materials"][0]["reason_code"],
+        memory_capability_denied.output["context_projection"]["materials"][0]["reason_code"],
         "context_material_surface_unavailable"
     );
 

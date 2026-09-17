@@ -576,31 +576,12 @@ fi
 # 6. MCP surface smoke
 # ----------------------------------------------------------------------------
 
-# The runtime exposure is startup-selected and immutable. Without Connector
-# configuration, Runtime(ModelSurface) defaults to adaptive_runtime: a smaller
-# typed core plus one long-tail runtime gateway. local-coding-v1 remains the
-# explicit fixed compatibility surface, while full-operator-v1 exposes the complete operator tool set.
-# No runtime surface re-exposes removed legacy edit tools or ModelHidden tools
-# (job_tail) via MCP tools/list.
-MODEL_SURFACE_ENV="${WEBCODEX_MCP_MODEL_SURFACE:-}"
-case "$MODEL_SURFACE_ENV" in
-    "" | "adaptive-runtime-v1")
-        EXPECTED_SURFACE="adaptive_runtime"
-        ;;
-    "local-coding-v1")
-        EXPECTED_SURFACE="local_coding"
-        ;;
-    "full-operator-v1")
-        EXPECTED_SURFACE="full_operator_runtime"
-        ;;
-    *)
-        fail "unsupported WEBCODEX_MCP_MODEL_SURFACE=$MODEL_SURFACE_ENV"
-        EXPECTED_SURFACE="adaptive_runtime"
-        ;;
-esac
-log "expected runtime exposure: $EXPECTED_SURFACE"
+# WebCodex has one model-facing runtime contract: Adaptive Runtime. Legacy
+# initialize no longer reports a selectable runtime taxonomy. Ordinary
+# model-visible long-tail tools stay behind call_runtime_tool.
+log "expected runtime: Adaptive Runtime"
 
-log "---- MCP surface (/mcp) ----"
+log "---- MCP runtime (/mcp) ----"
 
 # initialize
 body="$(api_post /mcp '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')"
@@ -611,28 +592,22 @@ else
     fail "MCP initialize did not return a protocolVersion (body: ${body:0:300})"
 fi
 runtime_exposure="$(json_get "$body" result.serverInfo.runtimeExposure)"
-if [ "$runtime_exposure" = "$EXPECTED_SURFACE" ]; then
-    pass "MCP initialize runtimeExposure=$runtime_exposure"
+if [ -z "$runtime_exposure" ]; then
+    pass "MCP initialize omits obsolete runtimeExposure taxonomy"
 else
-    fail "MCP initialize runtimeExposure mismatch (expected $EXPECTED_SURFACE got '$runtime_exposure' body: ${body:0:300})"
+    fail "MCP initialize must omit runtimeExposure (got '$runtime_exposure')"
 fi
 
 # tools/list
 body="$(api_post /mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')"
 TOOLS_LIST_BODY="$body"
 tools_count="$(echo "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("result",{}).get("tools",[])))' 2>/dev/null || echo 0)"
-if [ "$EXPECTED_SURFACE" = "adaptive_runtime" ]; then
-    min_tools_count=21
+if [ "${tools_count:-0}" -ge 21 ]; then
+    pass "MCP tools/list returned $tools_count Adaptive tools"
 else
-    min_tools_count=30
+    fail "MCP tools/list returned too few Adaptive tools (got $tools_count; body: ${body:0:300})"
 fi
-if [ "${tools_count:-0}" -ge "$min_tools_count" ]; then
-    pass "MCP tools/list returned $tools_count tools"
-else
-    fail "MCP tools/list returned too few tools (got $tools_count expected >=$min_tools_count; body: ${body:0:300})"
-fi
-# Extract the exact tool names from MCP tools/list (never grep the raw body:
-# descriptions and schemas may legitimately mention other tool names).
+# Extract exact names; descriptions/schemas may mention other tools.
 mcp_tool_names() {
     echo "$TOOLS_LIST_BODY" | python3 -c '
 import json, sys
@@ -648,100 +623,32 @@ mcp_tool_present() {
     mcp_tool_names | grep -qx "$1"
 }
 
-if [ "$EXPECTED_SURFACE" = "local_coding" ]; then
-    # The local_coding canonical coding loop must expose its key tools.
-    mcp_canonical_present=1
-    for tname in work_on_project list_projects project_overview read_files \
-        search_project_texts apply_text_edits apply_unified_diff run_shell \
-        run_job observe_jobs list_jobs stop_job cargo_fmt cargo_check \
-        cargo_test validation_summary git_status git_diff_hunks show_changes \
-        finish_coding_task; do
-        if mcp_tool_present "$tname"; then
-            :
-        else
-            mcp_canonical_present=0
-            fail "MCP tools/list missing local_coding tool $tname"
-        fi
-    done
-    if [ "$mcp_canonical_present" = "1" ]; then
-        pass "MCP tools/list exposes the local_coding canonical coding loop"
+adaptive_present=1
+for tname in work_on_project runtime_status tool_manifest \
+    search_project_texts read_files apply_text_edits run_process run_shell observe_jobs list_jobs \
+    cargo_check cargo_test git_review_summary git_diff_hunks \
+    show_changes workspace_hygiene_check finish_coding_task call_runtime_tool; do
+    if ! mcp_tool_present "$tname"; then
+        adaptive_present=0
+        fail "MCP tools/list missing Adaptive direct tool $tname"
     fi
-    # Non-local_coding / old-granularity tools must NOT re-enter the model
-    # surface. replace_in_file was removed entirely; write_project_file is a
-    # retained whole-file write tool that stays ModelVisible only on the
-    # full-operator surface, never on local_coding.
-    mcp_compat_absent=1
-    for tname in write_project_file job_tail list_tools \
-        read_file search_project_text git_diff git_diff_summary job_status job_log \
-        start_coding_task; do
-        if mcp_tool_present "$tname"; then
-            mcp_compat_absent=0
-            fail "MCP tools/list must not expose $tname on local_coding"
-        fi
-    done
-    if [ "$mcp_compat_absent" = "1" ]; then
-        pass "MCP tools/list excludes non-local_coding tools on local_coding"
+done
+for tname in list_tools list_projects project_overview apply_patch run_script apply_unified_diff \
+    go_test validation_summary git_status goto_definition computer_observe computer_control computer_save_snapshot \
+    post_session_message coding_agent_start artifact_upload_begin; do
+    if mcp_tool_present "$tname"; then
+        adaptive_present=0
+        fail "MCP tools/list must keep long-tail tool $tname behind call_runtime_tool"
     fi
-elif [ "$EXPECTED_SURFACE" = "adaptive_runtime" ]; then
-    adaptive_present=1
-    for tname in work_on_project runtime_status tool_manifest \
-        search_project_texts read_files apply_text_edits run_process run_shell observe_jobs list_jobs \
-        cargo_check cargo_test git_review_summary git_diff_hunks \
-        show_changes workspace_hygiene_check finish_coding_task call_runtime_tool; do
-        if mcp_tool_present "$tname"; then
-            :
-        else
-            adaptive_present=0
-            fail "MCP tools/list missing adaptive_runtime tool $tname"
-        fi
-    done
-    for tname in list_tools list_projects project_overview apply_patch run_script apply_unified_diff \
-        go_test validation_summary git_status goto_definition computer_observe computer_control computer_save_snapshot \
-        post_session_message coding_agent_start artifact_upload_begin; do
-        if mcp_tool_present "$tname"; then
-            adaptive_present=0
-            fail "MCP tools/list must keep long-tail tool $tname behind call_runtime_tool"
-        fi
-    done
-    if [ "$adaptive_present" = "1" ]; then
-        pass "MCP tools/list exposes only the adaptive typed core plus gateway"
+done
+for retired in read_file search_project_text job_status job_log git_diff git_diff_summary; do
+    if mcp_tool_present "$retired"; then
+        adaptive_present=0
+        fail "MCP tools/list must not expose retired tool $retired"
     fi
-    for retired in read_file search_project_text job_status job_log git_diff git_diff_summary; do
-        if mcp_tool_present "$retired"; then
-            adaptive_present=0
-            fail "MCP tools/list must not expose retired tool $retired"
-        fi
-    done
-else
-    # full_operator_runtime: the complete operator tool surface.
-    mcp_operator_present=1
-    for tname in list_tools work_on_project finish_coding_task \
-        git_review_summary git_diff_hunks apply_unified_diff read_files \
-        search_project_texts run_shell run_job observe_jobs list_jobs show_changes; do
-        if mcp_tool_present "$tname"; then
-            :
-        else
-            mcp_operator_present=0
-            fail "MCP tools/list missing full-operator tool $tname"
-        fi
-    done
-    if [ "$mcp_operator_present" = "1" ]; then
-        pass "MCP tools/list exposes the full-operator tool surface"
-    fi
-    # ModelHidden and retired tools must never appear in MCP tools/list.
-    # write_project_file is ModelVisible and is part of the full-operator
-    # surface, so it is not asserted absent here. replace_in_file and the
-    # external start_coding_task compatibility entry were retired entirely.
-    mcp_hidden_absent=1
-    for tname in job_tail start_coding_task; do
-        if mcp_tool_present "$tname"; then
-            mcp_hidden_absent=0
-            fail "MCP tools/list must not expose ModelHidden tool $tname"
-        fi
-    done
-    if [ "$mcp_hidden_absent" = "1" ]; then
-        pass "MCP tools/list excludes ModelHidden tools"
-    fi
+done
+if [ "$adaptive_present" = "1" ]; then
+    pass "MCP tools/list exposes canonical Adaptive direct tools plus gateway"
 fi
 
 # tools/call list_projects — must return structuredContent with the agent project.
@@ -877,34 +784,18 @@ else
     fail "job_tail skipped: no JOB_ID available"
 fi
 
-# list_project_files remains a lower-frequency Adaptive gateway tool, while
-# list_jobs is part of the direct Adaptive core. Compatibility/full surfaces
-# expose both directly.
+# list_project_files is long-tail; list_jobs is direct Adaptive core.
 phase_a_present=1
-if [ "$EXPECTED_SURFACE" = "adaptive_runtime" ]; then
-    if mcp_tool_present "list_project_files"; then
-        phase_a_present=0
-        fail "MCP tools/list must keep list_project_files behind call_runtime_tool"
-    fi
-    if ! mcp_tool_present "list_jobs"; then
-        phase_a_present=0
-        fail "MCP tools/list missing direct Adaptive tool list_jobs"
-    fi
-    if [ "$phase_a_present" = "1" ]; then
-        pass "MCP adaptive_runtime keeps low-frequency file listing behind the gateway"
-    fi
-else
-    for tname in list_project_files list_jobs; do
-        if mcp_tool_present "$tname"; then
-            :
-        else
-            phase_a_present=0
-            fail "MCP tools/list missing $tname"
-        fi
-    done
-    if [ "$phase_a_present" = "1" ]; then
-        pass "MCP tools/list exposes the retained Phase A console tools"
-    fi
+if mcp_tool_present "list_project_files"; then
+    phase_a_present=0
+    fail "MCP tools/list must keep list_project_files behind call_runtime_tool"
+fi
+if ! mcp_tool_present "list_jobs"; then
+    phase_a_present=0
+    fail "MCP tools/list missing direct Adaptive tool list_jobs"
+fi
+if [ "$phase_a_present" = "1" ]; then
+    pass "Adaptive Runtime keeps low-frequency file listing behind the gateway"
 fi
 
 # ----------------------------------------------------------------------------
@@ -950,21 +841,15 @@ else
     fail "apply_unified_diff failed preflight mutated the worktree"
 fi
 
-if [ "$EXPECTED_SURFACE" = "adaptive_runtime" ]; then
-    if mcp_tool_present "apply_unified_diff"; then
-        fail "MCP adaptive_runtime must keep apply_unified_diff behind call_runtime_tool"
-    else
-        pass "MCP adaptive_runtime keeps apply_unified_diff behind call_runtime_tool"
-    fi
-elif mcp_tool_present "apply_unified_diff"; then
-    pass "MCP tools/list exposes apply_unified_diff"
+if mcp_tool_present "apply_unified_diff"; then
+    fail "MCP tools/list must keep apply_unified_diff behind call_runtime_tool"
 else
-    fail "MCP tools/list missing apply_unified_diff"
+    pass "Adaptive Runtime keeps apply_unified_diff behind call_runtime_tool"
 fi
 if mcp_tool_present "apply_patch"; then
-    pass "MCP tools/list exposes canonical apply_patch"
+    fail "MCP tools/list must keep apply_patch behind call_runtime_tool"
 else
-    fail "MCP tools/list missing canonical apply_patch"
+    pass "Adaptive Runtime keeps apply_patch behind call_runtime_tool"
 fi
 for retired_patch_tool in apply_patch_checked validate_patch; do
     if mcp_tool_present "$retired_patch_tool"; then

@@ -24,7 +24,6 @@ async fn handle_with_server_apps_enabled(
         None,
         None,
         crate::model_surface::effective_mcp_compact_schemas(
-            runtime.runtime_exposure(),
             crate::config::mcp_compact_schemas_override(),
         ),
         enabled,
@@ -36,7 +35,7 @@ async fn handle_with_server_apps_enabled(
 #[tokio::test]
 async fn final_changes_descriptor_is_explicit_v3_and_lazy_diff_is_app_only() {
     assert_eq!(MCP_CHANGES_UI_RESOURCE_URI, "ui://webcodex/changes/v3");
-    let runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
 
     let ui = handle_with_server_apps_enabled(
         &runtime,
@@ -132,8 +131,7 @@ async fn final_changes_descriptor_is_explicit_v3_and_lazy_diff_is_app_only() {
 #[tokio::test]
 async fn final_changes_resource_is_advertised_v3_while_legacy_changes_resources_stay_hidden() {
     const PUBLIC_URL: &str = "https://self-host.example";
-    let runtime =
-        test_runtime_with_surface_and_public_url(ModelSurface::FullOperatorRuntime, PUBLIC_URL);
+    let runtime = test_runtime_with_public_url(PUBLIC_URL);
     let resources = handle_with_server_apps_enabled(
         &runtime,
         rpc(
@@ -187,7 +185,7 @@ async fn final_changes_resource_is_advertised_v3_while_legacy_changes_resources_
 
 #[tokio::test]
 async fn changes_file_diff_call_requires_app_protocol_capability() {
-    let runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
     let args = json!({
         "name": "changes_file_diff",
         "arguments": {
@@ -227,7 +225,7 @@ async fn changes_file_diff_call_requires_app_protocol_capability() {
 
 #[tokio::test]
 async fn changes_file_diff_discards_unadvertised_recording_session_wrapper() {
-    let runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
     let project = "agent:missing:changes".to_string();
     let session = runtime.sessions.start_session(
         Some(project.clone()),

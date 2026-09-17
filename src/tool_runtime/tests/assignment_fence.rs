@@ -222,7 +222,7 @@ async fn e3_assignment_tool_round_trip_stale_projection_and_fresh_fence() {
 }
 
 #[test]
-fn e3_assignment_schema_parser_scope_local_coding_and_audit_are_synchronized() {
+fn e3_assignment_schema_parser_scope_and_audit_are_synchronized() {
     let specs = registered_tool_specs();
     let get = specs
         .iter()
@@ -302,14 +302,11 @@ fn e3_assignment_schema_parser_scope_local_coding_and_audit_are_synchronized() {
         } if fence == raw_fence
     ));
 
-    assert!(
-        crate::tool_runtime::tool_definition::LOCAL_CODING_TOOL_NAMES
-            .contains(&"get_session_assignment")
-    );
-    assert!(
-        crate::tool_runtime::tool_definition::LOCAL_CODING_TOOL_NAMES
-            .contains(&"complete_session_message")
-    );
+    let specs = registered_tool_specs();
+    for tool_name in ["get_session_assignment", "complete_session_message"] {
+        assert!(specs.iter().any(|spec| spec.name == tool_name));
+        assert!(crate::tool_runtime::tool_definition::is_model_visible_tool_name(tool_name));
+    }
     assert_eq!(
         oauth_scope_policy_for_runtime_tool("get_session_assignment"),
         OAuthToolScopePolicy::Require(SCOPE_RUNTIME_READ)

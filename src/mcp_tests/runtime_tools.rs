@@ -4,15 +4,15 @@ use super::*;
 // runtime_status via MCP tools/list and tools/call
 // =========================================================================
 
-// Full Operator is a compatibility surface whose unset compact-schema policy
-// remains full, including outputSchema. Serialize it with process-global env
-// tests so a concurrent override cannot change the observed contract.
+// An explicit compact-schema=false override keeps full outputSchema projection.
+// Serialize it with process-global env tests so a concurrent override cannot
+// change the observed contract.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux_flags() {
     let mut env = crate::test_support::TestEnvGuard::new();
     env.remove("WEBCODEX_MCP_COMPACT_SCHEMAS");
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let outcome = handle_mcp_request(
         &runtime,
         rpc("tools/list", Some(Value::from(10)), json!({})),
@@ -124,15 +124,29 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
         "include_workspace must not be required in MCP schema"
     );
 
-    let update = tool("update_session_context");
+    let registered = crate::tool_runtime::registered_tool_specs();
+    let registered_tool = |name: &str| {
+        registered
+            .iter()
+            .find(|spec| spec.name == name)
+            .unwrap_or_else(|| panic!("missing registered ToolSpec {name}"))
+    };
+    assert!(tools
+        .iter()
+        .all(|tool| tool["name"] != "update_session_context"));
+    let update = registered_tool("update_session_context");
     assert_eq!(
-        update["inputSchema"]["required"],
+        update.input_schema["required"],
         json!(["project", "session_id", "execution_context"])
     );
-    assert_eq!(update["inputSchema"]["additionalProperties"], false);
+    assert_eq!(update.input_schema["additionalProperties"], false);
     assert_eq!(
-        update["inputSchema"]["properties"]["execution_context"]["additionalProperties"],
+        update.input_schema["properties"]["execution_context"]["additionalProperties"],
         false
+    );
+    assert_eq!(
+        crate::model_surface::adaptive_runtime_tool_invocation_route("update_session_context"),
+        ("gateway", Some("call_runtime_tool"))
     );
 
     let runtime_props = tool("runtime_status")["inputSchema"]["properties"]
@@ -146,8 +160,13 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
         assert_eq!(runtime_props[field]["type"], "boolean");
     }
 
-    let overview = tool("project_overview");
-    let overview_props = overview["inputSchema"]["properties"]
+    assert!(tools.iter().all(|tool| tool["name"] != "project_overview"));
+    let overview = registered_tool("project_overview");
+    assert_eq!(
+        crate::model_surface::adaptive_runtime_tool_invocation_route("project_overview"),
+        ("gateway", Some("call_runtime_tool"))
+    );
+    let overview_props = overview.input_schema["properties"]
         .as_object()
         .expect("project_overview inputSchema properties");
     for field in ["project", "path", "max_depth", "limit"] {
@@ -156,7 +175,7 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
             "MCP project_overview schema should expose {field}"
         );
     }
-    let overview_output = overview["outputSchema"]["properties"]["output"]["properties"]
+    let overview_output = overview.output_schema["properties"]["output"]["properties"]
         .as_object()
         .expect("project_overview outputSchema properties");
     for field in ["project_types", "key_files", "top_level", "scan"] {
@@ -169,9 +188,8 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
 
 #[tokio::test]
 async fn mcp_tools_call_runtime_status_returns_content() {
-    // runtime_status is not part of the local_coding surface; select the full
-    // operator surface so the call reaches dispatch.
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    // runtime_status is part of the canonical Adaptive direct set.
+    let runtime = test_runtime();
     let outcome = handle_mcp_request(
         &runtime,
         rpc(

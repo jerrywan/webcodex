@@ -1862,7 +1862,7 @@ pub enum ToolCall {
     },
 
     /// Search/list explicit durable project Memory. Model-hidden globally and
-    /// exposed only by the capable Stateless MCP Full Operator surface.
+    /// exposed only when Stateless MCP 2026 admits the Memory protocol capability.
     MemorySearch {
         project: String,
         #[serde(default)]

@@ -42,7 +42,6 @@ const READINESS_CLEANUP_SLACK: Duration = Duration::from_secs(2);
 const SHUTDOWN_OPERATION_WAIT: Duration = Duration::from_secs(5);
 const DESKTOP_STATE_MAX_BYTES: u64 = 256 * 1024;
 const DESKTOP_SERVER_ENV_MAX_BYTES: u64 = 256 * 1024;
-const DESKTOP_MCP_MODEL_SURFACE: &str = "adaptive-runtime-v1";
 const DESKTOP_MCP_COMPACT_SCHEMAS: &str = "true";
 static NEXT_STATE_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -2526,11 +2525,6 @@ fn ensure_desktop_server_defaults(path: &Path) -> DesktopResult<()> {
         })
     };
     let mut additions = Vec::new();
-    if !has_key("WEBCODEX_MCP_MODEL_SURFACE") {
-        additions.push(format!(
-            "WEBCODEX_MCP_MODEL_SURFACE={DESKTOP_MCP_MODEL_SURFACE}"
-        ));
-    }
     if !has_key("WEBCODEX_MCP_COMPACT_SCHEMAS") {
         additions.push(format!(
             "WEBCODEX_MCP_COMPACT_SCHEMAS={DESKTOP_MCP_COMPACT_SCHEMAS}"
@@ -3173,7 +3167,6 @@ mod tests {
         let once = std::fs::read_to_string(&env_file).unwrap();
         assert!(once.contains("WEBCODEX_TOKEN=secret\n"));
         assert!(once.contains("WEBCODEX_MCP_COMPACT_SCHEMAS=false\n"));
-        assert!(once.contains("WEBCODEX_MCP_MODEL_SURFACE=adaptive-runtime-v1\n"));
         assert_eq!(once.matches("WEBCODEX_MCP_COMPACT_SCHEMAS=").count(), 1);
 
         ensure_desktop_server_defaults(&env_file).unwrap();
@@ -3191,7 +3184,6 @@ mod tests {
         ensure_desktop_server_defaults(&env_file).unwrap();
         let content = std::fs::read_to_string(&env_file).unwrap();
         assert!(content.starts_with("WEBCODEX_ADDR=127.0.0.1:12345\n"));
-        assert!(content.contains("WEBCODEX_MCP_MODEL_SURFACE=adaptive-runtime-v1\n"));
         assert!(content.contains("WEBCODEX_MCP_COMPACT_SCHEMAS=true\n"));
         std::fs::remove_dir_all(dir).unwrap();
     }

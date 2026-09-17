@@ -84,7 +84,6 @@ async fn handle_with_server_apps_enabled(
         None,
         None,
         crate::model_surface::effective_mcp_compact_schemas(
-            runtime.runtime_exposure(),
             crate::config::mcp_compact_schemas_override(),
         ),
         server_mcp_apps_enabled,
@@ -96,11 +95,7 @@ async fn handle_with_server_apps_enabled(
 #[test]
 fn result_tool_app_metadata_is_capability_scoped_compact_safe_and_merge_safe() {
     for compact in [false, true] {
-        let enabled = mcp_tools_list_payload_with_compact_and_app(
-            ModelSurface::FullOperatorRuntime,
-            compact,
-            true,
-        );
+        let enabled = mcp_tools_list_payload_with_compact_and_app(compact, true);
         for name in RESULT_APP_TOOLS {
             assert!(super::super::presentation::tool_supports_result_app(name));
             assert_eq!(
@@ -113,12 +108,19 @@ fn result_tool_app_metadata_is_capability_scoped_compact_safe_and_merge_safe() {
         }
         for name in UNBOUND_RESULT_APP_TOOLS {
             assert!(!super::super::presentation::tool_supports_result_app(name));
-            assert_ne!(
-                tool(&enabled, name)
-                    .pointer("/_meta/ui/resourceUri")
-                    .and_then(Value::as_str),
-                Some(MCP_RESULT_UI_RESOURCE_URI)
-            );
+            if let Some(descriptor) = enabled["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == name)
+            {
+                assert_ne!(
+                    descriptor
+                        .pointer("/_meta/ui/resourceUri")
+                        .and_then(Value::as_str),
+                    Some(MCP_RESULT_UI_RESOURCE_URI)
+                );
+            }
         }
 
         assert_eq!(
@@ -134,11 +136,7 @@ fn result_tool_app_metadata_is_capability_scoped_compact_safe_and_merge_safe() {
             MCP_WORK_RESULT_UI_RESOURCE_URI
         );
 
-        let disabled = mcp_tools_list_payload_with_compact_and_app(
-            ModelSurface::FullOperatorRuntime,
-            compact,
-            false,
-        );
+        let disabled = mcp_tools_list_payload_with_compact_and_app(compact, false);
         for name in RESULT_APP_TOOLS {
             assert!(tool(&disabled, name).get("_meta").is_none());
         }
@@ -163,8 +161,7 @@ fn result_tool_app_metadata_is_capability_scoped_compact_safe_and_merge_safe() {
 #[tokio::test]
 async fn result_app_descriptor_and_resource_exposure_require_ui_operator_capability() {
     const PUBLIC_URL: &str = "https://self-host.example";
-    let runtime =
-        test_runtime_with_surface_and_public_url(ModelSurface::FullOperatorRuntime, PUBLIC_URL);
+    let runtime = test_runtime_with_public_url(PUBLIC_URL);
     assert_eq!(MCP_RESULT_UI_RESOURCE_URI, "ui://webcodex/changes/v2");
     assert_eq!(
         MCP_WORK_RESULT_UI_RESOURCE_URI,
@@ -197,12 +194,13 @@ async fn result_app_descriptor_and_resource_exposure_require_ui_operator_capabil
     assert!(tool(&ui_tools["result"], "present_work_result")["_meta"]
         .get("ui/resourceUri")
         .is_none());
-    for name in UNBOUND_RESULT_APP_TOOLS {
+    for descriptor in ui_tools["result"]["tools"].as_array().unwrap() {
         assert_ne!(
-            tool(&ui_tools["result"], name)
+            descriptor
                 .pointer("/_meta/ui/resourceUri")
                 .and_then(Value::as_str),
-            Some(MCP_RESULT_UI_RESOURCE_URI)
+            Some(MCP_RESULT_UI_RESOURCE_URI),
+            "legacy Result App resource must not be bound to any current tool descriptor"
         );
     }
 
@@ -321,8 +319,8 @@ async fn result_app_descriptor_and_resource_exposure_require_ui_operator_capabil
         .unwrap()
         .is_empty());
 
-    let local_runtime = test_runtime_with_surface(ModelSurface::LocalCoding);
-    let local_tools = handle_mcp_request(
+    let local_runtime = test_runtime();
+    let plain_tools = handle_mcp_request(
         &local_runtime,
         rpc(
             "tools/list",
@@ -332,10 +330,10 @@ async fn result_app_descriptor_and_resource_exposure_require_ui_operator_capabil
         None,
     )
     .await;
-    let McpOutcome::Ok(local_tools) = local_tools else {
-        panic!("expected LocalCoding tools/list");
+    let McpOutcome::Ok(plain_tools) = plain_tools else {
+        panic!("expected plain tools/list");
     };
-    assert!(local_tools["result"]["tools"]
+    assert!(plain_tools["result"]["tools"]
         .as_array()
         .unwrap()
         .iter()
@@ -344,23 +342,17 @@ async fn result_app_descriptor_and_resource_exposure_require_ui_operator_capabil
             .and_then(Value::as_str)
             != Some(MCP_RESULT_UI_RESOURCE_URI)));
 
-    assert!(!mcp_app_enabled(
-        true,
-        true,
-        ModelSurface::LocalCoding,
-        &mcp_2026_ui_params(json!({}))
-    ));
+    assert!(mcp_app_enabled(true, true, &mcp_2026_ui_params(json!({}))));
     assert!(!mcp_app_enabled(
         false,
         true,
-        ModelSurface::FullOperatorRuntime,
         &mcp_2026_ui_params(json!({}))
     ));
 }
 
 #[tokio::test]
 async fn server_mcp_apps_setting_disables_only_app_presentation() {
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
 
     let enabled = handle_with_server_apps_enabled(
         &runtime,
@@ -1993,7 +1985,7 @@ async fn mcp_show_changes_result(
 
 #[tokio::test]
 async fn mcp_job_presentation_tracks_real_running_to_terminal_transition() {
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let auth = result_app_auth();
     register_job_runner(&runtime, &auth).await;
     let started = runtime
@@ -2135,8 +2127,7 @@ async fn mcp_job_presentation_tracks_real_running_to_terminal_transition() {
 #[tokio::test]
 async fn mcp_validation_run_and_summary_use_real_canonical_contracts() {
     std::fs::create_dir_all("/tmp/result-app-demo").unwrap();
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime)
-        .with_validation_sync_wait(std::time::Duration::from_millis(500));
+    let runtime = test_runtime().with_validation_sync_wait(std::time::Duration::from_millis(500));
     let auth = result_app_auth();
     register_job_runner(&runtime, &auth).await;
     let project = "agent:result-app-runner:demo";
@@ -2209,8 +2200,11 @@ async fn mcp_validation_run_and_summary_use_real_canonical_contracts() {
             "tools/call",
             Some(json!(3221)),
             mcp_2026_ui_params(json!({
-                "name": "validation_summary",
-                "arguments": {"project": project, "session_id": session.session_id}
+                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "arguments": {
+                    "tool": "validation_summary",
+                    "arguments": {"project": project, "session_id": session.session_id}
+                }
             })),
         ),
         Some(&auth),
@@ -2246,8 +2240,11 @@ async fn mcp_validation_run_and_summary_use_real_canonical_contracts() {
             "tools/call",
             Some(json!(3222)),
             mcp_2026_ui_params(json!({
-                "name": "validation_summary",
-                "arguments": {"project": project, "session_id": session.session_id}
+                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "arguments": {
+                    "tool": "validation_summary",
+                    "arguments": {"project": project, "session_id": session.session_id}
+                }
             })),
         ),
         Some(&auth),
@@ -2271,8 +2268,11 @@ async fn mcp_validation_run_and_summary_use_real_canonical_contracts() {
             "tools/call",
             Some(json!(3223)),
             mcp_2026_params(json!({
-                "name": "validation_summary",
-                "arguments": {"project": project, "session_id": session.session_id}
+                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "arguments": {
+                    "tool": "validation_summary",
+                    "arguments": {"project": project, "session_id": session.session_id}
+                }
             })),
         ),
         Some(&auth),
@@ -2292,7 +2292,7 @@ async fn mcp_validation_run_and_summary_use_real_canonical_contracts() {
 
 #[tokio::test]
 async fn mcp_show_changes_uses_real_canonical_framing_and_app_gating() {
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let auth = result_app_auth();
     register_job_runner(&runtime, &auth).await;
 

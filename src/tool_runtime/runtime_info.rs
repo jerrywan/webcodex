@@ -67,17 +67,11 @@ impl RuntimeInfo {
 
 impl ToolRuntime {
     fn effective_config_status(&self) -> Value {
-        let lightweight_auth_available = matches!(
-            self.runtime_exposure(),
-            crate::model_surface::RuntimeExposure::Runtime(_)
-        );
         json!({
             "auth": {
-                "shared_key_enabled": lightweight_auth_available
-                    && self.runtime_info.auth_enabled
+                "shared_key_enabled": self.runtime_info.auth_enabled
                     && crate::auth::shared_key_enabled(),
-                "anonymous_enabled": lightweight_auth_available
-                    && self.runtime_info.auth_enabled
+                "anonymous_enabled": self.runtime_info.auth_enabled
                     && crate::auth::allow_anonymous_enabled(),
                 "oauth2_enabled": self.runtime_info.oauth2_enabled,
                 "oauth2_shared_key_bridge_enabled": self.runtime_info.oauth2_shared_key_bridge_enabled,
@@ -448,9 +442,7 @@ impl ToolRuntime {
 
         let mut output = json!({
             "service": "webcodex",
-            "runtime_exposure": self.runtime_exposure().name(),
             "mcp_compact_schemas": crate::model_surface::effective_mcp_compact_schemas(
-                self.runtime_exposure(),
                 crate::config::mcp_compact_schemas_override(),
             ),
             "effective_config": self.effective_config_status(),
@@ -649,9 +641,7 @@ impl ToolRuntime {
         let server_build = crate::build_info::runtime_build_info();
         ToolResult::ok(json!({
             "service": "webcodex",
-            "runtime_exposure": self.runtime_exposure().name(),
             "mcp_compact_schemas": crate::model_surface::effective_mcp_compact_schemas(
-                self.runtime_exposure(),
                 crate::config::mcp_compact_schemas_override(),
             ),
             "effective_config": self.effective_config_status(),
@@ -698,10 +688,6 @@ pub(crate) fn compact_runtime_status(status: &Value) -> Value {
         return json!({
             "compact": true,
             "service": status.get("service").cloned().unwrap_or_else(|| json!("webcodex")),
-            "runtime_exposure": status
-                .get("runtime_exposure")
-                .cloned()
-                .unwrap_or_else(|| json!(crate::model_surface::MODEL_SURFACE_LOCAL_CODING)),
             "mcp_compact_schemas": status.get("mcp_compact_schemas").cloned().unwrap_or_else(|| json!(false)),
             "effective_config": status.get("effective_config").cloned().unwrap_or(Value::Null),
             "auth_enabled": status.get("auth_enabled").cloned().unwrap_or_else(|| json!(false)),
@@ -728,10 +714,6 @@ pub(crate) fn compact_runtime_status(status: &Value) -> Value {
     let mut compact = json!({
         "compact": true,
         "service": status.get("service").cloned().unwrap_or_else(|| json!("webcodex")),
-        "runtime_exposure": status
-            .get("runtime_exposure")
-            .cloned()
-            .unwrap_or_else(|| json!(crate::model_surface::MODEL_SURFACE_LOCAL_CODING)),
         "mcp_compact_schemas": status.get("mcp_compact_schemas").cloned().unwrap_or_else(|| json!(false)),
         "effective_config": status.get("effective_config").cloned().unwrap_or(Value::Null),
         "auth_enabled": status.get("auth_enabled").cloned().unwrap_or_else(|| json!(false)),

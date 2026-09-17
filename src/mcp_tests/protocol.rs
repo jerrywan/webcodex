@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn mcp_initialize_returns_protocol_and_server_info() {
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let outcome = handle_mcp_request(
         &runtime,
         rpc("initialize", Some(Value::from(1)), json!({})),
@@ -16,10 +16,6 @@ async fn mcp_initialize_returns_protocol_and_server_info() {
             assert_eq!(value["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
             assert_eq!(value["result"]["serverInfo"]["name"], "webcodex");
             assert!(value["result"]["serverInfo"]["version"].is_string());
-            assert_eq!(
-                value["result"]["serverInfo"]["runtimeExposure"],
-                crate::model_surface::MODEL_SURFACE_FULL_OPERATOR_RUNTIME
-            );
             assert_eq!(
                 value["result"]["capabilities"]["tools"]["listChanged"],
                 false
@@ -190,7 +186,7 @@ async fn mcp_legacy_protocol_does_not_expose_tasks_extension_methods() {
 
 #[tokio::test]
 async fn mcp_stateless_tools_list_uses_2026_result_shape() {
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let outcome = handle_mcp_request(
         &runtime,
         rpc(

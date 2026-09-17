@@ -110,7 +110,6 @@ pub struct ToolRuntime {
     pub(crate) ssh_resource_gateway: Arc<crate::ssh_resource_gateway::SshResourceGatewayRuntime>,
     pub(crate) coding_agent_runs: Arc<super::coding_agent::CodingAgentServerState>,
     pub runtime_info: Arc<RuntimeInfo>,
-    runtime_exposure: crate::model_surface::RuntimeExposure,
     #[cfg(feature = "workspace-checkpoints")]
     pub(crate) checkpoint_store: checkpoint::CheckpointStore,
     pub(crate) sessions: sessions::SessionStore,
@@ -153,9 +152,8 @@ pub struct ToolRuntime {
     /// Sink for the workspace activity ledger (mutating tool executions).
     /// No-op unless the host injects a durable recorder.
     pub(crate) activity: Arc<dyn ActivityRecorder>,
-    /// Cross-surface connection observations (connector endpoint activity,
-    /// last successful meaningful tool call). Shared with the connector
-    /// runtime; never stores payloads or secrets.
+    /// Bounded connection/runtime observations such as endpoint activity and
+    /// last successful meaningful tool call. Never stores payloads or secrets.
     pub(crate) observations: Arc<RuntimeObservations>,
     /// Process-local payload-free view of currently in-flight MCP Window
     /// requests. It is observability only and intentionally resets on restart.
@@ -191,9 +189,6 @@ impl ToolRuntime {
             ),
             coding_agent_runs: Arc::new(super::coding_agent::CodingAgentServerState::default()),
             runtime_info,
-            runtime_exposure: crate::model_surface::RuntimeExposure::Runtime(
-                crate::model_surface::ModelSurface::LocalCoding,
-            ),
             #[cfg(feature = "workspace-checkpoints")]
             checkpoint_store: checkpoint::CheckpointStore::default(),
             sessions: sessions::SessionStore::default(),
@@ -226,32 +221,6 @@ impl ToolRuntime {
             communication_db: None,
             agent_continuations: None,
         }
-    }
-
-    pub(crate) fn with_runtime_exposure(
-        mut self,
-        runtime_exposure: crate::model_surface::RuntimeExposure,
-    ) -> Self {
-        self.runtime_exposure = runtime_exposure;
-        self
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_model_surface(
-        self,
-        model_surface: crate::model_surface::ModelSurface,
-    ) -> Self {
-        self.with_runtime_exposure(crate::model_surface::RuntimeExposure::Runtime(
-            model_surface,
-        ))
-    }
-
-    pub(crate) fn runtime_exposure(&self) -> crate::model_surface::RuntimeExposure {
-        self.runtime_exposure
-    }
-
-    pub(crate) fn model_surface(&self) -> Option<crate::model_surface::ModelSurface> {
-        self.runtime_exposure.model_surface()
     }
 
     /// Attach a durable workspace-activity recorder (server wiring).

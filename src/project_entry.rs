@@ -813,7 +813,6 @@ pub(super) async fn start_local_runtime(
         .env("WEBCODEX_OAUTH2_AUTH_CODE_TTL_SECS", "300")
         .env("WEBCODEX_OAUTH2_TRUSTED_MCP_FILE_CLIENT_IDS", "")
         .env("WEBCODEX_QUIC_ENABLED", "false")
-        .env_remove(crate::model_surface::MCP_MODEL_SURFACE_ENV)
         .env(
             crate::auth::PROJECT_GRANT_ID_ENV,
             config.project_grant_id(&paths),

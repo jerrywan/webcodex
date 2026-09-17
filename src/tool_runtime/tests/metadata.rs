@@ -1958,21 +1958,9 @@ fn runtime_status_input_schema_exposes_compact_flags() {
         .expect("runtime_status agents output description");
     assert!(agents_description.contains("stale_count"));
     assert!(!agents_description.contains("offline_count"));
-    let runtime_exposure_description = output_schema["properties"]["output"]["properties"]
-        ["runtime_exposure"]["description"]
-        .as_str()
-        .expect("runtime_status runtime_exposure output description");
-    for exposure in [
-        crate::model_surface::MODEL_SURFACE_LOCAL_CODING,
-        crate::model_surface::MODEL_SURFACE_ADAPTIVE_RUNTIME,
-        crate::model_surface::MODEL_SURFACE_FULL_OPERATOR_RUNTIME,
-    ] {
-        assert!(
-            runtime_exposure_description.contains(exposure),
-            "runtime_status runtime_exposure output description missing {exposure}"
-        );
-    }
-    assert!(!runtime_exposure_description.contains("canonical_connector"));
+    assert!(output_schema["properties"]["output"]["properties"]
+        .get("runtime_exposure")
+        .is_none());
     let compact_schemas =
         &output_schema["properties"]["output"]["properties"]["mcp_compact_schemas"];
     assert_eq!(compact_schemas["type"], "boolean");
@@ -2328,18 +2316,13 @@ async fn runtime_status_uses_agent_projects_as_effective() {
 
 #[tokio::test]
 async fn runtime_status_includes_build_metadata() {
-    let runtime =
-        test_runtime().with_model_surface(crate::model_surface::ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let result = runtime.dispatch(runtime_status_call()).await;
     assert!(result.success, "{:?}", result.error);
-    assert_eq!(
-        result.output["runtime_exposure"],
-        crate::model_surface::MODEL_SURFACE_FULL_OPERATOR_RUNTIME
-    );
+    assert!(result.output.get("runtime_exposure").is_none());
     assert_eq!(
         result.output["mcp_compact_schemas"],
         crate::model_surface::effective_mcp_compact_schemas(
-            runtime.runtime_exposure(),
             crate::config::mcp_compact_schemas_override(),
         )
     );
@@ -2429,45 +2412,20 @@ async fn runtime_status_preserves_allowlisted_effective_config_across_projection
 async fn runtime_status_reports_effective_mcp_compact_schema_policy() {
     let mut env = crate::test_support::TestEnvGuard::new();
     env.remove("WEBCODEX_MCP_COMPACT_SCHEMAS");
-
-    for (surface, expected) in [
-        (crate::model_surface::ModelSurface::LocalCoding, false),
-        (crate::model_surface::ModelSurface::AdaptiveRuntime, true),
-        (
-            crate::model_surface::ModelSurface::FullOperatorRuntime,
-            false,
-        ),
-    ] {
-        let runtime = test_runtime().with_model_surface(surface);
-        let result = runtime.dispatch(runtime_status_call()).await;
-        assert!(result.success, "{surface:?}: {:?}", result.error);
-        assert_eq!(
-            result.output["mcp_compact_schemas"], expected,
-            "{surface:?}"
-        );
-    }
-
-    let adaptive =
-        test_runtime().with_model_surface(crate::model_surface::ModelSurface::AdaptiveRuntime);
-    env.set("WEBCODEX_MCP_COMPACT_SCHEMAS", "false");
-    let full = adaptive.dispatch(runtime_status_call()).await;
-    assert_eq!(full.output["mcp_compact_schemas"], false);
-    env.set("WEBCODEX_MCP_COMPACT_SCHEMAS", "true");
-    let compact = adaptive.dispatch(runtime_status_call()).await;
-    assert_eq!(compact.output["mcp_compact_schemas"], true);
-}
-
-#[tokio::test]
-async fn runtime_status_defaults_to_local_coding_surface() {
-    // ToolRuntime::new_for_tests defaults to local_coding; keep this as a real
-    // default-constructor check rather than overriding the value under test.
     let runtime = test_runtime();
-    let result = runtime.dispatch(runtime_status_call()).await;
-    assert!(result.success, "{:?}", result.error);
-    assert_eq!(
-        result.output["runtime_exposure"],
-        crate::model_surface::MODEL_SURFACE_LOCAL_CODING
-    );
+
+    let default = runtime.dispatch(runtime_status_call()).await;
+    assert!(default.success, "{:?}", default.error);
+    assert_eq!(default.output["mcp_compact_schemas"], true);
+    assert!(default.output.get("runtime_exposure").is_none());
+
+    env.set("WEBCODEX_MCP_COMPACT_SCHEMAS", "false");
+    let full = runtime.dispatch(runtime_status_call()).await;
+    assert_eq!(full.output["mcp_compact_schemas"], false);
+
+    env.set("WEBCODEX_MCP_COMPACT_SCHEMAS", "true");
+    let compact = runtime.dispatch(runtime_status_call()).await;
+    assert_eq!(compact.output["mcp_compact_schemas"], true);
 }
 
 #[tokio::test]
@@ -2508,7 +2466,6 @@ async fn runtime_status_compact_and_summary_only_return_sanitized_summary() {
         assert_eq!(
             summary["mcp_compact_schemas"],
             crate::model_surface::effective_mcp_compact_schemas(
-                runtime.runtime_exposure(),
                 crate::config::mcp_compact_schemas_override(),
             ),
             "arguments: {arguments}"

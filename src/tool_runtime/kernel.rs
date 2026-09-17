@@ -363,7 +363,7 @@ impl ToolRuntime {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message: "Tool trace diagnostics are available only on Stateless MCP 2026 operator surfaces"
+                    message: "Tool trace diagnostics are available only on Stateless MCP 2026"
                         .to_string(),
                 }),
                 project: None,
@@ -376,7 +376,7 @@ impl ToolRuntime {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message: "Goal Plan App state is available only on Stateless MCP 2026 App-enabled operator surfaces"
+                    message: "Goal Plan App state is available only on Stateless MCP 2026 requests with Goal Plan App capability"
                         .to_string(),
                 }),
                 project: None,
@@ -389,7 +389,7 @@ impl ToolRuntime {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message: "Work Result App state is available only on Stateless MCP 2026 App-enabled operator surfaces"
+                    message: "Work Result App state is available only on Stateless MCP 2026 requests with Work Result App capability"
                         .to_string(),
                 }),
                 project: None,
@@ -402,7 +402,7 @@ impl ToolRuntime {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message: "Final Changes App lazy diff is available only on Stateless MCP 2026 App-enabled operator surfaces"
+                    message: "Final Changes App lazy diff is available only on Stateless MCP 2026 requests with Changes App capability"
                         .to_string(),
                 }),
                 project: None,
@@ -426,7 +426,7 @@ impl ToolRuntime {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message: "Agent continuation App coordination is available only on Stateless MCP 2026 App-enabled operator surfaces"
+                    message: "Agent continuation App coordination is available only on Stateless MCP 2026 requests with Agent Continuation App capability"
                         .to_string(),
                 }),
                 project: None,
@@ -435,7 +435,7 @@ impl ToolRuntime {
             };
         }
         // Project Memory tools are kernel-known but globally model-hidden. One
-        // explicit protocol-surface capability gates all six fixed tools; their
+        // explicit protocol capability gates all six fixed tools; their
         // canonical ToolDefinition authority decides caller access below.
         if matches!(
             operator_extension_family,
@@ -449,8 +449,7 @@ impl ToolRuntime {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message: "Memory tools are available only on Stateless MCP 2026 Full Operator"
-                        .to_string(),
+                    message: "Memory tools are available only on Stateless MCP 2026".to_string(),
                 }),
                 project: None,
                 model_ergonomics: None,
@@ -458,9 +457,8 @@ impl ToolRuntime {
             };
         }
         // Phase-3 Skill tools are kernel-known only so ToolCall parsing stays
-        // typed, but execution is authoritative-surface-gated. A private tool
-        // name from REST, legacy MCP, Local Coding, or Connector cannot enable
-        // this runtime.
+        // typed, but execution is gated by explicit protocol capability. A private
+        // tool name from REST or legacy MCP cannot enable this runtime.
         if matches!(
             operator_extension_family,
             Some(ToolOperatorExtensionFamily::SkillRuntime)
@@ -470,9 +468,8 @@ impl ToolRuntime {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message:
-                        "Skill runtime tools are available only on Stateless MCP 2026 Full Operator"
-                            .to_string(),
+                    message: "Skill runtime tools are available only on Stateless MCP 2026"
+                        .to_string(),
                 }),
                 project: None,
                 model_ergonomics: None,
@@ -488,9 +485,8 @@ impl ToolRuntime {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message:
-                        "Skill management tools are available only on Stateless MCP 2026 Full Operator"
-                            .to_string(),
+                    message: "Skill management tools are available only on Stateless MCP 2026"
+                        .to_string(),
                 }),
                 project: None,
                 model_ergonomics: None,

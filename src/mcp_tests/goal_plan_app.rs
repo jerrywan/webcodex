@@ -23,14 +23,10 @@ fn goal_auth(username: &str) -> crate::auth::AuthContext {
     auth
 }
 
-fn goal_runtime(
-    surface: ModelSurface,
-) -> (tempfile::TempDir, Arc<crate::db::Database>, ToolRuntime) {
+fn goal_runtime() -> (tempfile::TempDir, Arc<crate::db::Database>, ToolRuntime) {
     let temp = tempfile::tempdir().unwrap();
     let db = Arc::new(crate::db::Database::open(&temp.path().join("goal-plan.db")).unwrap());
-    let runtime = ToolRuntime::new_for_tests()
-        .with_model_surface(surface)
-        .with_communication_database(db.clone());
+    let runtime = ToolRuntime::new_for_tests().with_communication_database(db.clone());
     (temp, db, runtime)
 }
 
@@ -65,7 +61,6 @@ async fn handle_with_server_apps_enabled(
         None,
         None,
         crate::model_surface::effective_mcp_compact_schemas(
-            runtime.runtime_exposure(),
             crate::config::mcp_compact_schemas_override(),
         ),
         enabled,
@@ -77,7 +72,7 @@ async fn handle_with_server_apps_enabled(
 #[tokio::test]
 async fn goal_plan_app_descriptor_is_sparse_app_only_resource_backed_and_adaptive_direct() {
     assert_eq!(MCP_GOAL_PLAN_UI_RESOURCE_URI, "ui://webcodex/goal-plan/v2");
-    let (_temp, _db, adaptive) = goal_runtime(ModelSurface::AdaptiveRuntime);
+    let (_temp, _db, adaptive) = goal_runtime();
     let auth = goal_auth("goal-plan-descriptor");
 
     let ui = handle_with_server_apps_enabled(
@@ -151,59 +146,21 @@ async fn goal_plan_app_descriptor_is_sparse_app_only_resource_backed_and_adaptiv
     assert!(disabled_present.pointer("/_meta/ui/resourceUri").is_none());
     assert!(tool(&disabled_ui["result"], "goal_plan_state").is_none());
 
-    let (_full_temp, _full_db, full) = goal_runtime(ModelSurface::FullOperatorRuntime);
-    let full_ui = handle_with_server_apps_enabled(
-        &full,
-        rpc(
-            "tools/list",
-            Some(json!(4103)),
-            mcp_2026_ui_params(json!({})),
-        ),
-        Some(&auth),
-        true,
-    )
-    .await;
-    let McpOutcome::Ok(full_ui) = full_ui else {
-        panic!("expected UI-capable Full Operator tools/list");
-    };
-    for surface in [&ui, &full_ui] {
-        let bound_tools: Vec<_> = surface["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|tool| {
-                tool.pointer("/_meta/ui/resourceUri")
-                    .and_then(Value::as_str)
-                    == Some(MCP_GOAL_PLAN_UI_RESOURCE_URI)
-            })
-            .map(|tool| tool["name"].as_str().unwrap())
-            .collect();
-        assert_eq!(bound_tools, vec!["present_goal_plan"]);
-    }
-    for name in [
-        "create_goal",
-        "get_goal",
-        "list_goals",
-        "update_goal",
-        "associate_goal_agent_task",
-        "associate_goal_workflow_session",
-        "work_on_project",
-        "run_process",
-        "run_shell",
-        "finish_coding_task",
-    ] {
-        let descriptor = tool(&full_ui["result"], name).unwrap_or_else(|| panic!("missing {name}"));
+    for descriptor in ui["result"]["tools"].as_array().unwrap() {
+        if descriptor["name"] == "present_goal_plan" {
+            continue;
+        }
         assert_ne!(
             descriptor
                 .pointer("/_meta/ui/resourceUri")
                 .and_then(Value::as_str),
             Some(MCP_GOAL_PLAN_UI_RESOURCE_URI),
-            "{name} must not create another Goal Plan card"
+            "only present_goal_plan may create the Goal Plan card"
         );
     }
 
     let resources = handle_with_server_apps_enabled(
-        &full,
+        &adaptive,
         rpc(
             "resources/list",
             Some(json!(4104)),
@@ -235,7 +192,7 @@ async fn goal_plan_app_descriptor_is_sparse_app_only_resource_backed_and_adaptiv
         .any(|resource| resource["uri"] == "ui://webcodex/goal-plan/v1"));
     for uri in [MCP_GOAL_PLAN_UI_RESOURCE_URI, "ui://webcodex/goal-plan/v1"] {
         let read = handle_with_server_apps_enabled(
-            &full,
+            &adaptive,
             rpc(
                 "resources/read",
                 Some(json!(4105)),
@@ -285,7 +242,7 @@ async fn goal_plan_app_descriptor_is_sparse_app_only_resource_backed_and_adaptiv
 
 #[tokio::test]
 async fn goal_plan_poll_reads_authoritative_revision_without_ui_request_identity_or_mutation() {
-    let (_temp, _db, runtime) = goal_runtime(ModelSurface::AdaptiveRuntime);
+    let (_temp, _db, runtime) = goal_runtime();
     let bob = goal_auth("goal-plan-bob");
     let alice = goal_auth("goal-plan-alice");
     let goal_id = create_goal(&runtime, &bob, "goal-plan-bob-create");

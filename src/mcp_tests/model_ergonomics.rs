@@ -3,16 +3,13 @@ use super::*;
 // Durable model-ergonomics and MCP tool-surface measurement integration tests.
 // Keep these separate from the general HTTP transport lifecycle coverage.
 
-// Local Coding is a fixed compatibility surface, so unset compact-schema config
-// retains the historical full outputSchema projection. Keep the env serialized
-// against other compact-schema tests for the whole HTTP request.
+// Explicit compact-schema=false keeps the full outputSchema projection. Keep the
+// env serialized against other compact-schema tests for the whole HTTP request.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn http_mcp_tools_list_success() {
-    // Local Coding compatibility default: full schema fields remain present.
-    // Adaptive unset compact behavior is covered in model_surface tests.
+async fn http_mcp_tools_list_explicit_full_projection_audits_effective_policy() {
     let mut env = crate::test_support::TestEnvGuard::new();
-    env.remove("WEBCODEX_MCP_COMPACT_SCHEMAS");
+    env.set("WEBCODEX_MCP_COMPACT_SCHEMAS", "false");
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
     let runtime = Arc::new(test_runtime());
@@ -46,7 +43,7 @@ async fn http_mcp_tools_list_success() {
         } else {
             assert!(
                 tool["outputSchema"].is_object(),
-                "Local Coding unset tools/list must include outputSchema for {}",
+                "explicit full tools/list must include outputSchema for {}",
                 tool["name"]
             );
         }
@@ -62,10 +59,7 @@ async fn http_mcp_tools_list_success() {
     assert_eq!(summary["transport"], "mcp");
     assert_eq!(surface["schema_version"], 1);
     assert_eq!(surface["protocol_era"], "legacy");
-    assert_eq!(
-        surface["runtime_exposure"],
-        crate::model_surface::MODEL_SURFACE_LOCAL_CODING
-    );
+    assert!(surface.get("runtime_exposure").is_none());
     assert_eq!(surface["compact_schemas"], false);
     assert_eq!(surface["tool_count"].as_u64().unwrap(), tools.len() as u64);
     assert_eq!(
@@ -98,7 +92,7 @@ async fn http_adaptive_tools_list_unset_defaults_to_compact_and_reports_effectiv
     env.remove("WEBCODEX_MCP_COMPACT_SCHEMAS");
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::AdaptiveRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
 
     let mut response = TestClient::post("http://localhost/mcp")
@@ -127,10 +121,7 @@ async fn http_adaptive_tools_list_unset_defaults_to_compact_and_reports_effectiv
     assert_eq!(events.len(), 1);
     let summary: Value = serde_json::from_str(&events[0].summary_json).unwrap();
     let surface = &summary["tool_surface"];
-    assert_eq!(
-        surface["runtime_exposure"],
-        crate::model_surface::MODEL_SURFACE_ADAPTIVE_RUNTIME
-    );
+    assert!(surface.get("runtime_exposure").is_none());
     assert_eq!(surface["compact_schemas"], true);
     assert_eq!(surface["tool_count"].as_u64().unwrap(), tools.len() as u64);
     assert_eq!(
@@ -147,7 +138,7 @@ async fn http_mcp_tools_list_stateless_audit_measures_final_compact_result_and_s
     env.set("WEBCODEX_MCP_COMPACT_SCHEMAS", "1");
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::LocalCoding));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
 
     let mut response = TestClient::post("http://localhost/mcp")
@@ -180,10 +171,7 @@ async fn http_mcp_tools_list_stateless_audit_measures_final_compact_result_and_s
     let summary: Value = serde_json::from_str(&events[0].summary_json).unwrap();
     let surface = &summary["tool_surface"];
     assert_eq!(surface["protocol_era"], "stateless_2026");
-    assert_eq!(
-        surface["runtime_exposure"],
-        crate::model_surface::MODEL_SURFACE_LOCAL_CODING
-    );
+    assert!(surface.get("runtime_exposure").is_none());
     assert_eq!(surface["compact_schemas"], true);
     assert_eq!(surface["tool_count"].as_u64().unwrap(), tools.len() as u64);
     assert_eq!(
@@ -223,7 +211,7 @@ async fn http_mcp_tools_list_stateless_audit_measures_final_compact_result_and_s
 async fn http_mcp_direct_gateway_fallback_is_queryable_without_wrong_route_telemetry() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::AdaptiveRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
 
     let mut fallback = TestClient::post("http://localhost/mcp")
@@ -281,7 +269,7 @@ async fn http_mcp_direct_gateway_fallback_is_queryable_without_wrong_route_telem
 async fn http_mcp_work_on_project_preferences_persist_without_private_request_values() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
     let private_instruction = "PRIVATE_MCP_INSTRUCTION_SENTINEL";
     let private_project = "PRIVATE_MCP_PROJECT_SENTINEL";
@@ -366,7 +354,7 @@ async fn http_mcp_work_on_project_preferences_persist_without_private_request_va
 async fn http_mcp_tools_list_audit_sink_failure_is_non_blocking() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::LocalCoding));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
     db.conn_for_tests()
         .execute("DROP TABLE action_events", [])

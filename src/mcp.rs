@@ -9,9 +9,6 @@ use crate::action_audit::{ActionAudit, ActionAuditRecord};
 use crate::auth::AuthContext;
 use crate::json_error;
 use crate::json_measurement::serialized_json_len;
-#[cfg(test)]
-use crate::model_surface::ModelSurface;
-use crate::model_surface::RuntimeExposure;
 use crate::tool_request_trace::{
     estimate_json_bytes, jsonrpc_id_safe, new_trace_id, scope_active_trace,
     RequestCompletionTiming, ToolRequestLifecycle,
@@ -227,7 +224,6 @@ fn log_mcp_computer_app_resource_outcome(
 fn mcp_tools_list_audit_summary(
     result: &Value,
     protocol_era: McpProtocolEra,
-    runtime_exposure: RuntimeExposure,
     compact_schemas: bool,
 ) -> Option<Value> {
     let tools = result.get("tools")?.as_array()?;
@@ -241,7 +237,6 @@ fn mcp_tools_list_audit_summary(
         "tool_surface": {
             "schema_version": 1,
             "protocol_era": protocol::era_label(protocol_era),
-            "runtime_exposure": runtime_exposure.name(),
             "compact_schemas": compact_schemas,
             "tool_count": tools.len() as u64,
             "serialized_tools_bytes": serialized_tools_bytes,
@@ -272,19 +267,9 @@ pub async fn mcp_info(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         return;
     }
     let auth_required = config.is_auth_enabled();
-    let Some(runtime) = runtime(depot) else {
-        res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
-        res.render(json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Tool runtime not configured",
-        ));
-        return;
-    };
-    let runtime_exposure = runtime.runtime_exposure();
     res.render(Json(json!({
         "name": "webcodex",
         "version": env!("CARGO_PKG_VERSION"),
-        "runtimeExposure": runtime_exposure.name(),
         "protocol": "mcp",
         "protocolVersion": MCP_PROTOCOL_VERSION,
         "transport": "streamable-http-jsonrpc",
@@ -555,7 +540,6 @@ pub async fn mcp_post(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         None
     };
     let compact_schemas = crate::model_surface::effective_mcp_compact_schemas(
-        runtime.runtime_exposure(),
         crate::config::mcp_compact_schemas_override(),
     );
     let server_mcp_apps_enabled = crate::config::mcp_apps_enabled();
@@ -677,12 +661,7 @@ pub async fn mcp_post(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         match &outcome {
             McpOutcome::Ok(body) => {
                 let summary = body.get("result").and_then(|result| {
-                    mcp_tools_list_audit_summary(
-                        result,
-                        protocol_era,
-                        runtime.runtime_exposure(),
-                        compact_schemas,
-                    )
+                    mcp_tools_list_audit_summary(result, protocol_era, compact_schemas)
                 });
                 let mut event = ActionAuditRecord::new(
                     "mcp_tools_list",
@@ -926,7 +905,6 @@ async fn handle_mcp_request(
 ) -> McpOutcome {
     let protocol_era = inferred_protocol_era(&request);
     let compact_schemas = crate::model_surface::effective_mcp_compact_schemas(
-        runtime.runtime_exposure(),
         crate::config::mcp_compact_schemas_override(),
     );
     let server_mcp_apps_enabled = crate::config::mcp_apps_enabled();
@@ -973,17 +951,11 @@ async fn handle_mcp_request_with_lifecycle(
     mut correlation_out: Option<&mut crate::tool_runtime::ToolCallCorrelation>,
 ) -> McpOutcome {
     let stateless_2026 = protocol_era == McpProtocolEra::Stateless2026;
-    let runtime_exposure = runtime.runtime_exposure();
-    let RuntimeExposure::Runtime(model_surface) = runtime_exposure;
     let resource_read_bypasses_runtime_read = stateless_2026
         && request.method == "resources/read"
         && resources::resource_read_bypasses_runtime_read(&request.params);
-    let mcp_app_enabled = resources::mcp_app_enabled(
-        server_mcp_apps_enabled,
-        stateless_2026,
-        model_surface,
-        &request.params,
-    );
+    let mcp_app_enabled =
+        resources::mcp_app_enabled(server_mcp_apps_enabled, stateless_2026, &request.params);
     let runtime_resource_method =
         matches!(request.method.as_str(), "resources/list" | "resources/read");
 
@@ -1044,32 +1016,19 @@ async fn handle_mcp_request_with_lifecycle(
         // requests. WebCodex supports the stateless tools path required by
         // modern clients while retaining the initialized 2025 tool-only
         // session lifecycle used by 2025-06-18 and ChatGPT 2025-11-25 clients.
-        "server/discover" if stateless_2026 => {
-            let capabilities = if resources::model_surface_supports_computer_app(model_surface) {
-                resources::server_capabilities(server_mcp_apps_enabled)
-            } else {
-                json!({ "tools": { "listChanged": false } })
-            };
-            rpc_result(
-                id,
-                protocol::server_discover_payload(capabilities, runtime_exposure.name()),
-            )
-        }
-        "initialize" if !stateless_2026 => rpc_result(
+        "server/discover" if stateless_2026 => rpc_result(
             id,
-            protocol::legacy_initialize_payload(&request.params, runtime_exposure.name()),
+            protocol::server_discover_payload(resources::server_capabilities(
+                server_mcp_apps_enabled,
+            )),
         ),
+        "initialize" if !stateless_2026 => {
+            rpc_result(id, protocol::legacy_initialize_payload(&request.params))
+        }
         "ping" if !stateless_2026 => rpc_result(id, json!({})),
         "tools/list" => {
-            return tools::handle_list(
-                runtime,
-                id,
-                auth,
-                stateless_2026,
-                compact_schemas,
-                mcp_app_enabled,
-            )
-            .await;
+            return tools::handle_list(id, auth, stateless_2026, compact_schemas, mcp_app_enabled)
+                .await;
         }
         "resources/list" if stateless_2026 && runtime_resource_method => {
             return resources::handle_list(runtime, id, mcp_app_enabled);
@@ -1080,7 +1039,6 @@ async fn handle_mcp_request_with_lifecycle(
                 request.params,
                 id,
                 auth,
-                model_surface,
                 server_mcp_apps_enabled,
             )
             .await;

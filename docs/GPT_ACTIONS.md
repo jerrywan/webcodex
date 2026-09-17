@@ -4,9 +4,9 @@
 
 Use GPT Actions when a Custom GPT needs the Server's OpenAPI compatibility integration. Use [MCP](MCP.md) when the client supports MCP directly; MCP remains the primary ChatGPT integration.
 
-The schema at `/openapi.json` depends on the Server mode:
+The schema at `/openapi.json` follows one canonical Adaptive Runtime routing policy:
 
-- every runtime Server projects the canonical Adaptive Runtime model surface by default;
+- every runtime Server projects the canonical Adaptive Runtime model contract;
 - project-scoped `share` / `run` credentials restrict authority and visibility without defining another Action surface.
 
 ## Import the schema

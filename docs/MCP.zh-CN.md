@@ -81,9 +81,9 @@ OAuth 仍是独立的高级身份路径。
 
 ## Advanced / reference
 
-### Runtime surface selection
+### Adaptive Runtime routing
 
-Server 启动时会选择 model-facing MCP surface。普通用户不需要选择或理解内部 routing 名称，直接使用当前 Server 展示的工具即可。需要调整该 surface 的 maintainer 应查看内部 architecture/configuration contract；routing 不会改变目标工具原有的 authentication、project 或 safety checks。
+WebCodex 只有一个 model-facing MCP runtime contract：**Adaptive Runtime**。Canonical `ToolDefinition` rank 决定 direct tools；普通 model-visible long-tail tools 通过 `call_runtime_tool` 调用；server-owned protocol capability 与 MCP App admission 可以为对应请求加入 hidden extension。启动时不再选择 model surface。direct/gateway 只改变 presentation，不会绕过目标工具的 authentication、Project authority、permission、Runner capability、Session 或 safety checks。
 
 ### Tool result framing
 
@@ -254,14 +254,13 @@ stderr、provider stderr 或任意 provider prose。
 | `required_capability_unavailable` | 当前 Runner/runtime 缺少所需 coding capability | 升级所有二进制 |
 | `project_registry_scope_denied` | Project-scoped credential 尝试扩张或修改其授权可见范围之外的 Project registry | 使用已可见的 Project，或使用 `work_on_project(mode=worktree)` |
 
-## 高级 runtime surface
+## Adaptive Runtime extensions
 
-同一个 ToolRuntime 既可以服务单项目、project-scoped 的本地 `share` / `run`，也可以服务多项目 hosted Server。Adaptive Runtime、Local Coding、Full Operator 等 model surface 都只是这一套 runtime 的 projection；project-scoped credential 改变可见性，不改变 coding architecture。
+同一个 ToolRuntime 通过一套 Adaptive Runtime contract 服务单项目、project-scoped 的本地 `share` / `run` 和多项目 hosted Server。project-scoped credential 改变可见性与 authority，不改变 model-facing runtime shape。特定 protocol capability 与 MCP App 可以 admission 额外的 hidden presentation/resource operation，但不会形成第二套 runtime surface。
 
 ### ChatGPT 文件桥接
 
-在暴露 artifact 工具的更宽 MCP operator surface 上，WebCodex 支持双向的
-host-native 文件传输，不需要把完整二进制经由模型文本搬运：
+当当前 MCP protocol/host admission 允许 artifact capability 时，WebCodex 支持双向的 host-native 文件传输，不需要把完整二进制经由模型文本搬运：
 
 - `import_conversation_files_to_project` 通过 ChatGPT host 的
   `openai/fileParams` 导入 1..10 个文件。它既适用于用户选择的当前会话附件，也
@@ -287,7 +286,4 @@ workflow 应优先使用 `project_artifact`。DOCX/PPTX/XLSX 等 Office artifact
 仍复用同一底层 artifact transport，因此在支持这些 host 能力的 ChatGPT 中，可以在
 project 与 host 之间直接传递，而不需要模型手工搬运 Base64。
 
-更宽的 model coding surface 暴露 `work_on_project` 时，请阅读
-[Coding 工作流](CODING_WORKFLOW.zh-CN.md)，使用 canonical bootstrap / behavioral role
-心智模型，并遵循其中的 validation/closeout guidance。运维工具见
-[架构](ARCHITECTURE.md)与 `webcodex` CLI。
+请阅读 [Coding 工作流](CODING_WORKFLOW.zh-CN.md)，使用 canonical `work_on_project` bootstrap / behavioral role 心智模型，并遵循其中的 validation/closeout guidance。运维工具见 [架构](ARCHITECTURE.md) 与 `webcodex` CLI。

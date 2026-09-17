@@ -298,7 +298,7 @@ async fn stateless_full_trace_preserves_raw_context_ack_and_records_clean_effect
 
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
     let arguments = json!({"ack_session_context_revision": 42});
     let (status, body) = stateless_2026_tool_call(
@@ -380,7 +380,7 @@ async fn stateless_full_trace_correlates_only_hashed_openai_window_body() {
 
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
     let raw_window = "openai-window-trace-opaque-secret";
 
@@ -547,7 +547,7 @@ async fn mcp_tools_call_writes_a_summary_action_audit_row() {
     // call dispatches and lands an action audit row.
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
     let mut resp = TestClient::post("http://localhost/mcp")
         .bearer_auth("secret")
@@ -712,7 +712,7 @@ async fn mcp_tools_call_writes_a_summary_action_audit_row() {
 async fn observe_jobs_action_audit_remains_window_meaningful_transport() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
 
     let mut response = TestClient::post("http://localhost/mcp")
@@ -749,7 +749,7 @@ async fn observe_jobs_action_audit_remains_window_meaningful_transport() {
 async fn mcp_pre_result_invalid_arguments_still_records_generic_attempt() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
     let mut response = TestClient::post("http://localhost/mcp")
         .bearer_auth("secret")
@@ -785,7 +785,7 @@ async fn mcp_pre_result_invalid_arguments_still_records_generic_attempt() {
 async fn mcp_pre_kernel_wrapper_validation_still_records_generic_attempt() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
     let mut arguments = json!({});
     arguments.as_object_mut().unwrap().insert(
@@ -850,7 +850,7 @@ async fn mcp_pat_tools_call_persists_user_attribution() {
     let (_tmp, db) = test_db();
     let user = seed_user(&db, "alice");
     let token = seed_action_audit_pat(&db, &user);
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
 
     let resp = TestClient::post("http://localhost/mcp")
@@ -885,7 +885,7 @@ async fn mcp_oauth_tools_call_persists_user_and_client_attribution() {
     let user = seed_user(&db, "alice");
     let client = seed_oauth_client(&db, &user);
     let token = seed_oauth_access_token(&db, &client, &user, "runtime:read");
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
 
     let resp = TestClient::post("http://localhost/mcp")
@@ -894,7 +894,10 @@ async fn mcp_oauth_tools_call_persists_user_and_client_attribution() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": "list_tools", "arguments": {}}
+            "params": {
+                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "arguments": {"tool": "list_tools", "arguments": {}}
+            }
         }))
         .send(&service)
         .await;
@@ -942,7 +945,7 @@ async fn authority_probe(
 async fn http_mcp_rejects_dns_rebinding_authority_before_jsonrpc_dispatch() {
     let config = test_config(None);
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
 
     assert_eq!(
@@ -972,7 +975,7 @@ async fn http_mcp_rejects_dns_rebinding_authority_before_jsonrpc_dispatch() {
 async fn http_mcp_accepts_loopback_authorities_without_requiring_origin() {
     let config = test_config(None);
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
 
     for host in ["localhost", "127.0.0.1", "[::1]"] {
@@ -990,7 +993,7 @@ async fn http_mcp_accepts_configured_public_authority_and_matching_origin() {
     env.set("WEBCODEX_PUBLIC_URL", "https://mcp.example.test");
     let config = test_config(None);
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
 
     assert_eq!(
@@ -1030,7 +1033,7 @@ async fn http_mcp_accepts_configured_public_authority_and_matching_origin() {
 async fn http_mcp_rejects_malformed_host_and_origin() {
     let config = test_config(None);
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
 
     assert_eq!(
@@ -1051,7 +1054,7 @@ async fn http_mcp_rejects_malformed_host_and_origin() {
 async fn http_mcp_initialize_success() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
     let mut resp = TestClient::post("http://localhost/mcp")
         .bearer_auth("secret")
@@ -1074,10 +1077,6 @@ async fn http_mcp_initialize_success() {
     assert_eq!(body["jsonrpc"], "2.0");
     assert_eq!(body["id"], 1);
     assert_eq!(body["result"]["serverInfo"]["name"], "webcodex");
-    assert_eq!(
-        body["result"]["serverInfo"]["runtimeExposure"],
-        crate::model_surface::MODEL_SURFACE_FULL_OPERATOR_RUNTIME
-    );
     assert!(body["result"]["protocolVersion"].is_string());
     assert_eq!(
         body["result"]["capabilities"]["tools"]["listChanged"],
@@ -1089,7 +1088,7 @@ async fn http_mcp_initialize_success() {
 async fn http_mcp_accepts_chatgpt_2025_11_25_protocol_header() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
     let mut response = TestClient::post("http://localhost/mcp")
         .bearer_auth("secret")
@@ -1143,7 +1142,7 @@ fn http_mcp_2026_request_scoped_ack_redelivers_until_durable_resolution() {
 async fn http_mcp_2026_request_scoped_ack_redelivers_until_durable_resolution_body() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime.clone()));
 
     let (status, session_body) = stateless_2026_tool_call(
@@ -1479,7 +1478,7 @@ async fn http_mcp_2026_request_scoped_ack_redelivers_until_durable_resolution_bo
 async fn http_mcp_2026_context_request_projects_post_tool_materials_nonfatally() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
     let arguments = json!({
         crate::tool_runtime::context_projection::TOOL_CALL_CONTEXT_REQUEST_FIELD: [
@@ -1538,7 +1537,7 @@ fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_invalid_ack
 async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_invalid_ack_body() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime.clone()));
 
     fn assert_no_recovery_required(value: &Value) {
@@ -1851,7 +1850,7 @@ async fn http_mcp_2026_session_context_revision_recovers_missing_stale_and_inval
 async fn http_mcp_2026_collaboration_completion_preserves_explicit_recorder_provenance() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime.clone()));
 
     let (status, coordinator_body) = stateless_2026_tool_call(
@@ -2174,8 +2173,7 @@ async fn http_mcp_2026_observe_session_messages_preserves_stateless_delta_contra
         crate::tool_runtime::runner_project_runtime_id("mcp-observation-agent", "foreign");
     let runtime = Arc::new(
         ToolRuntime::new_for_tests_with_runner_registry(runner_registry.clone())
-            .with_session_ledger(&ledger)
-            .with_model_surface(ModelSurface::FullOperatorRuntime),
+            .with_session_ledger(&ledger),
     );
     let service = Service::new(build_test_router(
         config.clone(),
@@ -2503,8 +2501,7 @@ async fn http_mcp_2026_observe_session_messages_preserves_stateless_delta_contra
     drop(runtime);
     let restored_runtime = Arc::new(
         ToolRuntime::new_for_tests_with_runner_registry(runner_registry)
-            .with_session_ledger(&ledger)
-            .with_model_surface(ModelSurface::FullOperatorRuntime),
+            .with_session_ledger(&ledger),
     );
     let restored_service = Service::new(build_test_router(config, db, restored_runtime.clone()));
     let (status, restored_unchanged_body) = stateless_2026_tool_call(
@@ -2583,7 +2580,7 @@ async fn http_mcp_2026_observe_session_messages_preserves_stateless_delta_contra
 async fn http_mcp_2026_protocol_error_matrix_and_legacy_session_compatibility() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
     let params = mcp_2026_params(json!({}));
 
@@ -2719,7 +2716,7 @@ async fn http_mcp_2026_protocol_error_matrix_and_legacy_session_compatibility() 
 async fn http_mcp_2026_invalid_request_metadata_maps_to_invalid_params_before_dispatch() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
 
     for (label, params, id) in [
@@ -2789,7 +2786,7 @@ async fn http_mcp_2026_invalid_request_metadata_maps_to_invalid_params_before_di
 async fn http_mcp_2026_tools_call_requires_matching_name_and_accepts_base64_sentinel() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
     let params = mcp_2026_params(json!({"name": "list_projects", "arguments": {}}));
 
@@ -2833,7 +2830,7 @@ async fn http_mcp_2026_tools_call_requires_matching_name_and_accepts_base64_sent
 async fn http_mcp_2026_reads_computer_app_template_with_cache_contract() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
     let params = mcp_2026_ui_params(json!({"uri": MCP_COMPUTER_UI_RESOURCE_URI}));
 
@@ -2935,7 +2932,7 @@ async fn http_mcp_2026_reads_computer_app_template_with_cache_contract() {
 async fn http_mcp_computer_app_resource_protocol_failure_is_audited_without_content() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db.clone(), runtime));
     let mut params = mcp_2026_ui_params(json!({"uri": MCP_COMPUTER_UI_RESOURCE_URI}));
     params["_meta"]["io.modelcontextprotocol/protocolVersion"] = Value::from("2099-01-01");
@@ -3313,7 +3310,7 @@ async fn http_mcp_notification_returns_accepted_with_empty_body() {
 async fn http_mcp_get_discovery_returns_metadata() {
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
     let mut resp = TestClient::get("http://localhost/mcp")
         .bearer_auth("secret")
@@ -3324,10 +3321,6 @@ async fn http_mcp_get_discovery_returns_metadata() {
     assert_eq!(body["name"], "webcodex");
     assert!(body["version"].is_string());
     assert_eq!(body["protocol"], "mcp");
-    assert_eq!(
-        body["runtimeExposure"],
-        crate::model_surface::MODEL_SURFACE_FULL_OPERATOR_RUNTIME
-    );
     assert!(body["protocolVersion"].is_string());
     assert_eq!(body["endpoint"], "/mcp");
     let methods = body["methods"].as_array().unwrap();

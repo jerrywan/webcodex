@@ -10,13 +10,6 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
         "runtime_status" => Some(wrapped_output_schema(vec![
             ("service", schema_type("string", "Runtime service name.")),
             (
-                "runtime_exposure",
-                schema_type(
-                    "string",
-                    "Configured runtime exposure: local_coding, adaptive_runtime, or full_operator_runtime.",
-                ),
-            ),
-            (
                 "mcp_compact_schemas",
                 schema_type(
                     "boolean",
@@ -237,7 +230,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 "route",
                 json!({
                     "type": "object",
-                    "description": "Current ModelSurface invocation route only. This never grants scope, project authority, feature availability, or permission.",
+                    "description": "Canonical Adaptive Runtime invocation route only. This never grants scope, project authority, feature availability, or permission.",
                     "additionalProperties": false,
                     "properties": {
                         "mode": {
@@ -369,7 +362,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                                 "availability": {
                                     "type": "string",
                                     "enum": ["direct", "gateway", "unavailable"],
-                                    "description": "Invocation route on the current MCP ModelSurface only; authorization, feature gates, and project authority are checked separately."
+                                    "description": "Invocation route on canonical Adaptive Runtime only; authorization, feature gates, and project authority are checked separately."
                                 },
                                 "gateway_tool": {
                                     "anyOf": [

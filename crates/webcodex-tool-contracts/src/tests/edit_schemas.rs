@@ -174,7 +174,7 @@ fn apply_text_edits_input_schema_encodes_file_and_edit_kind_contracts() {
 }
 
 #[test]
-fn apply_text_edits_model_surface_size_is_bounded() {
+fn apply_text_edits_model_schema_size_is_bounded() {
     let specs = registered_tool_specs();
     let spec = spec_named(&specs, "apply_text_edits");
     let input_schema_bytes = serde_json::to_vec(&spec.input_schema).unwrap().len();

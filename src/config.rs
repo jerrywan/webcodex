@@ -320,16 +320,16 @@ pub(crate) fn tool_request_trace_max_total_bytes() -> u64 {
 ///
 /// `true` omits `outputSchema` from MCP discovery while preserving name,
 /// description, inputSchema, annotations, and adapter metadata. `false` restores
-/// the full discovery schema. Unset or invalid values defer to the selected
-/// RuntimeExposure policy rather than choosing a process-wide default here.
+/// the full discovery schema. Unset or invalid values use the Adaptive Runtime
+/// default, which is compact discovery.
 pub(crate) fn mcp_compact_schemas_override() -> Option<bool> {
     env_flag("WEBCODEX_MCP_COMPACT_SCHEMAS")
 }
 
 /// Opt-in compatibility projection for MCP hosts that expose only text content.
 ///
-/// `structuredContent` remains canonical. When enabled, ordinary Runtime and
-/// Connector tool results also serialize that same structured value into
+/// `structuredContent` remains canonical. When enabled, ordinary Runtime tool
+/// results also serialize that same structured value into
 /// `content[0].text`. The default stays compact to avoid duplicating model context.
 fn mcp_text_json_compat_enabled_from_flag(flag: Option<bool>) -> bool {
     flag.unwrap_or(false)
@@ -844,7 +844,7 @@ mod tests {
         assert_eq!(mcp_compact_schemas_override(), Some(false));
         env.set("WEBCODEX_MCP_COMPACT_SCHEMAS", "maybe");
         // Invalid values are treated as unset by env_flag and defer to the
-        // RuntimeExposure-specific default.
+        // canonical Adaptive Runtime default.
         assert_eq!(mcp_compact_schemas_override(), None);
         env.remove("WEBCODEX_MCP_COMPACT_SCHEMAS");
     }

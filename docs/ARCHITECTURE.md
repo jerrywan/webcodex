@@ -157,7 +157,7 @@ Runtime Console -----------------------> canonical Server HTTP/kernel paths abov
 - `runtime_http` — REST runtime routes plus the shared `/api/actions/{tool_name}`
   adapter. The Action adapter performs transport decoding/admission only and then
   enters the same ToolRuntime kernel as the canonical runtime path.
-- `mcp` — the primary model-facing adapter and model-surface selection.
+- `mcp` — the primary model-facing adapter. It always presents the canonical Adaptive Runtime: ToolDefinition-ranked direct tools, `call_runtime_tool` for the model-visible long tail, and protocol/App-admitted extensions.
 - `openapi` — the generic GPT Actions compatibility projector. It derives direct
   operations from the canonical Adaptive Runtime direct rank, removes only explicit protocol-incompatible `ToolDefinition` exceptions, and adds `call_runtime_tool` for the supported long tail.
 - `tool_runtime` — protocol-independent tool parsing, dispatch, project

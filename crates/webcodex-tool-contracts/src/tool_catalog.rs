@@ -468,72 +468,10 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
     },
 ];
 
-/// Single ordered, unique source of truth for the fixed `local_coding` MCP
-/// compatibility surface. This list intentionally does not drive Adaptive
-/// Runtime intent discovery.
-pub const LOCAL_CODING_TOOL_NAMES: &[&str] = &[
-    // entry
-    "work_on_project",
-    "list_projects",
-    "plugin_tool",
-    // exact coordinator assignment read + atomic completion
-    "get_session_assignment",
-    "complete_session_message",
-    // delegated ACP coding-agent Runs (explicit coding_agent:run authority)
-    "coding_agent_start",
-    "coding_agent_observe",
-    "coding_agent_cancel",
-    // project discovery + read
-    "project_overview",
-    "list_project_tracked_files",
-    "list_project_files",
-    "search_project_texts",
-    "read_files",
-    "project_artifact",
-    // LSP navigation
-    "lsp_status",
-    "document_symbols",
-    "document_diagnostics",
-    "hover",
-    "workspace_symbols",
-    "goto_definition",
-    "find_references",
-    "call_hierarchy",
-    // guarded edits
-    "apply_text_edits",
-    "apply_patch",
-    "apply_unified_diff",
-    // structured process, shell semantics/scripts, and jobs
-    "run_process",
-    "run_script",
-    "run_shell",
-    "run_job",
-    "observe_jobs",
-    "list_jobs",
-    "stop_job",
-    // validation
-    "cargo_fmt",
-    "cargo_check",
-    "cargo_test",
-    "go_test",
-    "validation_summary",
-    // git review
-    "git_status",
-    "git_log",
-    "git_review_summary",
-    "git_diff_hunks",
-    "show_changes",
-    "workspace_hygiene_check",
-    // finish
-    "finish_coding_task",
-];
-
-/// Ordered selection surface for ordinary coding work under Adaptive Runtime.
+/// Ordered selection for ordinary coding discovery under Adaptive Runtime.
 ///
-/// This is intentionally smaller and more canonical than the fixed Local Coding
-/// compatibility surface. It may include distinct gateway-routed specialists
-/// that are worth explicit discovery, but excludes singular/legacy peers when a
-/// preferred batch, structured review, or Job-continuation path exists.
+/// This ranks useful capabilities for `tool_manifest(intent="coding")`; it does
+/// not define direct admission. ToolDefinition rank remains the direct SSOT.
 pub const CODING_INTENT_TOOL_NAMES: &[&str] = &[
     "work_on_project",
     "project_overview",

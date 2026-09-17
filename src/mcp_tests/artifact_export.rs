@@ -4,13 +4,12 @@ async fn mcp_export_runtime(
     root: &std::path::Path,
     owner: Option<&str>,
 ) -> (Arc<ToolRuntime>, Arc<crate::runner_http::RunnerRegistry>) {
-    mcp_export_runtime_with_surface(root, owner, ModelSurface::FullOperatorRuntime).await
+    mcp_export_runtime_inner(root, owner).await
 }
 
-async fn mcp_export_runtime_with_surface(
+async fn mcp_export_runtime_inner(
     root: &std::path::Path,
     owner: Option<&str>,
-    model_surface: ModelSurface,
 ) -> (Arc<ToolRuntime>, Arc<crate::runner_http::RunnerRegistry>) {
     use crate::runner_protocol::{RunnerCapabilities, RunnerProjectSummary, RunnerRegisterRequest};
     let registry = Arc::new(crate::runner_http::RunnerRegistry::default());
@@ -61,10 +60,9 @@ async fn mcp_export_runtime_with_surface(
         }],
     )
     .await;
-    let runtime = Arc::new(
-        ToolRuntime::new_for_tests_with_runner_registry(registry.clone())
-            .with_model_surface(model_surface),
-    );
+    let runtime = Arc::new(ToolRuntime::new_for_tests_with_runner_registry(
+        registry.clone(),
+    ));
     (runtime, registry)
 }
 
@@ -354,10 +352,13 @@ async fn issue_mcp_artifact_export_with_metadata_max(
                     "tools/call",
                     Some(json!(3101)),
                     mcp_2026_params(json!({
-                        "name": "export_project_artifact",
+                        "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
                         "arguments": {
-                            "project": "agent:exporter:demo",
-                            "path": path,
+                            "tool": "export_project_artifact",
+                            "arguments": {
+                                "project": "agent:exporter:demo",
+                                "path": path,
+                            }
                         }
                     })),
                 ),
@@ -451,31 +452,37 @@ async fn project_artifact_export_uses_existing_resource_link_authority_path() {
 }
 
 #[tokio::test]
-async fn mcp_artifact_export_surface_is_stateless_full_operator_only() {
-    let legacy = mcp_tools_list_payload_with_compact(ModelSurface::FullOperatorRuntime, false);
+async fn mcp_artifact_export_is_stateless_protocol_only() {
+    let legacy = mcp_tools_list_payload_with_compact(false);
     assert!(!legacy["tools"]
         .as_array()
         .unwrap()
         .iter()
         .any(|tool| tool["name"] == "export_project_artifact"));
 
-    let stateless =
-        mcp_tools_list_payload_with_compact_and_app(ModelSurface::FullOperatorRuntime, false, true);
-    let spec = stateless["tools"]
+    let stateless = mcp_tools_list_payload_with_compact_and_app(false, true);
+    assert!(!stateless["tools"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|tool| tool["name"] == "export_project_artifact")
-        .expect("stateless full-operator tools/list must expose artifact export");
-    assert_eq!(spec["inputSchema"]["required"], json!(["project", "path"]));
-    assert!(spec["inputSchema"]["properties"]
-        .get("session_id")
-        .is_some());
-    assert!(spec["inputSchema"]["properties"]
+        .any(|tool| tool["name"] == "export_project_artifact"));
+    let spec = registered_tool_specs()
+        .into_iter()
+        .find(|spec| spec.name == "export_project_artifact")
+        .expect("canonical export_project_artifact ToolSpec");
+    assert_eq!(spec.input_schema["required"], json!(["project", "path"]));
+    assert!(spec.input_schema["properties"].get("session_id").is_some());
+    assert!(spec.input_schema["properties"]
         .get("allow_cross_project_session")
         .is_none());
+    assert!(
+        super::super::tools::adaptive_runtime_gateway_target_admitted_for_test(
+            "export_project_artifact",
+            true
+        )
+    );
 
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let mut auth = crate::auth::AuthContext::new(crate::auth::AuthKind::Bootstrap);
     auth.is_bootstrap = true;
     let legacy_call = handle_mcp_request(
@@ -484,8 +491,11 @@ async fn mcp_artifact_export_surface_is_stateless_full_operator_only() {
             "tools/call",
             Some(json!(3100)),
             json!({
-                "name": "export_project_artifact",
-                "arguments": {"project": "agent:any:any", "path": "report.pdf"}
+                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "arguments": {
+                    "tool": "export_project_artifact",
+                    "arguments": {"project": "agent:any:any", "path": "report.pdf"}
+                }
             }),
         ),
         Some(&auth),
@@ -505,7 +515,7 @@ async fn mcp_artifact_export_surface_is_stateless_full_operator_only() {
 
 #[tokio::test]
 async fn adaptive_artifact_export_unified_direct_and_legacy_gateway_preserve_gates() {
-    let runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
     let mut auth = crate::auth::AuthContext::new(crate::auth::AuthKind::Bootstrap);
     auth.is_bootstrap = true;
     let routes = [
@@ -570,9 +580,7 @@ async fn adaptive_artifact_export_gateway_returns_resource_link_and_round_trips_
     use base64::Engine as _;
 
     let tmp = tempfile::tempdir().unwrap();
-    let (runtime, registry) =
-        mcp_export_runtime_with_surface(tmp.path(), Some("alice"), ModelSurface::AdaptiveRuntime)
-            .await;
+    let (runtime, registry) = mcp_export_runtime_inner(tmp.path(), Some("alice")).await;
     let auth = mcp_export_api_auth("key-adaptive-gateway-export", "alice");
     let path = "paper/adaptive-gateway.pdf";
     let bytes = b"%PDF-1.7\nadaptive gateway export\n%%EOF\n".to_vec();
@@ -2106,16 +2114,23 @@ async fn mcp_artifact_export_action_audit_does_not_persist_handle_or_blob() {
             true,
         )
         .add_header(MCP_METHOD_HEADER, "tools/call", true)
-        .add_header(MCP_NAME_HEADER, "export_project_artifact", true)
+        .add_header(
+            MCP_NAME_HEADER,
+            crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+            true,
+        )
         .json(&json!({
             "jsonrpc": "2.0",
             "id": 3112,
             "method": "tools/call",
             "params": mcp_2026_params(json!({
-                "name": "export_project_artifact",
+                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
                 "arguments": {
-                    "project": "agent:exporter:demo",
-                    "path": "paper/audit.pdf"
+                    "tool": "export_project_artifact",
+                    "arguments": {
+                        "project": "agent:exporter:demo",
+                        "path": "paper/audit.pdf"
+                    }
                 }
             }))
         }))

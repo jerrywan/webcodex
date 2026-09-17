@@ -83,12 +83,11 @@ pub(super) fn legacy_initialize_protocol_version(params: &Value) -> &'static str
     }
 }
 
-pub(super) fn server_discover_payload(capabilities: Value, runtime_exposure_name: &str) -> Value {
+pub(super) fn server_discover_payload(capabilities: Value) -> Value {
     json!({
         "resultType": "complete",
         "ttlMs": 0,
         "cacheScope": "private",
-        "runtimeExposure": runtime_exposure_name,
         "supportedVersions": [
             MCP_STATELESS_PROTOCOL_VERSION,
             MCP_CHATGPT_PROTOCOL_VERSION,
@@ -104,7 +103,7 @@ pub(super) fn server_discover_payload(capabilities: Value, runtime_exposure_name
     })
 }
 
-pub(super) fn legacy_initialize_payload(params: &Value, runtime_exposure_name: &str) -> Value {
+pub(super) fn legacy_initialize_payload(params: &Value) -> Value {
     json!({
         "protocolVersion": legacy_initialize_protocol_version(params),
         "capabilities": {
@@ -114,8 +113,7 @@ pub(super) fn legacy_initialize_payload(params: &Value, runtime_exposure_name: &
         },
         "serverInfo": {
             "name": "webcodex",
-            "version": env!("CARGO_PKG_VERSION"),
-            "runtimeExposure": runtime_exposure_name
+            "version": env!("CARGO_PKG_VERSION")
         }
     })
 }

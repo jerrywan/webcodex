@@ -1968,7 +1968,7 @@ async fn skill_surface_sidecar_privacy_and_authority_are_fenced() {
         register_runner_project_at_path(&runtime, "skill-fence", "demo", root.path()).await;
 
     let auth = auth_context(None, true);
-    let surface_denied = runtime
+    let protocol_denied = runtime
         .call_tool_with_invocation_metadata(
             ToolCallRequest {
                 tool_name: "skill_list".to_string(),
@@ -1993,18 +1993,18 @@ async fn skill_surface_sidecar_privacy_and_authority_are_fenced() {
             },
         )
         .await;
-    assert!(!surface_denied.success);
-    assert!(surface_denied.result.is_none());
+    assert!(!protocol_denied.success);
+    assert!(protocol_denied.result.is_none());
     assert!(matches!(
-        surface_denied.error_status,
+        protocol_denied.error_status,
         Some(super::super::kernel::ToolCallErrorStatus::InvalidArguments { ref message })
-            if message.contains("Stateless MCP 2026 Full Operator")
+            if message.contains("Stateless MCP 2026")
     ));
     assert!(
         probe_patch_agent_request(&runtime, "skill-fence")
             .await
             .is_none(),
-        "private context marker must not bypass the Skill surface gate"
+        "private context marker must not bypass the Skill protocol capability gate"
     );
 
     let (without_sidecar, without_kinds) = dispatch_with_context_and_local_agent(

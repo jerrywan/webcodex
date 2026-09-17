@@ -479,7 +479,7 @@ async fn read_only_session_allows_ssh_inspect_but_denies_management_before_runne
 
 #[tokio::test]
 async fn ssh_resource_does_not_accept_stateless_continuity_wrappers() {
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::FullOperatorRuntime));
+    let runtime = Arc::new(test_runtime());
     let auth = ssh_auth();
     register_managed_runner(&runtime, "instance-a").await;
 

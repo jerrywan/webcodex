@@ -266,17 +266,12 @@ only for local/trusted-network demos."
     let shutdown_coordinator = Arc::new(server_shutdown::ShutdownCoordinator::default());
     let quic_cfg = config::QuicServerConfig::from_env();
     let project_auth = Arc::new(auth::ProjectAuthState::from_env().map_err(std::io::Error::other)?);
-    // Resolve the one model-facing Runtime exposure exactly once at startup.
-    // Project-scoped deployment changes authentication/visibility, not the coding runtime.
-    let runtime_exposure =
-        model_surface::resolve_runtime_exposure().map_err(std::io::Error::other)?;
     let runtime_info = Arc::new(tool_runtime::RuntimeInfo::from_config_with_quic_config(
         &config, &quic_cfg,
     ));
     let runtime_state_dir = config.runtime_state_dir();
     let mut tool_runtime_builder =
         tool_runtime::ToolRuntime::new(runner_registry.clone(), runtime_info.clone())
-            .with_runtime_exposure(runtime_exposure)
             .with_window_activity_database(db.clone())
             .with_memory_database(db.clone())
             .with_communication_database(db.clone())
@@ -294,10 +289,8 @@ only for local/trusted-network demos."
     }
     let tool_runtime = Arc::new(tool_runtime_builder);
     tracing::info!(
-        runtime_exposure = runtime_exposure.name(),
         project_scoped = project_auth.is_configured(),
-        config = "WEBCODEX_MCP_MODEL_SURFACE",
-        "MCP runtime exposure enabled"
+        "Adaptive Runtime enabled"
     );
 
     // Custom QUIC Runner transport. Default disabled;
@@ -736,7 +729,6 @@ only for local/trusted-network demos."
     );
     tracing::info!(
         mcp_compact_schemas = crate::model_surface::effective_mcp_compact_schemas(
-            runtime_exposure,
             crate::config::mcp_compact_schemas_override(),
         ),
         "mcp_compact_schemas"

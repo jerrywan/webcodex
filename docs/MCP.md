@@ -70,7 +70,7 @@ For a regular independent Windows Server + Runner reached through OpenAI Tunnel,
 
 ## Result cards
 
-On operator surfaces, clients advertising MCP Apps HTML support can display a
+On Stateless MCP 2026 requests that advertise MCP Apps HTML support, clients can display a
 small set of read-only milestone cards for `list_jobs`, `validation_summary`, and
 `git_review_summary`. The Job card shows only active or attention-requiring Jobs;
 routine successful terminal Jobs stay out of the foreground. Aggregate validation
@@ -108,9 +108,9 @@ advanced identity flow.
 
 ## Advanced / reference
 
-### Runtime surface selection
+### Adaptive Runtime routing
 
-A Server chooses its model-facing MCP surface at startup. Ordinary users do not need to select or understand the internal routing names; use the tools shown by the connected Server. Maintainers who intentionally change that surface should use the internal architecture/configuration contract; routing never changes the target tool's normal authentication, project, or safety checks.
+There is one model-facing MCP runtime contract: **Adaptive Runtime**. Canonical `ToolDefinition` rank decides the direct tools; ordinary model-visible long-tail tools are invoked through `call_runtime_tool`; server-owned protocol capabilities and MCP App admission may add hidden extensions for the relevant protocol request. There is no startup model-surface selector. Direct versus gateway routing changes presentation only and never bypasses the target tool's authentication, Project authority, permission, Runner capability, Session, or safety checks.
 
 ### Tool result framing
 
@@ -294,13 +294,13 @@ prose.
 | `required_capability_unavailable` | The current Runner/runtime lacks a required coding capability | Upgrade all binaries |
 | `project_registry_scope_denied` | A project-scoped credential tried to expand or mutate the Project registry outside its granted visibility | Use an already-visible Project or `work_on_project(mode=worktree)` |
 
-## Advanced runtime surface
+## Adaptive Runtime extensions
 
-The same ToolRuntime can serve one project-scoped local `share`/`run` instance or a multi-project hosted Server. Model surfaces such as Adaptive Runtime, Local Coding, and Full Operator are projections of that one runtime; project-scoped credentials change visibility, not the underlying coding architecture.
+The same ToolRuntime serves project-scoped local `share`/`run` instances and multi-project hosted Servers through one Adaptive Runtime contract. Project-scoped credentials change visibility and authority, not the model-facing runtime shape. Protocol-specific capabilities and MCP Apps may admit additional hidden presentation or resource operations without creating another runtime surface.
 
 ### ChatGPT file bridge
 
-On broader MCP operator surfaces that expose artifact tools, WebCodex supports
+When the connected MCP protocol/host admits the artifact capabilities, WebCodex supports
 host-native file transfer in both directions without routing complete binary
 payloads through model text:
 
@@ -331,7 +331,4 @@ as DOCX/PPTX/XLSX and PDFs use the same underlying artifact transport and can
 therefore move between a project and a supporting ChatGPT host without a model
 manually carrying their Base64.
 
-When a broader model coding surface exposes `work_on_project`, use the
-[Coding Workflow](CODING_WORKFLOW.md) for the canonical bootstrap, behavioral-role
-mental model, and validation/closeout guidance. See [Architecture](ARCHITECTURE.md)
-and the `webcodex` CLI for operator tooling.
+Use [Coding Workflow](CODING_WORKFLOW.md) for the canonical `work_on_project` bootstrap, behavioral-role mental model, and validation/closeout guidance. See [Architecture](ARCHITECTURE.md) and the `webcodex` CLI for operator tooling.

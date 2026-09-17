@@ -71,18 +71,13 @@ pub(crate) fn recommended_flows() -> Vec<&'static str> {
         .collect()
 }
 
-fn tool_manifest_specs(
-    capabilities: ToolProtocolCapabilities,
-    model_surface: crate::model_surface::ModelSurface,
-) -> Vec<ToolSpec> {
+fn tool_manifest_specs(capabilities: ToolProtocolCapabilities) -> Vec<ToolSpec> {
     let mut specs = registered_tool_specs();
-    if model_surface.supports_operator_extensions() {
-        specs.extend(
-            stateless_operator_extension_tool_specs()
-                .into_iter()
-                .filter(|spec| tool_manifest_extension_capability_allows(&spec.name, capabilities)),
-        );
-    }
+    specs.extend(
+        stateless_operator_extension_tool_specs()
+            .into_iter()
+            .filter(|spec| tool_manifest_extension_capability_allows(&spec.name, capabilities)),
+    );
     specs
 }
 
@@ -106,15 +101,14 @@ fn tool_manifest_extension_capability_allows(
     }
 }
 
-fn tool_manifest_route(
-    spec: &ToolSpec,
-    model_surface: crate::model_surface::ModelSurface,
-) -> (&'static str, Option<&'static str>) {
+fn tool_manifest_route(spec: &ToolSpec) -> (&'static str, Option<&'static str>) {
     if is_model_visible_tool_name(spec.name.as_str()) {
-        model_surface.runtime_tool_invocation_route(spec.name.as_str())
+        crate::model_surface::adaptive_runtime_tool_invocation_route(spec.name.as_str())
     } else {
-        model_surface
-            .runtime_tool_invocation_route_with_operator_extension(spec.name.as_str(), true)
+        crate::model_surface::adaptive_runtime_tool_invocation_route_with_operator_extension(
+            spec.name.as_str(),
+            true,
+        )
     }
 }
 
@@ -250,20 +244,17 @@ impl ToolRuntime {
         protocol_capabilities: ToolProtocolCapabilities,
     ) -> Result<Value, ToolResult> {
         let tool_name = raw_tool_name.trim();
-        let model_surface = self.model_surface().ok_or_else(|| {
-            ToolResult::err("tool_manifest requires a model-facing runtime surface".to_string())
-        })?;
         if tool_name.is_empty() {
             return Err(unknown_tool_manifest_tool_result(tool_name));
         }
-        let specs = tool_manifest_specs(protocol_capabilities, model_surface);
+        let specs = tool_manifest_specs(protocol_capabilities);
         let tool_count = specs.len();
         let Some(spec) = specs.iter().find(|spec| spec.name == tool_name) else {
             return Err(unknown_tool_manifest_tool_result(tool_name));
         };
         let category = runtime_tool_category(spec.name.as_str());
         let metadata = runtime_tool_metadata(spec.name.as_str());
-        let (availability, gateway_tool) = tool_manifest_route(spec, model_surface);
+        let (availability, gateway_tool) = tool_manifest_route(spec);
         let mut exact_categories = serde_json::Map::new();
         exact_categories.insert(category.to_string(), json!([spec.name]));
         let mut output = json!({
@@ -297,7 +288,7 @@ impl ToolRuntime {
             "limit_applied": false,
             "requested_limit": Value::Null,
             "categories": Value::Object(exact_categories),
-            "tools": [compact_manifest_tool_entry(spec, model_surface)],
+            "tools": [compact_manifest_tool_entry(spec)],
         });
         if let Some(execution) = runtime_tool_execution_contract(spec.name.as_str()) {
             output["contract"]["execution"] = manifest_execution_projection(execution);
@@ -374,11 +365,8 @@ impl ToolRuntime {
                 }
             },
         };
-        let model_surface = self.model_surface().ok_or_else(|| {
-            ToolResult::err("tool_manifest requires a model-facing runtime surface".to_string())
-        })?;
 
-        let specs = tool_manifest_specs(protocol_capabilities, model_surface);
+        let specs = tool_manifest_specs(protocol_capabilities);
         let tool_count = specs.len();
         let categories_requested = normalize_tool_manifest_categories(categories);
         let category = categories_requested
@@ -408,7 +396,7 @@ impl ToolRuntime {
         let risk_summary = include_risk_summary.then(|| build_risk_summary(&returned_specs));
         let tools: Vec<Value> = returned_specs
             .iter()
-            .map(|spec| compact_manifest_tool_entry(spec, model_surface))
+            .map(|spec| compact_manifest_tool_entry(spec))
             .collect();
 
         let mut output = json!({
@@ -870,13 +858,10 @@ fn manifest_execution_projection(execution: ToolExecutionContract) -> Value {
     })
 }
 
-pub(super) fn compact_manifest_tool_entry(
-    spec: &ToolSpec,
-    model_surface: crate::model_surface::ModelSurface,
-) -> Value {
+pub(super) fn compact_manifest_tool_entry(spec: &ToolSpec) -> Value {
     let name = spec.name.as_str();
     let m = runtime_tool_metadata(name);
-    let (availability, gateway_tool) = tool_manifest_route(spec, model_surface);
+    let (availability, gateway_tool) = tool_manifest_route(spec);
     let mut entry = json!({
         "name": name,
         "category": runtime_tool_category(name),

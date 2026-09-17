@@ -106,7 +106,7 @@ pub fn agent_continuation_app_tool_specs() -> Vec<ToolSpec> {
 }
 
 /// Fixed admin-only forensic trace reader. It remains globally ModelHidden and
-/// is projected only by capable Stateless MCP 2026 operator adapters.
+/// is projected only by capable Stateless MCP 2026 adapters.
 pub fn operator_diagnostic_tool_specs() -> Vec<ToolSpec> {
     operator_extension_specs(
         vec![tool_spec(
@@ -120,7 +120,7 @@ pub fn operator_diagnostic_tool_specs() -> Vec<ToolSpec> {
 
 /// Fixed read-only project Memory runtime contract. Definitions remain hidden
 /// from generic/GPT Action registries and are projected only by capable
-/// Stateless MCP Full Operator adapters.
+/// Stateless MCP 2026 adapters.
 pub fn memory_runtime_tool_specs() -> Vec<ToolSpec> {
     operator_extension_specs(
         memory::tool_specs(),
@@ -141,7 +141,7 @@ pub fn memory_management_tool_specs() -> Vec<ToolSpec> {
 
 /// Fixed read-only Skill runtime contract. These definitions are deliberately
 /// ModelHidden globally and are projected only by the capable Stateless MCP
-/// Full Operator adapter.
+/// 2026 adapter.
 pub fn skill_runtime_tool_specs() -> Vec<ToolSpec> {
     operator_extension_specs(
         skills::tool_specs(),
@@ -160,7 +160,7 @@ pub fn skill_management_tool_specs() -> Vec<ToolSpec> {
 }
 
 /// Canonical fixed Stateless MCP 2026 operator-extension universe. These specs
-/// remain globally ModelHidden and are projected only by protocol/surface-aware
+/// remain globally ModelHidden and are projected only by protocol-capability-aware
 /// adapters and discovery. Keeping the composition here prevents tools/list,
 /// Adaptive gateway admission, and tool_manifest from maintaining separate name sets.
 pub fn stateless_operator_extension_tool_specs() -> Vec<ToolSpec> {

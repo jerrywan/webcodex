@@ -144,7 +144,7 @@ impl ToolRuntime {
                 super::ProjectArtifactAction::Image => {
                     if !matches!(transport, SessionTransport::Mcp) {
                         ToolResult::err_with_output(
-                            "project_artifact action=image requires a supported MCP native-image surface",
+                            "project_artifact action=image requires MCP native-image transport",
                             serde_json::json!({
                                 "error_kind": "unsupported_transport",
                                 "action": "image",
@@ -168,7 +168,7 @@ impl ToolRuntime {
                 super::ProjectArtifactAction::Export => {
                     if !matches!(transport, SessionTransport::Mcp) {
                         ToolResult::err_with_output(
-                            "project_artifact action=export requires a supported stateless operator-capable MCP ResourceLink surface",
+                            "project_artifact action=export requires Stateless MCP 2026 ResourceLink transport",
                             serde_json::json!({
                                 "error_kind": "unsupported_transport",
                                 "action": "export",

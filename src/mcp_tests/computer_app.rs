@@ -22,19 +22,12 @@ fn mcp_2026_ui_capability_detection_is_explicit_and_mime_aware() {
         }
     });
     assert!(!request_supports_mcp_apps(&incompatible));
-    assert!(model_surface_supports_computer_app(
-        ModelSurface::FullOperatorRuntime
-    ));
-    assert!(!model_surface_supports_computer_app(
-        ModelSurface::LocalCoding
-    ));
 }
 
 #[tokio::test]
 async fn mcp_2026_computer_app_is_minimal_handshake_and_snapshot_only() {
     const PUBLIC_URL: &str = "https://self-host.example";
-    let runtime =
-        test_runtime_with_surface_and_public_url(ModelSurface::FullOperatorRuntime, PUBLIC_URL);
+    let runtime = test_runtime_with_public_url(PUBLIC_URL);
     // The URI is a host cache key. Bump it whenever the App delivery contract
     // changes so a previously failed/blank iframe cannot pin the old resource.
     assert_eq!(MCP_COMPUTER_UI_RESOURCE_URI, "ui://webcodex/computer/v12");
@@ -90,28 +83,27 @@ async fn mcp_2026_computer_app_is_minimal_handshake_and_snapshot_only() {
         panic!("expected UI-enabled tools/list");
     };
     let tools = tools["result"]["tools"].as_array().unwrap();
-    let observe = tools
+    assert!(tools
         .iter()
-        .find(|tool| tool["name"] == "computer_observe")
-        .expect("UI tools/list should expose the authorized read-only Computer gateway");
-    assert!(observe.get("_meta").is_none());
-    for legacy in [
+        .any(|tool| { tool["name"] == crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME }));
+    assert!(
+        !tools.iter().any(|tool| tool["name"] == "computer_observe"),
+        "Computer observation remains model-visible long tail and must use call_runtime_tool"
+    );
+    for retired in [
         "computer_snapshot",
         "computer_snapshot_display",
         "computer_list_windows",
     ] {
-        assert!(!tools.iter().any(|tool| tool["name"] == legacy));
+        assert!(!tools.iter().any(|tool| tool["name"] == retired));
     }
 
-    let compact =
-        mcp_tools_list_payload_with_compact_and_app(ModelSurface::FullOperatorRuntime, true, true);
-    let compact_observe = compact["tools"]
+    let compact = mcp_tools_list_payload_with_compact_and_app(true, true);
+    assert!(!compact["tools"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|tool| tool["name"] == "computer_observe")
-        .unwrap();
-    assert!(compact_observe.get("_meta").is_none());
+        .any(|tool| tool["name"] == "computer_observe"));
 
     let resources = handle_mcp_request(
         &runtime,
@@ -266,13 +258,13 @@ async fn mcp_2026_computer_app_is_minimal_handshake_and_snapshot_only() {
     let McpOutcome::Ok(tools_without_ui_capability) = tools_without_ui_capability else {
         panic!("expected tools/list without UI capability metadata");
     };
-    let snapshot = tools_without_ui_capability["result"]["tools"]
+    let names = tools_without_ui_capability["result"]["tools"]
         .as_array()
-        .unwrap()
-        .iter()
-        .find(|tool| tool["name"] == "computer_observe")
         .unwrap();
-    assert!(snapshot.get("_meta").is_none());
+    assert!(names
+        .iter()
+        .any(|tool| { tool["name"] == crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME }));
+    assert!(!names.iter().any(|tool| tool["name"] == "computer_observe"));
 
     let no_ui_resources = handle_mcp_request(
         &runtime,
@@ -333,7 +325,7 @@ async fn mcp_computer_snapshot_resource_links_are_unique_caller_bound_and_scope_
         auth
     }
 
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let auth = snapshot_auth("snapshot-link-owner", true);
     let caller = mcp_artifact_export_caller_binding(Some(&auth)).unwrap();
     let bytes = vec![0xff, 0xd8, 0xff, 0xd9];
@@ -477,7 +469,7 @@ async fn mcp_computer_snapshot_resource_links_are_unique_caller_bound_and_scope_
 
 #[tokio::test]
 async fn mcp_resources_read_not_found_echoes_uri_without_changing_param_errors() {
-    let runtime = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = test_runtime();
     let uri = "test://nonexistent-resource-for-conformance-testing";
 
     let unknown = super::super::resources::handle_read(
@@ -485,7 +477,6 @@ async fn mcp_resources_read_not_found_echoes_uri_without_changing_param_errors()
         json!({ "uri": uri }),
         Some(json!(2114)),
         None,
-        ModelSurface::FullOperatorRuntime,
         true,
     )
     .await;
@@ -496,15 +487,9 @@ async fn mcp_resources_read_not_found_echoes_uri_without_changing_param_errors()
     assert_eq!(unknown["error"]["data"], json!({ "uri": uri }));
     assert!(unknown.get("result").is_none());
 
-    let missing = super::super::resources::handle_read(
-        &runtime,
-        json!({}),
-        Some(json!(2115)),
-        None,
-        ModelSurface::FullOperatorRuntime,
-        true,
-    )
-    .await;
+    let missing =
+        super::super::resources::handle_read(&runtime, json!({}), Some(json!(2115)), None, true)
+            .await;
     let McpOutcome::BadRequest(missing) = missing else {
         panic!("missing uri must fail as Invalid params");
     };
@@ -514,37 +499,4 @@ async fn mcp_resources_read_not_found_echoes_uri_without_changing_param_errors()
         "Invalid params: uri is required"
     );
     assert!(missing["error"].get("data").is_none());
-}
-
-#[test]
-fn mcp_computer_snapshot_output_schema_matches_native_image_framing() {
-    let runtime_spec = registered_tool_specs()
-        .into_iter()
-        .find(|spec| spec.name == "computer_observe")
-        .expect("computer_observe runtime spec");
-    let runtime_properties = runtime_spec.output_schema["properties"]["output"]["properties"]
-        .as_object()
-        .expect("runtime computer_observe output properties");
-    assert!(runtime_properties.contains_key("content_base64"));
-    assert!(!runtime_properties.contains_key("content_delivery"));
-
-    for app_enabled in [false, true] {
-        let payload = mcp_tools_list_payload_with_compact_and_app(
-            ModelSurface::FullOperatorRuntime,
-            false,
-            app_enabled,
-        );
-        let tool = payload["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|tool| tool["name"] == "computer_observe")
-            .expect("MCP computer_observe descriptor");
-        let properties = tool["outputSchema"]["properties"]["output"]["properties"]
-            .as_object()
-            .expect("MCP computer_observe output properties");
-        assert!(!properties.contains_key("content_base64"));
-        assert_eq!(properties["content_delivery"]["type"], "string");
-        assert_eq!(properties["content_delivery"]["const"], "mcp_image");
-    }
 }

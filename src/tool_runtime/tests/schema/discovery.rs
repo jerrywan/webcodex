@@ -871,10 +871,9 @@ async fn tool_manifest_all_available_intents_parse_and_filter_through_tool_call(
 
 #[tokio::test]
 async fn tool_manifest_intent_coding_returns_ranked_compact_tools() {
-    use crate::model_surface::ModelSurface;
     use crate::tool_runtime::tool_definition::TOOL_MANIFEST_INTENTS;
 
-    let runtime = test_runtime().with_model_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
     let result = runtime
         .dispatch(ToolCall::ToolManifest {
             tool_name: None,
@@ -1557,8 +1556,7 @@ async fn tool_manifest_exact_tool_returns_input_contract_without_output_schema()
 
 #[tokio::test]
 async fn tool_manifest_projects_canonical_execution_selection_for_exact_and_filtered_views() {
-    let runtime =
-        test_runtime().with_model_surface(crate::model_surface::ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
     let expected = json!({
         "form": "shell_command",
         "lifetime": "runner",
@@ -1776,81 +1774,38 @@ async fn tool_manifest_projects_canonical_semantic_contracts() {
 }
 
 #[tokio::test]
-async fn tool_manifest_surface_routing_metadata_tracks_current_model_surface() {
-    use crate::model_surface::ModelSurface;
-
-    for (surface, tool_name, availability, gateway_tool) in [
+async fn tool_manifest_routing_metadata_uses_canonical_adaptive_routes() {
+    let runtime = test_runtime();
+    for (tool_name, availability, gateway_tool) in [
+        ("run_process", "direct", None),
+        ("run_shell", "direct", None),
+        ("import_conversation_files_to_project", "direct", None),
+        ("project_artifact", "direct", None),
         (
-            ModelSurface::LocalCoding,
-            "computer_observe",
-            "unavailable",
-            None,
-        ),
-        (ModelSurface::AdaptiveRuntime, "run_process", "direct", None),
-        (ModelSurface::AdaptiveRuntime, "run_shell", "direct", None),
-        (
-            ModelSurface::AdaptiveRuntime,
-            "import_conversation_files_to_project",
-            "direct",
-            None,
-        ),
-        (
-            ModelSurface::AdaptiveRuntime,
-            "project_artifact",
-            "direct",
-            None,
-        ),
-        (
-            ModelSurface::AdaptiveRuntime,
             "export_project_artifact",
             "gateway",
             Some("call_runtime_tool"),
         ),
+        ("session_discussion_summary", "direct", None),
+        ("list_jobs", "direct", None),
+        ("git_diff_hunks", "direct", None),
+        ("run_script", "gateway", Some("call_runtime_tool")),
         (
-            ModelSurface::AdaptiveRuntime,
-            "session_discussion_summary",
-            "direct",
-            None,
-        ),
-        (ModelSurface::AdaptiveRuntime, "list_jobs", "direct", None),
-        (
-            ModelSurface::AdaptiveRuntime,
-            "git_diff_hunks",
-            "direct",
-            None,
-        ),
-        (
-            ModelSurface::AdaptiveRuntime,
-            "run_script",
-            "gateway",
-            Some("call_runtime_tool"),
-        ),
-        (
-            ModelSurface::AdaptiveRuntime,
             "save_project_artifact",
             "gateway",
             Some("call_runtime_tool"),
         ),
         (
-            ModelSurface::AdaptiveRuntime,
             "read_project_artifact",
             "gateway",
             Some("call_runtime_tool"),
         ),
         (
-            ModelSurface::AdaptiveRuntime,
             "artifact_upload_begin",
             "gateway",
             Some("call_runtime_tool"),
         ),
-        (
-            ModelSurface::FullOperatorRuntime,
-            "run_script",
-            "direct",
-            None,
-        ),
     ] {
-        let runtime = test_runtime().with_model_surface(surface);
         let result = runtime
             .dispatch(ToolCall::ToolManifest {
                 tool_name: Some(tool_name.to_string()),
@@ -1860,11 +1815,7 @@ async fn tool_manifest_surface_routing_metadata_tracks_current_model_surface() {
                 include_risk_summary: false,
             })
             .await;
-        assert!(
-            result.success,
-            "{surface:?} {tool_name}: {:?}",
-            result.error
-        );
+        assert!(result.success, "{tool_name}: {:?}", result.error);
         assert_eq!(result.output["contract"]["availability"], availability);
         assert_eq!(
             result.output["contract"]["gateway_tool"],
@@ -1890,10 +1841,9 @@ async fn tool_manifest_surface_routing_metadata_tracks_current_model_surface() {
 
 #[tokio::test]
 async fn tool_manifest_operator_extensions_require_explicit_family_capabilities() {
-    use crate::model_surface::ModelSurface;
     use crate::tool_runtime::kernel::ToolProtocolCapabilities;
 
-    let runtime = test_runtime().with_model_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
     let manifest = |tool_name: &'static str, capabilities: ToolProtocolCapabilities| {
         runtime.tool_manifest(
             Some(tool_name.to_string()),
@@ -1943,26 +1893,6 @@ async fn tool_manifest_operator_extensions_require_explicit_family_capabilities(
     };
     assert!(manifest("read_tool_trace", diagnostic_only).await.success);
     assert!(!manifest("memory_search", diagnostic_only).await.success);
-
-    let local = test_runtime().with_model_surface(ModelSurface::LocalCoding);
-    let local_with_capability = local
-        .tool_manifest(
-            Some("skill_list".to_string()),
-            None,
-            None,
-            false,
-            false,
-            skill_only,
-        )
-        .await;
-    assert!(
-        !local_with_capability.success,
-        "unsupported Local Coding surface must not expose operator extensions even with inconsistent internal capability input"
-    );
-    assert_eq!(
-        local_with_capability.output["code"],
-        "unknown_tool_manifest_tool"
-    );
 
     let management_only = ToolProtocolCapabilities {
         skill_management: true,

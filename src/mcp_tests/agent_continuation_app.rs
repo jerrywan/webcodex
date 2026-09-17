@@ -103,15 +103,11 @@ fn continuation_auth(username: &str) -> crate::auth::AuthContext {
     auth
 }
 
-fn continuation_runtime(
-    surface: ModelSurface,
-) -> (tempfile::TempDir, Arc<crate::db::Database>, ToolRuntime) {
+fn continuation_runtime() -> (tempfile::TempDir, Arc<crate::db::Database>, ToolRuntime) {
     let temp = tempfile::tempdir().unwrap();
     let db =
         Arc::new(crate::db::Database::open(&temp.path().join("agent-continuation.db")).unwrap());
-    let runtime = ToolRuntime::new_for_tests()
-        .with_model_surface(surface)
-        .with_communication_database(db.clone());
+    let runtime = ToolRuntime::new_for_tests().with_communication_database(db.clone());
     (temp, db, runtime)
 }
 
@@ -133,7 +129,6 @@ async fn handle_with_server_apps_enabled(
         None,
         None,
         crate::model_surface::effective_mcp_compact_schemas(
-            runtime.runtime_exposure(),
             crate::config::mcp_compact_schemas_override(),
         ),
         enabled,
@@ -243,7 +238,7 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
         MCP_AGENT_CONTINUATION_UI_RESOURCE_URI,
         "ui://webcodex/agent-continuation/v17"
     );
-    let (_temp, _db, adaptive) = continuation_runtime(ModelSurface::AdaptiveRuntime);
+    let (_temp, _db, adaptive) = continuation_runtime();
     let auth = continuation_auth("continuation-surface");
     let ui = handle_with_server_apps_enabled(
         &adaptive,
@@ -393,25 +388,6 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
     };
     for name in APP_TOOLS {
         assert!(tool(&legacy["result"], name).is_none());
-    }
-
-    let (_local_temp, _local_db, local) = continuation_runtime(ModelSurface::LocalCoding);
-    let local_ui = handle_with_server_apps_enabled(
-        &local,
-        rpc(
-            "tools/list",
-            Some(json!(5105)),
-            mcp_2026_ui_params(json!({})),
-        ),
-        Some(&auth),
-        true,
-    )
-    .await;
-    let McpOutcome::Ok(local_ui) = local_ui else {
-        panic!("expected Local Coding tools/list")
-    };
-    for name in APP_TOOLS {
-        assert!(tool(&local_ui["result"], name).is_none());
     }
 
     for name in APP_TOOLS {
@@ -666,7 +642,7 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
 
 #[tokio::test]
 async fn agent_continuation_app_uses_hashed_openai_session_as_client_window_fence() {
-    let (_temp, db, runtime) = continuation_runtime(ModelSurface::AdaptiveRuntime);
+    let (_temp, db, runtime) = continuation_runtime();
     let owner = continuation_auth("continuation-window-owner");
     let foreign = continuation_auth("continuation-window-foreign");
     let agent = create_agent(
@@ -871,9 +847,7 @@ fn restart_recovery_survives_published_projection_output_schema() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("agent-continuation-schema-restart.db");
     let db = Arc::new(crate::db::Database::open(&path).unwrap());
-    let runtime = ToolRuntime::new_for_tests()
-        .with_model_surface(ModelSurface::AdaptiveRuntime)
-        .with_communication_database(db.clone());
+    let runtime = ToolRuntime::new_for_tests().with_communication_database(db.clone());
     let owner = continuation_auth("continuation-schema-restart");
     let agent = create_agent(
         &runtime,
@@ -917,9 +891,7 @@ fn restart_recovery_survives_published_projection_output_schema() {
     reopened
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();
-    let runtime = ToolRuntime::new_for_tests()
-        .with_model_surface(ModelSurface::AdaptiveRuntime)
-        .with_communication_database(reopened);
+    let runtime = ToolRuntime::new_for_tests().with_communication_database(reopened);
     let restart =
         runtime.agent_continuation_state(Some(&owner), agent, endpoint, generation, binding_id);
     assert!(restart.success, "{:?}", restart.output);
@@ -945,7 +917,7 @@ fn restart_recovery_survives_published_projection_output_schema() {
 
 #[test]
 fn expired_successor_replay_survives_published_recovery_output_schema() {
-    let (_temp, db, runtime) = continuation_runtime(ModelSurface::AdaptiveRuntime);
+    let (_temp, db, runtime) = continuation_runtime();
     let owner = continuation_auth("continuation-schema-successor");
     let agent = create_agent(
         &runtime,
@@ -1104,7 +1076,7 @@ fn task_origin_wake_survives_published_bootstrap_output_schema() {
 #[tokio::test]
 async fn agent_continuation_app_protocol_uses_standard_result_without_model_projection_leaks() {
     let binding_id = "wc_host_binding_qqqqqqqqqqqqqqqqqqqqqg".to_string();
-    let (_temp, _db, runtime) = continuation_runtime(ModelSurface::AdaptiveRuntime);
+    let (_temp, _db, runtime) = continuation_runtime();
     let owner = continuation_auth("continuation-owner");
     let foreign = continuation_auth("continuation-foreign");
     let sender = create_agent(
@@ -1439,8 +1411,7 @@ async fn agent_continuation_hidden_kernel_entry_is_fail_closed_without_protocol_
         ToolProtocolCapabilities, ToolTransport,
     };
 
-    let runtime =
-        ToolRuntime::new_for_tests().with_model_surface(ModelSurface::FullOperatorRuntime);
+    let runtime = ToolRuntime::new_for_tests();
     let auth = continuation_auth("continuation-kernel-gate");
     for transport in [ToolTransport::Mcp, ToolTransport::Api] {
         for name in APP_TOOLS {

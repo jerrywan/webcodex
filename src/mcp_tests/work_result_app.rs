@@ -24,7 +24,6 @@ async fn handle_with_server_apps_enabled(
         None,
         None,
         crate::model_surface::effective_mcp_compact_schemas(
-            runtime.runtime_exposure(),
             crate::config::mcp_compact_schemas_override(),
         ),
         enabled,
@@ -39,7 +38,7 @@ async fn work_result_descriptor_is_explicit_sparse_app_only_and_resource_backed(
         MCP_WORK_RESULT_UI_RESOURCE_URI,
         "ui://webcodex/work-result/v1"
     );
-    let runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
 
     let ui = handle_with_server_apps_enabled(
         &runtime,
@@ -69,7 +68,7 @@ async fn work_result_descriptor_is_explicit_sparse_app_only_and_resource_backed(
         json!(["project", "session_id"])
     );
 
-    let full = test_runtime_with_surface(ModelSurface::FullOperatorRuntime);
+    let full = test_runtime();
     let full_ui = handle_with_server_apps_enabled(
         &full,
         rpc(
@@ -84,23 +83,16 @@ async fn work_result_descriptor_is_explicit_sparse_app_only_and_resource_backed(
     let McpOutcome::Ok(full_ui) = full_ui else {
         panic!("expected UI-capable full tools/list");
     };
-    for name in [
-        "show_changes",
-        "list_jobs",
-        "observe_jobs",
-        "cargo_check",
-        "cargo_test",
-        "validation_summary",
-        "git_review_summary",
-        "finish_coding_task",
-    ] {
-        let descriptor = tool(&full_ui["result"], name).unwrap_or_else(|| panic!("missing {name}"));
+    for descriptor in full_ui["result"]["tools"].as_array().unwrap() {
+        if descriptor["name"] == "present_work_result" {
+            continue;
+        }
         assert_ne!(
             descriptor
                 .pointer("/_meta/ui/resourceUri")
                 .and_then(Value::as_str),
             Some(MCP_WORK_RESULT_UI_RESOURCE_URI),
-            "{name} must not create a Work Result card"
+            "only present_work_result may create a Work Result card"
         );
     }
     assert_eq!(
@@ -167,8 +159,7 @@ async fn work_result_descriptor_is_explicit_sparse_app_only_and_resource_backed(
 #[tokio::test]
 async fn work_result_resource_is_canonical_while_changes_resources_are_hidden_compatibility() {
     const PUBLIC_URL: &str = "https://self-host.example";
-    let runtime =
-        test_runtime_with_surface_and_public_url(ModelSurface::FullOperatorRuntime, PUBLIC_URL);
+    let runtime = test_runtime_with_public_url(PUBLIC_URL);
     let resources = handle_with_server_apps_enabled(
         &runtime,
         rpc(
@@ -226,7 +217,7 @@ async fn work_result_resource_is_canonical_while_changes_resources_are_hidden_co
 
 #[tokio::test]
 async fn work_result_state_call_requires_app_protocol_capability() {
-    let runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
     let args = json!({
         "name": "work_result_state",
         "arguments": {
@@ -264,7 +255,7 @@ async fn work_result_state_call_requires_app_protocol_capability() {
 
 #[tokio::test]
 async fn work_result_state_discards_unadvertised_recording_session_wrapper() {
-    let runtime = test_runtime_with_surface(ModelSurface::AdaptiveRuntime);
+    let runtime = test_runtime();
     let project = "agent:missing:work-result".to_string();
     let session = runtime.sessions.start_session(
         Some(project.clone()),

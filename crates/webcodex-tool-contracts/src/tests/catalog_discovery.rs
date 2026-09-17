@@ -679,66 +679,12 @@ fn project_overview_manifest_profiles_match_intended_workflows() {
 }
 
 #[test]
-fn local_coding_compatibility_surface_stays_exact_and_ordered() {
-    assert_eq!(
-        LOCAL_CODING_TOOL_NAMES,
-        &[
-            "work_on_project",
-            "list_projects",
-            "plugin_tool",
-            "get_session_assignment",
-            "complete_session_message",
-            "coding_agent_start",
-            "coding_agent_observe",
-            "coding_agent_cancel",
-            "project_overview",
-            "list_project_tracked_files",
-            "list_project_files",
-            "search_project_texts",
-            "read_files",
-            "project_artifact",
-            "lsp_status",
-            "document_symbols",
-            "document_diagnostics",
-            "hover",
-            "workspace_symbols",
-            "goto_definition",
-            "find_references",
-            "call_hierarchy",
-            "apply_text_edits",
-            "apply_patch",
-            "apply_unified_diff",
-            "run_process",
-            "run_script",
-            "run_shell",
-            "run_job",
-            "observe_jobs",
-            "list_jobs",
-            "stop_job",
-            "cargo_fmt",
-            "cargo_check",
-            "cargo_test",
-            "go_test",
-            "validation_summary",
-            "git_status",
-            "git_log",
-            "git_review_summary",
-            "git_diff_hunks",
-            "show_changes",
-            "workspace_hygiene_check",
-            "finish_coding_task",
-        ]
-    );
-}
-
-#[test]
 fn coding_intent_has_independent_ordered_canonical_selection_surface() {
     let coding = TOOL_MANIFEST_INTENTS
         .iter()
         .find(|intent| intent.name == "coding")
         .expect("coding intent");
     assert_eq!(coding.tools, CODING_INTENT_TOOL_NAMES);
-    assert_ne!(coding.tools, LOCAL_CODING_TOOL_NAMES);
     assert_eq!(coding.tools.first().copied(), Some("work_on_project"));
     assert_eq!(coding.tools.last().copied(), Some("finish_coding_task"));
 

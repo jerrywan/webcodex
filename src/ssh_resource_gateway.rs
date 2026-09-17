@@ -283,33 +283,6 @@ pub(crate) fn mcp_output_schema() -> Value {
     })
 }
 
-pub(crate) fn tool_spec(compact: bool) -> Value {
-    let definition = webcodex_tool_contracts::lookup_tool_definition(SSH_RESOURCE_TOOL_NAME)
-        .expect("ssh_resource ToolDefinition");
-    let model_spec = definition.model_spec.expect("ssh_resource model spec");
-    let mut input_schema = (model_spec.input_schema)();
-    if let Some(properties) = input_schema["properties"].as_object_mut() {
-        properties.insert(
-            "recording_session_id".to_string(),
-            json!({
-                "type": "string",
-                "pattern": "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
-                "description": "Optional explicit Workflow Session used for authority, read-only/guard, permission, and audit governance. It is never inferred from MCP transport identity."
-            }),
-        );
-    }
-    let mut value = json!({
-        "name": SSH_RESOURCE_TOOL_NAME,
-        "description": model_spec.description,
-        "inputSchema": input_schema,
-        "annotations": webcodex_tool_contracts::tool_annotations(SSH_RESOURCE_TOOL_NAME)
-    });
-    if !compact {
-        value["outputSchema"] = mcp_output_schema();
-    }
-    value
-}
-
 /// Body-free audit projection for the MCP lifecycle. The raw target is never
 /// recorded in ordinary tool telemetry or Session evidence.
 pub(crate) fn audit_arguments(arguments: &Value) -> Value {

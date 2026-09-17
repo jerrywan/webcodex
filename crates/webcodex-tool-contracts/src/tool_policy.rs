@@ -67,11 +67,11 @@ impl ToolDefinition {
     }
 
     pub fn adaptive_runtime_direct_rank(self) -> Option<u16> {
-        self.model_surface.adaptive_runtime_direct_rank
+        self.adaptive_runtime_direct_rank
     }
 
     pub fn gpt_action_exposure(self) -> ToolGptActionExposure {
-        self.model_surface.gpt_action_exposure
+        self.gpt_action_exposure
     }
 
     pub fn supports_gpt_actions(self) -> bool {

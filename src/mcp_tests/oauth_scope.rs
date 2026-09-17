@@ -1,21 +1,21 @@
 use super::*;
 
-fn oauth_mcp_service_with_surface(
-    scopes: &str,
-    model_surface: ModelSurface,
-) -> (tempfile::TempDir, Service, String) {
+fn oauth_mcp_service(scopes: &str) -> (tempfile::TempDir, Service, String) {
     let config = test_config_oauth2(Some("secret"));
     let (tmp, db) = test_db();
     let user = seed_user(&db, "alice");
     let client = seed_oauth_client(&db, &user);
     let token = seed_oauth_access_token(&db, &client, &user, scopes);
-    let runtime = Arc::new(test_runtime_with_surface(model_surface));
+    let runtime = Arc::new(test_runtime());
     let service = Service::new(build_test_router(config, db, runtime));
     (tmp, service, token)
 }
 
-fn oauth_mcp_service(scopes: &str) -> (tempfile::TempDir, Service, String) {
-    oauth_mcp_service_with_surface(scopes, ModelSurface::LocalCoding)
+fn adaptive_gateway_params(tool: &str, arguments: Value) -> Value {
+    json!({
+        "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+        "arguments": {"tool": tool, "arguments": arguments}
+    })
 }
 
 async fn oauth_mcp_service_with_plugin_runner(
@@ -26,7 +26,7 @@ async fn oauth_mcp_service_with_plugin_runner(
     let user = seed_user(&db, "alice");
     let client = seed_oauth_client(&db, &user);
     let token = seed_oauth_access_token(&db, &client, &user, scopes);
-    let runtime = Arc::new(test_runtime_with_surface(ModelSurface::LocalCoding));
+    let runtime = Arc::new(test_runtime());
     let mut capabilities = RunnerCapabilities::default();
     capabilities.native_tool_plugins = true;
     runtime
@@ -286,10 +286,10 @@ async fn oauth2_managed_ssh_resource_surface_requires_explicit_ssh_local_scope()
         &service,
         &token,
         "tools/call",
-        json!({
-            "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-            "arguments": {"action": "list", "runner": "runner-a"}
-        }),
+        adaptive_gateway_params(
+            crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+            json!({"action": "list", "runner": "runner-a"}),
+        ),
     )
     .await;
     assert_mcp_oauth_scope_rejected(
@@ -302,7 +302,7 @@ async fn oauth2_managed_ssh_resource_surface_requires_explicit_ssh_local_scope()
     let (_tmp, service, token) = oauth_mcp_service("runtime:read ssh:local");
     let (status, body, _) = oauth_mcp_request(&service, &token, "tools/list", json!({})).await;
     assert_eq!(status, StatusCode::OK, "body: {body:?}");
-    assert!(body["result"]["tools"]
+    assert!(!body["result"]["tools"]
         .as_array()
         .unwrap()
         .iter()
@@ -312,10 +312,10 @@ async fn oauth2_managed_ssh_resource_surface_requires_explicit_ssh_local_scope()
         &service,
         &token,
         "tools/call",
-        json!({
-            "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-            "arguments": {"action": "list", "runner": "runner-a"}
-        }),
+        adaptive_gateway_params(
+            crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+            json!({"action": "list", "runner": "runner-a"}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "body: {body:?}");
@@ -359,8 +359,7 @@ async fn oauth2_plugin_gateway_visibility_uses_any_plugin_scope_and_provider_nam
 
 #[tokio::test]
 async fn oauth2_adaptive_gateway_preserves_canonical_target_scope_errors() {
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("runtime:read", ModelSurface::AdaptiveRuntime);
+    let (_tmp, service, token) = oauth_mcp_service("runtime:read");
 
     let (status, body, _) = oauth_mcp_request(
         &service,
@@ -449,8 +448,7 @@ async fn oauth2_adaptive_gateway_preserves_canonical_target_scope_errors() {
     assert!(names.contains(crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME));
     assert!(!names.contains(crate::mcp_gateway::MCP_TOOL_NAME));
 
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("runtime:read mcp:local", ModelSurface::AdaptiveRuntime);
+    let (_tmp, service, token) = oauth_mcp_service("runtime:read mcp:local");
     let (status, body, _) = oauth_mcp_request(&service, &token, "tools/list", json!({})).await;
     assert_eq!(
         status,
@@ -485,8 +483,7 @@ async fn oauth2_adaptive_gateway_preserves_canonical_target_scope_errors() {
 
 #[tokio::test]
 async fn oauth2_mcp_computer_app_resources_require_runtime_read() {
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("runtime:read", ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service("runtime:read");
     let (status, body, _) = oauth_mcp_request(
         &service,
         &token,
@@ -500,8 +497,7 @@ async fn oauth2_mcp_computer_app_resources_require_runtime_read() {
         MCP_COMPUTER_UI_RESOURCE_URI
     );
 
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("project:read", ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service("project:read");
     let (status, body, challenge) = oauth_mcp_request(
         &service,
         &token,
@@ -524,13 +520,12 @@ async fn oauth2_mcp_computer_observe_snapshot_keeps_computer_read_scope() {
         "client_id": "missing-runner",
         "surface_id": "surface_test"
     });
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("runtime:read", ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service("runtime:read");
     let (status, body, challenge) = oauth_mcp_request(
         &service,
         &token,
         "tools/call",
-        json!({ "name": "computer_observe", "arguments": arguments.clone() }),
+        adaptive_gateway_params("computer_observe", arguments.clone()),
     )
     .await;
     assert_mcp_oauth_scope_rejected(
@@ -540,13 +535,12 @@ async fn oauth2_mcp_computer_observe_snapshot_keeps_computer_read_scope() {
         Some(crate::auth::SCOPE_COMPUTER_READ),
     );
 
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("computer:read", ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service("computer:read");
     let (status, body, _) = oauth_mcp_request(
         &service,
         &token,
         "tools/call",
-        json!({ "name": "computer_observe", "arguments": arguments }),
+        adaptive_gateway_params("computer_observe", arguments),
     )
     .await;
     assert_ne!(status, StatusCode::FORBIDDEN, "body: {body:?}");
@@ -648,40 +642,37 @@ async fn oauth2_mcp_tool_call_requires_project_read_for_read_files() {
 #[tokio::test]
 async fn oauth2_mcp_tool_call_requires_project_write_for_edit_tools() {
     // Edit tools require the project:write scope. Select the explicit full
-    // operator surface so the scope gate (not the local_coding boundary)
-    // decides this call.
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("project:write", ModelSurface::FullOperatorRuntime);
+    // canonical Adaptive Runtime so the scope gate decides this call.
+    let (_tmp, service, token) = oauth_mcp_service("project:write");
     let (status, body, _) = oauth_mcp_request(
         &service,
         &token,
         "tools/call",
-        json!({
-            "name": "write_project_file",
-            "arguments": {
+        adaptive_gateway_params(
+            "write_project_file",
+            json!({
                 "project": "demo",
                 "path": "README.md",
                 "content": "new"
-            }
-        }),
+            }),
+        ),
     )
     .await;
     assert_ne!(status, StatusCode::FORBIDDEN, "body: {:?}", body);
 
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("project:read", ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service("project:read");
     let (status, body, challenge) = oauth_mcp_request(
         &service,
         &token,
         "tools/call",
-        json!({
-            "name": "write_project_file",
-            "arguments": {
+        adaptive_gateway_params(
+            "write_project_file",
+            json!({
                 "project": "demo",
                 "path": "README.md",
                 "content": "new"
-            }
-        }),
+            }),
+        ),
     )
     .await;
     assert_mcp_oauth_scope_rejected(
@@ -726,8 +717,7 @@ async fn oauth2_mcp_detached_process_requires_job_run_and_job_detach() {
         ("job:run", crate::auth::SCOPE_JOB_DETACH),
         ("job:detach", crate::auth::SCOPE_JOB_RUN),
     ] {
-        let (_tmp, service, token) =
-            oauth_mcp_service_with_surface(scopes, ModelSurface::FullOperatorRuntime);
+        let (_tmp, service, token) = oauth_mcp_service(scopes);
         let (status, body, challenge) = oauth_mcp_request(
             &service,
             &token,
@@ -746,8 +736,7 @@ async fn oauth2_mcp_detached_process_requires_job_run_and_job_detach() {
         assert_mcp_oauth_scope_rejected(status, &body, challenge.as_deref(), Some(missing));
     }
 
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface("job:run job:detach", ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service("job:run job:detach");
     let (status, body, _) = oauth_mcp_request(
         &service,
         &token,
@@ -768,10 +757,7 @@ async fn oauth2_mcp_detached_process_requires_job_run_and_job_detach() {
 
 #[tokio::test]
 async fn oauth2_mcp_unknown_tool_fails_closed() {
-    let (_tmp, service, token) = oauth_mcp_service_with_surface(
-        "runtime:read project:read",
-        ModelSurface::FullOperatorRuntime,
-    );
+    let (_tmp, service, token) = oauth_mcp_service("runtime:read project:read");
     let (status, body, challenge) = oauth_mcp_request(
         &service,
         &token,
@@ -779,7 +765,13 @@ async fn oauth2_mcp_unknown_tool_fails_closed() {
         json!({"name": "no_such_tool", "arguments": {}}),
     )
     .await;
-    assert_mcp_oauth_scope_rejected(status, &body, challenge.as_deref(), None);
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body:?}");
+    assert_eq!(body["error"]["code"], -32602);
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains("call_runtime_tool"));
+    assert!(challenge.is_none());
 }
 
 fn listed_tool_names(body: &Value) -> std::collections::HashSet<String> {
@@ -817,8 +809,7 @@ async fn oauth2_memory_tools_require_canonical_project_and_memory_scopes() {
         ),
     ] {
         let scopes = format!("runtime:read {extra_scopes}");
-        let (_tmp, service, token) =
-            oauth_mcp_service_with_surface(&scopes, ModelSurface::FullOperatorRuntime);
+        let (_tmp, service, token) = oauth_mcp_service(&scopes);
         let (status, body, _) =
             oauth_mcp_request(&service, &token, "tools/list", mcp_2026_params(json!({}))).await;
         assert_eq!(status, StatusCode::OK, "{scopes}: {body:?}");
@@ -861,8 +852,7 @@ async fn oauth2_memory_tools_require_canonical_project_and_memory_scopes() {
             crate::auth::SCOPE_PROJECT_WRITE,
         ),
     ] {
-        let (_tmp, service, token) =
-            oauth_mcp_service_with_surface(scopes, ModelSurface::FullOperatorRuntime);
+        let (_tmp, service, token) = oauth_mcp_service(scopes);
         let (status, body, challenge) = oauth_mcp_request(
             &service,
             &token,
@@ -875,38 +865,10 @@ async fn oauth2_memory_tools_require_canonical_project_and_memory_scopes() {
 }
 
 #[tokio::test]
-async fn oauth2_tools_list_projects_canonical_computer_gateways_from_outer_scopes() {
+async fn oauth2_tools_list_keeps_computer_tools_long_tail_across_outer_scopes() {
     let baseline = "runtime:read project:read project:write job:run computer:read computer:control";
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface(baseline, ModelSurface::FullOperatorRuntime);
-    let (status, body, _) = oauth_mcp_request(&service, &token, "tools/list", json!({})).await;
-    assert_eq!(status, StatusCode::OK, "body: {body:?}");
-    let baseline_tools = listed_tool_names(&body);
-    for canonical in [
-        "computer_observe",
-        "computer_control",
-        "computer_save_snapshot",
-    ] {
-        assert!(
-            baseline_tools.contains(canonical),
-            "baseline must list {canonical}"
-        );
-    }
-    for legacy in [
-        "computer_launch_application",
-        "computer_list_displays",
-        "computer_snapshot_display",
-        "computer_pointer_move",
-        "computer_pointer_click",
-        "computer_read_clipboard",
-        "computer_write_clipboard",
-    ] {
-        assert!(!baseline_tools.contains(legacy), "baseline leaked {legacy}");
-    }
-
-    // Narrow action-specific scopes no longer create extra model-facing tool names.
-    // Exact action authority is resolved inside the canonical gateway before dispatch.
     for extra_scopes in [
+        "",
         "computer:launch",
         "computer:display_read",
         "computer:display_read computer:pointer_control",
@@ -914,39 +876,42 @@ async fn oauth2_tools_list_projects_canonical_computer_gateways_from_outer_scope
         "computer:clipboard_write",
     ] {
         let scopes = format!("{baseline} {extra_scopes}");
-        let (_tmp, service, token) =
-            oauth_mcp_service_with_surface(&scopes, ModelSurface::FullOperatorRuntime);
+        let (_tmp, service, token) = oauth_mcp_service(scopes.trim());
         let (status, body, _) = oauth_mcp_request(&service, &token, "tools/list", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{scopes}: {body:?}");
         let names = listed_tool_names(&body);
-        for canonical in [
+        assert!(names.contains(crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME));
+        for long_tail in [
             "computer_observe",
             "computer_control",
             "computer_save_snapshot",
         ] {
             assert!(
-                names.contains(canonical),
-                "{scopes} should list {canonical}"
+                !names.contains(long_tail),
+                "OAuth scopes must not promote long-tail {long_tail} into direct tools/list: {scopes}"
+            );
+        }
+        for retired in [
+            "computer_launch_application",
+            "computer_list_displays",
+            "computer_snapshot_display",
+            "computer_pointer_move",
+            "computer_pointer_click",
+            "computer_read_clipboard",
+            "computer_write_clipboard",
+        ] {
+            assert!(
+                !names.contains(retired),
+                "tools/list leaked retired {retired}: {scopes}"
             );
         }
     }
-
-    let launch_only = "runtime:read project:read project:write job:run computer:launch";
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface(launch_only, ModelSurface::FullOperatorRuntime);
-    let (status, body, _) = oauth_mcp_request(&service, &token, "tools/list", json!({})).await;
-    assert_eq!(status, StatusCode::OK, "body: {body:?}");
-    let names = listed_tool_names(&body);
-    assert!(names.contains("computer_control"));
-    assert!(!names.contains("computer_observe"));
-    assert!(!names.contains("computer_save_snapshot"));
 }
 
 #[tokio::test]
 async fn oauth2_coding_agent_tools_require_independent_scope_in_catalog_and_direct_call() {
     let insufficient = "runtime:read project:read project:write job:run mcp:local";
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface(insufficient, ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service(insufficient);
     let (status, body, _) = oauth_mcp_request(&service, &token, "tools/list", json!({})).await;
     assert_eq!(status, StatusCode::OK, "body: {body:?}");
     let names = listed_tool_names(&body);
@@ -962,10 +927,10 @@ async fn oauth2_coding_agent_tools_require_independent_scope_in_catalog_and_dire
         &service,
         &token,
         "tools/call",
-        json!({
-            "name": "coding_agent_cancel",
-            "arguments": {"run_id": "wc_agent_run_scopeprobe0001"}
-        }),
+        adaptive_gateway_params(
+            "coding_agent_cancel",
+            json!({"run_id": "wc_agent_run_scopeprobe0001"}),
+        ),
     )
     .await;
     assert_mcp_oauth_scope_rejected(
@@ -976,32 +941,33 @@ async fn oauth2_coding_agent_tools_require_independent_scope_in_catalog_and_dire
     );
 
     let coding_agent_without_write = "runtime:read project:read coding_agent:run mcp:local";
-    let (_tmp, service, token) = oauth_mcp_service_with_surface(
-        coding_agent_without_write,
-        ModelSurface::FullOperatorRuntime,
-    );
+    let (_tmp, service, token) = oauth_mcp_service(coding_agent_without_write);
     let (status, body, _) = oauth_mcp_request(&service, &token, "tools/list", json!({})).await;
     assert_eq!(status, StatusCode::OK, "body: {body:?}");
     let names = listed_tool_names(&body);
-    assert!(names.contains("coding_agent_observe"));
-    assert!(names.contains("coding_agent_cancel"));
-    assert!(
-        !names.contains("coding_agent_start"),
-        "delegated start must also require project:write"
-    );
+    for name in [
+        "coding_agent_start",
+        "coding_agent_observe",
+        "coding_agent_cancel",
+    ] {
+        assert!(
+            !names.contains(name),
+            "long-tail {name} must stay behind call_runtime_tool"
+        );
+    }
     let (status, body, challenge) = oauth_mcp_request(
         &service,
         &token,
         "tools/call",
-        json!({
-            "name": "coding_agent_start",
-            "arguments": {
+        adaptive_gateway_params(
+            "coding_agent_start",
+            json!({
                 "project": "agent:missing:demo",
                 "provider_id": "codex",
                 "idempotency_key": "scope-probe",
                 "instruction": "inspect"
-            }
-        }),
+            }),
+        ),
     )
     .await;
     assert_mcp_oauth_scope_rejected(
@@ -1012,8 +978,7 @@ async fn oauth2_coding_agent_tools_require_independent_scope_in_catalog_and_dire
     );
 
     let allowed = format!("{insufficient} coding_agent:run");
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface(&allowed, ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service(&allowed);
     let (status, body, _) = oauth_mcp_request(&service, &token, "tools/list", json!({})).await;
     assert_eq!(status, StatusCode::OK, "body: {body:?}");
     let names = listed_tool_names(&body);
@@ -1023,8 +988,8 @@ async fn oauth2_coding_agent_tools_require_independent_scope_in_catalog_and_dire
         "coding_agent_cancel",
     ] {
         assert!(
-            names.contains(name),
-            "explicit coding_agent:run should list {name}"
+            !names.contains(name),
+            "long-tail {name} must stay behind call_runtime_tool"
         );
     }
 }
@@ -1032,23 +997,22 @@ async fn oauth2_coding_agent_tools_require_independent_scope_in_catalog_and_dire
 #[tokio::test]
 async fn oauth2_pointer_tool_call_still_requires_display_scope_even_if_invoked_directly() {
     let scopes = "runtime:read computer:read computer:control computer:pointer_control";
-    let (_tmp, service, token) =
-        oauth_mcp_service_with_surface(scopes, ModelSurface::FullOperatorRuntime);
+    let (_tmp, service, token) = oauth_mcp_service(scopes);
     let (status, body, challenge) = oauth_mcp_request(
         &service,
         &token,
         "tools/call",
-        json!({
-            "name": "computer_control",
-            "arguments": {
+        adaptive_gateway_params(
+            "computer_control",
+            json!({
                 "action": "pointer_move",
                 "client_id": "missing-runner",
                 "display_id": "display_AAAAAAAAAAAAAAAA",
                 "snapshot_generation": 1,
                 "x": 0,
                 "y": 0
-            }
-        }),
+            }),
+        ),
     )
     .await;
     assert_mcp_oauth_scope_rejected(

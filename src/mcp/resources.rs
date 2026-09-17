@@ -5,7 +5,6 @@ use super::response::{
 };
 use super::{require_mcp_scope, scope_forbidden, McpOutcome};
 use crate::auth::AuthContext;
-use crate::model_surface::ModelSurface;
 use crate::tool_runtime::{
     validate_project_artifact_export_snapshot, ProjectArtifactExportSnapshot, ToolResult,
     ToolRuntime, MAX_PROJECT_ARTIFACT_EXPORT_BYTES, MAX_READ_PROJECT_ARTIFACT_LENGTH,
@@ -89,14 +88,6 @@ pub(super) fn request_supports_mcp_apps(params: &Value) -> bool {
             .any(|mime| mime.as_str() == Some(MCP_UI_RESOURCE_MIME_TYPE)),
         None => false,
     }
-}
-
-pub(super) fn model_surface_supports_mcp_apps(model_surface: ModelSurface) -> bool {
-    model_surface.supports_operator_extensions()
-}
-
-pub(super) fn model_surface_supports_computer_app(model_surface: ModelSurface) -> bool {
-    model_surface_supports_mcp_apps(model_surface)
 }
 
 fn mcp_app_resource_meta(domain: Option<&str>) -> Value {
@@ -1530,13 +1521,9 @@ pub(super) fn server_capabilities(apps_enabled: bool) -> Value {
 pub(super) fn mcp_app_enabled(
     server_apps_enabled: bool,
     stateless_2026: bool,
-    model_surface: ModelSurface,
     params: &Value,
 ) -> bool {
-    server_apps_enabled
-        && stateless_2026
-        && model_surface_supports_mcp_apps(model_surface)
-        && request_supports_mcp_apps(params)
+    server_apps_enabled && stateless_2026 && request_supports_mcp_apps(params)
 }
 
 pub(super) fn is_artifact_export_resource_uri(uri: &str) -> bool {
@@ -1581,7 +1568,6 @@ pub(super) async fn handle_read(
     params: Value,
     id: Option<Value>,
     auth: Option<&AuthContext>,
-    model_surface: ModelSurface,
     apps_enabled: bool,
 ) -> McpOutcome {
     let Some(uri) = params.get("uri").and_then(Value::as_str) else {
@@ -1649,13 +1635,6 @@ pub(super) async fn handle_read(
 
     // Tool descriptors advertise the App resource independently of whether a
     // later resource fetch repeats UI client-capability metadata.
-    if !model_surface_supports_mcp_apps(model_surface) {
-        return McpOutcome::BadRequest(rpc_error(
-            id,
-            -32602,
-            "MCP App resource is unavailable on this model surface",
-        ));
-    }
     let Some(result) =
         mcp_static_app_resource_read(uri, runtime.runtime_info.configured_public_url.as_deref())
     else {
@@ -1720,7 +1699,7 @@ impl McpResourceToolCallPrepareError {
     pub(super) fn message(&self) -> String {
         match self {
             Self::UnsupportedExportSurface(operation) => {
-                format!("{operation} requires a stateless-2026 operator-capable MCP surface")
+                format!("{operation} requires stateless-2026 MCP")
             }
             Self::ArtifactCallerBinding(operation, error) => {
                 format!("{operation} cannot bind this caller: {error}")
@@ -1737,13 +1716,12 @@ pub(super) fn prepare_tool_call(
     tool_name: &str,
     artifact_presentation: ProjectArtifactPresentationMode,
     stateless_2026: bool,
-    model_surface: ModelSurface,
     auth: Option<&AuthContext>,
 ) -> Result<McpResourceToolCallContext, McpResourceToolCallPrepareError> {
     let artifact_export_caller = if artifact_presentation == ProjectArtifactPresentationMode::Export
     {
         let operation = artifact_export_operation_label(tool_name);
-        if !stateless_2026 || !model_surface.supports_operator_extensions() {
+        if !stateless_2026 {
             return Err(McpResourceToolCallPrepareError::UnsupportedExportSurface(
                 operation,
             ));
@@ -1754,10 +1732,7 @@ pub(super) fn prepare_tool_call(
     } else {
         None
     };
-    let snapshot_resource_caller = if stateless_2026
-        && model_surface.supports_operator_extensions()
-        && tool_name == "computer_observe"
-    {
+    let snapshot_resource_caller = if stateless_2026 && tool_name == "computer_observe" {
         mcp_artifact_export_caller_binding(auth).ok()
     } else {
         None

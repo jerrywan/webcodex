@@ -30,21 +30,10 @@ fn mcp_gateway_tool_call_params_do_not_retain_outer_meta() {
 }
 
 fn test_runtime() -> ToolRuntime {
-    test_runtime_with_surface(ModelSurface::LocalCoding)
+    ToolRuntime::new_for_tests()
 }
 
-fn test_runtime_with_exposure(runtime_exposure: RuntimeExposure) -> ToolRuntime {
-    ToolRuntime::new_for_tests().with_runtime_exposure(runtime_exposure)
-}
-
-fn test_runtime_with_surface(model_surface: ModelSurface) -> ToolRuntime {
-    test_runtime_with_exposure(RuntimeExposure::Runtime(model_surface))
-}
-
-fn test_runtime_with_surface_and_public_url(
-    model_surface: ModelSurface,
-    public_url: &str,
-) -> ToolRuntime {
+fn test_runtime_with_public_url(public_url: &str) -> ToolRuntime {
     let runtime_info = crate::tool_runtime::RuntimeInfo {
         configured_public_url: Some(public_url.to_string()),
         ..Default::default()
@@ -53,7 +42,6 @@ fn test_runtime_with_surface_and_public_url(
         std::sync::Arc::new(crate::runner_http::RunnerRegistry::default()),
         std::sync::Arc::new(runtime_info),
     )
-    .with_runtime_exposure(RuntimeExposure::Runtime(model_surface))
 }
 
 fn start_authorized_test_session(
@@ -75,50 +63,6 @@ fn start_authorized_test_session(
             .with_owner_authority_fingerprint(Some(fingerprint)),
         )
         .unwrap()
-}
-
-/// Run one synchronous operation with a temporary model-surface env value.
-/// The previous value is restored while the shared env lock is still held,
-/// including during unwinding. Async request tests receive an already-built
-/// runtime so process-global env state never needs to span an await.
-fn with_model_surface_env<T>(value: Option<&str>, operation: impl FnOnce() -> T) -> T {
-    struct Restore {
-        previous: Option<std::ffi::OsString>,
-        _guard: std::sync::MutexGuard<'static, ()>,
-    }
-
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            match self.previous.as_ref() {
-                Some(previous) => {
-                    std::env::set_var(crate::model_surface::MCP_MODEL_SURFACE_ENV, previous)
-                }
-                None => std::env::remove_var(crate::model_surface::MCP_MODEL_SURFACE_ENV),
-            }
-        }
-    }
-
-    let guard = crate::admin_cli::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let previous = std::env::var_os(crate::model_surface::MCP_MODEL_SURFACE_ENV);
-    match value {
-        Some(value) => std::env::set_var(crate::model_surface::MCP_MODEL_SURFACE_ENV, value),
-        None => std::env::remove_var(crate::model_surface::MCP_MODEL_SURFACE_ENV),
-    }
-    let _restore = Restore {
-        previous,
-        _guard: guard,
-    };
-    operation()
-}
-
-fn test_runtime_from_model_surface_env(value: Option<&str>) -> ToolRuntime {
-    with_model_surface_env(value, || {
-        let runtime_exposure = crate::model_surface::resolve_runtime_exposure()
-            .expect("test runtime exposure configuration");
-        test_runtime_with_exposure(runtime_exposure)
-    })
 }
 
 fn rpc(method: &str, id: Option<Value>, params: Value) -> JsonRpcRequest {

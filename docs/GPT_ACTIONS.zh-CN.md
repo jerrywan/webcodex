@@ -4,9 +4,9 @@
 
 Custom GPT 需要通过 Server 的 OpenAPI 兼容集成调用 WebCodex 时使用 GPT Actions。客户端直接支持 MCP 时优先使用 [MCP](MCP.zh-CN.md)；MCP 仍然是 ChatGPT 的主要接入方式。
 
-`/openapi.json` 会根据 Server 模式生成不同 surface：
+`/openapi.json` 使用同一套 canonical Adaptive Runtime routing policy：
 
-- runtime Server 默认投影 canonical Adaptive Runtime model surface；
+- runtime Server 投影 canonical Adaptive Runtime model contract；
 - project-scoped `share` / `run` credential 只收窄 authority/visibility，不定义第二套 Action surface。
 
 ## 导入 schema

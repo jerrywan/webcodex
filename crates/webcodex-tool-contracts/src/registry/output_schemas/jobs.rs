@@ -890,7 +890,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                     "process_summary",
                     schema_type(
                         "string",
-                        "Bounded human-readable executable/argv summary; never execution input. Omitted on ordinary synchronous terminal success and from the default model-facing failure projection; full operator trace diagnostics can retain the canonical execution payload when enabled.",
+                        "Bounded human-readable executable/argv summary; never execution input. Omitted on ordinary synchronous terminal success and from the default model-facing failure projection; protocol-admitted trace diagnostics can retain the canonical execution payload when enabled.",
                     ),
                 ),
                 (
@@ -1004,7 +1004,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                     "script_summary",
                     schema_type(
                         "string",
-                        "Bounded body-free language/byte/argument summary; never execution input. Omitted on ordinary synchronous terminal success and from the default model-facing failure projection; full operator trace diagnostics can retain the canonical execution payload when enabled.",
+                        "Bounded body-free language/byte/argument summary; never execution input. Omitted on ordinary synchronous terminal success and from the default model-facing failure projection; protocol-admitted trace diagnostics can retain the canonical execution payload when enabled.",
                     ),
                 ),
                 (
