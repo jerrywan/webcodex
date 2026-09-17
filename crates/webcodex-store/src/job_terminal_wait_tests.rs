@@ -14,7 +14,6 @@ fn source(job_id: &str) -> JobTerminalSourceIdentity {
     JobTerminalSourceIdentity {
         job_id: job_id.to_string(),
         client_id: "runner-a".to_string(),
-        runner_instance_id: "instance-a".to_string(),
         auth_kind: "managed_owner".to_string(),
         auth_value: Some("alice".to_string()),
     }

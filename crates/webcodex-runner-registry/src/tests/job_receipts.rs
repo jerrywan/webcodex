@@ -3,6 +3,7 @@ use crate::{
     JobReceiptStore, JobTerminalEvent, JobTerminalEventSink, NoopRunnerRegistryTelemetry,
     RetainedJobReceipt, RunnerAccess, RunnerAccessGroup,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 #[derive(Debug, Default)]
@@ -65,7 +66,14 @@ async fn durable(store: &Arc<MemoryReceipts>) -> RunnerRegistry {
 #[derive(Debug, Default)]
 struct MemoryTerminalEvents {
     rows: Mutex<Vec<JobTerminalEvent>>,
+    fail_next: AtomicBool,
     registry: Mutex<Option<Weak<crate::receipts::ReceiptRegistryState>>>,
+}
+
+impl MemoryTerminalEvents {
+    fn fail_once(&self) {
+        self.fail_next.store(true, Ordering::SeqCst);
+    }
 }
 
 impl JobTerminalEventSink for MemoryTerminalEvents {
@@ -81,6 +89,9 @@ impl JobTerminalEventSink for MemoryTerminalEvents {
                 registry.is_unlocked_for_test(),
                 "terminal-event sink must run after registry unlock"
             );
+        }
+        if self.fail_next.swap(false, Ordering::SeqCst) {
+            return Err("injected terminal-event failure".into());
         }
         self.rows.lock().unwrap().push(event.clone());
         Ok(())
@@ -165,6 +176,32 @@ async fn terminal_events_emit_once_only_after_accepted_sequenced_terminal_truth(
     assert_eq!(events.rows.lock().unwrap().len(), 1);
 }
 
+
+#[tokio::test]
+async fn terminal_event_sink_failure_requeues_candidate_until_a_later_registry_unlock() {
+    let store = Arc::new(MemoryReceipts::default());
+    let events = Arc::new(MemoryTerminalEvents::default());
+    let registry = durable_with_events(&store, &events).await;
+    register(&registry, INSTANCE_A, empty_inventory()).await;
+    let (job, _) = start_and_take_over(&registry, INSTANCE_A).await;
+
+    events.fail_once();
+    registry
+        .update_job(update(INSTANCE_A, &job.job_id, 1, "completed", None, true))
+        .await
+        .unwrap();
+    assert!(events.rows.lock().unwrap().is_empty());
+
+    // Any later registry guard release retries the exact bounded candidate.
+    assert_eq!(registry.get_job(&job.job_id).await.unwrap().status, "completed");
+    {
+        let rows = events.rows.lock().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].job_id, job.job_id);
+    }
+    let _ = registry.get_job(&job.job_id).await.unwrap();
+    assert_eq!(events.rows.lock().unwrap().len(), 1);
+}
 
 #[tokio::test]
 async fn same_instance_reconciliation_preserves_exact_job_identity_for_terminal_event() {

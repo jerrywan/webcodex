@@ -208,22 +208,37 @@ impl JobTerminalEventSink for SqliteJobTerminalEventSink {
 }
 
 pub(crate) fn principal_for_auth(auth: Option<&AuthContext>) -> JobTerminalWaitPrincipal {
-    let kind = auth.map(AuthContext::principal_kind).unwrap_or("internal");
+    let access = crate::runner_http::runner_access_from_auth(auth);
+    let (kind, subject) = match access.as_ref() {
+        None => ("internal", "internal".to_string()),
+        Some(access) if access.owner_bypass => ("bootstrap", "bootstrap".to_string()),
+        Some(access) if access.global_visibility => {
+            let subject = auth
+                .and_then(|auth| auth.user_id.as_deref())
+                .or_else(|| auth.and_then(|auth| auth.username.as_deref()))
+                .or_else(|| auth.and_then(|auth| auth.api_key_id.as_deref()))
+                .unwrap_or("global");
+            ("global_user", subject.to_string())
+        }
+        Some(access) => match access.group.as_ref() {
+            Some(RunnerAccessGroup::SharedKey(value)) => ("shared_key", value.clone()),
+            Some(RunnerAccessGroup::ProjectGrant(value)) => ("project_grant", value.clone()),
+            Some(RunnerAccessGroup::OpenAnonymous) => {
+                ("open_anonymous", "open_anonymous".to_string())
+            }
+            None => (
+                "managed_owner",
+                access
+                    .username
+                    .clone()
+                    .unwrap_or_else(|| "managed_unowned".to_string()),
+            ),
+        },
+    };
     let mut hasher = Sha256::new();
     hasher.update(b"webcodex.job-terminal-wait.principal.v1\0");
     hash_field(&mut hasher, kind);
-    if let Some(auth) = auth {
-        for value in [
-            auth.shared_key_hash.as_deref(),
-            auth.project_grant_id.as_deref(),
-            auth.user_id.as_deref(),
-            auth.api_key_id.as_deref(),
-            auth.username.as_deref(),
-            auth.allowed_client_id.as_deref(),
-        ] {
-            hash_field(&mut hasher, value.unwrap_or(""));
-        }
-    }
+    hash_field(&mut hasher, &subject);
     JobTerminalWaitPrincipal {
         kind: kind.to_string(),
         digest: format!("{:x}", hasher.finalize()),
@@ -241,7 +256,6 @@ pub(crate) fn source_from_snapshot(
     source(
         &snapshot.job_id,
         &snapshot.client_id,
-        &snapshot.runner_instance_id,
         snapshot.auth_group.as_ref(),
         snapshot.owner_at_admission.as_deref(),
     )
@@ -252,7 +266,6 @@ pub(crate) fn fact_from_event(event: &JobTerminalEvent) -> JobTerminalFact {
         source: source(
             &event.job_id,
             &event.client_id,
-            &event.runner_instance_id,
             event.auth_group.as_ref(),
             event.owner_at_admission.as_deref(),
         ),
@@ -266,7 +279,6 @@ pub(crate) fn fact_from_event(event: &JobTerminalEvent) -> JobTerminalFact {
 fn source(
     job_id: &str,
     client_id: &str,
-    runner_instance_id: &str,
     auth_group: Option<&RunnerAccessGroup>,
     owner_at_admission: Option<&str>,
 ) -> JobTerminalSourceIdentity {
@@ -282,7 +294,6 @@ fn source(
     JobTerminalSourceIdentity {
         job_id: job_id.to_string(),
         client_id: client_id.to_string(),
-        runner_instance_id: runner_instance_id.to_string(),
         auth_kind: auth_kind.to_string(),
         auth_value,
     }
@@ -356,10 +367,60 @@ mod tests {
         JobTerminalSourceIdentity {
             job_id: job_id.to_string(),
             client_id: "runner".to_string(),
-            runner_instance_id: "instance".to_string(),
             auth_kind: "managed_owner".to_string(),
             auth_value: Some("alice".to_string()),
         }
+    }
+
+    #[test]
+    fn terminal_wait_principal_tracks_job_visibility_not_rotating_credentials() {
+        let mut first = AuthContext::new(crate::auth::AuthKind::ApiToken);
+        first.user_id = Some("user-alice".to_string());
+        first.username = Some("alice".to_string());
+        first.api_key_id = Some("key-a".to_string());
+        let mut rotated = first.clone();
+        rotated.api_key_id = Some("key-b".to_string());
+        rotated.allowed_client_id = Some("unrelated-transport-hint".to_string());
+        assert_eq!(
+            principal_for_auth(Some(&first)),
+            principal_for_auth(Some(&rotated))
+        );
+
+        let mut bob = rotated;
+        bob.user_id = Some("user-bob".to_string());
+        bob.username = Some("bob".to_string());
+        assert_ne!(
+            principal_for_auth(Some(&first)),
+            principal_for_auth(Some(&bob))
+        );
+    }
+
+    #[test]
+    fn logical_job_source_survives_runner_instance_transfer() {
+        let snapshot = JobTerminalRegistrationSnapshot {
+            job_id: "job-detached".to_string(),
+            client_id: "runner".to_string(),
+            runner_instance_id: "instance-old".to_string(),
+            auth_group: None,
+            owner_at_admission: Some("alice".to_string()),
+            terminal_event: None,
+            wait_expires_at: 1_900,
+        };
+        let event = JobTerminalEvent {
+            job_id: "job-detached".to_string(),
+            client_id: "runner".to_string(),
+            runner_instance_id: "instance-new".to_string(),
+            auth_group: None,
+            owner_at_admission: Some("alice".to_string()),
+            status: "completed".to_string(),
+            outcome: "succeeded".to_string(),
+            terminal_observed_at: 1_000,
+            expires_at: 1_900,
+        };
+        assert_eq!(
+            source_from_snapshot(&snapshot),
+            fact_from_event(&event).source
+        );
     }
 
     fn create_triggered(db: &Database, job_id: &str, key: &str, now: i64) -> String {

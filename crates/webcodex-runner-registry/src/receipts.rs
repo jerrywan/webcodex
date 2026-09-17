@@ -34,9 +34,11 @@ pub struct JobTerminalEvent {
     pub expires_at: i64,
 }
 
-/// Caller-authorized registration snapshot for one exact public Job. This is
-/// source identity plus sparse terminal truth only; observation cursors and
-/// Workflow Session provenance are intentionally absent.
+/// Caller-authorized registration snapshot for one exact public Job. The
+/// process-scoped Runner instance remains lifecycle evidence here, but durable
+/// terminal-attention identity is the logical Job/client plus auth partition so
+/// detached instance transfer cannot orphan an armed wait. Observation cursors
+/// and Workflow Session provenance are intentionally absent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobTerminalRegistrationSnapshot {
     pub job_id: String,
@@ -155,10 +157,24 @@ impl Drop for ReceiptRegistryGuard<'_> {
         }
         if let Some(sink) = &self.state.terminal_event_sink {
             let mut failed = 0;
+            let mut retry_ids = Vec::new();
             for event in terminal_events {
                 if sink.record_terminal_event(&event).is_err() {
                     failed += 1;
+                    retry_ids.push(event.job_id);
                 }
+            }
+            if !retry_ids.is_empty() {
+                // Terminal attention is durable caller state rather than optional
+                // historical telemetry. Preserve failed post-lock candidates so a
+                // later registry unlock can retry matching without changing the
+                // already-accepted Job verdict. The HashSet keeps retry state
+                // bounded and deduplicated.
+                self.state
+                    .terminal_event_candidates
+                    .lock()
+                    .unwrap()
+                    .extend(retry_ids);
             }
             if failed > 0 {
                 tracing::warn!(
