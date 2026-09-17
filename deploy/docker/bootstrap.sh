@@ -388,9 +388,9 @@ verify_files_against_receipt() {
 validate_committed_env() {
     [ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] || fail "$ENV_FILE is missing or unsafe"
     if [ "$MODE" = image ]; then
-        expected_lines=8
-    else
         expected_lines=7
+    else
+        expected_lines=6
     fi
     lines=$(wc -l < "$ENV_FILE" | tr -d ' ')
     [ "$lines" -eq "$expected_lines" ] || fail "$ENV_FILE does not match the canonical bootstrap layout"
