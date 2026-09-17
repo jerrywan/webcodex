@@ -1465,15 +1465,15 @@ pub enum ToolCall {
     SessionHandoffSummary {
         /// Required explicit wc_sess_* business Session id to summarize.
         session_id: String,
-        /// Optional runtime project id. When provided, the handoff includes a bounded workspace summary.
+        /// Optional runtime project id. Omission uses the exact authorized Session Project.
         #[serde(default)]
         project: Option<String>,
-        /// Include a bounded workspace (git status) summary. Defaults to true. Only effective when project
-        /// is provided.
+        /// Include a bounded workspace (git status) summary. Defaults to true when the Session
+        /// has an authorized Project or an explicit project is supplied.
         #[serde(default)]
         include_workspace: Option<bool>,
         /// Include bounded checkpoint candidates, especially the latest last_known_good. Defaults to true.
-        /// Only effective when project is provided and the workspace-checkpoints build feature is enabled;
+        /// Only effective with an authorized Project and the workspace-checkpoints build feature enabled;
         /// otherwise accepted and ignored.
         #[serde(default)]
         include_checkpoints: Option<bool>,
@@ -1482,12 +1482,10 @@ pub enum ToolCall {
         /// those fields.
         #[serde(default)]
         include_validation: Option<bool>,
-        /// When true, return compact closeout fields only:
-        /// workspace/jobs/permissions/tool_failures/validation/task_outcome/evidence_history/evidence_integrity/informational_notes/legacy
-        /// verdict/warnings/suggested_next_actions. Omits recent_events, long ledger details, command text,
-        /// stdout/stderr, tails, and excerpts.
+        /// Include detailed ledger and closeout evidence. Defaults to false: the response
+        /// contains only identity and the deterministic handoff_brief (at most 8 KiB).
         #[serde(default)]
-        summary_only: bool,
+        diagnostic: bool,
         /// Maximum items per bounded section. Defaults to 20; values above 100 are accepted and clamped to
         /// 100.
         #[schemars(range(min = 1))]

@@ -374,7 +374,7 @@ impl SpecializedOperationPolicy {
             change_summary_like: false,
             project_write: false,
             path_hint: SessionPathHint::None,
-            accepts_context_ack: false,
+
             advances_context_checkpoint: false,
         }
     }

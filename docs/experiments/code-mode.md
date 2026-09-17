@@ -66,7 +66,7 @@ webcodex-code-mode (V8 thread)
 
 `webcodex-code-mode` does not depend on the root WebCodex crate, `ToolRuntime`, `AuthContext`, `RunnerRegistry`, or Session storage. It owns only one-shot JavaScript execution, JSON/V8 conversion, bounded output, nested-call scheduling, termination, and the transport-neutral `CodeModeHost` callback contract.
 
-The root-side canonical callback implementation is intentionally no longer V8-specific. `CanonicalOrchestrationHost` owns the reusable authority-preserving nested-tool boundary; `V8CodeModeHost` only adapts the Code Mode crate's request/response types. Canonical target, recorder, context/ACK, result-expectation, and private wrapper fields are denied by the host itself; a frontend policy may add restrictions but cannot opt those Server-owned fields back in. This is an E1.x architectural probe, not a new workflow engine or stable extension API.
+The root-side canonical callback implementation is intentionally no longer V8-specific. `CanonicalOrchestrationHost` owns the reusable authority-preserving nested-tool boundary; `V8CodeModeHost` only adapts the Code Mode crate's request/response types. Canonical target, recorder, context sidecars/message ACK, result-expectation, and private wrapper fields are denied by the host itself; a frontend policy may add restrictions but cannot opt those Server-owned fields back in. This is an E1.x architectural probe, not a new workflow engine or stable extension API.
 
 The V8 integration follows the minimal runtime/thread, Promise callback, microtask-checkpoint, JSON conversion, and thread-safe isolate termination patterns used by OpenAI Codex's Apache-2.0-licensed code-mode implementation. WebCodex E1 does not copy Codex's persistent cells, remote sessions, stored values, media, module ecosystem, notification protocol, or full Code Mode subsystem.
 
@@ -174,7 +174,6 @@ JavaScript never selects its Project or Workflow Session. Nested arguments are r
 project
 session_id
 recording_session_id
-ack_session_context_revision
 ack_session_message_ids
 context_request
 session_message_resolution
@@ -392,9 +391,9 @@ If JavaScript throws or times out after consequential dispatch, the parent failu
 
 ### Session and Job continuation
 
-Each nested validator records its own ordinary canonical `tool_call_started` / `tool_call_finished`, validation, permission/scope, and Job evidence in the exact outer Workflow Session. The parent is not a fake validation event and does not compress children into one transaction. Server-owned nested fields, including Project/Session selection, context ACK, Session-message resolution, result expectations, and private `__webcodex_*` fields, remain forbidden inside JavaScript.
+Each nested validator records its own ordinary canonical `tool_call_started` / `tool_call_finished`, validation, permission/scope, and Job evidence in the exact outer Workflow Session. The parent is not a fake validation event and does not compress children into one transaction. Server-owned nested fields, including Project/Session selection, context sidecars, Session-message resolution, result expectations, and private `__webcodex_*` fields, remain forbidden inside JavaScript.
 
-Unlike re-observable E1, consequential E2a participates in normal Session continuity. After already-started children have drained, the outer response is decorated from the latest monotonic Session state; it never fabricates an ACK and never derives authority from `ClientWindow`.
+Unlike re-observable E1, consequential E2a participates in normal Session checkpointing. After already-started children have drained, the outer response is recorded against the latest monotonic Server-owned Session state; no caller-visible checkpoint token is synthesized, and no authority is derived from `ClientWindow`.
 
 `observe_jobs` remains intentionally outside nested E2a. A validator uses a short sync grace, may return its existing Job handoff, and Code Mode returns. The model then observes that exact Job through ordinary `observe_jobs`, including `wake_on=all_terminal` for a predetermined set when later work genuinely depends on all of them.
 

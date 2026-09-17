@@ -4,9 +4,7 @@ use super::super::kernel::{
     ToolProtocolCapabilities, ToolTransport,
 };
 use super::super::permissions::{AuthorityMode, PermissionEvaluator};
-use super::super::sessions::{
-    SessionContextRevisionAck, SessionTransport, ToolCallRecorderMetadata,
-};
+use super::super::sessions::{SessionTransport, ToolCallRecorderMetadata};
 use super::super::{ToolCall, ToolResult, ToolRuntime};
 use super::support::*;
 use crate::runner_protocol::{RunnerCapabilities, RunnerResultRequest};
@@ -57,7 +55,6 @@ async fn call_kernel_with_local_agent(
                         record_oauth_scope_denials: false,
                         host_file_import_trust: HostFileImportTrust::Untrusted,
                     },
-                    true,
                     sidecar_capable,
                 )
                 .await
@@ -340,7 +337,6 @@ async fn call_kernel_with_fake_operator_store(
                         record_oauth_scope_denials: false,
                         host_file_import_trust: HostFileImportTrust::Untrusted,
                     },
-                    true,
                     true,
                 )
                 .await
@@ -1839,7 +1835,6 @@ async fn skill_resource_read_revalidates_definition_after_resource_io() {
                         host_file_import_trust: HostFileImportTrust::Untrusted,
                     },
                     true,
-                    true,
                 )
                 .await
         }
@@ -2022,7 +2017,6 @@ async fn skill_surface_sidecar_privacy_and_authority_are_fenced() {
                 ..Default::default()
             },
             ToolProtocolCapabilities {
-                context_continuity: true,
                 context_sidecar: false,
                 ..Default::default()
             },
@@ -2124,7 +2118,6 @@ async fn skill_surface_sidecar_privacy_and_authority_are_fenced() {
         },
         vec!["skills.catalog".to_string()],
         ToolCallRecorderMetadata {
-            ack_session_context_revision: SessionContextRevisionAck::Revision(0),
             ..Default::default()
         },
     )

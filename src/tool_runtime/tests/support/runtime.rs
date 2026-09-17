@@ -221,15 +221,13 @@ pub(in crate::tool_runtime::tests) fn required_fields(spec: &ToolSpec) -> Vec<St
         .unwrap_or_default()
 }
 
-pub(in crate::tool_runtime::tests) fn seed_model_facing_recovery_events(
+pub(in crate::tool_runtime::tests) fn seed_checkpoint_events(
     runtime: &ToolRuntime,
     session_id: &str,
     project: &str,
     count: usize,
 ) -> u64 {
-    use crate::tool_runtime::sessions::{
-        SessionContextRevisionAck, SessionTransport, ToolCallRecorderMetadata,
-    };
+    use crate::tool_runtime::sessions::{SessionTransport, ToolCallRecorderMetadata};
 
     let mut revision = 0u64;
     for index in 0..count {
@@ -240,7 +238,6 @@ pub(in crate::tool_runtime::tests) fn seed_model_facing_recovery_events(
             &json!({"project": project, "executable": "true"}),
             Some(project.to_string()),
             ToolCallRecorderMetadata {
-                ack_session_context_revision: SessionContextRevisionAck::Revision(revision),
                 ..Default::default()
             },
             crate::tool_runtime::sessions::session_tool_contract("run_process"),
@@ -269,20 +266,18 @@ pub(in crate::tool_runtime::tests) fn seed_model_facing_recovery_events(
                 None,
             )
             .expect("seeded model-facing recovery event");
-        revision = recorded.context_revision;
+        revision = recorded;
     }
     revision
 }
 
-pub(in crate::tool_runtime::tests) fn seed_large_changed_path_recovery_events(
+pub(in crate::tool_runtime::tests) fn seed_large_changed_path_events(
     runtime: &ToolRuntime,
     session_id: &str,
     project: &str,
     count: usize,
 ) -> u64 {
-    use crate::tool_runtime::sessions::{
-        SessionContextRevisionAck, SessionTransport, ToolCallRecorderMetadata,
-    };
+    use crate::tool_runtime::sessions::{SessionTransport, ToolCallRecorderMetadata};
 
     let mut revision = runtime.sessions.context_revision(session_id).unwrap_or(0);
     for index in 0..count {
@@ -301,7 +296,6 @@ pub(in crate::tool_runtime::tests) fn seed_large_changed_path_recovery_events(
             &json!({"project": project, "paths": paths}),
             Some(project.to_string()),
             ToolCallRecorderMetadata {
-                ack_session_context_revision: SessionContextRevisionAck::Revision(revision),
                 ..Default::default()
             },
             crate::tool_runtime::sessions::session_tool_contract("delete_project_files"),
@@ -316,7 +310,7 @@ pub(in crate::tool_runtime::tests) fn seed_large_changed_path_recovery_events(
                 None,
             )
             .expect("seeded large changed-path recovery event");
-        revision = recorded.context_revision;
+        revision = recorded;
     }
     revision
 }

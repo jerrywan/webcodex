@@ -1240,7 +1240,7 @@ impl ToolRuntime {
         if model_facing {
             let session_output =
                 super::tool_audit::session_log_result_for_tool(tool_name, &result.output);
-            let recorded = self.sessions.record_model_facing_tool_call_finished(
+            self.sessions.record_model_facing_tool_call_finished(
                 start,
                 success,
                 &session_output,
@@ -1248,9 +1248,6 @@ impl ToolRuntime {
                 error_kind,
             );
             add_session_hint(result, &self.sessions, session_id);
-            if let Some(recorded) = recorded.as_ref() {
-                session_context::add_session_context_continuity(result, recorded);
-            }
             if let Some(ack) = ack_observation {
                 session_context::add_session_attention_projection(
                     result,
@@ -1894,15 +1891,7 @@ impl ToolRuntime {
             }
 
             call @ ToolCall::SessionHandoffSummary { .. } => {
-                let context_continuity_capable = protocol_capabilities.context_continuity
-                    && super::tool_definition::runtime_tool_accepts_context_ack(call.tool_name());
-                self.dispatch_handoff_tool(
-                    call,
-                    auth,
-                    context_continuity_capable,
-                    trusted_recording_session_id,
-                )
-                .await
+                self.dispatch_handoff_tool(call, auth).await
             }
 
             #[cfg(feature = "workspace-checkpoints")]

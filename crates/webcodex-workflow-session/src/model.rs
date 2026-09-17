@@ -16,9 +16,9 @@ pub use webcodex_core::workflow_session_contract::{
     MAX_MODEL_VALIDATION_ASSERTION_NAME_CHARS, MAX_TOOL_CALL_ACK_MESSAGE_IDS, SESSION_ID_PREFIX,
     SESSION_INBOX_ACK_REQUIRED_ATTENTION_INSTRUCTION, SESSION_INBOX_ACK_REQUIRED_ATTENTION_REASON,
     TOOL_ACCEPTED_EXIT_CODES_FIELD, TOOL_ASSERTION_NAME_FIELD,
-    TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD, TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
-    TOOL_CALL_RECORDING_SESSION_ID_FIELD, TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD,
-    TOOL_EXPECTED_FAILURE_FIELD, TOOL_EXPECTED_FAILURE_KIND_FIELD, TOOL_RESULT_EXPECTATION_FIELD,
+    TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD, TOOL_CALL_RECORDING_SESSION_ID_FIELD,
+    TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD, TOOL_EXPECTED_FAILURE_FIELD,
+    TOOL_EXPECTED_FAILURE_KIND_FIELD, TOOL_RESULT_EXPECTATION_FIELD,
 };
 
 pub const EVENT_ID_PREFIX: &str = "evt_";
@@ -151,8 +151,8 @@ pub struct SessionRecord {
     /// than are retained now". The persisted counterpart carries the additive
     /// serde default; the in-memory record is always constructed explicitly.
     pub events_observed: u64,
-    /// Durable Session-local model-facing continuity watermark. This advances
-    /// exactly once for each recorded ToolResult returned to the model;
+    /// Durable Server-owned checkpoint ordering watermark. This advances
+    /// once for each consequential model-facing result selected by tool policy;
     /// generic/background Session events never advance it.
     pub context_revision: u64,
     /// Git tree captured exactly once when a fresh coding Workflow Session is
@@ -546,9 +546,7 @@ pub struct ToolCallStart {
     pub started_instant: Instant,
     pub permission: Option<PermissionDecision>,
     pub expectation: ToolCallExpectation,
-    pub pre_call_context_revision: u64,
     pub advances_context_checkpoint: bool,
-    pub ack_session_context_revision: SessionContextRevisionAck,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -585,38 +583,6 @@ pub struct ToolCallRecorderMetadata {
     pub expectation: ToolCallExpectation,
     pub ack_session_message_ids: Vec<String>,
     pub session_message_resolution: Option<ToolCallSessionMessageResolution>,
-    pub ack_session_context_revision: SessionContextRevisionAck,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SessionContextRevisionAck {
-    /// The current tool/surface does not accept the context-continuity ACK
-    /// protocol. Checkpoint advancement is a separate ToolDefinition policy and
-    /// may still advance the cross-surface watermark.
-    #[default]
-    Unsupported,
-    Unacknowledged,
-    Revision(u64),
-    Invalid,
-}
-
-#[derive(Debug, Clone)]
-pub struct RecordedModelFacingToolCall {
-    pub session_id: String,
-    pub context_revision: u64,
-    /// Session checkpoint watermark immediately before the current model-facing
-    /// result was recorded. This must not be inferred from `context_revision - 1`
-    /// because continuity-aware recovery calls may not advance a checkpoint.
-    pub pre_response_context_revision: u64,
-    pub checkpoint_advanced: bool,
-    pub pre_call_context_revision: u64,
-    pub ack_session_context_revision: SessionContextRevisionAck,
-    /// Retained model-facing results strictly after a caller's explicitly proven
-    /// revision and before the current ToolResult. Unknown caller state keeps this
-    /// empty and requests explicit current-state recovery instead of revision-zero
-    /// replay. The current ToolResult is always excluded from this history delta.
-    pub recovery_events: Vec<SessionEvent>,
-    pub history_lost: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -698,8 +664,7 @@ pub struct SessionEvent {
     /// started/background/system events leave this unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_revision: Option<u64>,
-    /// Closed, bounded consequence projection used only for model-context
-    /// recovery. It never stores arbitrary ToolResult bodies.
+    /// Closed, bounded durable consequence evidence for diagnostic recovery. It never stores arbitrary ToolResult bodies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_result_summary: Option<Value>,
     pub timestamp: i64,
@@ -898,7 +863,7 @@ pub struct CompleteSessionMessageInput {
     pub completion_id: String,
     pub author_session_id: Option<String>,
     /// Required opaque semantic snapshot fence returned by get_session_assignment.
-    /// It is independent of completion idempotency, observation, and context ACKs.
+    /// It is independent of completion idempotency, observation, and collaboration ACKs.
     pub expected_assignment_fence: String,
 }
 

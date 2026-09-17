@@ -352,7 +352,7 @@ async fn write_project_file_with_session_id_records_changed_path_without_content
             include_workspace: Some(false),
             include_checkpoints: Some(false),
             include_validation: Some(false),
-            summary_only: false,
+            diagnostic: true,
             limit: None,
         })
         .await;

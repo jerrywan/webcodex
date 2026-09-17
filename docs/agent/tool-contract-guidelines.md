@@ -218,8 +218,8 @@ secondary to the tool result.
 This is a presentation/projection rule, not permission to weaken the underlying
 protocol. In particular:
 
-- missing Context ACK may return explicit recovery guidance;
-- the Host must not invent or automatically inject an ACK on WebCodex's behalf;
+- missing task context is recovered explicitly with `session_handoff_summary`;
+- collaboration ACKs require request-scoped retained-message proof;
 - a ClientWindow must not select a Workflow Session;
 - support metadata must not become execution authority.
 
@@ -245,7 +245,7 @@ Keep these concepts distinct:
 - **refine** — issue a new observation with changed bounded parameters, such as a
   larger result or hunk limit;
 - **recovery** — repair a failed/lost/invalid state using domain-proven evidence;
-- **checkpoint/ACK** — model-context coherence; not a cursor and not authority.
+- **collaboration ACK** — request-scoped retained-message proof; not a cursor or authority.
 
 Do not advertise a continuation that cannot recover the omitted information. Do
 not turn `outcome_unknown` into retry permission. Do not create a universal cursor

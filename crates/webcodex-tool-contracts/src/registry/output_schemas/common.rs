@@ -903,6 +903,7 @@ pub fn handoff_brief_schema(description: &str) -> Value {
                 "additionalProperties": false,
                 "properties": {
                     "workspace_conflict": nullable_bool(),
+                    "active_jobs": nullable_count(),
                     "blocking_jobs": nullable_count(),
                     "terminal_pending_jobs": nullable_count(),
                     "recovering_jobs": nullable_count(),
@@ -912,7 +913,7 @@ pub fn handoff_brief_schema(description: &str) -> Value {
                     "open_todos": nullable_count()
                 },
                 "required": [
-                    "workspace_conflict", "blocking_jobs",
+                    "workspace_conflict", "active_jobs", "blocking_jobs",
                     "terminal_pending_jobs", "recovering_jobs", "open_guidance",
                     "open_risks", "open_questions", "open_todos"
                 ]
@@ -935,7 +936,7 @@ pub fn handoff_brief_schema(description: &str) -> Value {
                     "complete": schema_type("boolean", "True only when no fixed evidence-gap reason applies."),
                     "reason_codes": {
                         "type": "array",
-                        "maxItems": 8,
+                        "maxItems": 9,
                         "uniqueItems": true,
                         "items": {
                             "type": "string",
@@ -944,6 +945,7 @@ pub fn handoff_brief_schema(description: &str) -> Value {
                                 "continuation_unavailable",
                                 "guidance_unavailable",
                                 "job_summary_unavailable",
+                                "session_changed_during_snapshot",
                                 "validation_not_requested",
                                 "validation_unavailable",
                                 "workspace_not_requested",

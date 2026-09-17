@@ -59,7 +59,7 @@ impl ToolRuntime {
         include_workspace: Option<bool>,
         include_checkpoints: Option<bool>,
         include_validation: Option<bool>,
-        summary_only: bool,
+        diagnostic: bool,
         limit: Option<usize>,
         auth: Option<&AuthContext>,
     ) -> ToolResult {
@@ -80,7 +80,11 @@ impl ToolRuntime {
             Ok(resolved) => resolved,
             Err(result) => return result,
         };
-        if let Some(request_project) = project
+        let session_project = self
+            .sessions
+            .session_project(&session_id)
+            .expect("authorized Workflow Session must still exist");
+        let requested_project = if let Some(request_project) = project
             .as_deref()
             .map(str::trim)
             .filter(|project| !project.is_empty())
@@ -92,19 +96,40 @@ impl ToolRuntime {
                 Ok(resolved) => resolved,
                 Err(err) => return err.into_tool_result(),
             };
-            if let Some(target) = authorized_target.as_ref() {
-                if target.resolved_id != requested.resolved_id {
+            if let Some(session_project) = session_project.as_deref() {
+                if session_project != requested.resolved_id {
                     return session_project_mismatch_result(
                         &session_id,
                         "session_handoff_summary",
                         &SessionProjectMismatch {
-                            session_project: target.resolved_id.clone(),
+                            session_project: session_project.to_string(),
                             request_project: requested.resolved_id,
                         },
                     );
                 }
             }
-        }
+            Some(requested)
+        } else {
+            None
+        };
+
+        // The exact authorized business Session owns recovery. Recorder identity
+        // never selects its Project or changes its evidence. Local/dev authority
+        // deliberately returns no resolved target, so independently resolve the
+        // already-authorized stored Project instead of treating it as unscoped.
+        let project = if let Some(requested) = requested_project {
+            Some(requested.resolved_id)
+        } else if let Some(target) = authorized_target {
+            Some(target.resolved_id)
+        } else {
+            // The Session project was canonicalized and authority-fenced when the
+            // Session was created. Concrete workspace/Job reads keep their own
+            // normal project resolution and authorization; do not add a second
+            // registry-availability precondition merely to choose the recovery
+            // target here.
+            session_project
+        };
+        let observed_revision = self.sessions.handoff_revision(&session_id);
 
         // --- session basic info + display-bounded events ---
         let summary = match self.sessions.summary(&session_id, Some(limit)) {
@@ -355,26 +380,29 @@ impl ToolRuntime {
             validation: Some(&feedback_validation),
             jobs: output.get("jobs"),
             guidance_available,
+            session_changed_during_snapshot: observed_revision.is_none()
+                || observed_revision != self.sessions.handoff_revision(&session_id),
             existing_suggested_actions: output.get("suggested_next_actions"),
         });
 
+        if !diagnostic {
+            return ToolResult::ok(json!({
+                "session_id": output["session_id"],
+                "project": output["project"],
+                "handoff_brief": output["handoff_brief"],
+            }));
+        }
         let compact = compact_handoff_output(&output);
-        if summary_only {
-            return ToolResult::ok(compact);
+        for (key, value) in compact.as_object().unwrap() {
+            if !include_validation && key == "validation" {
+                continue;
+            }
+            output
+                .as_object_mut()
+                .unwrap()
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
         }
-        for field in [
-            "facts",
-            "hard_blockers",
-            "advisories",
-            "task_outcome",
-            "evidence_history",
-            "evidence_integrity",
-            "informational_notes",
-            "verdict",
-        ] {
-            output[field] = compact.get(field).cloned().unwrap_or(Value::Null);
-        }
-
         ToolResult::ok(output)
     }
 
@@ -630,7 +658,7 @@ fn compact_handoff_output(output: &Value) -> Value {
         .and_then(Value::as_u64)
         .unwrap_or(0);
     let mut compact = json!({
-        "summary_only": true,
+        "diagnostic": true,
         "project": output.get("project").cloned().unwrap_or(Value::Null),
         "session_id": output.get("session_id").cloned().unwrap_or(Value::Null),
         "workspace_clean": workspace_clean,

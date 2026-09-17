@@ -313,10 +313,6 @@ pub fn runtime_tool_context_continuity_policy(name: &str) -> ToolContextContinui
     tool_context_continuity_policy(name)
 }
 
-pub fn runtime_tool_accepts_context_ack(name: &str) -> bool {
-    tool_context_continuity_policy(name).accepts_context_ack
-}
-
 pub fn runtime_tool_advances_context_checkpoint(name: &str) -> bool {
     tool_context_continuity_policy(name).advances_context_checkpoint()
 }

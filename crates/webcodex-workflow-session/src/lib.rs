@@ -59,9 +59,8 @@ pub use handoff_brief::{
 };
 pub use model::{
     CodingSessionError, CodingSessionRequest, CompleteSessionMessageInput,
-    ListSessionMessagesFilter, PostSessionMessageInput, RecordedModelFacingToolCall,
-    ReplaceSessionMessageInput, SessionAckObservation, SessionCloseError,
-    SessionContextRevisionAck, SessionCreateOptions, SessionDiscussionCounts,
+    ListSessionMessagesFilter, PostSessionMessageInput, ReplaceSessionMessageInput,
+    SessionAckObservation, SessionCloseError, SessionCreateOptions, SessionDiscussionCounts,
     SessionDiscussionSummary, SessionEvent, SessionExecutionContext,
     SessionExecutionContextUpdateError, SessionGuardDenial, SessionGuards, SessionLifecycle,
     SessionLifecycleDenial, SessionMessage, SessionMessageError, SessionMessageKind,
@@ -73,10 +72,9 @@ pub use model::{
     MAX_MESSAGE_TAGS, MAX_MESSAGE_TAG_CHARS, MAX_MODEL_VALIDATION_ASSERTION_NAME_CHARS,
     MAX_TOOL_CALL_ACK_MESSAGE_IDS, SESSION_INBOX_ACK_REQUIRED_ATTENTION_INSTRUCTION,
     SESSION_INBOX_ACK_REQUIRED_ATTENTION_REASON, TOOL_ACCEPTED_EXIT_CODES_FIELD,
-    TOOL_ASSERTION_NAME_FIELD, TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD,
-    TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD, TOOL_CALL_RECORDING_SESSION_ID_FIELD,
-    TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD, TOOL_EXPECTATION_RESULT_UNEXPECTED_FAILURE,
-    TOOL_RESULT_EXPECTATION_FIELD,
+    TOOL_ASSERTION_NAME_FIELD, TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
+    TOOL_CALL_RECORDING_SESSION_ID_FIELD, TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD,
+    TOOL_EXPECTATION_RESULT_UNEXPECTED_FAILURE, TOOL_RESULT_EXPECTATION_FIELD,
 };
 pub use store::SessionStore;
 pub use util::redact_and_bound_instruction;

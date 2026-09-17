@@ -1350,7 +1350,6 @@ async fn e1_and_e2a_remain_unable_to_dispatch_apply_text_edits_after_e2b() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn e2b_parent_continuity_projects_latest_session_revision_after_nested_edit() {
     use crate::tool_runtime::kernel::{ToolInvocationMetadata, ToolProtocolCapabilities};
-    use crate::tool_runtime::sessions::SessionContextRevisionAck;
 
     let (root, runtime, project, session_id) =
         e2b_fixture("e2b-session-continuity", "before\n").await;
@@ -1381,14 +1380,9 @@ async fn e2b_parent_continuity_projects_latest_session_revision_after_nested_edi
                     record_oauth_scope_denials: true,
                     host_file_import_trust: HostFileImportTrust::Untrusted,
                 },
-                ToolInvocationMetadata {
-                    ack_session_context_revision: SessionContextRevisionAck::Revision(
-                        initial_revision,
-                    ),
-                    ..Default::default()
-                },
+                ToolInvocationMetadata::default(),
                 ToolProtocolCapabilities {
-                    context_continuity: true,
+
                     ..Default::default()
                 },
             )
@@ -1411,11 +1405,8 @@ async fn e2b_parent_continuity_projects_latest_session_revision_after_nested_edi
         .context_revision(&session_id)
         .expect("latest Session revision");
     assert!(latest_revision > initial_revision);
-    assert_eq!(
-        result.output["session_context_revision"].as_u64(),
-        Some(latest_revision)
-    );
-    assert_eq!(result.output["session_continuity"]["status"], "behind");
+    assert!(result.output.get("session_context_revision").is_none());
+    assert!(result.output.get("session_continuity").is_none());
     assert_eq!(
         fs::read_to_string(root.path().join("src/example.rs")).unwrap(),
         "after\n"

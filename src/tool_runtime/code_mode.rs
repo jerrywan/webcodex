@@ -488,7 +488,6 @@ mod tests {
             "project",
             "session_id",
             "recording_session_id",
-            "ack_session_context_revision",
             "ack_session_message_ids",
             "context_request",
             "session_message_resolution",

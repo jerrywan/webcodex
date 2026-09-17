@@ -2191,7 +2191,6 @@ async fn search_project_texts_outer_recording_session_preserves_complete_sparse_
         HostFileImportTrust, ToolCallContext, ToolCallRequest, ToolInvocationMetadata,
         ToolProtocolCapabilities, ToolTransport,
     };
-    use crate::tool_runtime::sessions::SessionContextRevisionAck;
 
     let root = tempfile::tempdir().unwrap();
     let runtime = ToolRuntime::new_for_tests();
@@ -2227,11 +2226,9 @@ async fn search_project_texts_outer_recording_session_preserves_complete_sparse_
                         host_file_import_trust: HostFileImportTrust::Untrusted,
                     },
                     ToolInvocationMetadata {
-                        ack_session_context_revision: SessionContextRevisionAck::Revision(0),
                         ..Default::default()
                     },
                     ToolProtocolCapabilities {
-                        context_continuity: true,
                         context_sidecar: true,
                         ..Default::default()
                     },
@@ -2351,7 +2348,6 @@ async fn search_project_texts_outer_recording_session_keeps_final_response_under
         HostFileImportTrust, ToolCallContext, ToolCallRequest, ToolInvocationMetadata,
         ToolProtocolCapabilities, ToolTransport,
     };
-    use crate::tool_runtime::sessions::SessionContextRevisionAck;
     use webcodex_core::runtime_contract::MODEL_INSPECTION_MAX_RESULT_BYTES as MAX_SERIALIZED_OUTPUT_BYTES;
 
     let root = tempfile::tempdir().unwrap();
@@ -2363,7 +2359,7 @@ async fn search_project_texts_outer_recording_session_keeps_final_response_under
         Some("search final response cap".to_string()),
     );
     assert_eq!(
-        seed_model_facing_recovery_events(&runtime, &session.session_id, &project, 20),
+        seed_checkpoint_events(&runtime, &session.session_id, &project, 20),
         20
     );
     let auth = auth_context(None, true);
@@ -2396,11 +2392,10 @@ async fn search_project_texts_outer_recording_session_keeps_final_response_under
                     },
                     ToolInvocationMetadata {
                         context_request: vec!["webcodex.workflow".to_string()],
-                        ack_session_context_revision: SessionContextRevisionAck::Revision(0),
+
                         ..Default::default()
                     },
                     ToolProtocolCapabilities {
-                        context_continuity: true,
                         context_sidecar: true,
                         ..Default::default()
                     },

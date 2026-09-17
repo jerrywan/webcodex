@@ -113,16 +113,15 @@ fn assert_builtin_workflow(output: &Value) {
     assert!(workflow["role_selection"]
         .as_str()
         .is_some_and(|value| !value.is_empty()));
-    let ack_guidance = workflow["model_protocol"]["session_context_ack"]
+    let recovery = workflow["model_protocol"]["handoff_recovery"]
         .as_str()
-        .expect("Session context ACK guidance");
-    assert!(ack_guidance.contains("ack_session_context_revision"));
-    assert!(ack_guidance.contains("Checkpoint/recovery tools"));
-    assert!(ack_guidance.contains("only where exposed"));
-    assert!(ack_guidance.contains("never invent it"));
-    assert!(ack_guidance.contains("If unknown, omit"));
-    assert!(ack_guidance.contains("Session handoff recovery path"));
-    assert!(ack_guidance.contains("nonblocking"));
+        .unwrap();
+    assert!(recovery.contains("session_handoff_summary"));
+    assert!(recovery.contains("exact session_id"));
+    assert!(recovery.contains("basis completeness"));
+    assert!(workflow["model_protocol"]
+        .get("session_context_ack")
+        .is_none());
     let recording_guidance = workflow["model_protocol"]["session_recording"]
         .as_str()
         .expect("Session recording guidance");

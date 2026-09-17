@@ -5366,7 +5366,7 @@ impl ToolCallAuditProjection for ToolCall {
                 include_workspace,
                 include_checkpoints,
                 include_validation,
-                summary_only,
+                diagnostic,
                 limit,
             } => serde_json::json!({
                 "session_id": session_id,
@@ -5374,7 +5374,7 @@ impl ToolCallAuditProjection for ToolCall {
                 "include_workspace": include_workspace,
                 "include_checkpoints": include_checkpoints,
                 "include_validation": include_validation,
-                "summary_only": summary_only,
+                "diagnostic": diagnostic,
                 "limit": limit,
             }),
             Self::StartSession {

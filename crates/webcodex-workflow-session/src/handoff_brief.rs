@@ -38,6 +38,8 @@ pub struct HandoffBriefInput<'a> {
     /// flag lets callers report a stable gap if that guidance snapshot was not
     /// available instead of silently treating it as empty.
     pub guidance_available: bool,
+    /// Internal caller fence; the numeric revisions are never projected.
+    pub session_changed_during_snapshot: bool,
     /// Optional existing deterministic action projection. Only fixed known
     /// templates are reused; arbitrary strings are never copied into the brief.
     pub existing_suggested_actions: Option<&'a Value>,
@@ -60,6 +62,7 @@ struct ValidationProjection {
 #[derive(Debug)]
 struct JobProjection {
     available: bool,
+    active: Option<u64>,
     blocking: Option<u64>,
     terminal_pending: Option<u64>,
     recovering: Option<u64>,
@@ -150,6 +153,9 @@ pub fn build_handoff_brief(input: HandoffBriefInput<'_>) -> Value {
     });
 
     let mut basis_reasons = BTreeSet::new();
+    if input.session_changed_during_snapshot {
+        basis_reasons.insert("session_changed_during_snapshot");
+    }
     if !continuation_available {
         basis_reasons.insert("continuation_unavailable");
     }
@@ -228,6 +234,7 @@ pub fn build_handoff_brief(input: HandoffBriefInput<'_>) -> Value {
         "validation": validation.value,
         "attention": {
             "workspace_conflict": workspace.conflicted,
+            "active_jobs": jobs.active,
             "blocking_jobs": jobs.blocking,
             "terminal_pending_jobs": jobs.terminal_pending,
             "recovering_jobs": jobs.recovering,
@@ -494,6 +501,7 @@ fn project_jobs(jobs: Option<&Value>) -> JobProjection {
     let Some(jobs) = jobs.filter(|value| value.is_object()) else {
         return JobProjection {
             available: false,
+            active: None,
             blocking: None,
             terminal_pending: None,
             recovering: None,
@@ -505,6 +513,7 @@ fn project_jobs(jobs: Option<&Value>) -> JobProjection {
     let available = blocking.is_some() && terminal_pending.is_some() && recovering.is_some();
     JobProjection {
         available,
+        active: jobs.get("active_count").and_then(Value::as_u64),
         blocking: available.then_some(blocking.unwrap_or(0)),
         terminal_pending: available.then_some(terminal_pending.unwrap_or(0)),
         recovering: available.then_some(recovering.unwrap_or(0)),

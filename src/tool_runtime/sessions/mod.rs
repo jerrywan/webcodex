@@ -11,9 +11,8 @@ pub(crate) use webcodex_workflow_session::{
     validate_model_facing_assertion_name, validate_model_facing_result_expectation,
     CodingSessionError, CodingSessionRequest, CompleteSessionMessageInput, ConsoleValidationHooks,
     ExplorationToolKind, ListSessionMessagesFilter, PostSessionMessageInput,
-    RecordedModelFacingToolCall, ReplaceSessionMessageInput, SessionAckObservation,
-    SessionCloseError, SessionContextRevisionAck, SessionCreateOptions, SessionDiscussionCounts,
-    SessionDiscussionSummary, SessionEvent, SessionExecutionContext,
+    ReplaceSessionMessageInput, SessionAckObservation, SessionCloseError, SessionCreateOptions,
+    SessionDiscussionCounts, SessionDiscussionSummary, SessionEvent, SessionExecutionContext,
     SessionExecutionContextUpdateError, SessionGuardDenial, SessionGuards, SessionLifecycle,
     SessionLifecycleDenial, SessionMessage, SessionMessageError, SessionMessageKind,
     SessionMessageObservationError, SessionMessagePriority, SessionMessageStatus, SessionPathHint,
@@ -27,17 +26,16 @@ pub(crate) use webcodex_workflow_session::{
     MAX_MODEL_VALIDATION_ASSERTION_NAME_CHARS, MAX_TOOL_CALL_ACK_MESSAGE_IDS,
     SESSION_INBOX_ACK_REQUIRED_ATTENTION_INSTRUCTION, SESSION_INBOX_ACK_REQUIRED_ATTENTION_REASON,
     TOOL_ACCEPTED_EXIT_CODES_FIELD, TOOL_ASSERTION_NAME_FIELD,
-    TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD, TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
-    TOOL_CALL_RECORDING_SESSION_ID_FIELD, TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD,
-    TOOL_EXPECTATION_RESULT_UNEXPECTED_FAILURE, TOOL_RESULT_EXPECTATION_FIELD,
+    TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD, TOOL_CALL_RECORDING_SESSION_ID_FIELD,
+    TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD, TOOL_EXPECTATION_RESULT_UNEXPECTED_FAILURE,
+    TOOL_RESULT_EXPECTATION_FIELD,
 };
 
 use super::metadata::{ToolPathHint, ToolRisk};
 use super::tool_definition::{
-    runtime_tool_accepts_context_ack, runtime_tool_advances_context_checkpoint,
-    runtime_tool_is_change_summary_like, runtime_tool_is_git_like, runtime_tool_is_read_like,
-    runtime_tool_is_shell_like, runtime_tool_is_write_like, runtime_tool_metadata,
-    runtime_tool_session_risk_class,
+    runtime_tool_advances_context_checkpoint, runtime_tool_is_change_summary_like,
+    runtime_tool_is_git_like, runtime_tool_is_read_like, runtime_tool_is_shell_like,
+    runtime_tool_is_write_like, runtime_tool_metadata, runtime_tool_session_risk_class,
 };
 
 /// Project the canonical root tool declaration into the protocol-neutral facts
@@ -59,7 +57,6 @@ pub(crate) fn session_tool_contract(tool_name: &str) -> SessionToolContract {
             ToolPathHint::Patch => SessionPathHint::Patch,
             ToolPathHint::Artifact => SessionPathHint::Artifact,
         },
-        accepts_context_ack: runtime_tool_accepts_context_ack(tool_name),
         advances_context_checkpoint: runtime_tool_advances_context_checkpoint(tool_name),
     }
 }

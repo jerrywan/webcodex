@@ -1,8 +1,8 @@
 use super::RunnerCapabilityRequirement::{GitOrShell, InternalPosixScript, OwnerOnly};
 use super::ToolVisibility::{ModelHidden, ModelVisible};
 use super::{
-    adaptive_runtime_direct, context_recovery_only, context_reobservable, def, model_spec,
-    permission_risk, requires_explicit_business_session, ToolDefinition, PERMISSION_RISK_WRITE,
+    adaptive_runtime_direct, context_reobservable, def, model_spec, permission_risk,
+    requires_explicit_business_session, ToolDefinition, PERMISSION_RISK_WRITE,
     TOOL_CATEGORY_SESSION, TOOL_CATEGORY_VALIDATION,
 };
 use crate::metadata::{
@@ -565,7 +565,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         15,
     ),
     adaptive_runtime_direct(
-        requires_explicit_business_session(context_recovery_only(model_spec(
+        requires_explicit_business_session(context_reobservable(model_spec(
             def(
                 "session_handoff_summary",
             super::ToolAuditPolicy::typed_fields(&[
@@ -576,7 +576,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolAuditResultField::array_len("open_todo_count", "open_todos"),
                 super::ToolAuditResultField::array_len("recent_answer_count", "recent_answers"),
                 super::ToolAuditResultField::array_len("recent_completion_count", "recent_completions"),
-                super::ToolAuditResultField::value("summary_only"),
+                super::ToolAuditResultField::value("diagnostic"),
                 super::ToolAuditResultField::value("error_kind"),
             ]),
             ModelVisible,
@@ -600,8 +600,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolActivityPresentation::Support,
             super::ToolActivityInteraction::Meaningful,
         ),
-            "Read-only handoff for multi-step tasks, explicit session_id. Reads session ledger collaboration and ledger-derived validation. Diagnostics use bounded tails or safe result metadata; validation.parser.available is false if absent. Use the default full view to recover unknown context; summary_only, limit below 20, or disabled include_* components cannot establish a new ACK baseline. No checkpoint allocation; grants no authority.",
-        ).with_gpt_action_description("Recover an explicit Workflow Session for multi-step work. Use full defaults to rebuild context/ACK baseline; summary_only or reduced sections are diagnostic only. Read-only and grants no authority."))),
+            "Explicit read-only recovery for missing task context; requires the exact session_id. Defaults to identity plus deterministic handoff_brief, hard-bounded at 8 KiB: task instructions, workspace, progress, validation, jobs, collaboration attention, next actions and basis completeness. Omitted project uses the authorized Session Project. diagnostic=true adds detailed ledger and closeout evidence. A concurrent Session change marks the basis incomplete; re-observe before dependent work. No checkpoint allocation, ACK token, or authority grant.",
+        ).with_gpt_action_description("Recover missing task context for an exact session_id. Defaults to a bounded handoff_brief; diagnostic=true adds detailed evidence. Check basis completeness before dependent work. Read-only; no ACK token or authority grant."))),
         16,
     ),
 ];

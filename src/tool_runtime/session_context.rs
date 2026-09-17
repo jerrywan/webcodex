@@ -2,15 +2,12 @@ use super::sessions;
 use super::tool_definition::runtime_tool_is_shell_like;
 use super::{RecoveryKind, ToolResult};
 use crate::auth::AuthContext;
-use crate::json_measurement::serialized_json_len;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 pub(crate) const SESSION_PROJECT_MISMATCH_KIND: &str = "session_project_mismatch";
 const SESSION_ATTENTION_MAX_MESSAGES: usize = 3;
 const SESSION_ATTENTION_MAX_BODY_BYTES: usize = 3072;
-const SESSION_CONTINUITY_RECOVERY_EVENT_LIMIT: usize = 20;
-pub(crate) const SESSION_CONTINUITY_RECOVERY_EVENT_BYTES: usize = 48 * 1024;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SessionProjectMismatch {
@@ -314,24 +311,6 @@ fn completion_persistence_uncertain_exposes_exact_retry_same_recovery() {
     assert!(result.output.get("recovery_tool").is_none());
 }
 
-#[cfg(test)]
-#[test]
-fn context_recovery_suggested_call_remains_parser_ready_and_non_authoritative() {
-    let suggested = context_recovery_suggested_call("wc_sess_test");
-    assert_eq!(suggested["tool"], "session_handoff_summary");
-    assert_eq!(suggested.as_object().unwrap().len(), 2);
-    assert!(suggested.get("authority").is_none());
-    let call = crate::tool_runtime::ToolCall::from_tool_name(
-        suggested["tool"].as_str().unwrap(),
-        suggested["arguments"].clone(),
-    )
-    .expect("Session context recovery suggested_call must parse");
-    assert!(matches!(
-        call,
-        crate::tool_runtime::ToolCall::SessionHandoffSummary { .. }
-    ));
-}
-
 pub(crate) fn add_session_hint(
     result: &mut ToolResult,
     sessions: &sessions::SessionStore,
@@ -358,227 +337,6 @@ pub(crate) fn add_session_hint(
             "session_hint": hint,
         });
     }
-}
-
-fn model_facing_recovery_event(event: &sessions::SessionEvent) -> Value {
-    debug_assert!(
-        event.context_revision.is_some(),
-        "Context recovery events are selected by checkpoint revision"
-    );
-    let mut projected = serde_json::Map::new();
-    if let Some(context_revision) = event.context_revision {
-        projected.insert("context_revision".to_string(), json!(context_revision));
-    }
-    projected.insert(
-        "tool_name".to_string(),
-        Value::String(event.tool_name.clone()),
-    );
-    if let Some(status) = event.status.as_ref() {
-        projected.insert("status".to_string(), Value::String(status.clone()));
-    }
-    if !event.changed_paths.is_empty() {
-        projected.insert("changed_paths".to_string(), json!(event.changed_paths));
-    }
-    if let Some(job_id) = event.job_id.as_ref() {
-        projected.insert("job_id".to_string(), Value::String(job_id.clone()));
-    }
-    if let Some(error_kind) = event.error_kind.as_ref() {
-        projected.insert("error_kind".to_string(), Value::String(error_kind.clone()));
-    }
-    if let Some(effect_evidence) = event.effect_evidence.as_ref() {
-        projected.insert("effect_evidence".to_string(), json!(effect_evidence));
-    }
-    if let Some(context_result) = event.context_result_summary.as_ref() {
-        projected.insert("context_result".to_string(), context_result.clone());
-    }
-    if let Some(execution_summary) = event.validation_output_summary.as_ref() {
-        projected.insert("execution_summary".to_string(), execution_summary.clone());
-    }
-    Value::Object(projected)
-}
-
-#[cfg(test)]
-mod recovery_event_projection_tests;
-
-fn bounded_model_facing_recovery_events(
-    recorded: &sessions::RecordedModelFacingToolCall,
-) -> Vec<Value> {
-    let mut events = Vec::new();
-    for event in recorded
-        .recovery_events
-        .iter()
-        .rev()
-        .take(SESSION_CONTINUITY_RECOVERY_EVENT_LIMIT)
-    {
-        events.insert(0, model_facing_recovery_event(event));
-        let fits = serialized_json_len(&events)
-            .map(|bytes| bytes <= SESSION_CONTINUITY_RECOVERY_EVENT_BYTES)
-            .unwrap_or(false);
-        if !fits {
-            events.remove(0);
-            break;
-        }
-    }
-    events
-}
-
-fn context_recovery_suggested_call(session_id: &str) -> Value {
-    super::SuggestedToolCall::new("session_handoff_summary", json!({"session_id": session_id}))
-        .to_value()
-}
-
-/// A hint is sufficient to request recovery, never to certify model knowledge.
-fn require_context_recovery(output: &mut Value, status: &str, session_id: &str) {
-    output
-        .as_object_mut()
-        .unwrap()
-        .remove("session_context_revision");
-    output["session_continuity"] = json!({
-        "status": status,
-        "suggested_call": context_recovery_suggested_call(session_id),
-    });
-}
-
-/// Only the canonical handoff dispatcher calls this, after authorized execution.
-/// The revision is captured before reading any state; all requested components
-/// must be present and no checkpoint may complete across that observation.
-pub(crate) fn establish_handoff_context_baseline(
-    result: &mut ToolResult,
-    session_id: &str,
-    observed_revision: Option<u64>,
-    current_revision: Option<u64>,
-) {
-    if result.success && observed_revision.is_some() && observed_revision == current_revision {
-        result.output["session_context_revision"] = json!(observed_revision.unwrap());
-        result.output["session_continuity"] = json!({"status": "recovered"});
-    } else {
-        require_context_recovery(&mut result.output, "unacknowledged", session_id);
-    }
-}
-
-pub(crate) fn add_session_context_continuity(
-    result: &mut ToolResult,
-    recorded: &sessions::RecordedModelFacingToolCall,
-) -> bool {
-    debug_assert_eq!(
-        recorded.checkpoint_advanced,
-        recorded.context_revision > recorded.pre_response_context_revision,
-        "checkpoint allocation must match the recorded pre-response watermark"
-    );
-    if matches!(
-        recorded.ack_session_context_revision,
-        sessions::SessionContextRevisionAck::Unsupported
-    ) {
-        return false;
-    }
-    // Only a supported non-checkpoint carrier can supply this trusted business
-    // projection. Fence the exact recorder and the completion watermark again:
-    // a different Session's handoff or a concurrent completion proves no baseline.
-    if !recorded.checkpoint_advanced
-        && result
-            .output
-            .pointer("/session_continuity/status")
-            .and_then(Value::as_str)
-            == Some("recovered")
-    {
-        if result.success
-            && result.output.get("session_id").and_then(Value::as_str)
-                == Some(recorded.session_id.as_str())
-            && result
-                .output
-                .get("session_context_revision")
-                .and_then(Value::as_u64)
-                == Some(recorded.context_revision)
-        {
-            return false;
-        }
-        require_context_recovery(&mut result.output, "unacknowledged", &recorded.session_id);
-        return true;
-    }
-    let pre_response_context_revision = recorded.pre_response_context_revision;
-    let (status, ack_revision, needs_recovery, events_after_ack) = match recorded
-        .ack_session_context_revision
-    {
-        // An ACK can only prove state that already existed when the request
-        // started. A numerically matching revision allocated by a concurrent
-        // completion after request admission is still a future/invalid ACK.
-        sessions::SessionContextRevisionAck::Revision(revision)
-            if revision > recorded.pre_call_context_revision =>
-        {
-            ("invalid", Some(revision), true, None)
-        }
-        sessions::SessionContextRevisionAck::Revision(revision)
-            if revision == pre_response_context_revision =>
-        {
-            ("exact", Some(revision), false, None)
-        }
-        sessions::SessionContextRevisionAck::Revision(revision) => (
-            "behind",
-            Some(revision),
-            true,
-            Some(pre_response_context_revision.saturating_sub(revision)),
-        ),
-        sessions::SessionContextRevisionAck::Unsupported => {
-            unreachable!("unsupported continuity requests return before response decoration")
-        }
-        sessions::SessionContextRevisionAck::Unacknowledged => ("unacknowledged", None, true, None),
-        sessions::SessionContextRevisionAck::Invalid => ("invalid", None, true, None),
-    };
-    if !needs_recovery && !recorded.checkpoint_advanced {
-        return false;
-    }
-    let mut output = match std::mem::take(&mut result.output) {
-        Value::Object(map) => map,
-        other => {
-            let mut map = serde_json::Map::new();
-            map.insert("value".to_string(), other);
-            map
-        }
-    };
-    output.insert(
-        "session_context_revision".to_string(),
-        Value::from(recorded.context_revision),
-    );
-    if !needs_recovery {
-        result.output = Value::Object(output);
-        return false;
-    }
-
-    if status != "behind" {
-        result.output = Value::Object(output);
-        require_context_recovery(&mut result.output, status, &recorded.session_id);
-        return true;
-    }
-
-    let total_retained = recorded.recovery_events.len();
-    let events = bounded_model_facing_recovery_events(recorded);
-    let omitted_count = total_retained.saturating_sub(events.len());
-    let mut continuity = json!({
-        "status": status,
-        "ack_revision": ack_revision,
-        "pre_call_revision": recorded.pre_call_context_revision,
-        "history_lost": recorded.history_lost,
-    });
-    if let Some(events_after_ack) = events_after_ack {
-        continuity["events_after_ack"] = Value::from(events_after_ack);
-    }
-    output.insert("session_continuity".to_string(), continuity);
-    output.insert(
-        "session_recovery".to_string(),
-        json!({
-            "model_facing_events": events,
-            "omitted_count": omitted_count,
-            "truncated": omitted_count > 0,
-            "history_lost": recorded.history_lost,
-        }),
-    );
-    if recorded.history_lost || omitted_count > 0 {
-        output.remove("session_context_revision");
-        let continuity = output.get_mut("session_continuity").unwrap();
-        continuity["suggested_call"] = context_recovery_suggested_call(&recorded.session_id);
-    }
-    result.output = Value::Object(output);
-    true
 }
 
 pub(crate) fn observe_session_attention_acks(

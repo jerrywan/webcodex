@@ -2,9 +2,7 @@ use super::super::kernel::{
     HostFileImportTrust, ToolCallContext, ToolCallRequest, ToolInvocationMetadata,
     ToolProtocolCapabilities, ToolTransport,
 };
-use super::super::sessions::{
-    SessionContextRevisionAck, SessionTransport, ToolCallRecorderMetadata,
-};
+use super::super::sessions::{SessionTransport, ToolCallRecorderMetadata};
 use super::super::{ToolCall, ToolResult, ToolRuntime};
 use super::support::*;
 use crate::runner_protocol::{RunnerCapabilities, RunnerResultPayload, RunnerResultRequest};
@@ -224,7 +222,6 @@ async fn private_context_marker_requires_explicit_sidecar_capability() {
                 ..Default::default()
             },
             ToolProtocolCapabilities {
-                context_continuity: true,
                 context_sidecar: false,
                 ..Default::default()
             },
@@ -733,7 +730,7 @@ fn plugins_catalog_selection_projection_has_independent_hard_bound() {
 }
 
 #[tokio::test]
-async fn context_projection_coexists_with_session_continuity_and_attention() {
+async fn context_projection_coexists_without_context_ack_and_with_attention() {
     use crate::tool_runtime::sessions::{
         PostSessionMessageInput, SessionMessageKind, SessionMessagePriority,
     };
@@ -771,11 +768,10 @@ async fn context_projection_coexists_with_session_continuity_and_attention() {
             },
             ToolInvocationMetadata {
                 context_request: vec!["webcodex.workflow".to_string()],
-                ack_session_context_revision: SessionContextRevisionAck::Revision(0),
+
                 ..Default::default()
             },
             ToolProtocolCapabilities {
-                context_continuity: true,
                 context_sidecar: true,
                 ..Default::default()
             },

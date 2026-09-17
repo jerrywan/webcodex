@@ -125,63 +125,56 @@ Project scope is fail-closed. An explicit project-scoped business Session or rec
 The JSON ledger restores only the current version-2 top-level shape and canonical current Session rows. Pre-current ledger versions are rejected rather than migrated. Within v2, fields explicitly declared optional/default may be absent and restore conservatively; retired or unknown row members fail that row closed and are not reconstructed, counted, or rewritten. General `ClientWindow` support remains available to explicitly designed non-Workflow observations; Workflow Sessions do not use it for selection or authority.
 ### Assignment-fenced todo completion
 
-Executable todo completion is assignment-fenced in 0.4. A worker first calls `get_session_assignment` for the exact coordinator `session_id + message_id`; one atomic store snapshot returns the open todo, every retained direct reply within the bound, and an opaque Session/todo-bound `assignment_fence`. Current `complete_session_message` requests require that exact token as `expected_assignment_fence` together with the independent caller `completion_key`. Assignment-local semantic changes stale the fence before mutation; unrelated Session traffic, ACK bookkeeping, and model-context ACKs do not. A stale result has `state_changed=false` and includes the current assignment plus a fresh durable fence only when that exact current state remains provable. Retention loss or an oversized direct-reply set is non-completable from stale context.
+Executable todo completion is assignment-fenced in 0.4. A worker first calls `get_session_assignment` for the exact coordinator `session_id + message_id`; one atomic store snapshot returns the open todo, every retained direct reply within the bound, and an opaque Session/todo-bound `assignment_fence`. Current `complete_session_message` requests require that exact token as `expected_assignment_fence` together with the independent caller `completion_key`. Assignment-local semantic changes stale the fence before mutation; unrelated Session traffic and ACK bookkeeping do not. A stale result has `state_changed=false` and includes the current assignment plus a fresh durable fence only when that exact current state remains provable. Retention loss or an oversized direct-reply set is non-completable from stale context.
 
-The fence and completion key are different identity domains: the fence proves the semantic assignment snapshot, while the completion key correlates one accepted intent across uncertain retries. `ack_session_context_revision`, `ack_session_message_ids`, and message-observation tokens are separate continuity/cursor domains and cannot substitute for either. Business `session_id` remains the independently authorized target; `recording_session_id` remains provenance only and never supplies business guards or execution defaults. Current persisted rows must carry the assignment-history and completion-fence tracking metadata required by the v2 format; restore never invents a missing fence, fingerprint, or tracking state, and a row that cannot prove the current shape is discarded rather than admitted for replay.
+The fence and completion key are different identity domains: the fence proves the semantic assignment snapshot, while the completion key correlates one accepted intent across uncertain retries. `ack_session_message_ids` and message-observation tokens are separate continuity/cursor domains and cannot substitute for either. Business `session_id` remains the independently authorized target; `recording_session_id` remains provenance only and never supplies business guards or execution defaults. Current persisted rows must carry the assignment-history and completion-fence tracking metadata required by the v2 format; restore never invents a missing fence, fingerprint, or tracking state, and a row that cannot prove the current shape is discarded rather than admitted for replay.
 
-### Model-facing context continuity revision
+### Server-owned checkpoints and explicit handoff recovery
 
-Each Workflow Session also keeps a durable monotonic `context_revision` as a model-knowledge checkpoint watermark, not as a raw tool-result counter. Per-tool `ToolDefinition` policy decides whether a finished model-facing result advances the checkpoint. Consequential results such as edits, process execution, and Job observation allocate the next Session-local revision atomically with their finished event; concurrent checkpoint results therefore receive unique ordered revisions. Re-observable read/search/discovery/review results and `work_on_project` remain recorded in the Session ledger but do not consume a revision. Generic background/system/Job bookkeeping likewise does not advance this watermark. Retention may evict older checkpoint-annotated events without decreasing the durable high-water, and a capable caller whose ACK predates retained checkpoint history receives `history_lost=true` rather than invented history.
+Each Workflow Session keeps a durable monotonic `context_revision` for ordering
+checkpoint evidence. `ToolDefinition` policy advances it atomically with a
+consequential model-facing finished event, including edits, execution, and Job
+observation. Concurrent completions receive unique ordered revisions. Ordinary
+read/search/discovery/review results, `work_on_project`, and
+`session_handoff_summary` remain ledger evidence without advancing checkpoints.
+Background bookkeeping does not advance checkpoints either. Retention and
+restart preserve the high-water even when older events are no longer retained.
+The revision is Server-owned state, never a model-facing token to echo.
 
-The context ACK protocol is request-scoped and protocol-capability-scoped. Stateless MCP 2026 uses canonical `ToolDefinition` policy:
+Normal continuous work has no context-revision ACK input, automatic recovery
+delta, or handoff suggestion on unrelated tool results. When task context is
+missing, the model explicitly calls `session_handoff_summary` with the exact
+`session_id`. No identity, Project, window, transport, or recent-call state can
+select a Session implicitly. The authorized business Session supplies its Project
+when `project` is omitted; an explicit Project still passes the normal equality
+and authority checks. An outer recorder never changes the recovery target.
 
-| Policy | Accepts context ACK | Advances checkpoint |
-|---|---|---|
-| Consequential checkpoint (`CONSERVATIVE`, including unknown tools) | Yes | On model-facing result |
-| Ordinary re-observation (`REOBSERVABLE`) | No | Never |
-| Explicit recovery (`RECOVERY_ONLY`: `session_handoff_summary`) | Yes | Never |
+The default result contains `session_id`, `project`, and `handoff_brief`. The
+shared deterministic brief is hard-bounded at 8 KiB and carries root/latest task
+instructions, workspace state, progress/changed paths/recent files, validation,
+active/recovering Job attention, open collaboration counts, next actions, and
+basis completeness. `diagnostic=true` explicitly adds detailed ledger and closeout
+evidence. `include_workspace`, `include_validation`, `include_checkpoints`, and
+`limit` continue to select bounded observations; omitted/unavailable evidence is
+reported truthfully in the brief. There is no implicit handoff or ACK baseline.
 
-Read/search, Git review/diff/status, LSP observations, discovery, hygiene, `list_jobs`, Session/validation summaries, and `work_on_project` remain `REOBSERVABLE`: their target `ToolDefinition` does not consume Context ACK and they do not advance the checkpoint. On Stateless MCP 2026, the wrapper may nevertheless accept the known `ack_session_context_revision` metadata for invocation ergonomics and strip it before concrete business parsing. If a target does not consume that metadata, the business call still executes normally and the result reports `ignored_invocation_metadata` sparsely; supplying the field does not create `session_context_revision`, `session_continuity`, or `session_recovery`, recover history, grant authority, or acknowledge Session messages. Unknown or misspelled business arguments remain strict and fail closed. Adaptive Runtime's polymorphic `call_runtime_tool` also accepts the wrapper, but the actual target `ToolDefinition` exclusively controls whether it has semantic effect. Job completion observation (`observe_jobs`) remains checkpoint-capable. Session message ACKs, observation tokens, assignment fences and completion keys are unchanged.
+Handoff assembly checks an internal Session fence before and after gathering
+snapshots: checkpoint revision, total ledger events, and message-observation
+revision. If that state changes or disappears, the brief reports
+`basis.complete=false` and `session_changed_during_snapshot`. The caller can
+explicitly re-observe before dependent work. This detects Session evidence races;
+it does not claim atomicity across independent Runner workspace and Job reads.
+No internal revision is returned as a recovery token.
 
-Echo the latest **retained** `session_context_revision` only when the current target contract says it semantically consumes Context ACK. Omit it when unknown, and normally omit it on tools whose contract marks it ignored/inapplicable; never derive or invent one. `session_context_revision` is the sole dynamic model-facing checkpoint watermark; the fact that it is echoed through `ack_session_context_revision` is static tool-contract semantics and is not repeated in result metadata. An exact ACK plus a new checkpoint returns just its safe new revision. A valid known-behind ACK recovers bounded sparse checkpoint evidence strictly after the ACK and before the current result, including intervening concurrent completions. Each event projects only evidence actually available from its canonical Session event; absence of an optional member does not invent a negative fact, and the retention byte ceiling applies to the serialized sparse projection. `events_after_ack` counts checkpoints, not ordinary observations. The complete delta plus current result makes the newest revision safe to ACK. Future ACK detection uses the request-start watermark even if another call later allocates that number.
+Collaboration is independent: `ack_session_message_ids` still proves that the
+current request retains specific ACK-required Session/Peer messages.
+`session_attention` suppression/re-projection, message resolution, assignment
+fences, completion keys, and observation tokens keep their existing semantics.
+A handoff neither ACKs nor resolves a message and grants no authority.
 
-Missing, malformed or future ACKs no longer replay history or attach automatic `current_handoff`. The original effect completes normally and returns only a compact continuity hint, for example:
+Stateless MCP 2026 tools also accept an explicit bounded `context_request` wrapper sidecar request. It is independent of collaboration ACKs and handoff recovery and is removed before concrete `ToolCall` parsing. A static canonical material registry authorizes every requested material before its provider is read: `webcodex.workflow` is public; `project.instructions` requires the resolved Project plus `project:read`; `skills.catalog` additionally requires the admitted Skill runtime protocol capability; `plugins.catalog` requires the resolved Project plus both `project:read` and `plugin:inspect`; and `memory.bootstrap` requires the admitted Memory protocol capability plus both `project:read` and `memory:read`. Scope or material-capability denial is nonfatal to the main ToolResult and returns a bounded unavailable material without provider content. Unknown material keys are nonfatal and remain open-ended at the MCP schema layer. Sidecar material is projected only after the main tool effect or observation has completed, never grants authority, never retroactively makes requested guidance a precondition of that effect, never records caller-read state, and never infers a Project or model-memory state from a Workflow Session, connection, credential, `Mcp-Session-Id`, or hidden window identity. A model that has lost Project rules or durable Memory guidance must recover `project.instructions` and/or `memory.bootstrap` on an observation call, use `memory_read` when detailed Memory content is needed, reason over that context, and only then issue a later mutation that must obey it. Legacy MCP and generic REST/GPT Actions/OpenAPI do not expose this sidecar request contract.
 
-```json
-{
-  "session_continuity": {
-    "status": "unacknowledged",
-    "suggested_call": {
-      "tool": "session_handoff_summary",
-      "arguments": {"session_id": "wc_sess_example"}
-    }
-  }
-}
-```
-
-No newest `session_context_revision` accompanies that hint: the current command/edit result alone does not prove knowledge of earlier consequences. `session_continuity.status` reports the observed continuity state only; it is not authority or retry permission. `suggested_call` presence is the sole machine representation that explicit handoff recovery is actionable, and the call itself is the parser-ready minimum recovery invocation; no separate Boolean, tool name, or recovery Session identity duplicates that decision. A caller therefore does not need the complete `session_handoff_summary` schema already loaded; an Adaptive host may invoke the direct callable when available or use the admitted `call_runtime_tool` fallback with the same arguments. Invalid input uses `status=invalid`. Known-behind retention loss or event/byte truncation preserves `status=behind`, `events_after_ack`, bounded retained events and the loss/truncation flags, adds the same recovery guidance, and withholds the newest revision. A partial delta never certifies a complete prefix.
-
-Explicitly call `session_handoff_summary(session_id=...)` with its default complete view (`summary_only=false`, all `include_*` components enabled). Its bounded current Session state establishes a baseline with `session_continuity.status=recovered` and `session_context_revision`; there is no nested second handoff. `recovered` denotes current-state rebaselining, not exact ACK or complete historical replay. The watermark is captured before reading state and checked again after observation and recording. A concurrent checkpoint completion withholds the baseline and requests another handoff. A partial/summary-only view, a display limit below the default 20, or a failed handoff cannot establish a new baseline. A handoff of business Session C cannot certify recorder Session W: omit the outer recorder or use the same Session when recovering. Project/bootstrap identity never selects a recovery Session.
-
-All ACK states remain nonblocking for the original effect. ACK grants no authority, is not a delivery/read receipt, is not persisted as caller state, and is never inferred from connection, `openai/session`, `Mcp-Session-Id`, credentials, Project identity, elapsed time or hidden window state.
-
-Context recovery, compaction, and exact `work_on_project(session_id=...)` resume do
-not by themselves restart the coding task. After recovery, a model should reuse
-still-current verified Git state, reads, validation evidence, known Job ids, and
-implementation decisions instead of broad-scanning from scratch. Facts bound to
-a changed snapshot, HEAD/worktree, or instruction fingerprint must be re-observed.
-Workflow Session identity remains continuity/evidence identity only: it never
-proves that a fresh model context retained prior content.
-
-Legacy MCP and generic REST/GPT Actions/OpenAPI remain non-capable. They still contribute checkpoint-capable model-facing consequences to durable `context_revision` history for later capable recovery, but expose no context continuity overlay. Their ordinary observations remain bounded ledger evidence without advancing the watermark. Capability is supplied explicitly by the adapter.
-
-Model ergonomics telemetry schema v5 retains eligibility, ACK presence, bounded continuity status, delta event count, truncation/loss flags and total serialized result bytes. `context_recovery_kind` is one of `none`, `delta`, `compact_hint`, `current_state`; incomplete deltas requiring explicit recovery count as `compact_hint` while retaining their event/loss metrics. `current_state` identifies an explicit recovered handoff. `context_recovery_bytes` measures the UTF-8 serialized object containing only the final `session_context_revision`, `session_continuity` and `session_recovery` projections (zero if absent); explicit handoff business content is measured by `serialized_result_bytes`, not counted twice as an overlay. Telemetry stores no revision values, Session ids, paths, commands, prompts, events or handoff bodies.
-
-This watermark is independent of `ack_session_message_ids` and the Session message-observation revision: message ACKs mean only that specific ACK-required Session/Peer message is retained for one request, while context ACKs describe the retained model-facing Workflow Session checkpoint watermark. Neither implicitly acknowledges or resolves the other.
-
-Stateless MCP 2026 tools also accept an explicit bounded `context_request` wrapper sidecar request. It is independent of both ACK protocols and is removed before concrete `ToolCall` parsing. A static canonical material registry authorizes every requested material before its provider is read: `webcodex.workflow` is public; `project.instructions` requires the resolved Project plus `project:read`; `skills.catalog` additionally requires the admitted Skill runtime protocol capability; `plugins.catalog` requires the resolved Project plus both `project:read` and `plugin:inspect`; and `memory.bootstrap` requires the admitted Memory protocol capability plus both `project:read` and `memory:read`. Scope or material-capability denial is nonfatal to the main ToolResult and returns a bounded unavailable material without provider content. Unknown material keys are nonfatal and remain open-ended at the MCP schema layer. Sidecar material is projected only after the main tool effect or observation has completed, never grants authority, never retroactively makes requested guidance a precondition of that effect, never records caller-read state, and never infers a Project or model-memory state from a Workflow Session, connection, credential, `Mcp-Session-Id`, or hidden window identity. A model that has lost Project rules or durable Memory guidance must recover `project.instructions` and/or `memory.bootstrap` on an observation call, use `memory_read` when detailed Memory content is needed, reason over that context, and only then issue a later mutation that must obey it. Legacy MCP and generic REST/GPT Actions/OpenAPI do not expose this sidecar request contract.
-
-Project Memory is a separate durable knowledge plane from Workflow Session continuity. `memory_search`/`memory_read` require both `project:read` and `memory:read`; `memory_set`/`memory_delete` require both `project:write` and `memory:manage`, with mutations still passing the independent permission evaluator. Direct shared-key runtime credentials explicitly carry both Memory scopes, while Open Anonymous, ProjectCredential, Project Share, and legacy/default OAuth client scope sets do not gain them from project scopes. A Memory `memory_key` is logical semantic identity, `memory_id` identifies the current incarnation, the internal `definition_hash` identifies canonical model-relevant content, and model-facing `revision` is a generation-bound state ETag/CAS identity; delete and identical recreate therefore produce a different `memory_id` and `revision`. Session events never create or consolidate Memory automatically. `ack_session_context_revision` proves only the caller-held Session checkpoint prefix and never acknowledges Memory content, while `ack_session_message_ids` is limited to ACK-required collaboration messages and never acknowledges Memory. Memory reads/searches may leave bounded metadata-only consequences in Session history, but Memory bodies, summaries, search results, and `memory.bootstrap` projections are not copied into durable Session recovery. Re-registering the same runtime Project id to a different authoritative registered root resolves to a distinct internal Memory scope rather than inheriting the old root's Memory.
+Project Memory is a separate durable knowledge plane from Workflow Session continuity. `memory_search`/`memory_read` require both `project:read` and `memory:read`; `memory_set`/`memory_delete` require both `project:write` and `memory:manage`, with mutations still passing the independent permission evaluator. Direct shared-key runtime credentials explicitly carry both Memory scopes, while Open Anonymous, ProjectCredential, Project Share, and legacy/default OAuth client scope sets do not gain them from project scopes. A Memory `memory_key` is logical semantic identity, `memory_id` identifies the current incarnation, the internal `definition_hash` identifies canonical model-relevant content, and model-facing `revision` is a generation-bound state ETag/CAS identity; delete and identical recreate therefore produce a different `memory_id` and `revision`. Session events never create or consolidate Memory automatically. `ack_session_message_ids` is limited to ACK-required collaboration messages and never acknowledges Memory. Memory reads/searches may leave bounded metadata-only consequences in Session history, but Memory bodies, summaries, search results, and `memory.bootstrap` projections are not copied into durable Session recovery. Re-registering the same runtime Project id to a different authoritative registered root resolves to a distinct internal Memory scope rather than inheriting the old root's Memory.
 
 ### Message observation state
 
@@ -571,7 +564,8 @@ a `finish_coding_task` verdict.
 `session_handoff_summary` and `finish_coding_task` return the same version-1
 `handoff_brief`, built by one shared pure projection. It is the compact,
 model-friendly view for a new window, a new Agent, or a human receiver;
-`continuation_feedback` remains the more detailed diagnostic evidence. The
+`continuation_feedback` remains the more detailed evidence available from the
+explicit diagnostic handoff view and closeout tools. The
 brief is not Session replay, does not reconstruct chat or hidden model
 context, and does not decide that implementation work is complete.
 
@@ -672,19 +666,20 @@ validation rejects the call before kernel entry or the MCP hard dispatch timeout
 prevents kernel completion. Batch items do not create generic invocation records,
 and hidden/internal helpers do not start this telemetry.
 
-The current durable generic record uses `schema_version = 3`. Older v1/v2 rows
+The current durable generic record uses `schema_version = 6`. Older telemetry rows
 remain naturally queryable and are not migrated or backfilled. The current
 record contains:
 
 - base generic fields: `tool_name`, `tool_category`, `success`, `duration_ms`,
   nullable `serialized_result_bytes`, nullable structured `error_kind`,
   `failure_kind`, `recovery_kind`, and authoritative closed `execution_state`;
-- v2 continuity/recovery fields: `context_continuity_eligible`, optional
-  `context_ack_present`, `context_continuity_status`,
-  `session_recovery_event_count`, `session_recovery_truncated`,
-  `session_history_lost`, and `finish_summary_only`;
-- v3 edit measurement fields: optional `edit_surface`, `edit_outcome`, and
+- optional `finish_summary_only` and bounded `work_on_project` request-shape facts;
+- optional edit measurement fields: `edit_surface`, `edit_outcome`, and
   `edit_conflict_kind`.
+
+Context-ACK presence/status and recovery-delta byte/event metrics are retired.
+Generic final-result byte size and latency remain available without retaining
+revision values or recovery bodies.
 
 `edit_surface` is the closed label `canonical | advanced`. `edit_outcome` is a
 bounded structured classification derived from authoritative edit result fields.

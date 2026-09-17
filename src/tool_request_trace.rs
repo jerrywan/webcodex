@@ -2273,7 +2273,7 @@ mod tests {
             Some("write_project_file".into()),
         );
         let payload = json!({
-            "ack_session_context_revision": 42,
+            "ack_session_message_ids": ["wc_msg_abcd-efgh_ijklmn"],
             "content": "large-body-".repeat(100_000),
         });
         guard.capture_payload("raw_arguments", &payload);

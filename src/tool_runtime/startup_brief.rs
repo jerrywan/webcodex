@@ -73,7 +73,7 @@ pub(crate) fn builtin_coding_workflow_projection() -> Value {
             "Use one execution/Job, exact continuation; wait_secs=100,wake_on=terminal when blocked, not for visibility. After Rust stabilizes, format once before final diff/closeout; rerun only after later Rust edits. Final source needs sufficient fresh validation."
         ],
         "model_protocol": {
-            "session_context_ack": "Checkpoint/recovery tools may expose session_context_revision. Echo the latest retained revision in ack_session_context_revision only where exposed; never invent it. If unknown, omit; use the advertised Session handoff recovery path. ACK is nonblocking.",
+            "handoff_recovery": "When task context is missing, explicitly call session_handoff_summary with the exact session_id. Its bounded handoff_brief reconstructs retained task evidence; check basis completeness before dependent work.",
             "session_recording": "When work_on_project creates or resumes, pass recording_session_id for recorder provenance only. business session_id may target another Session; it grants no authority.",
             "session_message_ack": "For retained session_attention with requires_ack, echo ack_session_message_ids. This proves model-context retention only; it never resolves messages, grants authority, or gates execution.",
             "session_message_resolution": "For a handled non-todo, send session_message_resolution on the next ordinary call with recording_session_id; if requires_ack, also send ack_session_message_ids. It cannot predict the main call. Todos use complete_session_message.",

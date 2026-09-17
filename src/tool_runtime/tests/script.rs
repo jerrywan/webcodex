@@ -604,7 +604,7 @@ async fn run_script_slow_handoff_keeps_typed_payload_ephemeral_and_safe_metadata
                 include_workspace: Some(false),
                 include_checkpoints: Some(false),
                 include_validation: Some(false),
-                summary_only: false,
+                diagnostic: true,
                 limit: Some(20),
             },
             Some(&auth),

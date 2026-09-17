@@ -158,6 +158,7 @@ fn brief_for(
         jobs,
         guidance_available,
         existing_suggested_actions: None,
+        session_changed_during_snapshot: false,
     })
 }
 fn assert_all_objects_strict(schema: &Value, path: &str) {
@@ -358,7 +359,7 @@ async fn public_handoff_dispatch_records_only_standard_telemetry_and_preserves_g
                 include_workspace: Some(false),
                 include_checkpoints: Some(false),
                 include_validation: Some(false),
-                summary_only: true,
+                diagnostic: true,
                 limit: Some(20),
             },
             Some(&auth),

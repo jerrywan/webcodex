@@ -420,7 +420,7 @@ fn handoff_call(session_id: &str) -> ToolCall {
         include_workspace: None,
         include_checkpoints: None,
         include_validation: None,
-        summary_only: false,
+        diagnostic: true,
         limit: None,
     }
 }
@@ -477,7 +477,7 @@ async fn handoff_summary_only_and_include_validation_false_shape() {
             include_workspace: None,
             include_checkpoints: None,
             include_validation: Some(false),
-            summary_only: true,
+            diagnostic: true,
             limit: None,
         })
         .await;
@@ -676,7 +676,7 @@ async fn finish_coding_task_continuation_matches_handoff_attempt_without_rerunni
             Some(false),
             Some(false),
             Some(false),
-            false,
+            true,
             Some(20),
             Some(&auth),
         )

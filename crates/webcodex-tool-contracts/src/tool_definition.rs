@@ -57,7 +57,7 @@ pub use super::tool_policy::is_known_tool_name;
 pub use super::tool_policy::{
     adaptive_runtime_direct_tool_definitions, exploration_tool_names,
     is_adaptive_runtime_direct_tool, is_model_visible_tool_name, lookup_tool_definition,
-    model_visible_tool_definitions, model_visible_tool_names_csv, runtime_tool_accepts_context_ack,
+    model_visible_tool_definitions, model_visible_tool_names_csv,
     runtime_tool_activity_interaction, runtime_tool_activity_semantics,
     runtime_tool_advances_context_checkpoint, runtime_tool_approval_policy,
     runtime_tool_captures_validation_output, runtime_tool_category,
@@ -1049,24 +1049,16 @@ pub enum ContextCheckpointPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolContextContinuityPolicy {
-    pub accepts_context_ack: bool,
     pub checkpoint: ContextCheckpointPolicy,
 }
 
 impl ToolContextContinuityPolicy {
     pub const CONSERVATIVE: Self = Self {
-        accepts_context_ack: true,
         checkpoint: ContextCheckpointPolicy::OnModelFacingResult,
     };
 
-    /// Ordinary observations can be repeated without checkpoint recovery.
+    /// Ordinary re-observable results do not advance the internal checkpoint.
     pub const REOBSERVABLE: Self = Self {
-        accepts_context_ack: false,
-        checkpoint: ContextCheckpointPolicy::Never,
-    };
-
-    pub const RECOVERY_ONLY: Self = Self {
-        accepts_context_ack: true,
         checkpoint: ContextCheckpointPolicy::Never,
     };
 
@@ -1247,10 +1239,6 @@ const fn context_continuity(
 
 const fn context_reobservable(definition: ToolDefinition) -> ToolDefinition {
     context_continuity(definition, ToolContextContinuityPolicy::REOBSERVABLE)
-}
-
-const fn context_recovery_only(definition: ToolDefinition) -> ToolDefinition {
-    context_continuity(definition, ToolContextContinuityPolicy::RECOVERY_ONLY)
 }
 
 const fn permission_risk(

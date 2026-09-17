@@ -470,7 +470,7 @@ fn tool_specs_describe_default_coding_loop_preferences() {
     }
 
     let handoff_desc = desc("session_handoff_summary");
-    for phrase in ["handoff", "multi-step tasks", "read-only"] {
+    for phrase in ["handoff", "missing task context", "read-only"] {
         assert!(
             handoff_desc.contains(phrase),
             "session_handoff_summary description should mention {phrase}: {handoff_desc}"
@@ -1018,12 +1018,11 @@ fn session_tool_specs_describe_explicit_targeting() {
 
     let handoff_desc = desc("session_handoff_summary");
     for phrase in [
-        "session ledger",
-        "explicit session_id",
-        "ledger-derived validation",
-        "bounded tails",
-        "safe result metadata",
-        "validation.parser.available",
+        "exact session_id",
+        "handoff_brief",
+        "8 kib",
+        "diagnostic=true",
+        "basis incomplete",
     ] {
         assert!(
             handoff_desc.contains(phrase),

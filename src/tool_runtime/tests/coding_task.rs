@@ -3882,7 +3882,7 @@ async fn session_handoff_summary_only_with_agent_limit(
                         include_workspace: Some(true),
                         include_checkpoints: Some(false),
                         include_validation: Some(true),
-                        summary_only: true,
+                        diagnostic: true,
                         limit,
                     },
                     Some(&auth),

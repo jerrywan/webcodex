@@ -70,7 +70,7 @@ fn synthetic_read_contract() -> SessionToolContract {
         change_summary_like: false,
         project_write: false,
         path_hint: SessionPathHint::SinglePath,
-        accepts_context_ack: false,
+
         advances_context_checkpoint: false,
     }
 }
@@ -85,7 +85,7 @@ fn synthetic_write_contract() -> SessionToolContract {
         change_summary_like: false,
         project_write: true,
         path_hint: SessionPathHint::PathList,
-        accepts_context_ack: false,
+
         advances_context_checkpoint: false,
     }
 }
@@ -286,6 +286,7 @@ fn brief_for(
         jobs,
         guidance_available,
         existing_suggested_actions: None,
+        session_changed_during_snapshot: false,
     })
 }
 
@@ -879,6 +880,7 @@ fn handoff_brief_hard_limit_uses_actual_escaped_json_bytes() {
         jobs: Some(&jobs),
         guidance_available: true,
         existing_suggested_actions: None,
+        session_changed_during_snapshot: false,
     });
     let bytes = handoff_brief_size(&brief);
     assert_eq!(bytes, serde_json::to_vec(&brief).unwrap().len());

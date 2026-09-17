@@ -1,7 +1,7 @@
 use super::model_ergonomics_telemetry::{ModelErgonomicsCompletion, ModelErgonomicsTimer};
 use super::sessions::{
-    strip_tool_call_expectation_metadata, SessionContextRevisionAck, SessionTransport,
-    ToolCallRecorderMetadata, ToolCallSessionMessageResolution,
+    strip_tool_call_expectation_metadata, SessionTransport, ToolCallRecorderMetadata,
+    ToolCallSessionMessageResolution,
 };
 use super::tool_audit::{
     session_log_arguments_for_tool_request, session_log_arguments_for_typed_call,
@@ -55,40 +55,15 @@ pub(crate) struct ToolCallRequest {
 /// None of these fields are concrete tool business arguments or execution
 /// authority. Trusted protocol capabilities remain a separate adapter-derived
 /// input and the kernel continues to own all authority checks.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ToolInvocationMetadata {
     pub(crate) ack_session_message_ids: Vec<String>,
     pub(crate) session_message_resolution: Option<ToolCallSessionMessageResolution>,
     pub(crate) context_request: Vec<String>,
-    pub(crate) ack_session_context_revision: SessionContextRevisionAck,
-}
-
-impl Default for ToolInvocationMetadata {
-    fn default() -> Self {
-        Self {
-            ack_session_message_ids: Vec::new(),
-            session_message_resolution: None,
-            context_request: Vec::new(),
-            // Missing is the adapter-level default. A protocol/tool that is not
-            // continuity-capable is normalized to Unsupported inside the kernel.
-            ack_session_context_revision: SessionContextRevisionAck::Unacknowledged,
-        }
-    }
-}
-
-impl ToolInvocationMetadata {
-    fn effective_context_ack(&self, context_continuity_capable: bool) -> SessionContextRevisionAck {
-        if context_continuity_capable {
-            self.ack_session_context_revision
-        } else {
-            SessionContextRevisionAck::Unsupported
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ToolProtocolCapabilities {
-    pub(crate) context_continuity: bool,
     pub(crate) context_sidecar: bool,
     pub(crate) skill_runtime: bool,
     pub(crate) skill_management: bool,
@@ -277,14 +252,12 @@ impl ToolRuntime {
         &self,
         request: ToolCallRequest,
         context: ToolCallContext<'_>,
-        context_continuity_capable: bool,
         context_sidecar_capable: bool,
     ) -> ToolCallOutcome {
         self.call_tool_with_protocol_capabilities(
             request,
             context,
             ToolProtocolCapabilities {
-                context_continuity: context_continuity_capable,
                 context_sidecar: context_sidecar_capable,
                 skill_runtime: context_sidecar_capable,
                 skill_management: false,
@@ -321,14 +294,8 @@ impl ToolRuntime {
         invocation_metadata: ToolInvocationMetadata,
         capabilities: ToolProtocolCapabilities,
     ) -> ToolCallOutcome {
-        let context_continuity_capable = capabilities.context_continuity
-            && super::tool_definition::runtime_tool_accepts_context_ack(&request.tool_name);
-        let context_ack = invocation_metadata.effective_context_ack(context_continuity_capable);
-        let telemetry = ModelErgonomicsTimer::start_with_protocol(
-            &request.tool_name,
-            &request.arguments,
-            context_ack,
-        );
+        let telemetry =
+            ModelErgonomicsTimer::start_with_arguments(&request.tool_name, &request.arguments);
         let mut outcome = self
             .call_tool_with_context_inner(request, context, invocation_metadata, capabilities)
             .await;
@@ -343,16 +310,11 @@ impl ToolRuntime {
         invocation_metadata: ToolInvocationMetadata,
         capabilities: ToolProtocolCapabilities,
     ) -> ToolCallOutcome {
-        let context_continuity_capable = capabilities.context_continuity
-            && super::tool_definition::runtime_tool_accepts_context_ack(&request.tool_name);
-        let ack_session_context_revision =
-            invocation_metadata.effective_context_ack(context_continuity_capable);
         let mut recorder_metadata =
             ToolCallRecorderMetadata::from_business_arguments(&request.arguments);
         recorder_metadata.ack_session_message_ids = invocation_metadata.ack_session_message_ids;
         recorder_metadata.session_message_resolution =
             invocation_metadata.session_message_resolution;
-        recorder_metadata.ack_session_context_revision = ack_session_context_revision;
         // One trusted identity per real kernel request. The outer recorder and
         // inner business ledger pairs inherit it, but it never affects execution.
         recorder_metadata.assign_logical_invocation();
@@ -716,7 +678,7 @@ impl ToolRuntime {
                 &mut result,
                 session_context::SESSION_PROJECT_MISMATCH_KIND,
             );
-            let recording = self.sessions.record_model_facing_tool_call_finished(
+            self.sessions.record_model_facing_tool_call_finished(
                 session_event,
                 false,
                 &result.output,
@@ -724,9 +686,6 @@ impl ToolRuntime {
                 Some(session_context::SESSION_PROJECT_MISMATCH_KIND),
             );
             super::add_session_hint(&mut result, &self.sessions, session_id);
-            if let Some(recorded) = recording.as_ref() {
-                session_context::add_session_context_continuity(&mut result, recorded);
-            }
             session_context::add_session_attention_projection(
                 &mut result,
                 &self.sessions,
@@ -851,7 +810,7 @@ impl ToolRuntime {
                     &mut result,
                     "session_message_resolution_failed",
                 );
-                let recording = self.sessions.record_model_facing_tool_call_finished(
+                self.sessions.record_model_facing_tool_call_finished(
                     session_event,
                     false,
                     &result.output,
@@ -859,9 +818,6 @@ impl ToolRuntime {
                     Some("session_message_resolution_failed"),
                 );
                 super::add_session_hint(&mut result, &self.sessions, session_id);
-                if let Some(recorded) = recording.as_ref() {
-                    session_context::add_session_context_continuity(&mut result, recorded);
-                }
                 session_context::add_session_attention_projection(
                     &mut result,
                     &self.sessions,
@@ -947,7 +903,7 @@ impl ToolRuntime {
             }
         }
         let session_log_result = session_log_result_for_tool(&request.tool_name, &result.output);
-        let outer_recording = self.sessions.record_model_facing_tool_call_finished(
+        self.sessions.record_model_facing_tool_call_finished(
             session_event,
             result.success,
             &session_log_result,
@@ -959,9 +915,6 @@ impl ToolRuntime {
         // business `output.session_id` emitted by the concrete tool.
         if let Some(session_id) = context.session_id {
             super::add_session_hint(&mut result, &self.sessions, session_id);
-            if let Some(recorded) = outer_recording.as_ref() {
-                session_context::add_session_context_continuity(&mut result, recorded);
-            }
             session_context::add_session_attention_projection(
                 &mut result,
                 &self.sessions,
@@ -1198,10 +1151,6 @@ mod tests {
                 true,
             )
             .unwrap();
-        let ack_revision = runtime
-            .sessions
-            .context_revision(&session.session_id)
-            .expect("session context revision");
         let business_arguments = json!({});
         let business_object = business_arguments.as_object().unwrap();
         for wrapper in [
@@ -1209,7 +1158,6 @@ mod tests {
             crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD,
             crate::tool_runtime::sessions::TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD,
             crate::tool_runtime::context_projection::TOOL_CALL_CONTEXT_REQUEST_FIELD,
-            crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD,
         ] {
             assert!(!business_object.contains_key(wrapper));
         }
@@ -1222,19 +1170,9 @@ mod tests {
         let invocation_metadata = ToolInvocationMetadata {
             ack_session_message_ids: vec![guidance.message_id],
             context_request: vec!["webcodex.workflow".to_string()],
-            ack_session_context_revision: SessionContextRevisionAck::Revision(ack_revision),
+
             ..Default::default()
         };
-        assert_eq!(
-            invocation_metadata.effective_context_ack(true),
-            SessionContextRevisionAck::Revision(ack_revision)
-        );
-        assert_eq!(
-            invocation_metadata.effective_context_ack(false),
-            SessionContextRevisionAck::Unsupported,
-            "typed ACK metadata must not bypass trusted capability / ToolDefinition policy"
-        );
-
         let outcome = runtime
             .call_tool_with_invocation_metadata(
                 ToolCallRequest {
@@ -1251,7 +1189,6 @@ mod tests {
                 },
                 invocation_metadata,
                 ToolProtocolCapabilities {
-                    context_continuity: true,
                     context_sidecar: true,
                     ..Default::default()
                 },

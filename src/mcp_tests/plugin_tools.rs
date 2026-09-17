@@ -775,7 +775,6 @@ async fn plugin_tool_accepts_collaboration_ack_but_rejects_other_stateless_wrapp
             695,
             json!({
                 "action":"list",
-                crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD: 7
             }),
         ),
         (

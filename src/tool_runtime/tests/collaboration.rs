@@ -850,7 +850,7 @@ async fn collaboration_two_sessions_keep_execution_history_and_explicit_provenan
             "include_workspace": false,
             "include_checkpoints": false,
             "include_validation": false,
-            "summary_only": true
+            "diagnostic": true
         }),
         Some(&worker.session_id),
         &auth,
@@ -1609,7 +1609,7 @@ async fn project_scoped_session_authority_rejects_recycled_project_identity() {
                 "include_workspace": false,
                 "include_checkpoints": false,
                 "include_validation": false,
-                "summary_only": true
+                "diagnostic": true
             }),
         ),
         ("close_session", json!({"session_id": session_id})),
@@ -1763,7 +1763,7 @@ async fn projectless_session_owner_authority_blocks_known_ids_from_foreign_princ
                 "include_workspace": false,
                 "include_checkpoints": false,
                 "include_validation": false,
-                "summary_only": true
+                "diagnostic": true
             }),
         ),
         ("close_session", json!({"session_id": session_id})),

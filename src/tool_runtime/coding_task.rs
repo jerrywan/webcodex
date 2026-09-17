@@ -1621,7 +1621,7 @@ impl ToolRuntime {
                     Some(include_workspace),
                     Some(true),
                     Some(include_validation_summary),
-                    summary_only,
+                    true,
                     Some(20),
                     auth,
                 )
@@ -1769,6 +1769,7 @@ impl ToolRuntime {
             jobs: output.get("jobs"),
             guidance_available,
             existing_suggested_actions: output.get("suggested_next_actions"),
+            session_changed_during_snapshot: false,
         });
         let decision = finish_decision_output(&output);
         if summary_only {

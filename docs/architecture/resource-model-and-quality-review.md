@@ -193,7 +193,7 @@ Stage 4A1 因此保留为 **managed-worktree source lineage foundation**：它�
 
 旧 configured/managed enqueue wrapper和compatibility alias没有保留。这个收敛只改变内部protocol/admission shape：authorization、Project authority、Runner instance fencing、management outcome-unknown、ToolResult schema与模型可见Skill工具名称/参数仍由原边界保持。
 
-同理，内容 revision、catalog revision、状态 CAS、Job observation token、Session context ACK 虽然都长得像字符串，不应共用“版本号”的业务语义。只在误传风险高、已有具体消费者的接口引入 typed boundary 或 newtype，不要求每个字符串都包装。
+同理，内容 revision、catalog revision、状态 CAS、Job observation token、Session message ACK 虽然都长得像字符串，不应共用“版本号”的业务语义。只在误传风险高、已有具体消费者的接口引入 typed boundary 或 newtype，不要求每个字符串都包装。
 
 ## 5. 可以类推到其他领域的设计
 

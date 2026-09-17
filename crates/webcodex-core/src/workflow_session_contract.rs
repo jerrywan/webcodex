@@ -11,7 +11,6 @@ pub const MAX_MODEL_VALIDATION_ASSERTION_NAME_CHARS: usize =
 pub const TOOL_CALL_RECORDING_SESSION_ID_FIELD: &str = "recording_session_id";
 pub const TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD: &str = "ack_session_message_ids";
 pub const TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD: &str = "session_message_resolution";
-pub const TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD: &str = "ack_session_context_revision";
 pub const MAX_TOOL_CALL_ACK_MESSAGE_IDS: usize = 8;
 pub const TOOL_EXPECTED_FAILURE_FIELD: &str = "expected_failure";
 pub const TOOL_EXPECTED_FAILURE_KIND_FIELD: &str = "expected_failure_kind";

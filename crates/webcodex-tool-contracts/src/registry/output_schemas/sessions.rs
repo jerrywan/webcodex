@@ -432,8 +432,8 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
         ])),
         "session_handoff_summary" => Some(wrapped_output_schema(vec![
             (
-                "summary_only",
-                schema_type("boolean", "True only for compact summary_only output."),
+                "diagnostic",
+                schema_type("boolean", "True only when detailed evidence was explicitly requested."),
             ),
             (
                 "session_id",
@@ -447,7 +447,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 "workspace_clean",
                 schema_type(
                     "boolean",
-                    "Compact summary_only workspace cleanliness verdict.",
+                    "Diagnostic workspace cleanliness verdict.",
                 ),
             ),
             (
@@ -456,7 +456,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             (
                 "hygiene_clean",
-                schema_type("boolean", "Compact summary_only hygiene cleanliness verdict."),
+                schema_type("boolean", "Diagnostic hygiene cleanliness verdict."),
             ),
             (
                 "collaboration",
@@ -625,15 +625,15 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             (
                 "validation",
-                open_object_schema("Ledger-derived validation-like tool-call summary with status/reason: not_run, passed, failed, mixed, inconclusive, expected, or unknown. `expected` means a pre-declared negative/observation result matched without proving validator pass. Parser version 3 provides bounded structured diagnostics from bounded validation metadata using canonical diagnostics and failed_test_details fields only. Full and summary_only closeout preserve the same validation evidence. Does not include stdout/stderr bodies and performs no root-cause inference; parser.available remains false when session ledger events lack those fields. latest_status and historical_failures retain the existing final-state and resolved-history semantics."),
+                open_object_schema("Ledger-derived validation-like tool-call summary available only in diagnostic=true handoff output, with status/reason: not_run, passed, failed, mixed, inconclusive, expected, or unknown. `expected` means a pre-declared negative/observation result matched without proving validator pass. Parser version 3 provides bounded structured diagnostics from bounded validation metadata using canonical diagnostics and failed_test_details fields only. Does not include stdout/stderr bodies and performs no root-cause inference; parser.available remains false when session ledger events lack those fields. latest_status and historical_failures retain the existing final-state and resolved-history semantics."),
             ),
             (
                 "review_evidence",
-                review_evidence_schema("Ledger-derived non-cargo review evidence summary for full and summary_only outputs. Counts successful read/search/diff/workspace/hygiene inspection tools from the session ledger and exposes bounded tools for compact explainability. For docs-only or read-only audit tasks, validation.status may remain not_run while review_evidence.total is greater than zero. Does not include file contents, stdout/stderr, diff hunks, command text, tokens, secrets, or raw input payloads. Does not change validation.status or make the verdict pass."),
+                review_evidence_schema("Ledger-derived non-cargo review evidence summary available only in diagnostic=true handoff output. Counts successful read/search/diff/workspace/hygiene inspection tools from the session ledger and exposes bounded tools for compact explainability. For docs-only or read-only audit tasks, validation.status may remain not_run while review_evidence.total is greater than zero. Does not include file contents, stdout/stderr, diff hunks, command text, tokens, secrets, or raw input payloads. Does not change validation.status or make the verdict pass."),
             ),
             (
                 "verdict",
-                open_object_schema("Legacy aggregate closeout verdict for full and summary_only output: task_outcome fail or evidence_integrity error maps to blocking fail; otherwise task_outcome warn or evidence_integrity warning maps to non-blocking warn; otherwise pass. Resolved evidence history alone does not lower the verdict."),
+                open_object_schema("Legacy aggregate closeout verdict retained only in diagnostic=true handoff output: task_outcome fail or evidence_integrity error maps to blocking fail; otherwise task_outcome warn or evidence_integrity warning maps to non-blocking warn; otherwise pass. Resolved evidence history alone does not lower the verdict."),
             ),
             (
                 "task_outcome",
@@ -663,7 +663,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             (
                 "continuation_feedback",
-                continuation_feedback_schema("Deterministic continuation feedback for normal and summary_only handoff. A read-only attempt summary plus validation delta over existing handoff evidence; never an LLM summary, never an Agent loop, never a new verdict, and it never re-runs validation, mutates the ledger, refreshes activity, or consumes guidance."),
+                continuation_feedback_schema("Deterministic continuation feedback retained only in diagnostic=true handoff output. A read-only attempt summary plus validation delta over existing handoff evidence; never an LLM summary, never an Agent loop, never a new verdict, and it never re-runs validation, mutates the ledger, refreshes activity, or consumes guidance."),
             ),
             (
                 "handoff_brief",

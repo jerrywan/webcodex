@@ -567,7 +567,6 @@ pub struct SessionToolContract {
     pub change_summary_like: bool,
     pub project_write: bool,
     pub path_hint: SessionPathHint,
-    pub accepts_context_ack: bool,
     pub advances_context_checkpoint: bool,
 }
 

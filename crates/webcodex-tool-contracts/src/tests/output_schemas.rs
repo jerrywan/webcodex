@@ -2573,8 +2573,8 @@ fn session_handoff_summary_schema_exposes_ledger_validation_summary() {
         "session_handoff_summary input schema should include include_validation"
     );
     assert!(
-        input_props.contains_key("summary_only"),
-        "session_handoff_summary input schema should include summary_only"
+        input_props.contains_key("diagnostic"),
+        "session_handoff_summary input schema should include diagnostic"
     );
 
     let schema = output_schema_for_tool("session_handoff_summary");
@@ -2666,7 +2666,7 @@ fn session_handoff_summary_schema_exposes_ledger_validation_summary() {
     for phrase in [
         "ledger-derived",
         "non-cargo review evidence",
-        "summary_only",
+        "diagnostic",
         "read/search/diff/workspace/hygiene",
         "bounded tools",
         "does not include file contents",

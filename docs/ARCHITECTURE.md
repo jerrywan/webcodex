@@ -207,7 +207,7 @@ model turn. Unknown or ambiguous semantic input still fails closed.
 Successful projections should foreground sparse business truth; failures should
 be structured and decision-complete. Follow-up calls use one parser-ready
 `{tool, arguments}` representation when the producer can prove the next action,
-while continuation, refinement, failure recovery, and Session context ACK remain
+while continuation, refinement, failure recovery, and collaboration ACK remain
 separate semantic lanes. Duplicate aliases and compatibility projections are not
 kept without a named consumer.
 

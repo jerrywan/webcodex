@@ -515,7 +515,7 @@ async fn cargo_test_minimum_misassertion_then_sufficient_same_target_is_non_bloc
                 include_workspace: Some(false),
                 include_checkpoints: Some(false),
                 include_validation: Some(true),
-                summary_only: true,
+                diagnostic: true,
                 limit: Some(50),
             },
             Some(&auth),

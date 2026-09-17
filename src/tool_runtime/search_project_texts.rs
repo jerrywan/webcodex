@@ -1192,8 +1192,8 @@ mod tests {
             None,
             None,
         ));
-        result.output["session_recovery"] = json!({
-            "model_facing_events": ["o".repeat(220 * 1024)]
+        result.output["context_projection"] = json!({
+            "materials": ["o".repeat(220 * 1024)]
         });
         assert!(
             final_model_result_len(
@@ -1222,7 +1222,7 @@ mod tests {
         assert!(returned_count < 3);
         assert_eq!(next_index, returned_count);
         assert_eq!(
-            result.output["session_recovery"]["model_facing_events"][0]
+            result.output["context_projection"]["materials"][0]
                 .as_str()
                 .unwrap()
                 .len(),
