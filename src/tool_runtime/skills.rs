@@ -861,8 +861,8 @@ impl ToolRuntime {
                 Some(json!({"skill_id": skill_id, "skill_path": resource_path})),
             );
         }
-        let (executable, process_args) = match skill_resource_interpreter(&resource_path, args) {
-            Ok(command) => command,
+        let interpreter_candidates = match skill_resource_interpreters(&resource_path, args) {
+            Ok(candidates) => candidates,
             Err(kind) => {
                 return skill_execution_error(
                     kind,
@@ -977,22 +977,33 @@ impl ToolRuntime {
             "skill_package_revision": read_output.get("package_revision").cloned().unwrap_or(Value::Null),
         });
 
-        let mut result = self
-            .run_process_with_contract_for_resource(
-                project.resolved_id.clone(),
-                executable,
-                process_args,
-                Some(script.to_string()),
-                timeout_secs,
-                sync_wait_secs,
-                cwd,
-                purpose,
-                None,
-                session_id,
-                None,
-                auth,
-            )
-            .await;
+        let mut candidates = interpreter_candidates.into_iter().peekable();
+        let mut result = loop {
+            let (executable, process_args) = candidates
+                .next()
+                .expect("validated Skill resource interpreter candidates are non-empty");
+            let result = self
+                .run_process_with_contract_for_resource(
+                    project.resolved_id.clone(),
+                    executable,
+                    process_args,
+                    Some(script.to_string()),
+                    timeout_secs,
+                    sync_wait_secs,
+                    cwd.clone(),
+                    purpose,
+                    None,
+                    session_id.clone(),
+                    None,
+                    auth,
+                )
+                .await;
+            if candidates.peek().is_some() && skill_resource_interpreter_spawn_unavailable(&result)
+            {
+                continue;
+            }
+            break result;
+        };
         if let Some(output) = result.output.as_object_mut() {
             if let Some(metadata) = metadata.as_object() {
                 output.extend(metadata.clone());
@@ -2230,10 +2241,10 @@ fn catalog_page_envelope(
     })
 }
 
-fn skill_resource_interpreter(
+fn skill_resource_interpreters(
     resource_path: &str,
     args: Vec<String>,
-) -> Result<(String, Vec<String>), &'static str> {
+) -> Result<Vec<(String, Vec<String>)>, &'static str> {
     let extension = std::path::Path::new(resource_path)
         .extension()
         .and_then(|extension| extension.to_str())
@@ -2241,19 +2252,37 @@ fn skill_resource_interpreter(
         .to_ascii_lowercase();
     match extension.as_str() {
         "py" => {
-            let mut process_args = Vec::with_capacity(args.len() + 1);
-            process_args.push("-".to_string());
-            process_args.extend(args);
-            Ok(("python".to_string(), process_args))
+            let mut stdin_args = Vec::with_capacity(args.len() + 1);
+            stdin_args.push("-".to_string());
+            stdin_args.extend(args.iter().cloned());
+            let mut launcher_args = Vec::with_capacity(args.len() + 2);
+            launcher_args.extend(["-3".to_string(), "-".to_string()]);
+            launcher_args.extend(args);
+            Ok(vec![
+                ("python3".to_string(), stdin_args.clone()),
+                ("python".to_string(), stdin_args),
+                ("py".to_string(), launcher_args),
+            ])
         }
         "sh" => {
             let mut process_args = Vec::with_capacity(args.len() + 2);
             process_args.extend(["-s".to_string(), "--".to_string()]);
             process_args.extend(args);
-            Ok(("sh".to_string(), process_args))
+            Ok(vec![("sh".to_string(), process_args)])
         }
         _ => Err("skill_resource_interpreter_unsupported"),
     }
+}
+
+fn skill_resource_interpreter_spawn_unavailable(result: &ToolResult) -> bool {
+    !result.success
+        && result.output.get("execution_state").and_then(Value::as_str) == Some("not_started")
+        && result
+            .output
+            .get("command_started")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && result.output.get("failure_kind").and_then(Value::as_str) == Some("spawn_failed")
 }
 
 fn skill_execution_error(kind: &str, extra: Option<Value>) -> ToolResult {
@@ -2450,24 +2479,6 @@ fn recompute_name_conflicts(skills: &mut [CatalogSkill]) {
             .unwrap_or_default()
             > 1;
     }
-}
-
-fn skill_names_equal(left: &str, right: &str) -> bool {
-    left.to_lowercase() == right.to_lowercase()
-}
-
-fn exact_skill_name_matches<'a>(
-    catalog: &'a SkillCatalog,
-    name: &str,
-) -> Result<Vec<&'a CatalogSkill>, &'static str> {
-    if catalog.discovery_truncated {
-        return Err("skill_catalog_incomplete");
-    }
-    Ok(catalog
-        .skills
-        .iter()
-        .filter(|skill| skill_names_equal(&skill.descriptor.name, name))
-        .collect())
 }
 
 fn validate_skill_load_name(name: String) -> Result<String, &'static str> {
@@ -2853,54 +2864,52 @@ mod tests {
     #[test]
     fn skill_resource_interpreter_is_server_owned_and_extension_scoped() {
         assert_eq!(
-            skill_resource_interpreter("scripts/probe.py", vec!["arg".to_string()]).unwrap(),
-            (
-                "python".to_string(),
-                vec!["-".to_string(), "arg".to_string()]
-            )
+            skill_resource_interpreters("scripts/probe.py", vec!["arg".to_string()]).unwrap(),
+            vec![
+                (
+                    "python3".to_string(),
+                    vec!["-".to_string(), "arg".to_string()]
+                ),
+                (
+                    "python".to_string(),
+                    vec!["-".to_string(), "arg".to_string()]
+                ),
+                (
+                    "py".to_string(),
+                    vec!["-3".to_string(), "-".to_string(), "arg".to_string()]
+                ),
+            ]
         );
         assert_eq!(
-            skill_resource_interpreter("scripts/probe.sh", vec!["arg".to_string()]).unwrap(),
-            (
+            skill_resource_interpreters("scripts/probe.sh", vec!["arg".to_string()]).unwrap(),
+            vec![(
                 "sh".to_string(),
                 vec!["-s".to_string(), "--".to_string(), "arg".to_string()]
-            )
+            )]
         );
         assert_eq!(
-            skill_resource_interpreter("scripts/probe.rb", Vec::new()),
+            skill_resource_interpreters("scripts/probe.rb", Vec::new()),
             Err("skill_resource_interpreter_unsupported")
         );
-    }
 
-    #[test]
-    fn exact_skill_name_matching_is_unicode_aware_and_requires_complete_discovery() {
-        let skill = CatalogSkill {
-            descriptor: SkillDescriptor {
-                skill_id: skill_id("agent:test:demo", "unicode"),
-                name: "Ångström".to_string(),
-                description: "Unicode name".to_string(),
-                definition_revision: "a".repeat(64),
-                package_revision: None,
-                source_scope: "project",
-                trust: "project_content",
-                name_conflict: false,
-            },
-            order_key: "unicode".to_string(),
-        };
-        let mut catalog = SkillCatalog {
-            catalog_revision: catalog_revision(std::slice::from_ref(&skill), 0, &[], false),
-            skills: vec![skill],
-            invalid_count: 0,
-            diagnostics: Vec::new(),
-            discovery_truncated: false,
-        };
-        let matches = exact_skill_name_matches(&catalog, "ÅNGSTRÖM").unwrap();
-        assert_eq!(matches.len(), 1);
-        catalog.discovery_truncated = true;
-        assert_eq!(
-            exact_skill_name_matches(&catalog, "ÅNGSTRÖM").unwrap_err(),
-            "skill_catalog_incomplete"
+        let retryable = ToolResult::err_with_output(
+            "python3 unavailable",
+            json!({
+                "execution_state": "not_started",
+                "command_started": false,
+                "failure_kind": "spawn_failed"
+            }),
         );
+        assert!(skill_resource_interpreter_spawn_unavailable(&retryable));
+        let started = ToolResult::err_with_output(
+            "interpreter exited",
+            json!({
+                "execution_state": "completed",
+                "command_started": true,
+                "failure_kind": "command_failed"
+            }),
+        );
+        assert!(!skill_resource_interpreter_spawn_unavailable(&started));
     }
 
     #[test]

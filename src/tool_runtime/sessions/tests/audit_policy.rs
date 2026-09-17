@@ -41,7 +41,8 @@ fn canonical_audit_policies_keep_private_payloads_out_of_durable_session_ledger(
         "events":[{"kind":"text", "text":"PRIVATE_CODING_EVENT"}],
         "messages":[{"body":"PRIVATE_MESSAGE_BODY"}],
         "entries":[{"value":"PRIVATE_MEMORY_VALUE"}],
-        "skills":[{"body":"PRIVATE_SKILL_BODY", "path":"PRIVATE_SKILL_PATH"}]
+        "skills":[{"body":"PRIVATE_SKILL_BODY", "path":"PRIVATE_SKILL_PATH"}],
+        "skill_name":"PRIVATE_SKILL_NAME"
     });
     for name in definitions
         .iter()

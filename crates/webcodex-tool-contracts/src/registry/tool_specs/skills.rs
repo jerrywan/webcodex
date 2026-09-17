@@ -18,7 +18,7 @@ pub(super) fn tool_specs() -> Vec<ToolSpec> {
     vec![
         tool_spec(
             "skill_load",
-            "Load one uniquely named Skill by exact name using Unicode lowercase matching for an authorized Project. Returns the selected descriptor plus bounded SKILL.md text and revision metadata in one read-only call. Ambiguous names fail closed; scripts and other Skill resources are never executed.",
+            "Load one uniquely named Skill by exact case-insensitive name for an authorized Project. Returns the selected descriptor plus bounded SKILL.md text and revision metadata in one read-only call. Ambiguous names fail closed; scripts and other Skill resources are never executed.",
             skill_load_input_schema(),
         ),
         tool_spec(

@@ -82,7 +82,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     "run_skill_resource",
                     super::ToolAuditPolicy::typed_fields(&[
                         super::ToolAuditResultField::value("skill_id"),
-                        super::ToolAuditResultField::value("skill_name"),
                         super::ToolAuditResultField::value("skill_path"),
                         super::ToolAuditResultField::value("skill_sha256"),
                         super::ToolAuditResultField::value("skill_trust"),
