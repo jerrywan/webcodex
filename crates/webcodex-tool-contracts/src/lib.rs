@@ -8,6 +8,7 @@
 pub mod metadata;
 pub mod registry;
 pub mod request_schema;
+mod schema_generation;
 pub mod tool_call;
 pub mod tool_catalog;
 pub mod tool_definition;

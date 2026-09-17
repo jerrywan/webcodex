@@ -10,9 +10,10 @@ use crate::runner_config::{
     TRANSPORT_QUIC, TRANSPORT_WEBSOCKET,
 };
 use crate::runner_protocol::{
-    RunnerCapabilities, RunnerConfigAction, RunnerConfigExecutionState,
-    RunnerConfigOperationResponse, RunnerConfigReloadStatus, RunnerHostContext,
-    RUNNER_JOB_CONCURRENCY_MAX, RUNNER_JOB_CONCURRENCY_MIN,
+    RunnerCapabilities, RunnerConfigAction, RunnerConfigErrorCode, RunnerConfigErrorField,
+    RunnerConfigErrorReason, RunnerConfigExecutionState, RunnerConfigOperationResponse,
+    RunnerConfigReloadStatus, RunnerHostContext, RUNNER_JOB_CONCURRENCY_MAX,
+    RUNNER_JOB_CONCURRENCY_MIN,
 };
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
@@ -672,7 +673,7 @@ impl ReloadableRunnerConfig {
             return config_not_started(
                 RunnerConfigAction::Check,
                 Some(active.generation),
-                "runner_unavailable",
+                RunnerConfigErrorCode::RunnerUnavailable,
             );
         }
         match self.load_candidate() {
@@ -731,7 +732,7 @@ impl ReloadableRunnerConfig {
                 config_not_started(
                     RunnerConfigAction::Reload,
                     Some(active.generation),
-                    "runner_unavailable",
+                    RunnerConfigErrorCode::RunnerUnavailable,
                 ),
             );
         }
@@ -742,7 +743,7 @@ impl ReloadableRunnerConfig {
                 config_not_started(
                     RunnerConfigAction::Reload,
                     Some(active.generation),
-                    "config_generation_conflict",
+                    RunnerConfigErrorCode::ConfigGenerationConflict,
                 ),
             );
         }
@@ -754,18 +755,24 @@ impl ReloadableRunnerConfig {
                 let status = {
                     let mut status = active.reload_status.lock().unwrap();
                     status.last_reload_result = "failure".to_string();
-                    status.last_reload_error_code = Some(code.to_string());
-                    status.last_reload_error_field = error_field.map(str::to_string);
-                    status.last_reload_error_reason = error_reason.map(str::to_string);
+                    status.last_reload_error_code = Some(config_wire_atom(code));
+                    status.last_reload_error_field = error_field.map(config_wire_atom);
+                    status.last_reload_error_reason = error_reason.map(config_wire_atom);
                     status.clone()
                 };
                 active.external_tools.configuration_status_changed();
                 if let (Some(field), Some(reason)) = (error_field, error_reason) {
                     eprintln!(
-                        "webcodex-runner config reload failed: {code} field={field} reason={reason}"
+                        "webcodex-runner config reload failed: {} field={} reason={}",
+                        config_wire_atom(code),
+                        config_wire_atom(field),
+                        config_wire_atom(reason)
                     );
                 } else {
-                    eprintln!("webcodex-runner config reload failed: {code}");
+                    eprintln!(
+                        "webcodex-runner config reload failed: {}",
+                        config_wire_atom(code)
+                    );
                 }
                 return (
                     status,
@@ -804,13 +811,18 @@ impl ReloadableRunnerConfig {
                 let status = {
                     let mut status = active.reload_status.lock().unwrap();
                     status.last_reload_result = "failure".to_string();
-                    status.last_reload_error_code = Some("config_validation_failed".to_string());
+                    status.last_reload_error_code = Some(config_wire_atom(
+                        RunnerConfigErrorCode::ConfigValidationFailed,
+                    ));
                     status.last_reload_error_field = None;
                     status.last_reload_error_reason = None;
                     status.clone()
                 };
                 active.external_tools.configuration_status_changed();
-                eprintln!("webcodex-runner config reload failed: config_validation_failed");
+                eprintln!(
+                    "webcodex-runner config reload failed: {}",
+                    config_wire_atom(RunnerConfigErrorCode::ConfigValidationFailed)
+                );
                 return (
                     status,
                     config_candidate_error_response(
@@ -855,7 +867,7 @@ impl ReloadableRunnerConfig {
                     config_not_started(
                         RunnerConfigAction::Reload,
                         Some(active.generation),
-                        "plugin_reload_busy",
+                        RunnerConfigErrorCode::PluginReloadBusy,
                     ),
                 );
             }
@@ -865,7 +877,7 @@ impl ReloadableRunnerConfig {
                     config_not_started(
                         RunnerConfigAction::Reload,
                         Some(active.generation),
-                        "runner_unavailable",
+                        RunnerConfigErrorCode::RunnerUnavailable,
                     ),
                 );
             }
@@ -875,7 +887,7 @@ impl ReloadableRunnerConfig {
                     config_not_started(
                         RunnerConfigAction::Reload,
                         Some(active.generation),
-                        "plugin_reload_failed",
+                        RunnerConfigErrorCode::PluginReloadFailed,
                     ),
                 );
             }
@@ -883,13 +895,17 @@ impl ReloadableRunnerConfig {
                 let status = {
                     let mut status = active.reload_status.lock().unwrap();
                     status.last_reload_result = "failure".to_string();
-                    status.last_reload_error_code = Some("plugin_reload_failed".to_string());
+                    status.last_reload_error_code =
+                        Some(config_wire_atom(RunnerConfigErrorCode::PluginReloadFailed));
                     status.last_reload_error_field = None;
                     status.last_reload_error_reason = None;
                     status.clone()
                 };
                 active.external_tools.configuration_status_changed();
-                eprintln!("webcodex-runner config reload failed: plugin_reload_failed");
+                eprintln!(
+                    "webcodex-runner config reload failed: {}",
+                    config_wire_atom(RunnerConfigErrorCode::PluginReloadFailed)
+                );
                 return (
                     status,
                     RunnerConfigOperationResponse {
@@ -897,7 +913,7 @@ impl ReloadableRunnerConfig {
                         execution_state: RunnerConfigExecutionState::Completed,
                         valid: Some(false),
                         current_generation: Some(active.generation),
-                        error_code: Some("plugin_reload_failed".to_string()),
+                        error_code: Some(RunnerConfigErrorCode::PluginReloadFailed),
                         error_field: None,
                         error_reason: None,
                         restart_required: false,
@@ -927,62 +943,80 @@ impl ReloadableRunnerConfig {
     }
 }
 
-fn reload_error_code(error: &str) -> &'static str {
-    if error.starts_with("failed to read config") {
-        "config_read_failed"
-    } else if error.starts_with("failed to parse config") {
-        "config_parse_failed"
-    } else if error.starts_with("tool_providers.") {
-        "provider_config_invalid"
-    } else {
-        "config_validation_failed"
+fn config_wire_atom<T: serde::Serialize>(value: T) -> String {
+    match serde_json::to_value(value).expect("Runner config enum must serialize") {
+        serde_json::Value::String(value) => value,
+        _ => unreachable!("Runner config enum serialization must be a string"),
     }
 }
 
-fn reload_error_diagnostic(error: &str) -> (Option<&'static str>, Option<&'static str>) {
-    const OUT_OF_RANGE_FIELDS: &[(&str, &str)] = &[
-        ("skills.roots may contain at most ", "skills.roots"),
+fn reload_error_code(error: &str) -> RunnerConfigErrorCode {
+    if error.starts_with("failed to read config") {
+        RunnerConfigErrorCode::ConfigReadFailed
+    } else if error.starts_with("failed to parse config") {
+        RunnerConfigErrorCode::ConfigParseFailed
+    } else if error.starts_with("tool_providers.") {
+        RunnerConfigErrorCode::ProviderConfigInvalid
+    } else {
+        RunnerConfigErrorCode::ConfigValidationFailed
+    }
+}
+
+fn reload_error_diagnostic(
+    error: &str,
+) -> (
+    Option<RunnerConfigErrorField>,
+    Option<RunnerConfigErrorReason>,
+) {
+    const OUT_OF_RANGE_FIELDS: &[(&str, RunnerConfigErrorField)] = &[
+        (
+            "skills.roots may contain at most ",
+            RunnerConfigErrorField::SkillsRoots,
+        ),
         (
             "skills.roots entries must be non-empty paths of at most ",
-            "skills.roots",
+            RunnerConfigErrorField::SkillsRoots,
         ),
         (
             "max_concurrent_jobs must be between ",
-            "max_concurrent_jobs",
+            RunnerConfigErrorField::MaxConcurrentJobs,
         ),
         (
             "shell.max_persistent_shells must be between ",
-            "shell.max_persistent_shells",
+            RunnerConfigErrorField::ShellMaxPersistentShells,
         ),
         (
             "shell.persistent_shell_idle_timeout_secs must be between ",
-            "shell.persistent_shell_idle_timeout_secs",
+            RunnerConfigErrorField::ShellPersistentShellIdleTimeoutSecs,
         ),
         (
             "acp.max_concurrent_runs must be between ",
-            "acp.max_concurrent_runs",
+            RunnerConfigErrorField::AcpMaxConcurrentRuns,
         ),
         (
             "acp.permission_timeout_secs must be between ",
-            "acp.permission_timeout_secs",
+            RunnerConfigErrorField::AcpPermissionTimeoutSecs,
         ),
         (
             "mcp.request_timeout_secs must be between ",
-            "mcp.request_timeout_secs",
+            RunnerConfigErrorField::McpRequestTimeoutSecs,
         ),
     ];
     if error.starts_with("skills.roots entries must be absolute paths")
         || error.starts_with("skills.roots contains an unsupported Windows path namespace")
         || error.starts_with("skills.roots contains duplicate path identities")
     {
-        return (Some("skills.roots"), Some("invalid_path"));
+        return (
+            Some(RunnerConfigErrorField::SkillsRoots),
+            Some(RunnerConfigErrorReason::InvalidPath),
+        );
     }
     OUT_OF_RANGE_FIELDS
         .iter()
         .find_map(|(prefix, field)| {
             error
                 .starts_with(prefix)
-                .then_some((Some(*field), Some("out_of_range")))
+                .then_some((Some(*field), Some(RunnerConfigErrorReason::OutOfRange)))
         })
         .unwrap_or((None, None))
 }
@@ -998,9 +1032,9 @@ fn config_candidate_error_response(
         execution_state: RunnerConfigExecutionState::Completed,
         valid: Some(false),
         current_generation: Some(generation),
-        error_code: Some(reload_error_code(error).to_string()),
-        error_field: error_field.map(str::to_string),
-        error_reason: error_reason.map(str::to_string),
+        error_code: Some(reload_error_code(error)),
+        error_field,
+        error_reason,
         restart_required: false,
         restart_required_fields: Vec::new(),
     }
@@ -1009,14 +1043,14 @@ fn config_candidate_error_response(
 fn config_not_started(
     action: RunnerConfigAction,
     generation: Option<u64>,
-    error_code: &str,
+    error_code: RunnerConfigErrorCode,
 ) -> RunnerConfigOperationResponse {
     RunnerConfigOperationResponse {
         action,
         execution_state: RunnerConfigExecutionState::NotStarted,
         valid: None,
         current_generation: generation,
-        error_code: Some(error_code.to_string()),
+        error_code: Some(error_code),
         error_field: None,
         error_reason: None,
         restart_required: false,

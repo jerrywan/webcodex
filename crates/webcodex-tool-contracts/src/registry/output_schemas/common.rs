@@ -1,4 +1,5 @@
-use serde_json::{json, Value};
+use schemars::JsonSchema;
+use serde_json::{json, Map, Value};
 
 use webcodex_core::runtime_contract::{
     ContinuationCarrier, ContinuationKind, CONTINUATION_CARRIER_VALUES, CONTINUATION_KIND_VALUES,
@@ -9,6 +10,7 @@ use webcodex_core::workflow_session_contract::{
 };
 
 use crate::input_property_schema_for_tool;
+use crate::schema_generation::typed_host_schema;
 use crate::tool_definition::exploration_tool_names;
 
 pub fn schema_type(kind: &str, description: &str) -> Value {
@@ -535,23 +537,50 @@ pub fn recovery_kind_schema() -> Value {
 }
 
 pub fn wrapped_output_schema(output_properties: Vec<(&str, Value)>) -> Value {
-    let mut output_properties = output_properties;
-    output_properties.extend([
+    let properties = output_properties
+        .into_iter()
+        .map(|(name, schema)| (name.to_string(), schema))
+        .collect::<Map<_, _>>();
+    wrapped_output_schema_from_properties(properties)
+}
+
+/// Build the existing sparse ToolResult envelope from a canonical typed payload.
+///
+/// The DTO owns property names, nested shapes, enums, and structural bounds. Its
+/// `required` list is intentionally not lifted into `ToolResult.output`: runtime
+/// failures/not-started/outcome-unknown projections remain sparse, and generic
+/// runtime decorations remain legal. Overrides are reserved for explicit model
+/// projection boundaries such as intentionally-open nested LSP payloads.
+pub fn wrapped_typed_output_schema<T: JsonSchema>(overrides: Vec<(&str, Value)>) -> Value {
+    let schema = typed_host_schema::<T>();
+    let mut properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .expect("typed output payload JsonSchema must be an object");
+    for (name, replacement) in overrides {
+        assert!(
+            properties.contains_key(name),
+            "typed output payload has no property {name}"
+        );
+        properties.insert(name.to_string(), replacement);
+    }
+    wrapped_output_schema_from_properties(properties)
+}
+
+fn wrapped_output_schema_from_properties(mut properties: Map<String, Value>) -> Value {
+    properties.extend([
         (
-            "trace_ref",
+            "trace_ref".to_string(),
             schema_type(
                 "string",
                 "Opaque operator diagnostic reference emitted only on eligible failed calls while full tracing is enabled. Read with read_tool_trace; on Adaptive Runtime invoke that target through call_runtime_tool. Never a native path.",
             ),
         ),
-        ("session_hint", session_hint_schema()),
-        ("permission", permission_decision_schema()),
-        ("recovery_kind", recovery_kind_schema()),
+        ("session_hint".to_string(), session_hint_schema()),
+        ("permission".to_string(), permission_decision_schema()),
+        ("recovery_kind".to_string(), recovery_kind_schema()),
     ]);
-    let properties = output_properties
-        .into_iter()
-        .map(|(name, schema)| (name.to_string(), schema))
-        .collect::<serde_json::Map<_, _>>();
     json!({
         "type": "object",
         "properties": {

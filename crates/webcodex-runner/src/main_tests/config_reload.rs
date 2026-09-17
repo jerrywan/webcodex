@@ -526,7 +526,10 @@ fn first_class_check_reports_sanitized_parse_and_structural_failures() {
     let malformed = runtime.check_config();
     assert_eq!(malformed.valid, Some(false));
     assert_eq!(malformed.current_generation, Some(1));
-    assert_eq!(malformed.error_code.as_deref(), Some("config_parse_failed"));
+    assert_eq!(
+        malformed.error_code,
+        Some(runner_protocol::RunnerConfigErrorCode::ConfigParseFailed)
+    );
     assert!(malformed.error_field.is_none());
     assert!(malformed.error_reason.is_none());
 
@@ -549,14 +552,17 @@ fn first_class_check_reports_sanitized_parse_and_structural_failures() {
     assert_eq!(structural.valid, Some(false));
     assert_eq!(structural.current_generation, Some(1));
     assert_eq!(
-        structural.error_code.as_deref(),
-        Some("config_validation_failed")
+        structural.error_code,
+        Some(runner_protocol::RunnerConfigErrorCode::ConfigValidationFailed)
     );
     assert_eq!(
-        structural.error_field.as_deref(),
-        Some("max_concurrent_jobs")
+        structural.error_field,
+        Some(runner_protocol::RunnerConfigErrorField::MaxConcurrentJobs)
     );
-    assert_eq!(structural.error_reason.as_deref(), Some("out_of_range"));
+    assert_eq!(
+        structural.error_reason,
+        Some(runner_protocol::RunnerConfigErrorReason::OutOfRange)
+    );
 
     let serialized = format!(
         "{} {}",
@@ -615,8 +621,8 @@ fn first_class_reload_applies_hot_candidate_once_and_fences_stale_generation() {
     assert_eq!(stale.valid, None);
     assert_eq!(stale.current_generation, Some(2));
     assert_eq!(
-        stale.error_code.as_deref(),
-        Some("config_generation_conflict")
+        stale.error_code,
+        Some(runner_protocol::RunnerConfigErrorCode::ConfigGenerationConflict)
     );
     assert_eq!(runtime.snapshot().generation, 2);
     assert_eq!(runtime.snapshot().policy.max_timeout_secs, 120);
@@ -635,7 +641,10 @@ fn first_class_invalid_reload_preserves_active_snapshot_and_generation() {
     );
     assert_eq!(rejected.valid, Some(false));
     assert_eq!(rejected.current_generation, Some(1));
-    assert_eq!(rejected.error_code.as_deref(), Some("config_parse_failed"));
+    assert_eq!(
+        rejected.error_code,
+        Some(runner_protocol::RunnerConfigErrorCode::ConfigParseFailed)
+    );
     let after = runtime.snapshot();
     assert!(Arc::ptr_eq(&before, &after));
     assert_eq!(after.generation, 1);

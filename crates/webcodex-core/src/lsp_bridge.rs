@@ -43,6 +43,15 @@ pub const MAX_CALL_HIERARCHY_PREPARE_ITEMS_INSPECTED: usize = 64;
 pub const MAX_CALL_HIERARCHY_CALL_ENTRIES_INSPECTED_PER_RPC: usize = 256;
 pub const MAX_CALL_HIERARCHY_RAW_CALL_SITE_RANGES_INSPECTED_PER_ENTRY: usize = 100;
 
+pub const MAX_PUBLIC_SYMBOL_NAME_CHARS: usize = 256;
+pub const MAX_PUBLIC_SYMBOL_DETAIL_CHARS: usize = 512;
+pub const MAX_PUBLIC_DIAGNOSTIC_MESSAGE_CHARS: usize = 4096;
+pub const MAX_PUBLIC_DIAGNOSTIC_SOURCE_CHARS: usize = 128;
+pub const MAX_PUBLIC_DIAGNOSTIC_CODE_CHARS: usize = 128;
+pub const MAX_PUBLIC_DIAGNOSTIC_TOTAL_TEXT_CHARS: usize = 64 * 1024;
+pub const MAX_PUBLIC_HOVER_VALUE_CHARS: usize = 16 * 1024;
+pub const MAX_PUBLIC_WORKSPACE_SYMBOL_FIELD_CHARS: usize = 256;
+
 pub const MAX_ERROR_MESSAGE_CHARS: usize = 240;
 
 /// Stable error codes for the agent LSP bridge and public tools.
@@ -193,21 +202,23 @@ pub struct RunnerLspPayload {
 }
 
 /// Public 1-based Unicode scalar position.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PublicPosition {
+    #[schemars(range(min = 1))]
     pub line: usize,
+    #[schemars(range(min = 1))]
     pub column: usize,
 }
 
 /// Half-open range using public positions (same semantics as LSP Range).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PublicRange {
     pub start: PublicPosition,
     pub end: PublicPosition,
 }
 
 /// Project-relative location returned to the model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PublicLocation {
     pub path: String,
     pub range: PublicRange,
@@ -216,12 +227,14 @@ pub struct PublicLocation {
 }
 
 /// Normalized document symbol node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PublicSymbol {
+    #[schemars(length(max = MAX_PUBLIC_SYMBOL_NAME_CHARS))]
     pub name: String,
     pub kind: String,
     pub kind_code: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(inner(length(max = MAX_PUBLIC_SYMBOL_DETAIL_CHARS)))]
     pub detail: Option<String>,
     pub range: PublicRange,
     pub selection_range: PublicRange,
@@ -229,7 +242,7 @@ pub struct PublicSymbol {
     pub children: Vec<PublicSymbol>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LspAvailabilityStatus {
     Unavailable,
@@ -239,7 +252,7 @@ pub enum LspAvailabilityStatus {
     Crashed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LspCommandSource {
     Configured,
@@ -247,7 +260,7 @@ pub enum LspCommandSource {
     Path,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LspServerStatusEntry {
     pub language: String,
     pub server: String,
@@ -260,119 +273,187 @@ pub struct LspServerStatusEntry {
     pub position_encoding: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LspStatusResult {
     pub project: String,
+    /// Languages detected for the project from its bounded repository signals.
     pub detected_languages: Vec<String>,
+    /// Per-language server availability and running state; executable paths are never exposed.
     pub servers: Vec<LspServerStatusEntry>,
+    /// Bounded non-fatal discovery/status warnings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DocumentSymbolsResult {
     pub project: String,
     pub path: String,
     pub language: String,
     pub symbols: Vec<PublicSymbol>,
+    /// In-project valid symbol node count before truncation.
     pub total_count: usize,
+    /// Symbol nodes actually returned.
     pub returned_count: usize,
+    /// Whether the symbol budget truncated results.
     pub truncated: bool,
+    /// External symbol results intentionally omitted.
     pub external_results_omitted: usize,
+    /// Invalid symbol results omitted.
     pub invalid_results_omitted: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PublicDiagnostic {
-    pub range: PublicRange,
-    pub severity: String,
-    #[serde(default)]
-    pub severity_code: Option<i64>,
-    #[serde(default)]
-    pub code: Option<String>,
-    #[serde(default)]
-    pub source: Option<String>,
-    pub message: String,
-    pub tags: Vec<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicDiagnosticSeverity {
+    Error,
+    Warning,
+    Information,
+    Hint,
+    Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicDiagnosticTag {
+    Unnecessary,
+    Deprecated,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PublicDiagnostic {
+    pub range: PublicRange,
+    pub severity: PublicDiagnosticSeverity,
+    /// Original numeric LSP severity, when present.
+    #[serde(default)]
+    pub severity_code: Option<i64>,
+    /// Bounded string-normalized diagnostic code.
+    #[serde(default)]
+    #[schemars(inner(length(max = MAX_PUBLIC_DIAGNOSTIC_CODE_CHARS)))]
+    pub code: Option<String>,
+    /// Bounded diagnostic source.
+    #[serde(default)]
+    #[schemars(inner(length(max = MAX_PUBLIC_DIAGNOSTIC_SOURCE_CHARS)))]
+    pub source: Option<String>,
+    /// Sanitized bounded diagnostic message.
+    #[schemars(length(max = MAX_PUBLIC_DIAGNOSTIC_MESSAGE_CHARS))]
+    pub message: String,
+    #[schemars(length(max = 3))]
+    #[schemars(extend("uniqueItems" = true))]
+    pub tags: Vec<PublicDiagnosticTag>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DocumentDiagnosticsStatus {
     Complete,
     Timeout,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DocumentDiagnosticsResult {
     pub project: String,
     pub path: String,
     pub language: String,
+    /// Bounded, sorted, deduplicated diagnostics without raw related-information locations.
     pub diagnostics: Vec<PublicDiagnostic>,
+    /// Raw server diagnostic count before filtering.
     pub total_count: usize,
+    /// Normalized diagnostics actually returned.
     pub returned_count: usize,
+    /// Whether cache or caller limits truncated diagnostics.
     pub truncated: bool,
+    /// Authoritative diagnostics outcome. Only `complete` is a current diagnostic conclusion.
     pub status: DocumentDiagnosticsStatus,
+    /// True only for a fresh complete publication with zero raw diagnostics; null for timeout.
     pub clean: Option<bool>,
+    /// Optional LSP document version from the publication.
     #[serde(default)]
     pub published_version: Option<i32>,
+    /// Malformed diagnostics or invalid ranges omitted.
     pub invalid_results_omitted: usize,
+    /// Related-information entries intentionally not expanded.
     pub related_information_omitted: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicHoverKind {
+    Markdown,
+    Plaintext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PublicHover {
-    pub kind: String,
+    pub kind: PublicHoverKind,
+    #[schemars(length(max = MAX_PUBLIC_HOVER_VALUE_CHARS))]
     pub value: String,
     #[serde(default)]
     pub range: Option<PublicRange>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HoverResult {
     pub project: String,
     pub path: String,
     pub position: PublicPosition,
     #[serde(default)]
     pub hover: Option<PublicHover>,
+    /// Whether normalized hover text exceeded the bounded model payload.
     pub truncated: bool,
+    /// Whether a malformed optional hover range was omitted.
     pub range_omitted: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PublicWorkspaceSymbol {
+    #[schemars(length(max = MAX_PUBLIC_WORKSPACE_SYMBOL_FIELD_CHARS))]
     pub name: String,
     pub kind: String,
     pub kind_code: i64,
     #[serde(default)]
+    #[schemars(inner(length(max = MAX_PUBLIC_WORKSPACE_SYMBOL_FIELD_CHARS)))]
     pub container_name: Option<String>,
     pub path: String,
     #[serde(default)]
     pub range: Option<PublicRange>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceSymbolsResult {
     pub project: String,
     pub query: String,
+    /// Bounded, sorted, deduplicated workspace-only symbols.
     pub symbols: Vec<PublicWorkspaceSymbol>,
+    /// Raw server result count before filtering.
     pub total_results: usize,
+    /// Workspace symbols returned after deduplication and truncation.
     pub returned_count: usize,
+    /// Whether valid workspace symbols exceeded the caller limit.
     pub truncated: bool,
+    /// External/dependency symbol locations omitted.
     pub external_results_omitted: usize,
+    /// Malformed symbol results omitted.
     pub invalid_results_omitted: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LocationsResult {
     pub project: String,
     pub path: String,
     pub query_position: PublicPosition,
+    /// Bounded project-relative locations.
     pub locations: Vec<PublicLocation>,
+    /// Raw server result count before filtering.
     pub total_results: usize,
+    /// Locations returned after deduplication and truncation.
     pub returned_count: usize,
+    /// Whether in-project valid results exceeded the caller limit.
     pub truncated: bool,
+    /// External locations omitted.
     pub external_results_omitted: usize,
+    /// Invalid locations omitted.
     pub invalid_results_omitted: usize,
 }
 
@@ -380,7 +461,7 @@ pub struct LocationsResult {
 ///
 /// The opaque LSP `data` field and the source URI intentionally have no
 /// representation here; they remain request-local inside the Runner.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PublicCallHierarchySymbol {
     pub name: String,
     pub kind: String,
@@ -390,14 +471,14 @@ pub struct PublicCallHierarchySymbol {
     pub selection_range: PublicRange,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CallHierarchyEdgeDirection {
     Incoming,
     Outgoing,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PublicCallHierarchyEdge {
     pub direction: CallHierarchyEdgeDirection,
     pub depth: usize,
@@ -406,22 +487,32 @@ pub struct PublicCallHierarchyEdge {
     pub call_sites: Vec<PublicRange>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CallHierarchyResult {
     pub project: String,
     pub path: String,
     pub language: String,
     pub query_position: PublicPosition,
     pub direction: CallHierarchyDirection,
+    #[schemars(range(min = MIN_CALL_HIERARCHY_DEPTH, max = MAX_CALL_HIERARCHY_DEPTH))]
     pub depth: usize,
+    /// Bounded normalized prepareCallHierarchy roots.
     pub roots: Vec<PublicCallHierarchySymbol>,
+    /// Raw prepare result count before filtering.
     pub root_total_count: usize,
+    /// Normalized root symbols returned.
     pub root_returned_count: usize,
+    /// Breadth-first flattened call edges.
     pub edges: Vec<PublicCallHierarchyEdge>,
+    /// Flattened edges returned.
     pub returned_count: usize,
+    /// Whether any configured result bound truncated output.
     pub truncated: bool,
+    /// External/dependency items omitted.
     pub external_results_omitted: usize,
+    /// Malformed items or ranges omitted.
     pub invalid_results_omitted: usize,
+    /// Valid call-site ranges omitted by per-edge bounds.
     pub call_site_ranges_omitted: usize,
 }
 

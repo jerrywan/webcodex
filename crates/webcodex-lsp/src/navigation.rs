@@ -24,23 +24,20 @@ use webcodex_core::lsp_bridge::{
     CallHierarchyDirection, CallHierarchyEdgeDirection, CallHierarchyResult,
     DocumentDiagnosticsResult, DocumentDiagnosticsStatus, DocumentSymbolsResult, HoverResult,
     LocationsResult, LspAvailabilityStatus, LspServerStatusEntry, LspStatusResult,
-    PublicCallHierarchyEdge, PublicCallHierarchySymbol, PublicDiagnostic, PublicHover,
-    PublicLocation, PublicPosition, PublicRange, PublicSymbol, PublicWorkspaceSymbol,
-    RunnerLspPayload, RunnerLspRequest, RunnerLspResultEnvelope, WorkspaceSymbolsResult,
+    PublicCallHierarchyEdge, PublicCallHierarchySymbol, PublicDiagnostic, PublicDiagnosticSeverity,
+    PublicDiagnosticTag, PublicHover, PublicHoverKind, PublicLocation, PublicPosition, PublicRange,
+    PublicSymbol, PublicWorkspaceSymbol, RunnerLspPayload, RunnerLspRequest,
+    RunnerLspResultEnvelope, WorkspaceSymbolsResult,
     MAX_CALL_HIERARCHY_CALL_ENTRIES_INSPECTED_PER_RPC, MAX_CALL_HIERARCHY_CALL_SITES_PER_EDGE,
     MAX_CALL_HIERARCHY_PREPARE_ITEMS_INSPECTED,
     MAX_CALL_HIERARCHY_RAW_CALL_SITE_RANGES_INSPECTED_PER_ENTRY, MAX_CALL_HIERARCHY_ROOTS,
+    MAX_PUBLIC_DIAGNOSTIC_CODE_CHARS, MAX_PUBLIC_DIAGNOSTIC_MESSAGE_CHARS,
+    MAX_PUBLIC_DIAGNOSTIC_SOURCE_CHARS, MAX_PUBLIC_DIAGNOSTIC_TOTAL_TEXT_CHARS,
+    MAX_PUBLIC_HOVER_VALUE_CHARS, MAX_PUBLIC_SYMBOL_DETAIL_CHARS, MAX_PUBLIC_SYMBOL_NAME_CHARS,
+    MAX_PUBLIC_WORKSPACE_SYMBOL_FIELD_CHARS,
 };
 
-const MAX_SYMBOL_NAME_CHARS: usize = 256;
-const MAX_SYMBOL_DETAIL_CHARS: usize = 512;
-const MAX_DIAGNOSTIC_MESSAGE_CHARS: usize = 4096;
-const MAX_DIAGNOSTIC_SOURCE_CHARS: usize = 128;
-const MAX_DIAGNOSTIC_CODE_CHARS: usize = 128;
-const MAX_DIAGNOSTIC_TOTAL_TEXT_CHARS: usize = 64 * 1024;
 const DIAGNOSTICS_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_HOVER_VALUE_CHARS: usize = 16 * 1024;
-const MAX_WORKSPACE_SYMBOL_FIELD_CHARS: usize = 256;
 pub fn execute_lsp_operation(
     project_root: PathBuf,
     supervisor: &LspSupervisor,
@@ -379,7 +376,7 @@ fn document_diagnostics(
                 .as_deref()
                 .map(|value| value.chars().count())
                 .unwrap_or(0);
-        if text_chars.saturating_add(diagnostic_chars) > MAX_DIAGNOSTIC_TOTAL_TEXT_CHARS {
+        if text_chars.saturating_add(diagnostic_chars) > MAX_PUBLIC_DIAGNOSTIC_TOTAL_TEXT_CHARS {
             text_budget_count = index;
             break;
         }
@@ -1080,12 +1077,12 @@ fn bound_call_hierarchy_name(name: &str) -> String {
         })
         .collect::<String>();
     let sanitized = sanitized.trim();
-    if sanitized.chars().count() <= MAX_SYMBOL_NAME_CHARS {
+    if sanitized.chars().count() <= MAX_PUBLIC_SYMBOL_NAME_CHARS {
         return sanitized.to_string();
     }
     sanitized
         .chars()
-        .take(MAX_SYMBOL_NAME_CHARS.saturating_sub(1))
+        .take(MAX_PUBLIC_SYMBOL_NAME_CHARS.saturating_sub(1))
         .collect::<String>()
         + "…"
 }
@@ -1330,21 +1327,23 @@ fn normalize_hover(
     ))
 }
 
-fn normalize_hover_contents(contents: &Value) -> Option<(String, String)> {
+fn normalize_hover_contents(contents: &Value) -> Option<(PublicHoverKind, String)> {
     match contents {
-        Value::String(value) => Some(("markdown".to_string(), value.clone())),
+        Value::String(value) => Some((PublicHoverKind::Markdown, value.clone())),
         Value::Object(object) => {
             let value = object.get("value")?.as_str()?;
             if let Some(kind) = object.get("kind") {
                 let kind = kind.as_str()?;
-                if !matches!(kind, "markdown" | "plaintext") {
-                    return None;
-                }
-                return Some((kind.to_string(), value.to_string()));
+                let kind = match kind {
+                    "markdown" => PublicHoverKind::Markdown,
+                    "plaintext" => PublicHoverKind::Plaintext,
+                    _ => return None,
+                };
+                return Some((kind, value.to_string()));
             }
             let language = object.get("language")?.as_str()?;
             Some((
-                "markdown".to_string(),
+                PublicHoverKind::Markdown,
                 fenced_marked_string(language, value),
             ))
         }
@@ -1361,7 +1360,7 @@ fn normalize_hover_contents(contents: &Value) -> Option<(String, String)> {
                     _ => return None,
                 }
             }
-            Some(("markdown".to_string(), values.join("\n\n")))
+            Some((PublicHoverKind::Markdown, values.join("\n\n")))
         }
         _ => None,
     }
@@ -1404,13 +1403,13 @@ fn bound_hover_value(value: &str) -> (String, bool) {
             character => character,
         })
         .collect::<String>();
-    if sanitized.chars().count() <= MAX_HOVER_VALUE_CHARS {
+    if sanitized.chars().count() <= MAX_PUBLIC_HOVER_VALUE_CHARS {
         return (sanitized, false);
     }
     (
         sanitized
             .chars()
-            .take(MAX_HOVER_VALUE_CHARS.saturating_sub(1))
+            .take(MAX_PUBLIC_HOVER_VALUE_CHARS.saturating_sub(1))
             .collect::<String>()
             + "…",
         true,
@@ -1462,7 +1461,7 @@ fn normalize_workspace_symbol(
     let Some(name) = object.get("name").and_then(Value::as_str) else {
         return WorkspaceSymbolNormalize::Invalid;
     };
-    let name = bound_diagnostic_field(name, MAX_WORKSPACE_SYMBOL_FIELD_CHARS);
+    let name = bound_diagnostic_field(name, MAX_PUBLIC_WORKSPACE_SYMBOL_FIELD_CHARS);
     if name.is_empty() {
         return WorkspaceSymbolNormalize::Invalid;
     }
@@ -1500,7 +1499,7 @@ fn normalize_workspace_symbol(
     let container_name = object
         .get("containerName")
         .and_then(Value::as_str)
-        .map(|value| bound_diagnostic_field(value, MAX_WORKSPACE_SYMBOL_FIELD_CHARS))
+        .map(|value| bound_diagnostic_field(value, MAX_PUBLIC_WORKSPACE_SYMBOL_FIELD_CHARS))
         .filter(|value| !value.is_empty());
     WorkspaceSymbolNormalize::Ok(PublicWorkspaceSymbol {
         name,
@@ -1548,22 +1547,24 @@ fn normalize_diagnostic(
     let message = value.get("message")?.as_str()?;
     let severity_code = value.get("severity").and_then(Value::as_i64);
     let severity = match severity_code {
-        Some(1) => "error",
-        Some(2) => "warning",
-        Some(3) => "information",
-        Some(4) => "hint",
-        _ => "unknown",
-    }
-    .to_string();
+        Some(1) => PublicDiagnosticSeverity::Error,
+        Some(2) => PublicDiagnosticSeverity::Warning,
+        Some(3) => PublicDiagnosticSeverity::Information,
+        Some(4) => PublicDiagnosticSeverity::Hint,
+        _ => PublicDiagnosticSeverity::Unknown,
+    };
     let code = value.get("code").and_then(|code| match code {
-        Value::String(code) => Some(bound_diagnostic_field(code, MAX_DIAGNOSTIC_CODE_CHARS)),
+        Value::String(code) => Some(bound_diagnostic_field(
+            code,
+            MAX_PUBLIC_DIAGNOSTIC_CODE_CHARS,
+        )),
         Value::Number(code) => Some(code.to_string()),
         _ => None,
     });
     let source = value
         .get("source")
         .and_then(Value::as_str)
-        .map(|source| bound_diagnostic_field(source, MAX_DIAGNOSTIC_SOURCE_CHARS))
+        .map(|source| bound_diagnostic_field(source, MAX_PUBLIC_DIAGNOSTIC_SOURCE_CHARS))
         .filter(|source| !source.is_empty());
     let mut unnecessary = false;
     let mut deprecated = false;
@@ -1583,13 +1584,13 @@ fn normalize_diagnostic(
     }
     let mut tags = Vec::new();
     if unnecessary {
-        tags.push("unnecessary".to_string());
+        tags.push(PublicDiagnosticTag::Unnecessary);
     }
     if deprecated {
-        tags.push("deprecated".to_string());
+        tags.push(PublicDiagnosticTag::Deprecated);
     }
     if unknown {
-        tags.push("unknown".to_string());
+        tags.push(PublicDiagnosticTag::Unknown);
     }
     Some(PublicDiagnostic {
         range,
@@ -1597,7 +1598,7 @@ fn normalize_diagnostic(
         severity_code,
         code,
         source,
-        message: bound_diagnostic_field(message, MAX_DIAGNOSTIC_MESSAGE_CHARS),
+        message: bound_diagnostic_field(message, MAX_PUBLIC_DIAGNOSTIC_MESSAGE_CHARS),
         tags,
     })
 }
@@ -1605,12 +1606,12 @@ fn normalize_diagnostic(
 fn diagnostic_sort_key(
     diagnostic: &PublicDiagnostic,
 ) -> (u8, usize, usize, usize, usize, Option<&str>, &str) {
-    let severity = match diagnostic.severity.as_str() {
-        "error" => 0,
-        "warning" => 1,
-        "information" => 2,
-        "hint" => 3,
-        _ => 4,
+    let severity = match diagnostic.severity {
+        PublicDiagnosticSeverity::Error => 0,
+        PublicDiagnosticSeverity::Warning => 1,
+        PublicDiagnosticSeverity::Information => 2,
+        PublicDiagnosticSeverity::Hint => 3,
+        PublicDiagnosticSeverity::Unknown => 4,
     };
     (
         severity,
@@ -1914,11 +1915,11 @@ fn normalize_symbol_information(
 }
 
 fn bound_symbol_name(name: &str) -> String {
-    bound_symbol_field(name, MAX_SYMBOL_NAME_CHARS)
+    bound_symbol_field(name, MAX_PUBLIC_SYMBOL_NAME_CHARS)
 }
 
 fn bound_symbol_detail(detail: &str) -> String {
-    bound_symbol_field(detail, MAX_SYMBOL_DETAIL_CHARS)
+    bound_symbol_field(detail, MAX_PUBLIC_SYMBOL_DETAIL_CHARS)
 }
 
 fn bound_symbol_field(value: &str, max_chars: usize) -> String {

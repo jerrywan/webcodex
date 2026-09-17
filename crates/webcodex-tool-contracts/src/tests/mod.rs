@@ -71,3 +71,4 @@ mod policy_contracts;
 mod registry_specs;
 mod tool_call_contracts;
 mod tool_call_test_support;
+mod typed_output_schemas;

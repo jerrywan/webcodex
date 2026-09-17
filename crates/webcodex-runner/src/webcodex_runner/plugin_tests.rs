@@ -1452,7 +1452,10 @@ fn runner_config_reload_and_plugin_state_commit_as_one_active_generation() {
     let rejected = runtime.reload_config(2);
     assert_eq!(rejected.valid, Some(false));
     assert_eq!(rejected.current_generation, Some(2));
-    assert_eq!(rejected.error_code.as_deref(), Some("plugin_reload_failed"));
+    assert_eq!(
+        rejected.error_code,
+        Some(webcodex_core::runner_protocol::RunnerConfigErrorCode::PluginReloadFailed)
+    );
     assert_eq!(runtime.snapshot().generation, 2);
     let still_v2 = current_providers(runtime.plugins())[0].clone();
     assert_eq!(still_v2.provider_instance_id, v2.provider_instance_id);

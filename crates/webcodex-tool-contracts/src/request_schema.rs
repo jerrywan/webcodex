@@ -3,8 +3,8 @@
 //! The cache is a projection, not a registry: tool identity remains owned by
 //! `ToolDefinition`, while the accepted request shape remains owned by `ToolCall`.
 
+use crate::schema_generation::{normalize_host_schema, openapi_schema_generator};
 use crate::ToolCall;
-use schemars::generate::SchemaSettings;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -63,12 +63,7 @@ fn derive_tool_input_schemas() -> BTreeMap<String, Value> {
     // unions that have historically been brittle across MCP/GPT Action hosts.
     // The small normalization below is global presentation cleanup only; it
     // never defines a field, requiredness rule, enum, or structural bound.
-    let generator = SchemaSettings::openapi3()
-        .with(|settings| {
-            settings.meta_schema = None;
-            settings.inline_subschemas = true;
-        })
-        .into_generator();
+    let generator = openapi_schema_generator();
     let root = serde_json::to_value(generator.into_root_schema_for::<ToolCall>())
         .expect("ToolCall JsonSchema must serialize");
     let variants = root
@@ -95,6 +90,7 @@ fn derive_tool_input_schemas() -> BTreeMap<String, Value> {
             .cloned()
             .unwrap_or_else(empty_object_schema);
         normalize_host_schema(&mut input_schema);
+        normalize_closed_object_unions(&mut input_schema);
         decorate_model_wrapper_schema(tool_name, &mut input_schema);
         let previous = schemas.insert(tool_name.to_string(), input_schema);
         assert!(
@@ -152,72 +148,34 @@ fn empty_object_schema() -> Value {
     })
 }
 
-fn normalize_host_schema(value: &mut Value) {
+fn normalize_closed_object_unions(value: &mut Value) {
     match value {
         Value::Object(object) => {
-            object.remove("title");
-            object.remove("format");
-            if let Some(description) = object.get_mut("description") {
-                if let Some(text) = description.as_str() {
-                    *description =
-                        Value::String(text.split_whitespace().collect::<Vec<_>>().join(" "));
-                }
-            }
-            let was_nullable = object.remove("nullable") == Some(Value::Bool(true));
-            let pure_null = was_nullable
-                && object
-                    .get("enum")
-                    .and_then(Value::as_array)
-                    .is_some_and(|values| {
-                        values.len() == 1 && values.first().is_some_and(Value::is_null)
-                    })
-                && !object.contains_key("type");
-            if pure_null {
-                object.clear();
-                object.insert("type".to_string(), Value::String("null".to_string()));
-                return;
-            }
-            if was_nullable {
-                if let Some(values) = object.get_mut("enum").and_then(Value::as_array_mut) {
-                    values.retain(|value| !value.is_null());
-                }
-            }
-            if object.get("default").is_some_and(Value::is_null) {
-                object.remove("default");
-            }
             if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
                 for nested in properties.values_mut() {
-                    normalize_host_schema(nested);
+                    normalize_closed_object_unions(nested);
                 }
             }
             if let Some(items) = object.get_mut("items") {
-                normalize_host_schema(items);
+                normalize_closed_object_unions(items);
             }
             for keyword in ["oneOf", "anyOf", "allOf"] {
                 if let Some(branches) = object.get_mut(keyword).and_then(Value::as_array_mut) {
                     for branch in branches {
-                        normalize_host_schema(branch);
+                        normalize_closed_object_unions(branch);
                     }
                 }
             }
             if let Some(additional) = object.get_mut("additionalProperties") {
                 if additional.is_object() {
-                    normalize_host_schema(additional);
+                    normalize_closed_object_unions(additional);
                 }
-            }
-            if object.contains_key("properties") {
-                object
-                    .entry("type".to_string())
-                    .or_insert_with(|| Value::String("object".to_string()));
-                object
-                    .entry("required".to_string())
-                    .or_insert_with(|| Value::Array(Vec::new()));
             }
             normalize_closed_object_union(object);
         }
         Value::Array(values) => {
             for nested in values {
-                normalize_host_schema(nested);
+                normalize_closed_object_unions(nested);
             }
         }
         _ => {}
@@ -341,6 +299,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn shared_host_normalization_preserves_request_optional_and_closed_shape() {
+        let run = input_schema_for_tool("run_process");
+        let cwd = &run["properties"]["cwd"];
+        assert_eq!(cwd["type"], "string");
+        assert!(cwd.get("anyOf").is_none());
+        assert!(cwd.get("nullable").is_none());
+        assert!(!run["required"].as_array().unwrap().contains(&json!("cwd")));
+        assert_eq!(run["additionalProperties"], false);
+
+        let artifact = input_schema_for_tool("project_artifact");
+        assert_eq!(artifact["additionalProperties"], false);
+        assert_eq!(
+            artifact["properties"]["action"]["enum"],
+            json!(["metadata", "inspect", "image", "export"])
+        );
     }
 
     #[test]

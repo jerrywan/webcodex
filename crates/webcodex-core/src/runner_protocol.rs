@@ -792,19 +792,62 @@ impl Default for RunnerConfigReloadStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunnerConfigAction {
     Check,
     Reload,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunnerConfigExecutionState {
     NotStarted,
     Completed,
     OutcomeUnknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunnerConfigErrorCode {
+    InvalidRequest,
+    ConfigReadFailed,
+    ConfigParseFailed,
+    ConfigValidationFailed,
+    ProviderConfigInvalid,
+    PluginReloadFailed,
+    PluginReloadBusy,
+    ConfigGenerationConflict,
+    RunnerUnavailable,
+    RunnerReplaced,
+    CapabilityUnavailable,
+    InvalidRunnerResponse,
+    OutcomeUnknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum RunnerConfigErrorField {
+    #[serde(rename = "max_concurrent_jobs")]
+    MaxConcurrentJobs,
+    #[serde(rename = "skills.roots")]
+    SkillsRoots,
+    #[serde(rename = "shell.max_persistent_shells")]
+    ShellMaxPersistentShells,
+    #[serde(rename = "shell.persistent_shell_idle_timeout_secs")]
+    ShellPersistentShellIdleTimeoutSecs,
+    #[serde(rename = "acp.max_concurrent_runs")]
+    AcpMaxConcurrentRuns,
+    #[serde(rename = "acp.permission_timeout_secs")]
+    AcpPermissionTimeoutSecs,
+    #[serde(rename = "mcp.request_timeout_secs")]
+    McpRequestTimeoutSecs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunnerConfigErrorReason {
+    OutOfRange,
+    InvalidPath,
 }
 
 /// Closed Runner config operation. No filesystem path or raw configuration is
@@ -832,20 +875,45 @@ impl RunnerConfigOperationRequest {
     }
 }
 
+fn runner_config_restart_required_fields_schema(
+    _: &mut schemars::SchemaGenerator,
+) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "array",
+        "maxItems": RUNNER_CONFIG_RESTART_REQUIRED_FIELDS.len(),
+        "uniqueItems": true,
+        "items": {
+            "type": "string",
+            "enum": RUNNER_CONFIG_RESTART_REQUIRED_FIELDS,
+        }
+    })
+}
+
 /// Bounded, non-secret result for one exact Runner config operation. Generation
 /// is null only when Control cannot truthfully know the current generation after
 /// a delivery failure or replacement; successful Runner responses always carry it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunnerConfigOperationResponse {
+    /// Exact config operation attempted by the Runner.
     pub action: RunnerConfigAction,
+    /// Whether execution was definitely not started, completed, or has an unknown outcome.
     pub execution_state: RunnerConfigExecutionState,
+    /// Candidate validity when validation completed; absent when no trustworthy validation exists.
     pub valid: Option<bool>,
+    /// Active Runner config generation when known.
+    #[schemars(range(min = 1))]
     pub current_generation: Option<u64>,
-    pub error_code: Option<String>,
-    pub error_field: Option<String>,
-    pub error_reason: Option<String>,
+    /// Closed, non-secret operation failure code.
+    pub error_code: Option<RunnerConfigErrorCode>,
+    /// Closed config field identifier for safely classifiable validation failures.
+    pub error_field: Option<RunnerConfigErrorField>,
+    /// Closed reason paired with `error_field`.
+    pub error_reason: Option<RunnerConfigErrorReason>,
+    /// Whether some accepted candidate fields require process restart to take effect.
     pub restart_required: bool,
+    /// Sorted unique startup-only fields whose candidate values require restart.
+    #[schemars(schema_with = "runner_config_restart_required_fields_schema")]
     pub restart_required_fields: Vec<String>,
 }
 
@@ -867,41 +935,14 @@ impl RunnerConfigOperationResponse {
             }
             previous = Some(field);
         }
-        match (self.error_field.as_deref(), self.error_reason.as_deref()) {
+        match (self.error_field, self.error_reason) {
             (None, None) => {}
-            (Some(field), Some("out_of_range"))
-                if matches!(
-                    field,
-                    "max_concurrent_jobs"
-                        | "skills.roots"
-                        | "shell.max_persistent_shells"
-                        | "shell.persistent_shell_idle_timeout_secs"
-                        | "acp.max_concurrent_runs"
-                        | "acp.permission_timeout_secs"
-                        | "mcp.request_timeout_secs"
-                ) => {}
-            (Some("skills.roots"), Some("invalid_path")) => {}
+            (Some(_), Some(RunnerConfigErrorReason::OutOfRange)) => {}
+            (
+                Some(RunnerConfigErrorField::SkillsRoots),
+                Some(RunnerConfigErrorReason::InvalidPath),
+            ) => {}
             _ => return Err("invalid config error diagnostic"),
-        }
-        if let Some(code) = self.error_code.as_deref() {
-            if !matches!(
-                code,
-                "invalid_request"
-                    | "config_read_failed"
-                    | "config_parse_failed"
-                    | "config_validation_failed"
-                    | "provider_config_invalid"
-                    | "plugin_reload_failed"
-                    | "plugin_reload_busy"
-                    | "config_generation_conflict"
-                    | "runner_unavailable"
-                    | "runner_replaced"
-                    | "capability_unavailable"
-                    | "invalid_runner_response"
-                    | "outcome_unknown"
-            ) {
-                return Err("unknown Runner config error code");
-            }
         }
         match self.execution_state {
             RunnerConfigExecutionState::Completed => {
@@ -2252,10 +2293,31 @@ mod envelope_tests {
         };
         assert!(valid.validate().is_ok());
 
-        let mut leaked_error = valid.clone();
-        leaked_error.error_code = Some("/private/path?token=secret".to_string());
-        leaked_error.valid = Some(false);
-        assert!(leaked_error.validate().is_err());
+        let leaked_error = serde_json::json!({
+            "action": "check",
+            "execution_state": "completed",
+            "valid": false,
+            "current_generation": 1,
+            "error_code": "/private/path?token=secret",
+            "error_field": null,
+            "error_reason": null,
+            "restart_required": false,
+            "restart_required_fields": []
+        });
+        assert!(serde_json::from_value::<RunnerConfigOperationResponse>(leaked_error).is_err());
+
+        let skills_path = RunnerConfigOperationResponse {
+            action: RunnerConfigAction::Check,
+            execution_state: RunnerConfigExecutionState::Completed,
+            valid: Some(false),
+            current_generation: Some(1),
+            error_code: Some(RunnerConfigErrorCode::ConfigValidationFailed),
+            error_field: Some(RunnerConfigErrorField::SkillsRoots),
+            error_reason: Some(RunnerConfigErrorReason::InvalidPath),
+            restart_required: false,
+            restart_required_fields: Vec::new(),
+        };
+        assert!(skills_path.validate().is_ok());
 
         let mut unbounded_field = valid;
         unbounded_field.restart_required = true;
