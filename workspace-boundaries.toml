@@ -27,6 +27,7 @@ layer = "composition"
 role = "Server composition and protocol adapters."
 normal = [
     "webcodex-admin",
+    "webcodex-code-mode",
     "webcodex-core",
     "webcodex-persistent-shell",
     "webcodex-runner-config",
@@ -69,6 +70,14 @@ normal = [
     "webcodex-core",
     "webcodex-runner-config",
 ]
+dev = []
+build = []
+test_support = []
+
+[packages.webcodex-code-mode]
+layer = "runtime"
+role = "Experimental transport-neutral Code Mode frontend/runtime and bounded V8 orchestration."
+normal = []
 dev = []
 build = []
 test_support = []
