@@ -3262,7 +3262,7 @@ fn finish_suggested_next_actions(output: &Value) -> Vec<String> {
         == Some(false)
     {
         if output
-            .pointer("/changes/show_changes/diff_review_handoff/recovery/tool")
+            .pointer("/changes/show_changes/diff_review_handoff/next_call/tool")
             .and_then(Value::as_str)
             == Some("git_diff_hunks")
         {
@@ -3380,7 +3380,7 @@ mod startup_runner_tests {
             "changes": {
                 "show_changes": {
                     "diff_review_handoff": {
-                        "recovery": {"tool": "git_diff_hunks", "arguments": {}}
+                        "next_call": {"tool": "git_diff_hunks", "arguments": {}}
                     }
                 }
             },
@@ -3392,12 +3392,9 @@ mod startup_runner_tests {
         assert!(actions
             .iter()
             .any(|action| action == "continue the diff review with git_diff_hunks"));
-        assert!(
-            crate::tool_runtime::tool_definition::is_adaptive_runtime_direct_tool(
-                output["changes"]["show_changes"]["diff_review_handoff"]["recovery"]["tool"]
-                    .as_str()
-                    .unwrap()
-            )
+        assert_eq!(
+            output["changes"]["show_changes"]["diff_review_handoff"]["next_call"]["tool"],
+            "git_diff_hunks"
         );
         assert!(!actions
             .iter()
