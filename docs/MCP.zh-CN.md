@@ -89,7 +89,7 @@ Server 启动时会选择 model-facing MCP surface。普通用户不需要选择
 
 MCP tool 的 machine-readable 结果位于 `structuredContent`；`content` 只保留简短的人类可读或 protocol-native fallback。需要结构化字段的 client 应读取 `structuredContent`，不要解析文本。
 
-部分 MCP host 不会把 `structuredContent` 暴露给模型；Claude Custom Connector 已观察到这种情况，即使 WebCodex 已成功执行工具并返回完整结构化结果。为这类 host 提供服务的 operator 可以显式设置 `WEBCODEX_MCP_TEXT_JSON_COMPAT=true`。开启后，普通 Runtime 与 Connector tool result 仍以 `structuredContent` 为 canonical，同时把同一 JSON 值序列化到 `content[0].text`。该选项默认关闭，因为重复表示会增加 response/model-context 大小；protocol-native image/resource framing 与现有 App-only compatibility path 不受影响。
+部分 MCP host 不会把 `structuredContent` 暴露给模型；Claude Custom Connector 已观察到这种情况，即使 WebCodex 已成功执行工具并返回完整结构化结果。为这类 host 提供服务的 operator 可以显式设置 `WEBCODEX_MCP_TEXT_JSON_COMPAT=true`。开启后，普通 runtime tool result 仍以 `structuredContent` 为 canonical，同时把同一 JSON 值序列化到 `content[0].text`。该选项默认关闭，因为重复表示会增加 response/model-context 大小；protocol-native image/resource framing 与现有 App-only compatibility path 不受影响。
 
 Result 中的 recovery 字段只描述下一次**显式**调用的安全建议，不授予 authority，也不会触发 hidden retry。尤其是 uncertain outcome，必须先 reconcile，再决定是否重复 effect。
 
@@ -217,8 +217,8 @@ Adaptive Runtime 可以把常用工具直接暴露，把 long-tail 工具通过 
 ## 第一个安全 prompt
 
 ```text
-Use the configured WebCodex project. Start a read-only task, read README.md,
-summarize the project, review the result, and finish. Do not edit files.
+Use the configured WebCodex project. Inspect README.md and summarize the
+project structure. Do not edit files or run commands.
 ```
 
 这个 prompt 里不需要项目发现或 runtime 标识符。
@@ -252,10 +252,7 @@ stderr、provider stderr 或任意 provider prose。
 | `workspace_unavailable` | 配置的 Git 工作区不可用 | 恢复工作区，再运行 doctor |
 | `server_unreachable` / `agent_offline` | 项目 Runner/runtime 不可用 | 运行 `webcodex run` / `webcodex doctor` |
 | `required_capability_unavailable` | 当前 Runner/runtime 缺少所需 coding capability | 升级所有二进制 |
-| `task_not_active` | 任务无法再变更或执行 | 开始新任务 |
-| `execution_not_terminal` | Finish 被活跃/未知工作阻塞 | 审查/等待/取消 |
-| `checks_required` | 普通任务尚未运行检查 | 调用 `checks_run` |
-| `checks_stale` | 上次检查后工作区已变化 | 运行一次新检查 |
+| `project_registry_scope_denied` | Project-scoped credential 尝试扩张或修改其授权可见范围之外的 Project registry | 使用已可见的 Project，或使用 `work_on_project(mode=worktree)` |
 
 ## 高级 runtime surface
 

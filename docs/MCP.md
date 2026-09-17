@@ -116,7 +116,7 @@ A Server chooses its model-facing MCP surface at startup. Ordinary users do not 
 
 Machine-readable MCP tool results are returned in `structuredContent`; `content` is a concise human-readable/protocol-native fallback. Clients that need fields should consume `structuredContent` rather than parse text.
 
-Some MCP hosts do not expose `structuredContent` to the model. This has been observed with Claude Custom Connector even when WebCodex successfully executes the tool and returns the complete structured result. Operators serving such a host can explicitly set `WEBCODEX_MCP_TEXT_JSON_COMPAT=true`. Ordinary Runtime and Connector tool results then keep `structuredContent` canonical while also serializing that same JSON value into `content[0].text`. The option is off by default because the duplicate representation increases response/model-context size; protocol-native image/resource framing and the existing App-only compatibility paths remain unchanged.
+Some MCP hosts do not expose `structuredContent` to the model. This has been observed with Claude Custom Connector even when WebCodex successfully executes the tool and returns the complete structured result. Operators serving such a host can explicitly set `WEBCODEX_MCP_TEXT_JSON_COMPAT=true`. Ordinary runtime tool results then keep `structuredContent` canonical while also serializing that same JSON value into `content[0].text`. The option is off by default because the duplicate representation increases response/model-context size; protocol-native image/resource framing and the existing App-only compatibility paths remain unchanged.
 
 Recovery fields in a result describe the next safe **explicit** call. They never grant authority and never trigger a hidden retry. In particular, an uncertain outcome must be reconciled before repeating an effect.
 
@@ -253,8 +253,8 @@ Long-running commands and validations use the canonical WebCodex Job lifecycle. 
 ## First safe prompt
 
 ```text
-Use the configured WebCodex project. Start a read-only task, read README.md,
-summarize the project, review the result, and finish. Do not edit files.
+Use the configured WebCodex project. Inspect README.md and summarize the
+project structure. Do not edit files or run commands.
 ```
 
 No project discovery or runtime identifier belongs in this prompt.
@@ -292,10 +292,7 @@ prose.
 | `workspace_unavailable` | The configured Git workspace is unavailable | Restore the workspace, then run doctor |
 | `server_unreachable` / `agent_offline` | The project Runner/runtime is unavailable | Run `webcodex run` / `webcodex doctor` |
 | `required_capability_unavailable` | The current Runner/runtime lacks a required coding capability | Upgrade all binaries |
-| `task_not_active` | The task can no longer mutate or execute | Start a new task |
-| `execution_not_terminal` | Finish is blocked by active/unknown work | Review/wait/cancel |
-| `checks_required` | A normal task has not run checks | Call `checks_run` |
-| `checks_stale` | The workspace changed after the last check | Run a new check |
+| `project_registry_scope_denied` | A project-scoped credential tried to expand or mutate the Project registry outside its granted visibility | Use an already-visible Project or `work_on_project(mode=worktree)` |
 
 ## Advanced runtime surface
 
