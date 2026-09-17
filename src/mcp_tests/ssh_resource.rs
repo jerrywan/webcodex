@@ -108,10 +108,10 @@ async fn call_in_task(
             rpc(
                 "tools/call",
                 Some(json!(id)),
-                json!({
-                    "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-                    "arguments": arguments
-                }),
+                adaptive_runtime_gateway_params(
+                    crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+                    arguments,
+                ),
             ),
             Some(&auth),
         )
@@ -260,10 +260,10 @@ async fn managed_ssh_stale_revision_invalidates_binding_without_lost_update() {
         rpc(
             "tools/call",
             Some(json!(804)),
-            json!({
-                "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-                "arguments": {"action":"remove","binding":binding,"name":"old"}
-            }),
+            adaptive_runtime_gateway_params(
+                crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+                json!({"action":"remove","binding":binding,"name":"old"}),
+            ),
         ),
         Some(&auth),
     )
@@ -297,15 +297,15 @@ async fn managed_ssh_binding_rejects_runner_instance_replacement() {
         rpc(
             "tools/call",
             Some(json!(805)),
-            json!({
-                "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-                "arguments": {
+            adaptive_runtime_gateway_params(
+                crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+                json!({
                     "action":"register",
                     "binding":binding,
                     "name":"w10",
                     "target":"17724@w10"
-                }
-            }),
+                }),
+            ),
         ),
         Some(&auth),
     )
@@ -372,15 +372,15 @@ async fn managed_ssh_invalid_post_dispatch_response_is_outcome_unknown_and_bindi
         rpc(
             "tools/call",
             Some(json!(807)),
-            json!({
-                "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-                "arguments": {
+            adaptive_runtime_gateway_params(
+                crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+                json!({
                     "action":"register",
                     "binding":binding,
                     "name":"w10",
                     "target":"17724@w10"
-                }
-            }),
+                }),
+            ),
         ),
         Some(&auth),
     )
@@ -434,16 +434,16 @@ async fn read_only_session_allows_ssh_inspect_but_denies_management_before_runne
         rpc(
             "tools/call",
             Some(json!(809)),
-            json!({
-                "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-                "arguments": {
+            adaptive_runtime_gateway_params(
+                crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+                json!({
                     "action":"register",
                     "binding":binding,
                     "name":"w10",
                     "target":"private-user@private-host",
                     "recording_session_id":session.session_id
-                }
-            }),
+                }),
+            ),
         ),
         Some(&auth),
     )
@@ -525,10 +525,10 @@ async fn ssh_resource_does_not_accept_stateless_continuity_wrappers() {
             rpc(
                 "tools/call",
                 Some(json!(id)),
-                mcp_2026_params(json!({
-                    "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-                    "arguments": arguments
-                })),
+                mcp_2026_params(adaptive_runtime_gateway_params(
+                    crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+                    arguments,
+                )),
             ),
             Some(&auth),
         )
@@ -566,15 +566,15 @@ async fn restricted_permission_denies_ssh_management_before_runner_dispatch() {
         rpc(
             "tools/call",
             Some(json!(810)),
-            json!({
-                "name": crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
-                "arguments": {
+            adaptive_runtime_gateway_params(
+                crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+                json!({
                     "action":"register",
                     "binding":"wc_sshbind_0123456789abcdef0123456789abcdef",
                     "name":"w10",
                     "target":"private-user@private-host"
-                }
-            }),
+                }),
+            ),
         ),
         Some(&auth),
     )

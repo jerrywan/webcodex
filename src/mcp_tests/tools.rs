@@ -623,7 +623,7 @@ fn stateless_workflow_recorder_metadata_adds_protocol_projection() {
         .unwrap()
         .iter()
         .find(|tool| tool["name"] == "read_files")
-        .expect("full-operator read_files schema");
+        .expect("Adaptive direct read_files schema");
     let read_files_output = serde_json::to_string(&read_files["outputSchema"]).unwrap();
     assert!(!serde_json::to_string(&full)
         .unwrap()
@@ -637,22 +637,14 @@ fn stateless_workflow_recorder_metadata_adds_protocol_projection() {
     assert!(read_files_output.contains("accepted but not consumed by this target"));
     assert!(!read_files_output.contains("session_continuity"));
     assert!(!read_files_output.contains("session_recovery"));
-    let list_tools = full["tools"]
+    assert!(full["tools"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|tool| tool["name"] == "list_tools")
-        .expect("full-operator list_tools schema");
-    let context_output =
-        &list_tools["outputSchema"]["properties"]["output"]["properties"]["context_projection"];
-    assert_eq!(context_output["type"], "object");
-    assert!(context_output["properties"].get("timing").is_none());
-    assert!(context_output["properties"]
-        .get("applies_to_current_effect")
-        .is_none());
+        .all(|tool| tool["name"] != "list_tools"));
     assert_eq!(
-        context_output["required"],
-        json!(["materials", "truncated"])
+        crate::model_surface::adaptive_runtime_tool_invocation_route("list_tools"),
+        ("gateway", Some("call_runtime_tool"))
     );
 
     let generic = registered_tool_specs()
@@ -983,7 +975,7 @@ fn read_project_artifact_stays_gateway_only_without_changing_generic_schema() {
         "MCP image presentation must not change the generic REST/GPT Actions schema"
     );
 
-    assert!(generic_tool.description.contains("bounded"));
+    assert!(generic_tool.description.to_lowercase().contains("bounded"));
 }
 
 #[test]
@@ -1529,7 +1521,7 @@ async fn mcp_tools_call_still_returns_structured_content_under_compact_flag() {
         rpc(
             "tools/call",
             Some(json!(3)),
-            json!({"name": "list_projects", "arguments": {}}),
+            adaptive_runtime_gateway_params("list_projects", json!({})),
         ),
         None,
     )
@@ -1543,27 +1535,32 @@ async fn mcp_tools_call_still_returns_structured_content_under_compact_flag() {
 }
 
 #[tokio::test]
-async fn session_tools_exposed_in_registry_and_mcp() {
-    // Session tools remain registered and reachable through canonical Adaptive routing.
-    // Assertions cover names/descriptions/inputSchema only, which compact
-    // mode keeps, so no env or lock is needed.
+async fn session_tools_stay_registered_and_follow_adaptive_routes() {
     let runtime = test_runtime();
     let specs = registered_tool_specs();
     let registry_names: Vec<&str> = specs.iter().map(|spec| spec.name.as_str()).collect();
-    assert!(registry_names.contains(&"session_summary"));
-    assert!(registry_names.contains(&"update_session_context"));
-    assert!(registry_names.contains(&"validation_summary"));
+    for name in [
+        "session_summary",
+        "update_session_context",
+        "validation_summary",
+        "session_handoff_summary",
+    ] {
+        assert!(
+            registry_names.contains(&name),
+            "missing registered Session tool {name}"
+        );
+    }
     for removed in [
         "bind_current_session",
         "current_session",
         "unbind_current_session",
+        "start_session",
     ] {
         assert!(
             !registry_names.contains(&removed),
-            "removed Session tool leaked into registry: {removed}"
+            "retired/model-hidden Session tool leaked into model registry: {removed}"
         );
     }
-    assert!(!registry_names.contains(&"start_session"));
 
     let outcome = handle_mcp_request(
         &runtime,
@@ -1571,63 +1568,79 @@ async fn session_tools_exposed_in_registry_and_mcp() {
         None,
     )
     .await;
-    let value = match outcome {
-        McpOutcome::Ok(v) => v,
-        other => panic!("expected Ok, got {:?}", other),
+    let McpOutcome::Ok(value) = outcome else {
+        panic!("expected Adaptive tools/list success, got {outcome:?}");
     };
-    let names: Vec<String> = value["result"]["tools"]
-        .as_array()
-        .unwrap()
+    let tools = value["result"]["tools"].as_array().unwrap();
+    let names = tools
         .iter()
-        .map(|tool| tool["name"].as_str().unwrap().to_string())
-        .collect();
-    assert!(names.iter().any(|name| name == "session_summary"));
-    assert!(names.iter().any(|name| name == "update_session_context"));
-    assert!(names.iter().any(|name| name == "validation_summary"));
-    assert!(!names.iter().any(|name| name == "start_session"));
-    for removed in [
-        "bind_current_session",
-        "current_session",
-        "unbind_current_session",
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"session_handoff_summary"));
+    for long_tail in [
+        "session_summary",
+        "update_session_context",
+        "validation_summary",
     ] {
         assert!(
-            !names.iter().any(|name| name == removed),
-            "removed Session tool leaked into MCP: {removed}"
+            !names.contains(&long_tail),
+            "long-tail Session tool leaked into Adaptive direct inventory: {long_tail}"
+        );
+        assert_eq!(
+            crate::model_surface::adaptive_runtime_tool_invocation_route(long_tail),
+            ("gateway", Some("call_runtime_tool")),
+            "{long_tail}"
         );
     }
-    let tools = value["result"]["tools"].as_array().unwrap();
-    let tool_description = |name: &str| {
-        tools
+
+    let registered = |name: &str| {
+        specs
             .iter()
-            .find(|tool| tool["name"] == name)
-            .unwrap_or_else(|| panic!("missing MCP tool {name}"))["description"]
-            .as_str()
-            .unwrap()
-            .to_lowercase()
+            .find(|tool| tool.name == name)
+            .unwrap_or_else(|| panic!("missing registered tool {name}"))
     };
-    assert!(tool_description("session_summary").contains("session ledger"));
-    assert!(tool_description("update_session_context").contains("authorized project"));
-    assert!(tool_description("update_session_context").contains("background writer"));
-    assert!(tool_description("update_session_context").contains("success does not mean"));
-    assert!(tool_description("validation_summary").contains("does not run cargo"));
-    assert!(tool_description("session_handoff_summary").contains("explicit session_id"));
-    let validation_summary = tools
+    assert!(registered("session_summary")
+        .description
+        .to_lowercase()
+        .contains("session ledger"));
+    assert!(registered("update_session_context")
+        .description
+        .contains("authorized project"));
+    assert!(registered("update_session_context")
+        .description
+        .contains("background writer"));
+    assert!(registered("update_session_context")
+        .description
+        .contains("success does not mean"));
+    assert!(registered("validation_summary")
+        .description
+        .to_lowercase()
+        .contains("does not run cargo"));
+
+    let handoff = tools
         .iter()
-        .find(|tool| tool["name"] == "validation_summary")
-        .expect("missing MCP validation_summary tool");
+        .find(|tool| tool["name"] == "session_handoff_summary")
+        .expect("Adaptive direct session_handoff_summary");
+    assert!(handoff["description"]
+        .as_str()
+        .unwrap()
+        .contains("explicit session_id"));
+
+    let validation_summary = registered("validation_summary");
     assert_eq!(
-        validation_summary["inputSchema"]["required"],
+        validation_summary.input_schema["required"],
         json!(["project", "session_id"])
     );
     assert_eq!(
-        validation_summary["inputSchema"]["additionalProperties"],
+        validation_summary.input_schema["additionalProperties"],
         false
     );
-    for name in ["read_files", "run_shell", "write_project_file"] {
+
+    for name in ["read_files", "run_shell"] {
         let tool = tools
             .iter()
             .find(|tool| tool["name"] == name)
-            .unwrap_or_else(|| panic!("missing MCP tool {name}"));
+            .unwrap_or_else(|| panic!("missing Adaptive direct tool {name}"));
         assert!(
             tool["inputSchema"]["properties"]
                 .get("session_id")
@@ -1643,6 +1656,11 @@ async fn session_tools_exposed_in_registry_and_mcp() {
             "MCP tools/list must not require session_id for {name}"
         );
     }
+    assert!(!names.contains(&"write_project_file"));
+    assert_eq!(
+        crate::model_surface::adaptive_runtime_tool_invocation_route("write_project_file"),
+        ("gateway", Some("call_runtime_tool"))
+    );
 }
 
 #[tokio::test]
@@ -1653,7 +1671,7 @@ async fn mcp_tools_call_list_projects_returns_content_blocks() {
         rpc(
             "tools/call",
             Some(Value::from(4)),
-            json!({"name": "list_projects", "arguments": {}}),
+            adaptive_runtime_gateway_params("list_projects", json!({})),
         ),
         None,
     )
@@ -1684,10 +1702,10 @@ async fn mcp_tools_call_rejects_legacy_reserved_session_id_before_dispatch() {
         rpc(
             "tools/call",
             Some(Value::from(32)),
-            mcp_2026_params(json!({
-                "name": "list_projects",
-                "arguments": {"_session_id": &session.session_id}
-            })),
+            mcp_2026_params(adaptive_runtime_gateway_params(
+                "list_projects",
+                json!({"_session_id": &session.session_id}),
+            )),
         ),
         None,
     )
@@ -1893,7 +1911,7 @@ async fn stateless_mcp_ack_wrapper_is_removed_before_concrete_dispatch_and_is_re
         rpc(
             "tools/call",
             Some(Value::from(id)),
-            mcp_2026_params(json!({"name": "list_projects", "arguments": arguments})),
+            mcp_2026_params(adaptive_runtime_gateway_params("list_projects", arguments)),
         )
     };
 
@@ -1953,13 +1971,13 @@ async fn mcp_tools_call_rejects_legacy_session_alias_even_with_canonical_recorde
         rpc(
             "tools/call",
             Some(Value::from(320)),
-            mcp_2026_params(json!({
-                "name": "list_projects",
-                "arguments": {
+            mcp_2026_params(adaptive_runtime_gateway_params(
+                "list_projects",
+                json!({
                     crate::tool_runtime::sessions::TOOL_CALL_RECORDING_SESSION_ID_FIELD: &canonical.session_id,
                     "_session_id": &canonical.session_id
-                }
-            })),
+                }),
+            )),
         ),
         None,
     )
@@ -1994,12 +2012,12 @@ async fn mcp_tools_call_records_event_with_recording_session_id() {
         rpc(
             "tools/call",
             Some(Value::from(33)),
-            mcp_2026_params(json!({
-                "name": "list_projects",
-                "arguments": {
+            mcp_2026_params(adaptive_runtime_gateway_params(
+                "list_projects",
+                json!({
                     crate::tool_runtime::sessions::TOOL_CALL_RECORDING_SESSION_ID_FIELD: &session.session_id
-                }
-            })),
+                }),
+            )),
         ),
         None,
     )

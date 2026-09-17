@@ -74,6 +74,13 @@ fn rpc(method: &str, id: Option<Value>, params: Value) -> JsonRpcRequest {
     }
 }
 
+fn adaptive_runtime_gateway_params(tool: &str, arguments: Value) -> Value {
+    json!({
+        "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+        "arguments": {"tool": tool, "arguments": arguments}
+    })
+}
+
 fn mcp_2026_params(mut params: Value) -> Value {
     params
         .as_object_mut()
