@@ -294,6 +294,9 @@ pub const RUNNER_CAPABILITY_MANAGED_WORKTREE: &str = "managed_worktree";
 /// Runner-global Skill catalog observation, exact resolution, and source-pinned read.
 /// Configured and managed sources share this cross-process runtime capability.
 pub const RUNNER_CAPABILITY_SKILL_RUNTIME: &str = "skill_runtime";
+/// Runner-owned package-context execution for trusted Skill resources.
+/// Missing on older Runners is false; never infer it from generic process support.
+pub const RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION: &str = "skill_resource_execution";
 /// Runner-global managed Skill lifecycle and revision inventory. This is an
 /// independent consequential capability and is never inferred from Skill runtime access.
 pub const RUNNER_CAPABILITY_SKILL_MANAGEMENT: &str = "skill_management";
@@ -468,6 +471,7 @@ pub const RUNNER_CAPABILITY_NAMES: &[&str] = &[
     RUNNER_CAPABILITY_PROJECT_PATH_REGISTRATION,
     RUNNER_CAPABILITY_MANAGED_WORKTREE,
     RUNNER_CAPABILITY_SKILL_RUNTIME,
+    RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION,
     RUNNER_CAPABILITY_SKILL_MANAGEMENT,
     RUNNER_CAPABILITY_COMPUTER_OBSERVE,
     RUNNER_CAPABILITY_COMPUTER_APPLICATION_DISCOVERY,
@@ -668,6 +672,9 @@ pub struct RunnerCapabilities {
     /// Runner-local Skill catalog observation, exact resolution, and source-pinned reads.
     #[serde(default, skip_serializing_if = "is_false")]
     pub skill_runtime: bool,
+    /// Runner-owned trusted Skill package execution context.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub skill_resource_execution: bool,
     /// Managed Skill lifecycle/revision management. Independent from runtime reads.
     #[serde(default, skip_serializing_if = "is_false")]
     pub skill_management: bool,
@@ -969,6 +976,7 @@ impl Default for RunnerCapabilities {
             project_path_registration: false,
             managed_worktree: false,
             skill_runtime: false,
+            skill_resource_execution: false,
             skill_management: false,
             computer_observe: false,
             computer_application_discovery: false,
@@ -2482,6 +2490,7 @@ mod envelope_tests {
                 project_path_registration: false,
                 managed_worktree: false,
                 skill_runtime: false,
+                skill_resource_execution: false,
                 skill_management: false,
                 computer_observe: false,
                 computer_application_discovery: false,

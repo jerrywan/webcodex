@@ -803,6 +803,9 @@ fn run_skill_resource_contract_distinguishes_live_configured_and_managed_fences(
         "resource bytes are read at execution",
         "expected_package_revision",
         "immutable package",
+        "package-relative helpers",
+        "__file__",
+        "requested project cwd",
     ] {
         assert!(
             run_spec.contains(phrase),
@@ -835,6 +838,9 @@ fn run_skill_resource_contract_distinguishes_live_configured_and_managed_fences(
         "resource bytes are read at execution",
         "expected_package_revision",
         "immutable package",
+        "package-relative helpers",
+        "__file__",
+        "requested project cwd",
     ] {
         assert!(
             model_description.contains(phrase),

@@ -88,7 +88,8 @@ use webcodex_core::runner_protocol::{
     RUNNER_CAPABILITY_LSP_CALL_HIERARCHY, RUNNER_CAPABILITY_LSP_READ_ONLY_NAVIGATION,
     RUNNER_CAPABILITY_PERSISTENT_SHELL, RUNNER_CAPABILITY_RUNNER_CONFIG_CONTROL,
     RUNNER_CAPABILITY_SHELL, RUNNER_CAPABILITY_SKILL_MANAGEMENT,
-    RUNNER_CAPABILITY_STRUCTURED_PROCESS_ARGV, RUNNER_CAPABILITY_STRUCTURED_SCRIPT_PAYLOAD,
+    RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION, RUNNER_CAPABILITY_STRUCTURED_PROCESS_ARGV,
+    RUNNER_CAPABILITY_STRUCTURED_SCRIPT_PAYLOAD,
 };
 
 /// Runner capability or owner-boundary requirement that must hold before a
@@ -103,6 +104,9 @@ pub enum RunnerCapabilityRequirement {
     /// General native process + argv execution. This must never be inferred
     /// from shell or structured-validation support.
     StructuredProcess,
+    /// Runner-owned trusted Skill resource execution with package identity.
+    /// Never infer this from generic structured process or Skill read support.
+    SkillResourceExecution,
     /// Durable detached native process Jobs. This explicit authority is never
     /// inferred from ordinary structured process execution.
     DetachedProcess,
@@ -175,6 +179,7 @@ impl RunnerCapabilityRequirement {
             Self::OwnerOnly => "owner boundary",
             Self::Shell => RUNNER_CAPABILITY_SHELL,
             Self::StructuredProcess => RUNNER_CAPABILITY_STRUCTURED_PROCESS_ARGV,
+            Self::SkillResourceExecution => RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION,
             Self::DetachedProcess => RUNNER_CAPABILITY_DETACHED_PROCESS_JOBS,
             Self::StructuredScript => RUNNER_CAPABILITY_STRUCTURED_SCRIPT_PAYLOAD,
             Self::InternalPosixScript => RUNNER_CAPABILITY_INTERNAL_POSIX_SCRIPT,
@@ -211,6 +216,7 @@ impl RunnerCapabilityRequirement {
             Self::OwnerOnly => &[],
             Self::Shell => &[RUNNER_CAPABILITY_SHELL],
             Self::StructuredProcess => &[RUNNER_CAPABILITY_STRUCTURED_PROCESS_ARGV],
+            Self::SkillResourceExecution => &[RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION],
             Self::DetachedProcess => &[RUNNER_CAPABILITY_DETACHED_PROCESS_JOBS],
             Self::StructuredScript => &[RUNNER_CAPABILITY_STRUCTURED_SCRIPT_PAYLOAD],
             Self::InternalPosixScript => &[RUNNER_CAPABILITY_INTERNAL_POSIX_SCRIPT],

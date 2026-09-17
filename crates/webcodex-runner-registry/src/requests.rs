@@ -34,7 +34,7 @@ use webcodex_core::runner_operation::{
     RunnerComputerOperation, RunnerComputerOperationKind, RunnerFileOperation,
     RunnerInvocationMetadata, RunnerOperation, RunnerPersistentShellOperation,
     RunnerProcessOperation, RunnerProjectOperation, RunnerProjectOperationKind,
-    RunnerScriptOperation, RunnerShellOperation,
+    RunnerScriptOperation, RunnerShellOperation, RunnerSkillResourceOperation,
 };
 use webcodex_core::runner_protocol::{
     shell_computer_request_payload_max_bytes, PersistentShellRequest, PersistentShellResult,
@@ -52,7 +52,7 @@ use webcodex_core::runner_protocol::{
     RUNNER_CAPABILITY_STRUCTURED_SCRIPT_JAVASCRIPT, RUNNER_CAPABILITY_STRUCTURED_SCRIPT_PAYLOAD,
     RUNNER_CONFIG_REQUEST_MAX_BYTES,
 };
-use webcodex_core::runner_skill::RunnerSkillRequest;
+use webcodex_core::runner_skill::{RunnerSkillExecutionRequest, RunnerSkillRequest};
 use webcodex_core::ssh_resource::{SshResourceRequest, SSH_RESOURCE_REQUEST_MAX_BYTES};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1162,6 +1162,71 @@ impl RunnerRegistry {
             &client_id,
             request_id.clone(),
             request,
+            Some(tx),
+            None,
+        )?;
+        notify_runner_locked(&inner, &client_id);
+        Ok((request_id, rx))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn enqueue_skill_resource_execution(
+        &self,
+        client_id: String,
+        cwd: Option<String>,
+        request: RunnerSkillExecutionRequest,
+        timeout_secs: u64,
+        wait_timeout_secs: u64,
+        requested_by: String,
+    ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), String> {
+        request
+            .validate()
+            .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
+        if !(webcodex_core::runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS
+            ..=webcodex_core::runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS)
+            .contains(&timeout_secs)
+            || wait_timeout_secs == 0
+            || wait_timeout_secs > timeout_secs
+        {
+            return Err("invalid Runner Skill execution timeout".to_string());
+        }
+        let normalized_cwd = cwd.map(|cwd| cwd.trim().to_string());
+        if normalized_cwd.as_deref().is_some_and(|cwd| {
+            cwd.len() > webcodex_core::runner_protocol::PROCESS_CWD_MAX_BYTES || cwd.contains('\0')
+        }) {
+            return Err("invalid Runner Skill execution cwd".to_string());
+        }
+        let request_id = next_request_id();
+        let (tx, rx) = oneshot::channel();
+        let runner_request = encode_runner_operation(
+            &request_id,
+            &client_id,
+            requested_by,
+            RunnerOperation::RunSkillResource(RunnerSkillResourceOperation {
+                cwd: normalized_cwd,
+                request,
+                timeout_secs,
+            }),
+        )?;
+        let mut inner = self.inner.lock().await;
+        let Some(runner) = inner.runners.get(&client_id) else {
+            return Err(format!("unknown shell client: {client_id}"));
+        };
+        if !runner
+            .runner_features
+            .supports(RunnerFeature::SkillResourceExecution)
+        {
+            return Err(format!(
+                "capability_unavailable: runner {client_id} does not support {}",
+                webcodex_core::runner_protocol::RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION
+            ));
+        }
+        enqueue_pending_request_locked(
+            self.telemetry.as_ref(),
+            &mut inner,
+            &client_id,
+            request_id.clone(),
+            runner_request,
             Some(tx),
             None,
         )?;

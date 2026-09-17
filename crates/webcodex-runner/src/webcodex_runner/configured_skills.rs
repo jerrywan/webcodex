@@ -6,8 +6,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use webcodex_core::runner_skill::{
-    normalize_runner_skill_resource_path, RunnerSkillDescriptor, RunnerSkillReadResponse,
-    RunnerSkillSource, MAX_RUNNER_SKILL_READ_TEXT_BYTES, RUNNER_SKILL_RESPONSE_FORMAT,
+    normalize_runner_skill_resource_path, RunnerSkillDescriptor, RunnerSkillExecutionRequest,
+    RunnerSkillReadResponse, RunnerSkillSource, MAX_RUNNER_SKILL_READ_TEXT_BYTES,
+    RUNNER_SKILL_RESPONSE_FORMAT,
 };
 use webcodex_core::skill_metadata::{parse_skill_metadata, MAX_SKILL_DEFINITION_BYTES};
 use webcodex_workspace::file_read_range;
@@ -23,6 +24,12 @@ const MAX_CONFIGURED_SKILL_ROOT_SCAN_ENTRIES: usize = 1024;
 pub(super) struct LiveSkill {
     pub(super) descriptor: RunnerSkillDescriptor,
     package_root: PathBuf,
+}
+
+#[derive(Debug)]
+pub(super) struct PreparedConfiguredSkillExecution {
+    pub(super) target_path: PathBuf,
+    pub(super) script: String,
 }
 
 #[derive(Debug, Default)]
@@ -372,6 +379,71 @@ fn load_live_skill(
             definition_revision,
         },
         package_root,
+    })
+}
+
+pub(super) fn prepare_execution_target(
+    config: &SkillsConfig,
+    request: &RunnerSkillExecutionRequest,
+) -> Result<PreparedConfiguredSkillExecution, String> {
+    request
+        .validate()
+        .map_err(|_| "skill_invalid_execution_request".to_string())?;
+    if request.expected_source != RunnerSkillSource::Configured {
+        return Err("skill_source_changed".to_string());
+    }
+    let path = normalize_runner_skill_resource_path(&request.path)
+        .map_err(|_| "skill_resource_path_invalid".to_string())?;
+    if webcodex_core::sensitive_paths::is_secret_path(&path) {
+        return Err("skill_sensitive_path".to_string());
+    }
+    let (skill, _scan_stats) = resolve_live_skill_by_id(config, &request.skill_id)?;
+    let skill = skill.ok_or_else(|| "skill_not_found".to_string())?;
+    if skill.descriptor.definition_revision() != request.expected_definition_revision {
+        return Err("skill_definition_changed".to_string());
+    }
+    let canonical_root = skill
+        .package_root
+        .parent()
+        .ok_or_else(|| "skill_resource_path_invalid".to_string())?;
+    let target = resolve_regular_package_file(
+        &skill.package_root,
+        canonical_root,
+        &path,
+        "skill_resource_not_found",
+        "skill_resource_path_invalid",
+    )
+    .map_err(str::to_string)?;
+    let bytes =
+        read_bounded(&target, MAX_RUNNER_SKILL_READ_TEXT_BYTES).map_err(|code| match code {
+            "too_large" => "skill_resource_too_large".to_string(),
+            "invalid_utf8" => "skill_resource_unsupported_encoding".to_string(),
+            _ => "skill_resource_unavailable".to_string(),
+        })?;
+    if sha256_hex(&bytes) != request.expected_resource_sha256 {
+        return Err("skill_resource_changed".to_string());
+    }
+    let script =
+        String::from_utf8(bytes).map_err(|_| "skill_resource_unsupported_encoding".to_string())?;
+    if script.contains('\0') {
+        return Err("skill_resource_unsupported_encoding".to_string());
+    }
+    let definition_after = resolve_regular_package_file(
+        &skill.package_root,
+        canonical_root,
+        SKILL_DEFINITION_FILE,
+        "skill_definition_changed",
+        "skill_definition_changed",
+    )
+    .map_err(str::to_string)?;
+    let definition_after = read_bounded(&definition_after, MAX_SKILL_DEFINITION_BYTES)
+        .map_err(|_| "skill_definition_changed".to_string())?;
+    if sha256_hex(&definition_after) != request.expected_definition_revision {
+        return Err("skill_definition_changed".to_string());
+    }
+    Ok(PreparedConfiguredSkillExecution {
+        target_path: target,
+        script,
     })
 }
 

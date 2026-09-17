@@ -413,6 +413,7 @@ async fn register_agent_projects_for_auth(
                         project_path_registration: false,
                         managed_worktree: false,
                         skill_runtime: false,
+                        skill_resource_execution: false,
                         skill_management: false,
                         computer_observe: false,
                         computer_application_discovery: false,

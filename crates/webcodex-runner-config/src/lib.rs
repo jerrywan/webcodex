@@ -295,6 +295,9 @@ pub fn generated_runner_config_toml(opts: &RunnerInitOptions) -> Result<String, 
             // Runner-local Skill runtime and management are implemented by the
             // running binary and are never inferred from project/file capabilities.
             skill_runtime: false,
+            // Trusted Skill resource execution is implemented by the running binary
+            // and must not be inferred from static generated config.
+            skill_resource_execution: false,
             skill_management: false,
             // Desktop observation is a runtime/platform capability and is never
             // claimed by generated static config.

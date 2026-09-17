@@ -1,4 +1,4 @@
-use super::RunnerCapabilityRequirement::{FileRead, SkillManagement, StructuredProcess};
+use super::RunnerCapabilityRequirement::{FileRead, SkillManagement};
 use super::ToolVisibility::{ModelHidden, ModelVisible};
 use super::{
     adaptive_runtime_direct, def, model_spec, require_all_scopes, ToolDefinition,
@@ -96,7 +96,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     ])),
                     ModelVisible,
                     TOOL_CATEGORY_RUNTIME,
-                    Some(StructuredProcess),
+                    Some(super::RunnerCapabilityRequirement::SkillResourceExecution),
                     TOOL_PROVIDER_RUNNER,
                     super::ToolSemanticContract {
                         effect: super::ToolEffect::Execute,
@@ -111,7 +111,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     true,
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
-                "Execute one supported scripts/*.py or scripts/*.sh resource from a trusted Runner-configured live Skill or Runner-installed managed Skill without exposing or retransmitting its source through model context. Configured Skills are live resources: expected_definition_revision fences the selected SKILL.md definition, while resource bytes are read at execution and are not package-revision-pinned; skill_sha256 reports the bytes actually executed. Managed installed Skills additionally require expected_package_revision to fence the immutable package. WebCodex selects the interpreter, supplies the script over stdin, and appends only caller-provided script arguments after the interpreter's script marker; project-content Skills are rejected.",
+                "Execute one supported scripts/*.py or scripts/*.sh resource from a trusted Runner-configured live Skill or Runner-installed managed Skill without exposing or retransmitting its source through model context. Configured Skills are live resources: expected_definition_revision fences the selected SKILL.md definition, while resource bytes are read at execution and package-relative helpers remain live; skill_sha256 reports the exact main-script bytes executed. Managed installed Skills additionally require expected_package_revision and execute against a Runner-owned immutable package snapshot. The Runner preserves the selected Skill script/package identity for __file__, Python sibling imports, and shell $0-relative helpers while keeping the requested Project cwd; project-content Skills are rejected.",
             )
             .with_gpt_action_description("Execute a trusted Runner Skill script. Configured Skills are live and definition-fenced by expected_definition_revision; managed Skills additionally require expected_package_revision. WebCodex selects the .py/.sh interpreter; project-content Skills are rejected.")
             .with_execution(super::ToolExecutionContract::new(

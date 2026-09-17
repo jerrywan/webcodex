@@ -89,7 +89,9 @@ pub(crate) use projects::{
 pub(crate) use projects::{
     parse_runner_project_toml, runner_project_summary, validate_project_path_policy,
 };
-pub(crate) use runner_skills::handle_runner_skill_request;
+pub(crate) use runner_skills::{
+    handle_runner_skill_request, run_skill_resource_with_profiles_and_execution_state,
+};
 pub(crate) use shell::{
     configured_prepared_shell_job_command, configured_shell_job_command,
     configured_validation_job_command, cwd_allowed, prepare_detached_process_launch,

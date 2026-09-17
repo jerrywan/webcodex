@@ -9,8 +9,9 @@ use super::{
     run_internal_posix_script_with_profiles_and_execution_state,
     run_internal_search_script_with_profiles_and_execution_state,
     run_process_with_profiles_and_execution_state, run_script_with_profiles_and_execution_state,
-    run_shell_with_profiles_and_execution_state, run_ssh_shell_with_execution_state, CommandResult,
-    HotRunnerConfig, PersistentShellManager, ReloadableRunnerConfig, RunnerSink,
+    run_shell_with_profiles_and_execution_state,
+    run_skill_resource_with_profiles_and_execution_state, run_ssh_shell_with_execution_state,
+    CommandResult, HotRunnerConfig, PersistentShellManager, ReloadableRunnerConfig, RunnerSink,
     ShellCommandResult, SubmitResultError,
 };
 use crate::runner_protocol::{
@@ -221,7 +222,8 @@ fn submit_decode_failure(
         | "start_validation_job"
         | "start_process_job"
         | "start_detached_process_job"
-        | "start_script_job" => {
+        | "start_script_job"
+        | "start_skill_resource_job" => {
             if submit_invalid_job_start(sink, &request, error.clone()) {
                 Ok(true)
             } else {
@@ -294,7 +296,7 @@ fn submit_decode_failure(
                 runtime,
             )
             .map(|_| true),
-        "run_process" | "run_script" | "run_internal_posix_script" => sink
+        "run_process" | "run_script" | "run_internal_posix_script" | "skill_resource_execution" => sink
             .submit_shell_result_with_metadata(
                 request_id,
                 ShellCommandResult::not_started(invalid_command(format!(
@@ -443,6 +445,25 @@ pub(crate) fn dispatch_request_with_outcome(
         RunnerOperation::Computer(operation) => {
             let result = handle_computer_operation(&operation);
             sink.submit_result_with_metadata(request_id, result, config, runtime)
+                .map(|_| true)
+        }
+        RunnerOperation::RunSkillResource(operation) => {
+            let result = run_skill_resource_with_profiles_and_execution_state(
+                config.generation,
+                &config.skills,
+                runtime.client_id(),
+                runtime.server_url(),
+                policy,
+                shell,
+                project_registry_dir,
+                &jobs.prepared_profiles,
+                operation.cwd.as_deref(),
+                &operation.request,
+                operation.timeout_secs,
+                Some(runtime.shutdown_flag()),
+                None,
+            );
+            sink.submit_shell_result_with_metadata(request_id, result, config, runtime)
                 .map(|_| true)
         }
         RunnerOperation::RunProcess(operation) => {
@@ -663,6 +684,9 @@ pub(crate) fn dispatch_request_with_outcome(
                         policy: policy.clone(),
                         shell: shell.clone(),
                         ssh: config.ssh.clone(),
+                        skills: config.skills.clone(),
+                        client_id: runtime.client_id().to_string(),
+                        server_url: runtime.server_url().to_string(),
                         project_registry_dir: project_registry_dir.to_path_buf(),
                         metadata: invocation_metadata,
                         operation,

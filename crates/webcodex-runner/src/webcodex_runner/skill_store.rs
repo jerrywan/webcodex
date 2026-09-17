@@ -11,7 +11,8 @@ use std::io::{Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 use webcodex_core::runner_skill::{
-    RunnerSkillDescriptor, RunnerSkillReadResponse, RUNNER_SKILL_RESPONSE_FORMAT,
+    RunnerSkillDescriptor, RunnerSkillExecutionRequest, RunnerSkillReadResponse, RunnerSkillSource,
+    RUNNER_SKILL_RESPONSE_FORMAT,
 };
 use webcodex_core::skill_metadata::{
     parse_skill_metadata, SkillMetadata, MAX_SKILL_DEFINITION_BYTES,
@@ -50,6 +51,12 @@ const DEFAULT_RESOURCE_MAX_BYTES: usize = 512 * 1024;
 pub(super) struct ManagedSkillCatalogSnapshot {
     pub(super) namespace_revision: String,
     pub(super) skills: Vec<RunnerSkillDescriptor>,
+}
+
+#[derive(Debug)]
+pub(super) struct PreparedManagedSkillExecution {
+    pub(super) snapshot: tempfile::TempDir,
+    pub(super) script: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -617,6 +624,67 @@ impl SkillStore {
                 .map(InstalledRevisionMetadata::public_version)
                 .collect(),
         })
+    }
+
+    pub(super) fn prepare_execution_snapshot(
+        &self,
+        request: &RunnerSkillExecutionRequest,
+    ) -> Result<PreparedManagedSkillExecution, String> {
+        request
+            .validate()
+            .map_err(|_| "skill_store_invalid_request".to_string())?;
+        if request.expected_source != RunnerSkillSource::Managed {
+            return Err("skill_source_changed".to_string());
+        }
+        let path = validate_resource_path(&request.path)?;
+        if webcodex_core::sensitive_paths::is_secret_path(&path) {
+            return Err("skill_sensitive_path".to_string());
+        }
+        let _lock = self.lock()?;
+        let skill_key = self
+            .resolve_skill_key(&request.skill_id)?
+            .ok_or_else(|| "skill_not_found".to_string())?;
+        let before = self.read_state(&skill_key)?;
+        let active = before
+            .active_package_revision
+            .clone()
+            .ok_or_else(|| "skill_not_found".to_string())?;
+        if request.expected_package_revision.as_deref() != Some(active.as_str()) {
+            return Err("skill_package_changed".to_string());
+        }
+        let metadata = self.read_revision_metadata(&skill_key, &active)?;
+        if metadata.definition_revision != request.expected_definition_revision {
+            return Err("skill_definition_changed".to_string());
+        }
+        let files = self.verify_package_immutable(&skill_key, &metadata)?;
+        let resource = files
+            .get(&path)
+            .ok_or_else(|| "skill_store_revision_modified".to_string())?;
+        if sha256_hex(resource) != request.expected_resource_sha256 {
+            return Err("skill_store_revision_modified".to_string());
+        }
+        let script = std::str::from_utf8(resource)
+            .map_err(|_| "skill_resource_unsupported_encoding".to_string())?
+            .to_string();
+        if script.contains('\0') {
+            return Err("skill_resource_unsupported_encoding".to_string());
+        }
+        let after = self.read_state(&skill_key)?;
+        if after.active_package_revision.as_deref() != Some(active.as_str()) {
+            return Err("skill_package_changed".to_string());
+        }
+        let snapshot = tempfile::Builder::new()
+            .prefix("webcodex-skill-")
+            .tempdir()
+            .map_err(|_| "skill_store_unavailable".to_string())?;
+        for (relative, bytes) in files {
+            let target = snapshot.path().join(&relative);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|_| "skill_store_unavailable".to_string())?;
+            }
+            fs::write(&target, bytes).map_err(|_| "skill_store_unavailable".to_string())?;
+        }
+        Ok(PreparedManagedSkillExecution { snapshot, script })
     }
 
     pub(super) fn read_resource(

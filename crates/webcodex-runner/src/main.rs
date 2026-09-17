@@ -97,6 +97,7 @@ use webcodex_runner::{is_transport_failure, SshConfig, SshConnectionPool};
 use webcodex_runner::{
     run_process_with_profiles_and_execution_state_with_start_hook,
     run_script_with_profiles_and_execution_state_with_start_hook,
+    run_skill_resource_with_profiles_and_execution_state,
 };
 
 const JOB_UPDATE_INTERVAL_MS: u64 = 250;
@@ -225,6 +226,9 @@ struct PendingJobStart {
     policy: RunnerPolicy,
     shell: ShellConfig,
     ssh: SshConfig,
+    skills: webcodex_runner::config::SkillsConfig,
+    client_id: String,
+    server_url: String,
     project_registry_dir: PathBuf,
     metadata: RunnerInvocationMetadata,
     operation: RunnerJobOperation,
@@ -240,6 +244,7 @@ impl PendingJobStart {
         project_registry_dir: PathBuf,
         request: RunnerRequest,
     ) -> Self {
+        let client_id = request.client_id.clone();
         let invocation = request
             .decode_invocation()
             .expect("test Job wire request must decode to a canonical invocation");
@@ -255,6 +260,9 @@ impl PendingJobStart {
             policy,
             shell,
             ssh,
+            skills: webcodex_runner::config::SkillsConfig::default(),
+            client_id,
+            server_url: "http://127.0.0.1:1".to_string(),
             project_registry_dir,
             metadata: invocation.metadata,
             operation,
@@ -2041,6 +2049,7 @@ fn runner_register_capabilities(cfg: &RunnerConfig) -> RunnerCapabilities {
     // Configured live roots and managed active Skills share one Runner-local runtime
     // boundary; managed lifecycle authority remains independently advertised.
     capabilities.skill_runtime = true;
+    capabilities.skill_resource_execution = true;
     capabilities.skill_management = true;
     // Native Tool Plugins are a separate Runner-local gateway capability. Keep
     // this explicit even when zero Plugins are configured so cross-platform
@@ -2934,7 +2943,8 @@ fn job_prestart_lifecycle(operation: &RunnerJobOperation) -> Option<ShellCommand
         RunnerJobOperation::StartShell(_)
         | RunnerJobOperation::StartProcess(_)
         | RunnerJobOperation::StartDetachedProcess(_)
-        | RunnerJobOperation::StartScript(_) => Some(ShellCommandExecutionState::NotStarted),
+        | RunnerJobOperation::StartScript(_)
+        | RunnerJobOperation::StartSkillResource(_) => Some(ShellCommandExecutionState::NotStarted),
         RunnerJobOperation::StartValidation(_) | RunnerJobOperation::Stop { .. } => None,
     }
 }
@@ -2947,7 +2957,11 @@ pub(crate) fn decode_failure_prestart_lifecycle(
 ) -> Option<ShellCommandExecutionState> {
     matches!(
         request.kind.as_str(),
-        "start_job" | "start_process_job" | "start_detached_process_job" | "start_script_job"
+        "start_job"
+            | "start_process_job"
+            | "start_detached_process_job"
+            | "start_script_job"
+            | "start_skill_resource_job"
     )
     .then_some(ShellCommandExecutionState::NotStarted)
 }
@@ -3396,6 +3410,20 @@ fn validate_runner_job_context_operation(
                 &operation.script,
                 operation.stdin.as_deref(),
                 operation.cwd.as_deref(),
+                operation.timeout_secs,
+            )?;
+        }
+        RunnerJobOperation::StartSkillResource(operation) => {
+            if context.ssh_resource.is_some() {
+                return Err("typed Skill resource Job request shape is invalid".to_string());
+            }
+            operation
+                .request
+                .validate()
+                .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
+            validate_runner_structured_common(
+                operation.cwd.as_deref(),
+                None,
                 operation.timeout_secs,
             )?;
         }
@@ -4317,9 +4345,9 @@ impl JobManager {
         }
         match &start.operation {
             RunnerJobOperation::StartDetachedProcess(_) => self.start_detached_process_job(start),
-            RunnerJobOperation::StartProcess(_) | RunnerJobOperation::StartScript(_) => {
-                self.start_structured_job(start)
-            }
+            RunnerJobOperation::StartProcess(_)
+            | RunnerJobOperation::StartScript(_)
+            | RunnerJobOperation::StartSkillResource(_) => self.start_structured_job(start),
             RunnerJobOperation::StartShell(_) | RunnerJobOperation::StartValidation(_) => {
                 self.start_shell_job(start)
             }
@@ -4538,6 +4566,9 @@ impl JobManager {
             generation,
             policy,
             shell,
+            skills,
+            client_id,
+            server_url,
             project_registry_dir,
             operation,
             ..
@@ -4545,9 +4576,11 @@ impl JobManager {
         let job_id = operation.job_id().to_string();
         if !matches!(
             operation,
-            RunnerJobOperation::StartProcess(_) | RunnerJobOperation::StartScript(_)
+            RunnerJobOperation::StartProcess(_)
+                | RunnerJobOperation::StartScript(_)
+                | RunnerJobOperation::StartSkillResource(_)
         ) {
-            unreachable!("structured Job starter received non process/script operation");
+            unreachable!("structured Job starter received non structured operation");
         }
         let stop_requested = {
             let _lifecycle = lock_unpoison(&self.lifecycle);
@@ -4614,7 +4647,24 @@ impl JobManager {
                         Some(&on_started),
                     )
                 }
-                _ => unreachable!("structured Job starter received non process/script operation"),
+                RunnerJobOperation::StartSkillResource(request) => {
+                    run_skill_resource_with_profiles_and_execution_state(
+                        generation,
+                        &skills,
+                        &client_id,
+                        &server_url,
+                        &policy,
+                        &shell,
+                        &project_registry_dir,
+                        &manager.prepared_profiles,
+                        request.cwd.as_deref(),
+                        &request.request,
+                        request.timeout_secs,
+                        Some(stop_requested.as_ref()),
+                        Some(&on_started),
+                    )
+                }
+                _ => unreachable!("structured Job starter received non structured operation"),
             };
             let execution_state = result.execution_state;
             let stopped = stop_requested.load(Ordering::SeqCst)
@@ -4658,6 +4708,7 @@ impl JobManager {
             project_registry_dir,
             metadata: _,
             operation,
+            ..
         } = start;
         let (job_id, cwd, raw_command, steps, timeout_secs, context, validation) = match &operation
         {

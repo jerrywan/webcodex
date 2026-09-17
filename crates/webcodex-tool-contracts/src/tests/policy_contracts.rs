@@ -661,7 +661,7 @@ fn required_runner_capability_matches_metadata_risk_table() {
         (
             "run_skill_resource",
             ToolRisk::JobRun,
-            RunnerCapabilityRequirement::StructuredProcess,
+            RunnerCapabilityRequirement::SkillResourceExecution,
         ),
         (
             "run_detached_process",

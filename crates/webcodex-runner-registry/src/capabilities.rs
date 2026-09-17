@@ -48,6 +48,7 @@ pub enum RunnerFeature {
     ProjectPathRegistration,
     ManagedWorktree,
     SkillRuntime,
+    SkillResourceExecution,
     SkillManagement,
     ComputerObserve,
     ComputerApplicationDiscovery,
@@ -112,6 +113,7 @@ const ALL_RUNNER_FEATURES: &[RunnerFeature] = &[
     RunnerFeature::ProjectPathRegistration,
     RunnerFeature::ManagedWorktree,
     RunnerFeature::SkillRuntime,
+    RunnerFeature::SkillResourceExecution,
     RunnerFeature::SkillManagement,
     RunnerFeature::ComputerObserve,
     RunnerFeature::ComputerApplicationDiscovery,
@@ -206,6 +208,7 @@ impl RunnerFeature {
             Self::ProjectPathRegistration => wire::RUNNER_CAPABILITY_PROJECT_PATH_REGISTRATION,
             Self::ManagedWorktree => wire::RUNNER_CAPABILITY_MANAGED_WORKTREE,
             Self::SkillRuntime => wire::RUNNER_CAPABILITY_SKILL_RUNTIME,
+            Self::SkillResourceExecution => wire::RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION,
             Self::SkillManagement => wire::RUNNER_CAPABILITY_SKILL_MANAGEMENT,
             Self::ComputerObserve => wire::RUNNER_CAPABILITY_COMPUTER_OBSERVE,
             Self::ComputerApplicationDiscovery => {
@@ -288,6 +291,7 @@ impl RunnerFeature {
             wire::RUNNER_CAPABILITY_PROJECT_PATH_REGISTRATION => Self::ProjectPathRegistration,
             wire::RUNNER_CAPABILITY_MANAGED_WORKTREE => Self::ManagedWorktree,
             wire::RUNNER_CAPABILITY_SKILL_RUNTIME => Self::SkillRuntime,
+            wire::RUNNER_CAPABILITY_SKILL_RESOURCE_EXECUTION => Self::SkillResourceExecution,
             wire::RUNNER_CAPABILITY_SKILL_MANAGEMENT => Self::SkillManagement,
             wire::RUNNER_CAPABILITY_COMPUTER_OBSERVE => Self::ComputerObserve,
             wire::RUNNER_CAPABILITY_COMPUTER_APPLICATION_DISCOVERY => {
@@ -359,6 +363,7 @@ impl RunnerFeature {
             | Self::DetachedProcessJobs
             | Self::ManagedWorktree
             | Self::SkillRuntime
+            | Self::SkillResourceExecution
             | Self::SkillManagement
             | Self::ComputerObserve
             | Self::ComputerApplicationDiscovery
@@ -433,6 +438,7 @@ impl RunnerFeature {
             Self::ProjectPathRegistration => capabilities.project_path_registration,
             Self::ManagedWorktree => capabilities.managed_worktree,
             Self::SkillRuntime => capabilities.skill_runtime,
+            Self::SkillResourceExecution => capabilities.skill_resource_execution,
             Self::SkillManagement => capabilities.skill_management,
             Self::ComputerObserve => capabilities.computer_observe,
             Self::ComputerApplicationDiscovery => capabilities.computer_application_discovery,

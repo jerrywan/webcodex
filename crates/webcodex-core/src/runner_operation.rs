@@ -20,7 +20,9 @@ use crate::runner_protocol::{
     STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS,
 };
 use crate::runner_skill::{
-    RunnerSkillRequest, RUNNER_SKILL_REQUEST_KIND, RUNNER_SKILL_REQUEST_MAX_BYTES,
+    RunnerSkillExecutionRequest, RunnerSkillRequest, RUNNER_SKILL_EXECUTION_REQUEST_KIND,
+    RUNNER_SKILL_EXECUTION_REQUEST_MAX_BYTES, RUNNER_SKILL_REQUEST_KIND,
+    RUNNER_SKILL_REQUEST_MAX_BYTES,
 };
 use crate::ssh_resource::{SshResourceRequest, SSH_RESOURCE_REQUEST_MAX_BYTES};
 use crate::validation_bridge::{validate_bridge_request, ValidationBridgeRequest};
@@ -71,6 +73,13 @@ pub struct RunnerScriptOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerSkillResourceOperation {
+    pub cwd: Option<String>,
+    pub request: RunnerSkillExecutionRequest,
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunnerJobShellOperation {
     pub job_id: String,
     pub cwd: Option<String>,
@@ -109,12 +118,22 @@ pub struct RunnerJobScriptOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerJobSkillResourceOperation {
+    pub job_id: String,
+    pub cwd: Option<String>,
+    pub request: RunnerSkillExecutionRequest,
+    pub timeout_secs: u64,
+    pub context: ShellJobContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunnerJobOperation {
     StartShell(RunnerJobShellOperation),
     StartValidation(RunnerJobValidationOperation),
     StartProcess(RunnerJobProcessOperation),
     StartDetachedProcess(RunnerJobProcessOperation),
     StartScript(RunnerJobScriptOperation),
+    StartSkillResource(RunnerJobSkillResourceOperation),
     Stop { job_id: String },
 }
 
@@ -127,6 +146,7 @@ impl RunnerJobOperation {
                 &operation.job_id
             }
             Self::StartScript(operation) => &operation.job_id,
+            Self::StartSkillResource(operation) => &operation.job_id,
             Self::Stop { job_id } => job_id,
         }
     }
@@ -139,6 +159,7 @@ impl RunnerJobOperation {
                 Some(&operation.context)
             }
             Self::StartScript(operation) => Some(&operation.context),
+            Self::StartSkillResource(operation) => Some(&operation.context),
             Self::Stop { .. } => None,
         }
     }
@@ -151,6 +172,7 @@ impl RunnerJobOperation {
                 operation.cwd.as_deref()
             }
             Self::StartScript(operation) => operation.cwd.as_deref(),
+            Self::StartSkillResource(operation) => operation.cwd.as_deref(),
             Self::Stop { .. } => None,
         }
     }
@@ -205,6 +227,16 @@ impl RunnerJobOperation {
                 script_bytes: Some(operation.script.script.len()),
                 arg_count: operation.script.args.len(),
                 stdin_present: operation.stdin.is_some(),
+                validation_identity: correlation.0,
+                validation_tool: correlation.1,
+                assertion_name: correlation.2,
+            }),
+            Self::StartSkillResource(operation) => Some(ShellJobStructuredExecutionMetadata {
+                execution_source: "run_skill_resource".to_string(),
+                language: None,
+                script_bytes: None,
+                arg_count: operation.request.args.len(),
+                stdin_present: true,
                 validation_identity: correlation.0,
                 validation_tool: correlation.1,
                 assertion_name: correlation.2,
@@ -507,6 +539,7 @@ pub enum RunnerOperation {
     RunProcess(RunnerProcessOperation),
     RunScript(RunnerScriptOperation),
     RunInternalPosixScript(RunnerScriptOperation),
+    RunSkillResource(RunnerSkillResourceOperation),
     Job(RunnerJobOperation),
     File(RunnerFileOperation),
     Project(RunnerProjectOperation),
@@ -535,12 +568,14 @@ impl RunnerOperation {
             Self::RunProcess(_) => "run_process",
             Self::RunScript(_) => "run_script",
             Self::RunInternalPosixScript(_) => "run_internal_posix_script",
+            Self::RunSkillResource(_) => RUNNER_SKILL_EXECUTION_REQUEST_KIND,
             Self::Job(operation) => match operation {
                 RunnerJobOperation::StartShell(_) => "start_job",
                 RunnerJobOperation::StartValidation(_) => "start_validation_job",
                 RunnerJobOperation::StartProcess(_) => "start_process_job",
                 RunnerJobOperation::StartDetachedProcess(_) => "start_detached_process_job",
                 RunnerJobOperation::StartScript(_) => "start_script_job",
+                RunnerJobOperation::StartSkillResource(_) => "start_skill_resource_job",
                 RunnerJobOperation::Stop { .. } => "stop_job",
             },
             Self::File(operation) => operation.wire_kind(),
@@ -686,6 +721,26 @@ fn encode_operation(
             wire.script = Some(operation.script);
             wire.timeout_secs = operation.timeout_secs;
         }
+        RunnerOperation::RunSkillResource(operation) => {
+            operation
+                .request
+                .validate()
+                .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
+            validate_direct_structured_common(
+                operation.cwd.as_deref(),
+                None,
+                operation.timeout_secs,
+            )?;
+            let content = serde_json::to_string(&operation.request).map_err(|error| {
+                format!("could not encode Runner Skill execution request: {error}")
+            })?;
+            if content.len() > RUNNER_SKILL_EXECUTION_REQUEST_MAX_BYTES {
+                return Err("Runner Skill execution request exceeds V2 payload bound".to_string());
+            }
+            wire.cwd = operation.cwd;
+            wire.content = Some(content);
+            wire.timeout_secs = operation.timeout_secs;
+        }
         RunnerOperation::Job(operation) => encode_job_operation(&mut wire, operation)?,
         RunnerOperation::File(operation) => {
             let payload = operation.payload().clone();
@@ -806,6 +861,7 @@ fn encode_job_operation(
         RunnerJobOperation::StartProcess(_) => "start_process_job",
         RunnerJobOperation::StartDetachedProcess(_) => "start_detached_process_job",
         RunnerJobOperation::StartScript(_) => "start_script_job",
+        RunnerJobOperation::StartSkillResource(_) => "start_skill_resource_job",
         RunnerJobOperation::Stop { .. } => "stop_job",
     }
     .to_string();
@@ -865,6 +921,25 @@ fn encode_job_operation(
             wire.cwd = operation.cwd;
             wire.script = Some(operation.script);
             wire.stdin = operation.stdin;
+            wire.timeout_secs = operation.timeout_secs;
+            wire.job_context = Some(operation.context);
+        }
+        RunnerJobOperation::StartSkillResource(operation) => {
+            operation
+                .request
+                .validate()
+                .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
+            validate_structured_job_common(operation.cwd.as_deref(), None, operation.timeout_secs)?;
+            validate_job_context_coherence(operation.cwd.as_deref(), &operation.context)?;
+            let content = serde_json::to_string(&operation.request).map_err(|error| {
+                format!("could not encode Runner Skill execution request: {error}")
+            })?;
+            if content.len() > RUNNER_SKILL_EXECUTION_REQUEST_MAX_BYTES {
+                return Err("Runner Skill execution request exceeds V2 payload bound".to_string());
+            }
+            wire.job_id = Some(operation.job_id);
+            wire.cwd = operation.cwd;
+            wire.content = Some(content);
             wire.timeout_secs = operation.timeout_secs;
             wire.job_context = Some(operation.context);
         }
@@ -939,11 +1014,43 @@ fn decode_operation(wire: &RunnerRequest) -> Result<RunnerOperation, String> {
                 RunnerOperation::RunScript(operation)
             })
         }
+        RUNNER_SKILL_EXECUTION_REQUEST_KIND => {
+            ensure_special_payloads_absent(wire)?;
+            ensure_no_file_fields_except_content(wire)?;
+            if wire.job_id.is_some()
+                || wire.job_context.is_some()
+                || !wire.command.is_empty()
+                || wire.stdin.is_some()
+            {
+                return Err(
+                    "skill_resource_execution contains incompatible execution fields".to_string(),
+                );
+            }
+            let content = bounded_content(
+                wire,
+                RUNNER_SKILL_EXECUTION_REQUEST_MAX_BYTES,
+                RUNNER_SKILL_EXECUTION_REQUEST_KIND,
+            )?;
+            let request = serde_json::from_str::<RunnerSkillExecutionRequest>(content)
+                .map_err(|error| format!("invalid Runner Skill execution payload: {error}"))?;
+            request
+                .validate()
+                .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
+            validate_direct_structured_common(wire.cwd.as_deref(), None, wire.timeout_secs)?;
+            Ok(RunnerOperation::RunSkillResource(
+                RunnerSkillResourceOperation {
+                    cwd: wire.cwd.clone(),
+                    request,
+                    timeout_secs: wire.timeout_secs,
+                },
+            ))
+        }
         "start_job"
         | "start_validation_job"
         | "start_process_job"
         | "start_detached_process_job"
         | "start_script_job"
+        | "start_skill_resource_job"
         | "stop_job" => decode_job_operation(wire).map(RunnerOperation::Job),
         kind if kind.starts_with("file_") => {
             ensure_special_payloads_absent(wire)?;
@@ -1142,7 +1249,11 @@ fn decode_operation(wire: &RunnerRequest) -> Result<RunnerOperation, String> {
 }
 
 fn decode_job_operation(wire: &RunnerRequest) -> Result<RunnerJobOperation, String> {
-    ensure_no_file_fields(wire)?;
+    if wire.kind == "start_skill_resource_job" {
+        ensure_no_file_fields_except_content(wire)?;
+    } else {
+        ensure_no_file_fields(wire)?;
+    }
     let job_id = wire
         .job_id
         .clone()
@@ -1272,6 +1383,43 @@ fn decode_job_operation(wire: &RunnerRequest) -> Result<RunnerJobOperation, Stri
             {
                 return Err(
                     "script Job recovery metadata does not match typed operation".to_string(),
+                );
+            }
+            Ok(job)
+        }
+        "start_skill_resource_job" => {
+            ensure_special_payloads_absent(wire)?;
+            if !wire.command.is_empty() || wire.stdin.is_some() || context.ssh_resource.is_some() {
+                return Err(
+                    "typed Skill resource Job contains incompatible execution fields".to_string(),
+                );
+            }
+            let content = bounded_content(
+                wire,
+                RUNNER_SKILL_EXECUTION_REQUEST_MAX_BYTES,
+                RUNNER_SKILL_EXECUTION_REQUEST_KIND,
+            )?;
+            let request = serde_json::from_str::<RunnerSkillExecutionRequest>(content)
+                .map_err(|error| format!("invalid Runner Skill execution payload: {error}"))?;
+            request
+                .validate()
+                .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
+            validate_structured_job_common(wire.cwd.as_deref(), None, wire.timeout_secs)?;
+            let job = RunnerJobOperation::StartSkillResource(RunnerJobSkillResourceOperation {
+                job_id,
+                cwd: wire.cwd.clone(),
+                request,
+                timeout_secs: wire.timeout_secs,
+                context,
+            });
+            if job
+                .context()
+                .and_then(|ctx| ctx.structured_execution.clone())
+                != job.expected_structured_execution()
+            {
+                return Err(
+                    "Skill resource Job recovery metadata does not match typed operation"
+                        .to_string(),
                 );
             }
             Ok(job)
@@ -1477,6 +1625,20 @@ fn bounded_content<'a>(
         return Err(format!("{label} content payload is invalid or oversized"));
     }
     Ok(content)
+}
+
+fn ensure_no_file_fields_except_content(wire: &RunnerRequest) -> Result<(), String> {
+    if wire.path.is_some()
+        || wire.max_bytes.is_some()
+        || wire.expected_sha256.is_some()
+        || wire.expected_prefix.is_some()
+        || wire.start_line.is_some()
+        || wire.end_line.is_some()
+        || wire.create_dirs
+    {
+        return Err(format!("{} contains incompatible file fields", wire.kind));
+    }
+    Ok(())
 }
 
 fn ensure_no_file_fields(wire: &RunnerRequest) -> Result<(), String> {
@@ -1725,6 +1887,18 @@ mod tests {
         }
     }
 
+    fn skill_execution_request() -> RunnerSkillExecutionRequest {
+        RunnerSkillExecutionRequest {
+            skill_id: "wc_skill_qqqqqqqqqqqqqqqqqqqqqg".to_string(),
+            expected_source: crate::runner_skill::RunnerSkillSource::Configured,
+            path: "scripts/probe.py".to_string(),
+            expected_definition_revision: "b".repeat(64),
+            expected_package_revision: None,
+            expected_resource_sha256: "c".repeat(64),
+            args: vec!["literal".to_string()],
+        }
+    }
+
     #[test]
     fn omitted_v2_kind_keeps_legacy_run_shell_default() {
         let value = serde_json::json!({
@@ -1872,6 +2046,7 @@ mod tests {
             script: "printf ok".to_string(),
             args: vec!["literal".to_string()],
         };
+        let skill_request = skill_execution_request();
         let validation_step = ShellJobValidationStep {
             name: "check".to_string(),
             program: "cargo".to_string(),
@@ -1912,6 +2087,11 @@ mod tests {
                     args: Vec::new(),
                 },
                 stdin: None,
+                timeout_secs: 30,
+            }),
+            RunnerOperation::RunSkillResource(RunnerSkillResourceOperation {
+                cwd: Some("/repo".to_string()),
+                request: skill_request.clone(),
                 timeout_secs: 30,
             }),
             RunnerOperation::Job(RunnerJobOperation::StartShell(RunnerJobShellOperation {
@@ -1985,6 +2165,22 @@ mod tests {
                     false,
                 ),
             })),
+            RunnerOperation::Job(RunnerJobOperation::StartSkillResource(
+                RunnerJobSkillResourceOperation {
+                    job_id: "job-skill-resource".to_string(),
+                    cwd: Some("/repo".to_string()),
+                    request: skill_request.clone(),
+                    timeout_secs: 60,
+                    context: structured_job_context(
+                        Some("/repo"),
+                        "run_skill_resource",
+                        None,
+                        None,
+                        skill_request.args.len(),
+                        true,
+                    ),
+                },
+            )),
             RunnerOperation::Job(RunnerJobOperation::Stop {
                 job_id: "job-stop".to_string(),
             }),
@@ -2121,11 +2317,13 @@ mod tests {
             "run_process",
             "run_script",
             "run_internal_posix_script",
+            RUNNER_SKILL_EXECUTION_REQUEST_KIND,
             "start_job",
             "start_validation_job",
             "start_process_job",
             "start_detached_process_job",
             "start_script_job",
+            "start_skill_resource_job",
             "stop_job",
             "file_read",
             "file_write",

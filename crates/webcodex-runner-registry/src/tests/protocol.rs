@@ -492,6 +492,7 @@ async fn runner_supports_recognizes_all_protocol_capability_names() {
                 project_path_registration: true,
                 managed_worktree: true,
                 skill_runtime: true,
+                skill_resource_execution: true,
                 skill_management: true,
                 computer_observe: true,
                 computer_application_discovery: true,

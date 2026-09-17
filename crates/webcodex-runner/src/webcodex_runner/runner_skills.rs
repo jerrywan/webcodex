@@ -1,14 +1,219 @@
-use super::config::{RunnerPolicy, SkillsConfig};
+use super::config::SkillsConfig;
 use super::configured_skills;
-use super::output::CommandResult;
-use super::skill_store::SkillStore;
-use std::collections::BTreeSet;
-use std::time::Instant;
-use webcodex_core::runner_skill::{
-    RunnerSkillDescriptor, RunnerSkillListResponse, RunnerSkillReadResponse, RunnerSkillRequest,
-    RunnerSkillResolveResponse, RunnerSkillSource, RUNNER_SKILL_RESPONSE_FORMAT,
-    RUNNER_SKILL_RESPONSE_MAX_BYTES,
+use super::output::{CommandResult, ShellCommandResult};
+use super::shell::{
+    run_process_with_profiles_and_execution_state_with_start_hook, PreparedShellProfileCache,
 };
+use super::skill_store::SkillStore;
+use super::{RunnerPolicy, ShellConfig};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
+use webcodex_core::runner_protocol::{
+    PROCESS_ARGV_MAX_BYTES, PROCESS_ARG_MAX_BYTES, PROCESS_ARG_MAX_COUNT,
+    PROCESS_EXECUTABLE_MAX_BYTES,
+};
+use webcodex_core::runner_skill::{
+    RunnerSkillDescriptor, RunnerSkillExecutionRequest, RunnerSkillListResponse,
+    RunnerSkillReadResponse, RunnerSkillRequest, RunnerSkillResolveResponse, RunnerSkillSource,
+    RUNNER_SKILL_RESPONSE_FORMAT, RUNNER_SKILL_RESPONSE_MAX_BYTES,
+};
+
+const PYTHON_SKILL_WRAPPER: &str = r#"import os, sys
+p = sys.argv[1]
+a = sys.argv[2:]
+src = sys.stdin.read()
+sys.argv = [p, *a]
+sys.path[0] = os.path.dirname(p)
+g = {"__name__": "__main__", "__file__": p, "__package__": None, "__spec__": None, "__builtins__": __builtins__}
+exec(compile(src, p, "exec"), g, g)
+"#;
+
+const SHELL_SKILL_WRAPPER: &str = "script=$(cat) || exit $?; eval \"$script\"";
+
+struct PreparedSkillResourceExecution {
+    target_path: PathBuf,
+    script: String,
+    _managed_snapshot: Option<tempfile::TempDir>,
+}
+
+fn prepare_skill_resource_execution(
+    config: &SkillsConfig,
+    client_id: &str,
+    server_url: &str,
+    request: &RunnerSkillExecutionRequest,
+) -> Result<PreparedSkillResourceExecution, String> {
+    let store = SkillStore::for_runner(client_id, server_url)?;
+    prepare_skill_resource_execution_with_store(config, &store, request)
+}
+
+fn prepare_skill_resource_execution_with_store(
+    config: &SkillsConfig,
+    store: &SkillStore,
+    request: &RunnerSkillExecutionRequest,
+) -> Result<PreparedSkillResourceExecution, String> {
+    request
+        .validate()
+        .map_err(|_| "skill_invalid_execution_request".to_string())?;
+    let resolved = resolve_runner_skill(config, store, &request.skill_id)?;
+    require_resolved_source(resolved.as_ref(), request.expected_source)?;
+    match request.expected_source {
+        RunnerSkillSource::Configured => {
+            let prepared = configured_skills::prepare_execution_target(config, request)?;
+            Ok(PreparedSkillResourceExecution {
+                target_path: prepared.target_path,
+                script: prepared.script,
+                _managed_snapshot: None,
+            })
+        }
+        RunnerSkillSource::Managed => {
+            let prepared = store.prepare_execution_snapshot(request)?;
+            let target_path = prepared.snapshot.path().join(&request.path);
+            Ok(PreparedSkillResourceExecution {
+                target_path,
+                script: prepared.script,
+                _managed_snapshot: Some(prepared.snapshot),
+            })
+        }
+    }
+}
+
+fn skill_execution_candidates(
+    request: &RunnerSkillExecutionRequest,
+    target: &str,
+) -> Result<Vec<(String, Vec<String>)>, String> {
+    let extension = Path::new(&request.path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let candidates = match extension {
+        "py" => {
+            let mut common = vec![
+                "-B".to_string(),
+                "-c".to_string(),
+                PYTHON_SKILL_WRAPPER.to_string(),
+                target.to_string(),
+            ];
+            common.extend(request.args.iter().cloned());
+            let mut py = Vec::with_capacity(common.len() + 1);
+            py.push("-3".to_string());
+            py.extend(common.iter().cloned());
+            vec![
+                ("python3".to_string(), common.clone()),
+                ("python".to_string(), common),
+                ("py".to_string(), py),
+            ]
+        }
+        "sh" => {
+            let mut args = vec![
+                "-c".to_string(),
+                SHELL_SKILL_WRAPPER.to_string(),
+                target.to_string(),
+            ];
+            args.extend(request.args.iter().cloned());
+            vec![("sh".to_string(), args)]
+        }
+        _ => return Err("skill_resource_interpreter_unsupported".to_string()),
+    };
+    for (executable, args) in &candidates {
+        let total = args.iter().fold(executable.len(), |total, arg| {
+            total.saturating_add(1).saturating_add(arg.len())
+        });
+        if executable.is_empty()
+            || executable.len() > PROCESS_EXECUTABLE_MAX_BYTES
+            || args.len() > PROCESS_ARG_MAX_COUNT
+            || args
+                .iter()
+                .any(|arg| arg.len() > PROCESS_ARG_MAX_BYTES || arg.contains('\0'))
+            || total > PROCESS_ARGV_MAX_BYTES
+        {
+            return Err("skill_resource_interpreter_arguments_invalid".to_string());
+        }
+    }
+    Ok(candidates)
+}
+
+fn interpreter_unavailable(result: &ShellCommandResult) -> bool {
+    result.execution_state == webcodex_core::runner_protocol::ShellCommandExecutionState::NotStarted
+        && result.result.error.as_deref().is_some_and(|error| {
+            error.starts_with("failed to spawn structured process")
+                || error.contains("structured process executable is unavailable")
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_skill_resource_with_profiles_and_execution_state(
+    generation: u64,
+    skills: &SkillsConfig,
+    client_id: &str,
+    server_url: &str,
+    policy: &RunnerPolicy,
+    shell: &ShellConfig,
+    project_registry_dir: &Path,
+    cache: &PreparedShellProfileCache,
+    cwd: Option<&str>,
+    request: &RunnerSkillExecutionRequest,
+    timeout_secs: u64,
+    stop_requested: Option<&AtomicBool>,
+    on_started: Option<&dyn Fn()>,
+) -> ShellCommandResult {
+    let prepared = match prepare_skill_resource_execution(skills, client_id, server_url, request) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return ShellCommandResult::not_started(CommandResult {
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+                duration_ms: Some(0),
+                error: Some(error),
+            })
+        }
+    };
+    let Some(target) = prepared.target_path.to_str() else {
+        return ShellCommandResult::not_started(CommandResult {
+            exit_code: None,
+            stdout: None,
+            stderr: None,
+            duration_ms: Some(0),
+            error: Some("skill_resource_native_path_not_utf8".to_string()),
+        });
+    };
+    let candidates = match skill_execution_candidates(request, target) {
+        Ok(candidates) => candidates,
+        Err(error) => {
+            return ShellCommandResult::not_started(CommandResult {
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+                duration_ms: Some(0),
+                error: Some(error),
+            })
+        }
+    };
+    let last = candidates.len().saturating_sub(1);
+    for (index, (executable, args)) in candidates.into_iter().enumerate() {
+        let result = run_process_with_profiles_and_execution_state_with_start_hook(
+            generation,
+            policy,
+            shell,
+            project_registry_dir,
+            cache,
+            cwd,
+            &executable,
+            &args,
+            Some(&prepared.script),
+            timeout_secs,
+            stop_requested,
+            on_started,
+        );
+        if index != last && interpreter_unavailable(&result) {
+            continue;
+        }
+        return result;
+    }
+    unreachable!("trusted Skill interpreter candidates are never empty")
+}
 
 pub(crate) fn handle_runner_skill_request(
     config: &SkillsConfig,

@@ -146,12 +146,18 @@ impl ToolRuntime {
                     if matches!(
                         required,
                         RunnerCapabilityRequirement::StructuredProcess
+                            | RunnerCapabilityRequirement::SkillResourceExecution
                             | RunnerCapabilityRequirement::DetachedProcess
                             | RunnerCapabilityRequirement::StructuredScript
                     ) {
                         let noun =
                             if matches!(required, RunnerCapabilityRequirement::StructuredScript) {
                                 "script"
+                            } else if matches!(
+                                required,
+                                RunnerCapabilityRequirement::SkillResourceExecution
+                            ) {
+                                "trusted Skill resource"
                             } else if matches!(
                                 required,
                                 RunnerCapabilityRequirement::DetachedProcess

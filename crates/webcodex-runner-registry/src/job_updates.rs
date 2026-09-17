@@ -26,8 +26,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use webcodex_core::runner_operation::{
     RunnerInvocationMetadata, RunnerJobOperation, RunnerJobProcessOperation,
-    RunnerJobScriptOperation, RunnerJobShellOperation, RunnerJobValidationOperation,
-    RunnerOperation,
+    RunnerJobScriptOperation, RunnerJobShellOperation, RunnerJobSkillResourceOperation,
+    RunnerJobValidationOperation, RunnerOperation,
 };
 use webcodex_core::runner_protocol::{
     validate_process_argv, validate_script_request, validation_infrastructure_failure_code,
@@ -39,6 +39,7 @@ use webcodex_core::runner_protocol::{
     PROCESS_STDIN_MAX_BYTES, STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
     STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS,
 };
+use webcodex_core::runner_skill::RunnerSkillExecutionRequest;
 
 #[derive(Clone, Copy)]
 struct ValidationProtocolError(&'static str);
@@ -577,6 +578,7 @@ pub enum StructuredJobExecution {
     Process(ShellProcessArgv),
     DetachedProcess(ShellProcessArgv),
     Script(ShellScriptPayload),
+    SkillResource(RunnerSkillExecutionRequest),
 }
 
 fn validate_structured_job_common(
@@ -741,6 +743,10 @@ impl RunnerRegistry {
             Some(StructuredJobExecution::Script(script))
                 if script.language == ShellScriptLanguage::Typescript
         );
+        let skill_resource_request = matches!(
+            structured_execution.as_ref(),
+            Some(StructuredJobExecution::SkillResource(_))
+        );
         let structured_stdin = metadata.stdin;
         if validation_steps.len() > 3
             || validation_steps.iter().any(|step| !step.is_canonical())
@@ -834,6 +840,27 @@ impl RunnerRegistry {
                     assertion_name: assertion_name.clone(),
                 };
                 (preview, Some(safe), "run_script")
+            }
+            Some(StructuredJobExecution::SkillResource(request)) => {
+                request
+                    .validate()
+                    .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
+                if structured_stdin.is_some() {
+                    return Err("Skill resource Job does not accept generic stdin".to_string());
+                }
+                validate_structured_job_common(normalized_job_cwd.as_deref(), None, timeout_secs)?;
+                let preview = format!("trusted Skill resource {}", request.path);
+                let safe = ShellJobStructuredExecutionMetadata {
+                    execution_source: "run_skill_resource".to_string(),
+                    language: None,
+                    script_bytes: None,
+                    arg_count: request.args.len(),
+                    stdin_present: true,
+                    validation_identity: validation_identity.clone(),
+                    validation_tool: validation_tool.clone(),
+                    assertion_name: assertion_name.clone(),
+                };
+                (preview, Some(safe), "run_skill_resource")
             }
             None => {
                 let run = ShellRunRequest {
@@ -949,6 +976,15 @@ impl RunnerRegistry {
                     context: job_context,
                 })
             }
+            Some(StructuredJobExecution::SkillResource(request)) => {
+                RunnerJobOperation::StartSkillResource(RunnerJobSkillResourceOperation {
+                    job_id: job_id.clone(),
+                    cwd: normalized_job_cwd.clone(),
+                    request,
+                    timeout_secs,
+                    context: job_context,
+                })
+            }
             None if validation_steps.is_empty() => {
                 RunnerJobOperation::StartShell(RunnerJobShellOperation {
                     job_id: job_id.clone(),
@@ -1017,6 +1053,15 @@ impl RunnerRegistry {
         {
             return Err(format!(
                 "capability_unavailable: runner {client_id} does not support structured_script_typescript"
+            ));
+        }
+        if skill_resource_request
+            && !runner
+                .runner_features
+                .supports(RunnerFeature::SkillResourceExecution)
+        {
+            return Err(format!(
+                "capability_unavailable: runner {client_id} does not support skill_resource_execution"
             ));
         }
         if detached_request
