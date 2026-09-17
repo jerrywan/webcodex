@@ -3343,6 +3343,20 @@ pub enum ToolCall {
         wake_on: ObserveJobsWakeOn,
     },
 
+    /// Arm one caller-owned durable one-shot terminal attention for an exact
+    /// existing Job. This never starts, retries, stops, or replaces execution.
+    WaitForJobTerminal {
+        /// Exact existing public Job identity. The Job is independently re-authorized; this value never
+        /// starts, retries, stops, or replaces execution.
+        #[schemars(length(min = 1, max = 128))]
+        job_id: String,
+        /// Caller-generated bounded operation key. Exact replay for the same Job returns the same durable
+        /// terminal wait; changed reuse is rejected. It is registration identity only, never Job or retry
+        /// identity.
+        #[schemars(length(min = 1, max = 128))]
+        idempotency_key: String,
+    },
+
     /// List files in a Runner-registered project directory (bounded, read-only).
     /// Returns project-relative paths plus a file/dir kind. Routed to the
     /// owning registered Runner via the `file_list` op; the server never reads
@@ -4708,6 +4722,7 @@ impl ToolCall {
             Self::RunJob { .. } => "run_job",
             Self::StopJob { .. } => "stop_job",
             Self::ObserveJobs { .. } => "observe_jobs",
+            Self::WaitForJobTerminal { .. } => "wait_for_job_terminal",
             Self::ListProjectFiles { .. } => "list_project_files",
             Self::ListProjectTrackedFiles { .. } => "list_project_tracked_files",
             Self::ProjectOverview { .. } => "project_overview",

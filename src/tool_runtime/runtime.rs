@@ -177,6 +177,15 @@ pub struct ToolRuntime {
     /// AgentTask, and Goal state share this Server SQLite handle while remaining
     /// independent tables, lifecycles, and authority domains.
     pub(crate) communication_db: Option<Arc<crate::Database>>,
+    /// Dedicated generic Job-terminal-attention store. This is intentionally
+    /// independent of Durable Agent communication identity.
+    pub(crate) job_terminal_db: Option<Arc<crate::Database>>,
+    /// Process-local Host delivery seam for already-durable terminal events.
+    pub(crate) job_terminal_continuations:
+        Option<crate::job_terminal_attention::JobTerminalContinuationController>,
+    #[cfg(test)]
+    pub(crate) job_terminal_registration_test_hook:
+        Option<crate::tool_runtime::job_terminal_wait::JobTerminalRegistrationTestHook>,
     /// Optional process-local Host continuation registry/controller. It is
     /// created only when the durable communication database is injected and is
     /// intentionally empty again after process restart.
@@ -228,6 +237,10 @@ impl ToolRuntime {
             window_activity_db: None,
             memory_db: None,
             communication_db: None,
+            job_terminal_db: None,
+            job_terminal_continuations: None,
+            #[cfg(test)]
+            job_terminal_registration_test_hook: None,
             agent_continuations: None,
         }
     }
@@ -259,6 +272,25 @@ impl ToolRuntime {
             db.clone(),
         ));
         self.communication_db = Some(db);
+        self
+    }
+
+    pub(crate) fn with_job_terminal_attention(
+        mut self,
+        db: Arc<crate::Database>,
+        controller: crate::job_terminal_attention::JobTerminalContinuationController,
+    ) -> Self {
+        self.job_terminal_db = Some(db);
+        self.job_terminal_continuations = Some(controller);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_job_terminal_registration_test_hook(
+        mut self,
+        hook: crate::tool_runtime::job_terminal_wait::JobTerminalRegistrationTestHook,
+    ) -> Self {
+        self.job_terminal_registration_test_hook = Some(hook);
         self
     }
 

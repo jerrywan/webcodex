@@ -408,6 +408,14 @@ The minimum mutation cases are: one real `read_files -> read_revision -> apply_t
 
 Capture both call economy and effect truth: outer model-facing calls, nested calls, canonical edit calls, Runner file-write requests, Code Mode duration, `slot_wait_ms`, nested raw result bytes, returned bytes, consequential-call counters, known results, outcome uncertainty, and mutation `state_changed`. The value hypothesis is specifically whether one adaptive E2b call can replace the direct sequence `read_files -> model decision -> apply_text_edits -> model decision -> read/show_changes` without weakening canonical authority or evidence. Do not infer generic mutation safety or model-level speedup from local runtime tests alone.
 
+### E3 v1: generic asynchronous Job terminal attention
+
+E3 is implemented outside Code Mode as the model-visible `wait_for_job_terminal` Job operation. It registers one bounded caller-owned one-shot wait for one exact existing public `job_id`; keyed replay returns the same durable wait, and the operation cannot start, retry, stop, replace, or redispatch the execution. Canonical RunnerRegistry terminal truth is the only trigger. The event is deliberately sparse (Job id, terminal status, bounded outcome, wait identity) and never carries stdout/stderr, command text, paths, environment, validation bodies, credentials, or observation tokens. `observe_jobs` remains the explicit details/recovery surface.
+
+Durable wait/event state survives Store reopen and can be reconciled from the same Runner Job or retained terminal receipts. Host delivery is separate presentation state: `pending` means durable terminal truth exists without accepted Host delivery, `delivered` means a current carrier accepted dispatch after the durable fence, and `delivery_unknown` means the fence was crossed but acknowledgement is uncertain and must not be silently retried. The current ordinary Workflow Session surface has no Job-native production continuation carrier, so production truthfully reports `automatic_resume_available=false`; deterministic adapter tests prove only the seam, not live ChatGPT auto-resume.
+
+E3 is not added to any Code Mode allowlist. E1 remains read-only, E2a still hands off the same canonical validation Job, and E2b remains one guarded mutation with no validation/Job access. Nested Job waiting and E2c remain out of scope.
+
 ### Current stage sequence
 
 ```text
@@ -416,7 +424,7 @@ E2a  structured validation + Job/effect foundation
 E2b  guarded structured mutation: E1 reads + one apply_text_edits attempt
 E2c  decide whether validation and mutation should coexist in one cell;
      consider selective process/shell only with telemetry
-E3   Async Event Delivery
+E3   implemented generic asynchronous Job terminal attention v1
 E4   product/stability decision
 ```
 
@@ -436,4 +444,4 @@ E1 intentionally has no:
 - Windows/macOS Code Mode packaging guarantee;
 - stable compatibility promise.
 
-The implemented stage sequence is documented above. Current E2b remains deliberately narrower than nested validation, multiple mutation attempts, generic shell/process orchestration, global/direct-write serialization, finer-than-Project mutation locking, nested Job waiting, Async Event Delivery, or a stable product commitment.
+The implemented stage sequence is documented above. Current E2b remains deliberately narrower than nested validation, multiple mutation attempts, generic shell/process orchestration, global/direct-write serialization, finer-than-Project mutation locking, nested Job waiting, or a stable product commitment. E3 is a separate generic Job capability and does not expand the E1/E2a/E2b child-tool allowlists.

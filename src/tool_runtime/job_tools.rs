@@ -52,6 +52,13 @@ impl ToolRuntime {
                 self.observe_jobs_for_auth(items, tail_lines, wait_secs, wake_on, auth)
                     .await
             }
+            ToolCall::WaitForJobTerminal {
+                job_id,
+                idempotency_key,
+            } => {
+                self.wait_for_job_terminal(job_id, idempotency_key, auth)
+                    .await
+            }
             ToolCall::ListJobs {
                 limit,
                 status,

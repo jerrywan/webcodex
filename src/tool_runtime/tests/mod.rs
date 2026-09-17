@@ -31,6 +31,7 @@ mod goals;
 mod handoff;
 mod handoff_brief;
 mod hygiene;
+mod job_terminal_wait;
 mod jobs;
 mod lsp;
 mod memory;

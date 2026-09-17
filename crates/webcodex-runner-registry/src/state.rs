@@ -367,6 +367,9 @@ pub(super) struct JobObservationState {
     /// and never controls Server registry retention.
     pub(super) terminal_observed_at: Option<i64>,
     pub(super) receipt_candidates: Option<crate::receipts::ReceiptCandidates>,
+    /// Exact terminal-event candidates consumed by a post-registry-lock sink.
+    /// This owns no Job truth: authoritative terminal state remains on the Job.
+    pub(super) terminal_event_candidates: Option<crate::receipts::TerminalEventCandidates>,
     /// Fixed historical deadline, also identifies a receipt with no live lease.
     pub(super) receipt_expires_at: Option<i64>,
 }
@@ -379,6 +382,7 @@ impl JobObservationState {
             notify: Arc::new(Notify::new()),
             terminal_observed_at: None,
             receipt_candidates: None,
+            terminal_event_candidates: None,
             receipt_expires_at: None,
         }
     }

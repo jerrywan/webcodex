@@ -46,6 +46,7 @@ mod handoff_tools;
 mod helpers;
 mod hygiene;
 mod hygiene_tools;
+mod job_terminal_wait;
 mod job_tools;
 mod jobs;
 pub(crate) mod kernel;

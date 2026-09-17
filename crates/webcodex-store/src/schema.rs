@@ -390,6 +390,10 @@ impl Database {
         // reference AgentTasks, while the Wait itself owns no source-domain authority.
         Self::ensure_agent_wait_schema(&mut conn)?;
 
+        // Generic Job terminal attention has its own authority model and bounded
+        // one-shot store; it deliberately does not reuse Durable Agent waits.
+        Self::ensure_job_terminal_wait_schema(&mut conn)?;
+
         // Agent Wake is the shared durable continuation/outbox domain. Initialize it
         // after AgentTask and AgentWait so every source foreign key is enforceable.
         Self::ensure_agent_wake_schema(&mut conn)?;

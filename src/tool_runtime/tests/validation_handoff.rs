@@ -1324,6 +1324,156 @@ async fn handoff_job_terminal_success_produces_passed_validation_summary() {
 }
 
 #[tokio::test]
+async fn e3_cargo_test_lib_handoff_arms_terminal_attention_without_polling() {
+    let client_id = "vhandoff-e3-attention";
+    let temp = tempfile::tempdir().unwrap();
+    let db = std::sync::Arc::new(
+        crate::Database::open(&temp.path().join("e3-validation-handoff.db")).unwrap(),
+    );
+    let controller =
+        crate::job_terminal_attention::JobTerminalContinuationController::new(db.clone());
+    let registry = std::sync::Arc::new(
+        crate::job_receipts::production_registry_with_terminal_attention(
+            db.clone(),
+            controller.clone(),
+        )
+        .await,
+    );
+    let runtime = ToolRuntime::new(
+        registry,
+        std::sync::Arc::new(crate::tool_runtime::RuntimeInfo::default()),
+    )
+    .with_job_terminal_attention(db.clone(), controller)
+    .with_validation_sync_wait(std::time::Duration::from_millis(50));
+    register_agent(
+        &runtime,
+        client_id,
+        None,
+        RunnerCapabilities {
+            async_shell_jobs: true,
+            structured_validation_argv: true,
+            structured_cargo_test_lib: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let project = agent_test_project_id(client_id);
+    let auth = auth_context(None, true);
+
+    let validation = tokio::spawn({
+        let runtime = runtime.clone();
+        let auth = auth.clone();
+        async move {
+            runtime
+                .dispatch_with_auth(
+                    ToolCall::CargoTest {
+                        project,
+                        session_id: None,
+                        cwd: None,
+                        filter: None,
+                        lib: Some(true),
+                        all_targets: None,
+                        all_features: None,
+                        no_default_features: None,
+                        features: None,
+                        package: None,
+                        no_run: None,
+                        require_tests: None,
+                        min_tests: None,
+                        timeout_secs: Some(1800),
+                        sync_wait_secs: Some(1),
+                    },
+                    Some(&auth),
+                )
+                .await
+        }
+    });
+    let (request, job_id) = poll_start_validation_job(&runtime, client_id).await;
+    runtime
+        .runner_registry
+        .update_job(cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "running",
+            "running 1 test\n",
+            "",
+            None,
+            running_progress("test"),
+            false,
+        ))
+        .await
+        .unwrap();
+    let handoff = validation.await.unwrap();
+    assert!(handoff.success, "{:?}", handoff.error);
+    let _handoff_token = sparse_validation_handoff_token(&handoff.output, &job_id);
+
+    let armed = runtime
+        .dispatch_with_auth(
+            ToolCall::WaitForJobTerminal {
+                job_id: job_id.clone(),
+                idempotency_key: "e3-cargo-test-lib-attention".to_string(),
+            },
+            Some(&auth),
+        )
+        .await;
+    assert!(armed.success, "{:?}", armed.error);
+    assert_eq!(armed.output["state"], "waiting");
+    assert_eq!(armed.output["automatic_resume_available"], false);
+
+    runtime
+        .runner_registry
+        .update_job(cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "completed",
+            "running 1 test\n\ntest result: ok. 1 passed; 0 failed; 0 ignored\n",
+            "",
+            Some(0),
+            completed_progress(),
+            true,
+        ))
+        .await
+        .unwrap();
+
+    let principal = crate::job_terminal_attention::principal_for_auth(Some(&auth));
+    let wait_id = armed.output["wait_id"].as_str().unwrap();
+    let triggered = db
+        .read_job_terminal_wait(&principal, wait_id, chrono::Utc::now().timestamp())
+        .unwrap();
+    assert_eq!(
+        triggered.state,
+        webcodex_store::JobTerminalWaitState::Triggered
+    );
+    assert_eq!(
+        triggered.delivery_state,
+        webcodex_store::JobTerminalDeliveryState::Pending
+    );
+    assert_eq!(triggered.terminal_status.as_deref(), Some("completed"));
+    assert_eq!(triggered.terminal_outcome.as_deref(), Some("succeeded"));
+
+    // Terminal visibility did not require observation. One explicit observation is
+    // still available afterward when the model wants canonical logs/details.
+    let details = runtime
+        .dispatch_with_auth(
+            ToolCall::ObserveJobs {
+                items: vec![ObserveJobsItem {
+                    job_id: job_id.clone(),
+                    after_observation_token: None,
+                }],
+                tail_lines: 40,
+                wait_secs: None,
+                wake_on: ObserveJobsWakeOn::Terminal,
+            },
+            Some(&auth),
+        )
+        .await;
+    assert!(details.success, "{:?}", details.error);
+    assert_eq!(details.output["terminal_count"], 1);
+}
+
+#[tokio::test]
 async fn stale_validation_terminal_snapshot_cannot_evict_newer_materialization_marker() {
     let client_id = "vhandoff-stale-terminal-snapshot";
     let runtime = runtime_with_agent_project(client_id);

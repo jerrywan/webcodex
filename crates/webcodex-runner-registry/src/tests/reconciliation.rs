@@ -2702,6 +2702,8 @@ async fn reconciliation_summary_counts_inventory_effects_without_payload_data() 
             INSTANCE_A,
             None,
             registry.observation_epoch.clone(),
+            None,
+            None,
             &first_inventory,
             now_ts(),
         );
@@ -2729,6 +2731,8 @@ async fn reconciliation_summary_counts_inventory_effects_without_payload_data() 
         INSTANCE_A,
         None,
         registry.observation_epoch.clone(),
+        None,
+        None,
         &second_inventory,
         now_ts(),
     );

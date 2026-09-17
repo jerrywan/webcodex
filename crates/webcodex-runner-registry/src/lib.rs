@@ -16,7 +16,10 @@ mod projects;
 mod protocol;
 mod receipts;
 mod reconciliation;
-pub use receipts::{JobReceiptStore, RetainedJobReceipt};
+pub use receipts::{
+    JobReceiptStore, JobTerminalEvent, JobTerminalEventSink, JobTerminalRegistrationSnapshot,
+    RetainedJobReceipt,
+};
 mod registry;
 mod requests;
 mod runners;

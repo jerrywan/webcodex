@@ -21,6 +21,9 @@ mod communication;
 mod connection_observation;
 mod goal;
 mod job_receipts;
+mod job_terminal_wait;
+#[cfg(test)]
+mod job_terminal_wait_tests;
 mod memory;
 pub mod models;
 mod oauth;
@@ -69,6 +72,14 @@ pub use self::goal::{
     GoalPatch, GoalStoreError, GoalSummary, NewGoal, GOAL_ID_PREFIX, MAX_GOAL_CORRELATIONS,
     MAX_GOAL_LIST_LIMIT, MAX_GOAL_OBJECTIVE_BYTES, MAX_GOAL_TERMINAL_REASON_BYTES,
     MAX_GOAL_TITLE_CHARS, WORKFLOW_SESSION_ID_PREFIX,
+};
+pub use self::job_terminal_wait::{
+    JobTerminalDeliveryPrepared, JobTerminalDeliveryState, JobTerminalFact,
+    JobTerminalSourceIdentity, JobTerminalWaitMatch, JobTerminalWaitMutation,
+    JobTerminalWaitPrincipal, JobTerminalWaitRecord, JobTerminalWaitState,
+    JobTerminalWaitStoreError, NewJobTerminalWait, JOB_TERMINAL_DELIVERY_ATTEMPT_ID_PREFIX,
+    JOB_TERMINAL_WAIT_ID_PREFIX, MAX_JOB_TERMINAL_WAITS_GLOBAL,
+    MAX_JOB_TERMINAL_WAITS_PER_PRINCIPAL, MAX_JOB_TERMINAL_WAITS_PER_SOURCE,
 };
 #[allow(unused_imports)]
 pub use self::memory::{

@@ -581,6 +581,8 @@ impl RunnerRegistry {
                 &runner_instance_id,
                 auth_group,
                 self.observation_epoch.clone(),
+                self.inner.capture_candidates(),
+                self.inner.capture_terminal_event_candidates(),
                 inventory,
                 now,
             );

@@ -370,6 +370,36 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
         ).with_gpt_action_description("Continue known Jobs by job_id/token. Use wait_secs=100,wake_on=terminal only when progress is blocked on terminal outcome; otherwise retain the exact continuation, continue independent work, and observe later. Tokens are observation cursors, never retry/execution authority."),
         80,
     ),
+    adaptive_runtime_direct(
+        model_spec(
+            def(
+                "wait_for_job_terminal",
+                super::ToolAuditPolicy::TYPED_CANONICAL,
+                ModelVisible,
+                TOOL_CATEGORY_JOB,
+                None,
+                TOOL_PROVIDER_NATIVE,
+                super::ToolSemanticContract {
+                    effect: super::ToolEffect::Mutate,
+                    risk: Read,
+                    approval: super::ToolApprovalPolicy::None,
+                    idempotency: super::ToolIdempotency::Keyed,
+                },
+                Some(RUNTIME_READ),
+                false,
+                NoPath,
+                false,
+                false,
+                super::ToolSessionEvidencePolicy::NONE,
+            )
+            .with_activity(
+                super::ToolActivityPresentation::Transport,
+                super::ToolActivityInteraction::Meaningful,
+            ),
+            "Arm one caller-owned bounded one-shot terminal attention for one exact existing public job_id. Exact keyed replay returns the same wait. This operation never starts, retries, stops, or replaces the Job; job_id remains execution identity and observation tokens are unrelated cursors. Terminal delivery contains only sparse identity/status/outcome facts, never logs. automatic_resume_available is true only when a real current Host carrier exists. Do not poll this wait; use observe_jobs only when explicit logs/details or recovery are needed.",
+        ).with_gpt_action_description("Arm durable one-shot attention for an existing Job terminal transition. It never changes Job execution. Do not poll the wait; observe_jobs remains the explicit logs/details recovery tool."),
+        79,
+    ),
 ];
 
 pub(super) const LISTING_DEFINITIONS: &[ToolDefinition] = &[

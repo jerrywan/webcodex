@@ -78,6 +78,7 @@ fn store_connection_domains_and_metric_names_are_closed_and_stable() {
             "core",
             "goal",
             "job_receipts",
+            "job_terminal_wait",
             "memory",
             "oauth",
             "schema",

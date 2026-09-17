@@ -704,6 +704,8 @@ pub(crate) fn record_from_snapshot(
     runner_instance_id: &str,
     auth_group: Option<RunnerAccessGroup>,
     observation_epoch: std::sync::Arc<str>,
+    receipt_candidates: Option<crate::receipts::ReceiptCandidates>,
+    terminal_event_candidates: Option<crate::receipts::TerminalEventCandidates>,
     snapshot: &ShellJobSnapshot,
     now: i64,
 ) -> ShellJobRecord {
@@ -759,7 +761,11 @@ pub(crate) fn record_from_snapshot(
             reason: Some(JobRecoveryReason::ServerRestartReconciliation),
             recovering_since: None,
         },
-        observation: JobObservationState::new(observation_epoch),
+        observation: JobObservationState {
+            receipt_candidates,
+            terminal_event_candidates,
+            ..JobObservationState::new(observation_epoch)
+        },
     };
     observe_job_terminal(&mut record, now);
     record
@@ -1023,6 +1029,8 @@ pub(super) fn reconcile_inventory_locked(
     runner_instance_id: &str,
     auth_group: Option<RunnerAccessGroup>,
     observation_epoch: std::sync::Arc<str>,
+    receipt_candidates: Option<crate::receipts::ReceiptCandidates>,
+    terminal_event_candidates: Option<crate::receipts::TerminalEventCandidates>,
     inventory: &ShellJobInventory,
     now: i64,
 ) -> ReconciliationSummary {
@@ -1135,6 +1143,8 @@ pub(super) fn reconcile_inventory_locked(
                 runner_instance_id,
                 auth_group.clone(),
                 observation_epoch.clone(),
+                receipt_candidates.clone(),
+                terminal_event_candidates.clone(),
                 snapshot,
                 now,
             );

@@ -392,7 +392,7 @@ E2a  structured validation + Job/effect foundation
 E2b  guarded structured mutation: E1 reads + one apply_text_edits attempt
 E2c  decide whether validation and mutation should coexist in one cell;
      consider selective generic process/shell only if telemetry justifies it
-E3   Async Event Delivery
+E3   implemented generic asynchronous Job terminal attention v1
 E4   product/stability decision
 ```
 
@@ -436,9 +436,23 @@ The first-version mutation contract is intentionally narrow:
 
 The primary adaptive workflow is therefore `canonical read -> JavaScript decision -> one canonical apply_text_edits -> canonical post-edit inspection`. Validation is intentionally outside the mutation-capable cell. Combining validation Jobs and later mutation would otherwise make validation freshness ambiguous without a workspace-snapshot fence; that question is deferred rather than hidden.
 
-### E2c / E3 / E4
+### E3 — implemented generic Job terminal attention v1
 
-E2c first decides whether validation and mutation should coexist in one cell and whether any selective process/shell composition is justified by telemetry. Finer mutation locking is also evidence-driven, not assumed. Async Event Delivery remains a separate stage rather than a Code Mode-specific waiter. Product/stability commitment comes only after the experimental execution and dogfood evidence are mature.
+E3 is a generic Job lifecycle capability, not a Code Mode child tool. The model-visible operation is `wait_for_job_terminal(job_id, idempotency_key)`: it arms one caller-owned, bounded, one-shot terminal wait for one exact already-dispatched public Job. `job_id` remains execution identity; the wait never starts, retries, stops, replaces, or redispatches work. Observation tokens remain opaque log/lifecycle cursors and are not E3 identity or authority. The sparse terminal event contains only exact Job identity, canonical terminal status, and a bounded outcome classification; detailed logs and validation evidence remain available only through ordinary `observe_jobs`.
+
+Authoritative triggering comes only from the existing RunnerRegistry Job lifecycle. Accepted sequenced Runner terminal updates, protocol-violation terminalization, stop/lost/timeout paths, and authoritative receipt/reconciliation hydration all converge on the existing first-terminal-observation hook. That hook marks an in-memory candidate while the registry mutex is held; an immutable sparse terminal fact is captured and sent to the E3 sink only after the mutex is released. E3 therefore creates neither a second Job tracker nor SQLite I/O under the RunnerRegistry async mutex. Stale, duplicate, out-of-order, wrong-instance, or otherwise rejected Runner updates cannot create a second logical terminal event.
+
+The durable `wc_job_terminal_waits` store is separate from Durable Agent waits because its authority model is different. Registration first re-authorizes the exact visible Job and persists only a digest of caller ownership plus the minimum Job authority partition. Workflow Session, ClientWindow, MCP request id, recording provenance, and observation cursor are absent from execution authority. Exact keyed replay returns the same wait; changed reuse conflicts. Registration uses a two-snapshot handshake around the durable insert: a terminal Job is matched immediately, while a transition racing the insert is caught either by the post-lock terminal sink or the second canonical snapshot. Active-wait retention is derived from the structured execution ceiling, recovery grace, and existing Job terminal-retention window rather than a short arbitrary TTL.
+
+Restart preserves durable event truth but not a process-local Host callback. Waiting rows survive Store reopen; Runner reconciliation or retained terminal-receipt hydration can match them to the same Job without redispatch. A triggered event remains `pending` when no eligible carrier exists. A failed preflight remains pending because the durable dispatch fence was not crossed. `delivered` means the configured carrier accepted dispatch after that fence. `delivery_unknown` means dispatch crossed the durable fence but acknowledgement is not authoritative; it is never silently retried. A Server takeover conservatively converts any old process-local `prepared` delivery to `delivery_unknown`.
+
+The Host boundary is intentionally truthful in v1. The existing production `ui/message` continuation carrier is fenced by Durable Agent/Endpoint/CommunicationPrincipal identity and is not reused as ordinary Job authority. E3 provides a narrow Host-neutral adapter seam plus deterministic delivery-fence tests, but ordinary Workflow Sessions currently install no production Job-native auto-resume carrier, so `automatic_resume_available=false` and triggered events remain durably pending. `observe_jobs` remains the explicit production fallback for terminal recovery and for logs/details. A real ChatGPT/MCP Job-native carrier and live candidate-deployment dogfood remain a separate, explicitly authorized production integration step.
+
+E3 deliberately does not enter the E1/E2a/E2b allowlists. E2a and direct validators still return the same canonical Job handoff, E2b remains mutation-only, and no Code Mode cell waits on Jobs. The intended relationship is `E2a or Direct validator -> canonical Job handoff -> E3 terminal attention`, with at most one later `observe_jobs` call when the model needs detailed evidence.
+
+### E2c / E4
+
+E2c still decides whether validation and mutation should coexist in one cell and whether any selective process/shell composition is justified by telemetry. Finer mutation locking is also evidence-driven, not assumed. E3 remains independent of that decision and is not evidence for nested Job waiting. Product/stability commitment comes only after the experimental execution, E3 Host-integration dogfood, and broader evidence are mature.
 
 ## What not to build
 

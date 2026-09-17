@@ -1206,6 +1206,7 @@ impl RunnerRegistry {
             recovery: JobRecoveryState::default(),
             observation: JobObservationState {
                 receipt_candidates: self.inner.capture_candidates(),
+                terminal_event_candidates: self.inner.capture_terminal_event_candidates(),
                 ..JobObservationState::new(self.observation_epoch.clone())
             },
         };
@@ -1272,6 +1273,26 @@ impl RunnerRegistry {
             return Err(format!("unknown shell job: {job_id}"));
         }
         Ok(job_view(job))
+    }
+
+    pub async fn job_terminal_registration_snapshot_for_auth(
+        &self,
+        auth: Option<&crate::RunnerAccess>,
+        job_id: &str,
+    ) -> Result<crate::JobTerminalRegistrationSnapshot, String> {
+        validate_id(job_id, "job_id")?;
+        let mut inner = self.inner.lock().await;
+        refresh_job_status_locked(&mut inner, job_id);
+        let job = inner
+            .jobs_by_id
+            .get(job_id)
+            .ok_or_else(|| format!("unknown shell job: {job_id}"))?;
+        if job.visibility != ShellJobVisibility::Public
+            || !shell_job_visible_to_auth(auth, &inner, job)
+        {
+            return Err(format!("unknown shell job: {job_id}"));
+        }
+        Ok(crate::receipts::registration_snapshot(job, now_ts()))
     }
 
     pub async fn hidden_job_log_for_auth(

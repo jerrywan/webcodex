@@ -3593,6 +3593,9 @@ impl ToolCallAuditProjection for ToolCall {
                 "wait_secs": wait_secs,
                 "wake_on": wake_on,
             }),
+            Self::WaitForJobTerminal { job_id, .. } => serde_json::json!({
+                "job_id": job_id,
+            }),
             Self::ApplyUnifiedDiff {
                 project,
                 deny_sensitive_paths,

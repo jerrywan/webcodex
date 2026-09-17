@@ -30,10 +30,25 @@ impl JobReceiptStore for SqliteJobReceiptStore {
 }
 
 /// Used before production starts accepting any Runner or tool traffic.
+#[cfg(test)]
 pub(crate) async fn production_registry(db: Arc<crate::Database>) -> RunnerRegistry {
     RunnerRegistry::with_job_receipt_store(
         crate::runner_http::tool_request_trace_telemetry(),
         Arc::new(SqliteJobReceiptStore(db)),
+    )
+    .await
+}
+
+/// Production wiring for E3: terminal Job facts share the authoritative registry
+/// transition but are durably matched only after the registry lock is released.
+pub(crate) async fn production_registry_with_terminal_attention(
+    db: Arc<crate::Database>,
+    controller: crate::job_terminal_attention::JobTerminalContinuationController,
+) -> RunnerRegistry {
+    RunnerRegistry::with_job_receipt_and_terminal_event_sink(
+        crate::runner_http::tool_request_trace_telemetry(),
+        Arc::new(SqliteJobReceiptStore(db.clone())),
+        Arc::new(crate::job_terminal_attention::SqliteJobTerminalEventSink::new(db, controller)),
     )
     .await
 }

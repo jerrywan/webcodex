@@ -516,6 +516,9 @@ pub(super) fn is_final_job_status(status: &str) -> bool {
 pub(super) fn observe_job_terminal(job: &mut ShellJobRecord, now: i64) {
     if job.lifecycle.is_terminal() && job.observation.terminal_observed_at.is_none() {
         job.observation.terminal_observed_at = Some(now);
+        if let Some(candidates) = &job.observation.terminal_event_candidates {
+            candidates.lock().unwrap().insert(job.job_id.clone());
+        }
     }
 }
 

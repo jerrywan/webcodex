@@ -18,7 +18,44 @@ pub trait JobReceiptStore: std::fmt::Debug + Send + Sync {
     fn prune(&self, now: i64) -> Result<(), String>;
 }
 
+/// Sparse authoritative terminal fact emitted only after the canonical registry
+/// has accepted a terminal Job lifecycle. It intentionally excludes commands,
+/// streams, paths, validation bodies, credentials, and Session provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobTerminalEvent {
+    pub job_id: String,
+    pub client_id: String,
+    pub runner_instance_id: String,
+    pub auth_group: Option<crate::RunnerAccessGroup>,
+    pub owner_at_admission: Option<String>,
+    pub status: String,
+    pub outcome: String,
+    pub terminal_observed_at: i64,
+    pub expires_at: i64,
+}
+
+/// Caller-authorized registration snapshot for one exact public Job. This is
+/// source identity plus sparse terminal truth only; observation cursors and
+/// Workflow Session provenance are intentionally absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobTerminalRegistrationSnapshot {
+    pub job_id: String,
+    pub client_id: String,
+    pub runner_instance_id: String,
+    pub auth_group: Option<crate::RunnerAccessGroup>,
+    pub owner_at_admission: Option<String>,
+    pub terminal_event: Option<JobTerminalEvent>,
+    pub wait_expires_at: i64,
+}
+
+/// Best-effort post-lock sink for durable terminal-attention matching. The sink
+/// owns no Job state and its failure can never change an accepted Job verdict.
+pub trait JobTerminalEventSink: std::fmt::Debug + Send + Sync {
+    fn record_terminal_event(&self, event: &JobTerminalEvent) -> Result<(), String>;
+}
+
 pub(crate) type ReceiptCandidates = Arc<Mutex<HashSet<String>>>;
+pub(crate) type TerminalEventCandidates = Arc<Mutex<HashSet<String>>>;
 
 /// One unlock boundary for every registry path, including early returns and
 /// read-triggered lost transitions. Notifications mark only changed terminal
@@ -27,20 +64,37 @@ pub(crate) type ReceiptCandidates = Arc<Mutex<HashSet<String>>>;
 pub(crate) struct ReceiptRegistryState {
     state: AsyncMutex<RunnerRegistryInner>,
     pub(crate) candidates: ReceiptCandidates,
+    pub(crate) terminal_event_candidates: TerminalEventCandidates,
     store: Option<Arc<dyn JobReceiptStore>>,
+    terminal_event_sink: Option<Arc<dyn JobTerminalEventSink>>,
 }
 
 impl ReceiptRegistryState {
     pub(crate) fn new(store: Option<Arc<dyn JobReceiptStore>>) -> Self {
+        Self::with_sinks(store, None)
+    }
+
+    pub(crate) fn with_sinks(
+        store: Option<Arc<dyn JobReceiptStore>>,
+        terminal_event_sink: Option<Arc<dyn JobTerminalEventSink>>,
+    ) -> Self {
         Self {
             state: AsyncMutex::new(RunnerRegistryInner::default()),
             candidates: Arc::default(),
+            terminal_event_candidates: Arc::default(),
             store,
+            terminal_event_sink,
         }
     }
 
     pub(crate) fn capture_candidates(&self) -> Option<ReceiptCandidates> {
         self.store.as_ref().map(|_| self.candidates.clone())
+    }
+
+    pub(crate) fn capture_terminal_event_candidates(&self) -> Option<TerminalEventCandidates> {
+        self.terminal_event_sink
+            .as_ref()
+            .map(|_| self.terminal_event_candidates.clone())
     }
 
     #[cfg(test)]
@@ -75,9 +129,15 @@ impl DerefMut for ReceiptRegistryGuard<'_> {
 impl Drop for ReceiptRegistryGuard<'_> {
     fn drop(&mut self) {
         let ids = std::mem::take(&mut *self.state.candidates.lock().unwrap());
+        let terminal_ids =
+            std::mem::take(&mut *self.state.terminal_event_candidates.lock().unwrap());
         let receipts: Vec<_> = ids
             .iter()
             .filter_map(|id| self.jobs_by_id.get(id).and_then(capture))
+            .collect();
+        let terminal_events: Vec<_> = terminal_ids
+            .iter()
+            .filter_map(|id| self.jobs_by_id.get(id).and_then(capture_terminal_event))
             .collect();
         // Release authority before any storage calls, even if an adapter fails.
         drop(self.guard.take());
@@ -93,6 +153,72 @@ impl Drop for ReceiptRegistryGuard<'_> {
                 tracing::warn!(count = failed, "terminal Job receipt persistence degraded");
             }
         }
+        if let Some(sink) = &self.state.terminal_event_sink {
+            let mut failed = 0;
+            for event in terminal_events {
+                if sink.record_terminal_event(&event).is_err() {
+                    failed += 1;
+                }
+            }
+            if failed > 0 {
+                tracing::warn!(
+                    count = failed,
+                    "terminal Job attention persistence degraded"
+                );
+            }
+        }
+    }
+}
+
+fn terminal_outcome(status: &str) -> &'static str {
+    match status {
+        "completed" => "succeeded",
+        "timed_out" => "timed_out",
+        "stopped" | "cancelled" => "cancelled",
+        _ => "failed",
+    }
+}
+
+pub(crate) fn capture_terminal_event(job: &ShellJobRecord) -> Option<JobTerminalEvent> {
+    if job.visibility != ShellJobVisibility::Public || !job.lifecycle.is_terminal() {
+        return None;
+    }
+    let terminal_observed_at = job.observation.terminal_observed_at?;
+    let status = job.lifecycle.as_wire().to_string();
+    Some(JobTerminalEvent {
+        job_id: job.job_id.clone(),
+        client_id: job.client_id.clone(),
+        runner_instance_id: job.runner_instance_id.clone(),
+        auth_group: job.auth_group.clone(),
+        owner_at_admission: job.owner_at_admission.clone(),
+        outcome: terminal_outcome(&status).to_string(),
+        status,
+        terminal_observed_at,
+        expires_at: terminal_observed_at.saturating_add(JOB_TERMINAL_RETENTION_SECS),
+    })
+}
+
+pub(crate) fn registration_snapshot(
+    job: &ShellJobRecord,
+    now: i64,
+) -> JobTerminalRegistrationSnapshot {
+    let terminal_event = capture_terminal_event(job);
+    let active_retention = (webcodex_core::runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS
+        as i64)
+        .saturating_add(crate::JOB_RECOVERY_GRACE_MAX_SECS)
+        .saturating_add(JOB_TERMINAL_RETENTION_SECS);
+    let wait_expires_at = terminal_event
+        .as_ref()
+        .map(|event| event.expires_at)
+        .unwrap_or_else(|| now.saturating_add(active_retention));
+    JobTerminalRegistrationSnapshot {
+        job_id: job.job_id.clone(),
+        client_id: job.client_id.clone(),
+        runner_instance_id: job.runner_instance_id.clone(),
+        auth_group: job.auth_group.clone(),
+        owner_at_admission: job.owner_at_admission.clone(),
+        terminal_event,
+        wait_expires_at,
     }
 }
 
@@ -167,6 +293,22 @@ impl RunnerRegistry {
         telemetry: Arc<dyn crate::RunnerRegistryTelemetry>,
         store: Arc<dyn JobReceiptStore>,
     ) -> Self {
+        Self::with_job_stores(telemetry, store, None).await
+    }
+
+    pub async fn with_job_receipt_and_terminal_event_sink(
+        telemetry: Arc<dyn crate::RunnerRegistryTelemetry>,
+        store: Arc<dyn JobReceiptStore>,
+        terminal_event_sink: Arc<dyn JobTerminalEventSink>,
+    ) -> Self {
+        Self::with_job_stores(telemetry, store, Some(terminal_event_sink)).await
+    }
+
+    async fn with_job_stores(
+        telemetry: Arc<dyn crate::RunnerRegistryTelemetry>,
+        store: Arc<dyn JobReceiptStore>,
+        terminal_event_sink: Option<Arc<dyn JobTerminalEventSink>>,
+    ) -> Self {
         let now = now_ts();
         let receipts = match store.load(now) {
             Ok(receipts) => receipts,
@@ -176,11 +318,16 @@ impl RunnerRegistry {
             }
         };
         let registry = Self {
-            inner: Arc::new(ReceiptRegistryState::new(Some(store))),
+            inner: Arc::new(ReceiptRegistryState::with_sinks(
+                Some(store),
+                terminal_event_sink,
+            )),
             ..Self::with_telemetry(telemetry)
         };
         {
             let mut inner = registry.inner.lock().await;
+            let receipt_candidates = registry.inner.capture_candidates();
+            let terminal_event_candidates = registry.inner.capture_terminal_event_candidates();
             for receipt in receipts {
                 if receipt.validate(now).is_err() {
                     tracing::warn!("skipping invalid terminal Job receipt");
@@ -191,6 +338,8 @@ impl RunnerRegistry {
                     &receipt.runner_instance_id,
                     receipt.auth_group,
                     registry.observation_epoch.clone(),
+                    receipt_candidates.clone(),
+                    terminal_event_candidates.clone(),
                     &receipt.snapshot,
                     now,
                 );

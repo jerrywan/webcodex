@@ -1276,6 +1276,19 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 schema_type("string", "Ownership basis: project_and_session or unknown_session_project_only."),
             ),
         ])),
+        "wait_for_job_terminal" => Some(wrapped_output_schema(vec![
+            ("wait_id", schema_type("string", "Durable caller-owned one-shot terminal wait identity.")),
+            ("job_id", schema_type("string", "Exact existing Job execution identity.")),
+            ("state", schema_type("string", "Wait lifecycle: waiting or triggered.")),
+            ("delivery_state", schema_type("string", "Host delivery lifecycle: not_ready, pending, prepared, delivered, or delivery_unknown. pending means durable terminal truth exists but no accepted Host delivery has been proved. delivery_unknown means dispatch crossed its durable fence but acknowledgement is unknown and is never silently retried.")),
+            ("terminal_status", nullable_schema("string", "Canonical terminal Job status when triggered; null while waiting.")),
+            ("terminal_outcome", nullable_schema("string", "Bounded terminal outcome classification when triggered; null while waiting.")),
+            ("replayed", schema_type("boolean", "Whether this was exact keyed registration replay.")),
+            ("state_changed", schema_type("boolean", "Whether this call durably created, matched, or advanced delivery state for this wait.")),
+            ("automatic_resume_available", schema_type("boolean", "True only when a real current production Host continuation carrier is installed.")),
+            ("expires_at", schema_type("integer", "Bounded wait/event expiry as Unix seconds.")),
+            ("fallback_tool", schema_type("string", "Explicit logs/details and recovery fallback; currently observe_jobs.")),
+        ])),
         "observe_jobs" => Some(observe_jobs_output_schema()),
         "job_tail" => {
             let mut schema = wrapped_output_schema(vec![
