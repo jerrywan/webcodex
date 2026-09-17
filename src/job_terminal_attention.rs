@@ -197,13 +197,17 @@ impl JobTerminalEventSink for SqliteJobTerminalEventSink {
         if matched.matched_count > 0 {
             metric("async_match");
         }
+        let mut first_error = None;
         for (principal, wait_id) in matched.delivery_candidates {
-            let _ = self
-                .controller
-                .attempt_delivery(&principal, &wait_id, now)
-                .map_err(|error| error.code.to_string())?;
+            if let Err(error) = self.controller.attempt_delivery(&principal, &wait_id, now) {
+                first_error.get_or_insert_with(|| error.code.to_string());
+            }
         }
-        Ok(())
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(())
+        }
     }
 }
 

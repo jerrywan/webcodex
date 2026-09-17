@@ -320,21 +320,52 @@ impl Database {
                 },
             )
             .map_err(store_error)?;
-        let mut candidates = Vec::new();
+        let mut newly_matched = Vec::new();
         for row in rows {
-            candidates.push(row.map_err(store_error)?);
+            newly_matched.push(row.map_err(store_error)?);
         }
         drop(stmt);
-        for (wait_id, _, _) in &candidates {
+        for (wait_id, _, _) in &newly_matched {
             tx.execute("UPDATE wc_job_terminal_waits SET state='triggered',delivery_state='pending',terminal_status=?2,terminal_outcome=?3,terminal_observed_at=?4,triggered_at=?4,expires_at=?5,updated_at=MAX(updated_at,?4) WHERE wait_id=?1 AND state='waiting'",params![wait_id,fact.status,fact.outcome,fact.terminal_observed_at,fact.expires_at]).map_err(store_error)?;
         }
+        let matched_count = newly_matched.len();
+
+        // A terminal-event sink failure may happen after the durable wait has
+        // already moved from waiting to triggered/pending but before Host delivery
+        // was prepared. Re-offer exactly those safe pending deliveries when the
+        // same canonical terminal fact is retried. Prepared/finished deliveries
+        // stay fenced and are never silently redispatched.
+        let mut stmt=tx.prepare("SELECT wait_id,owner_kind,owner_digest FROM wc_job_terminal_waits WHERE job_id=?1 AND job_client_id=?2 AND job_auth_kind=?3 AND job_auth_value IS ?4 AND state='triggered' AND delivery_state='pending' AND terminal_status=?5 AND terminal_outcome=?6 AND terminal_observed_at=?7 ORDER BY wait_id").map_err(store_error)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    fact.source.job_id,
+                    fact.source.client_id,
+                    fact.source.auth_kind,
+                    fact.source.auth_value,
+                    fact.status,
+                    fact.outcome,
+                    fact.terminal_observed_at
+                ],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .map_err(store_error)?;
+        let mut delivery_candidates = Vec::new();
+        for row in rows {
+            let (wait_id, kind, digest) = row.map_err(store_error)?;
+            delivery_candidates.push((JobTerminalWaitPrincipal { kind, digest }, wait_id));
+        }
+        drop(stmt);
         tx.commit().map_err(store_error)?;
         Ok(JobTerminalWaitMatch {
-            matched_count: candidates.len(),
-            delivery_candidates: candidates
-                .into_iter()
-                .map(|(wait_id, kind, digest)| (JobTerminalWaitPrincipal { kind, digest }, wait_id))
-                .collect(),
+            matched_count,
+            delivery_candidates,
         })
     }
 

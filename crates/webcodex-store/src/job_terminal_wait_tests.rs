@@ -108,6 +108,79 @@ fn keyed_registration_matching_and_owner_partition_are_one_shot() {
 }
 
 #[test]
+fn repeated_terminal_fact_reoffers_only_safe_pending_deliveries() {
+    let temp = tempdir().unwrap();
+    let db = Database::open(&temp.path().join("job-terminal-pending-retry.db")).unwrap();
+    let first_owner = principal('e');
+    let second_owner = principal('f');
+    let terminal = fact("job-retry", T0 + 20);
+
+    let first_wait = db
+        .create_job_terminal_wait(
+            &first_owner,
+            waiting("job-retry", "retry-first", T0 + 8_100),
+            T0,
+        )
+        .unwrap()
+        .wait
+        .wait_id;
+    let second_wait = db
+        .create_job_terminal_wait(
+            &second_owner,
+            waiting("job-retry", "retry-second", T0 + 8_100),
+            T0,
+        )
+        .unwrap()
+        .wait
+        .wait_id;
+
+    let first_match = db.match_job_terminal_fact(&terminal, T0 + 20).unwrap();
+    assert_eq!(first_match.matched_count, 2);
+    assert_eq!(first_match.delivery_candidates.len(), 2);
+
+    // Replaying the same canonical terminal event after a post-match sink
+    // failure must recover pending delivery work without pretending a new wait
+    // matched the terminal transition.
+    let retry = db.match_job_terminal_fact(&terminal, T0 + 21).unwrap();
+    assert_eq!(retry.matched_count, 0);
+    assert_eq!(retry.delivery_candidates.len(), 2);
+
+    let prepared = db
+        .prepare_job_terminal_delivery(&first_owner, &first_wait, T0 + 22)
+        .unwrap()
+        .unwrap();
+    let after_prepare = db.match_job_terminal_fact(&terminal, T0 + 23).unwrap();
+    assert_eq!(after_prepare.matched_count, 0);
+    assert_eq!(after_prepare.delivery_candidates.len(), 1);
+    assert_eq!(after_prepare.delivery_candidates[0].1, second_wait);
+
+    db.finish_job_terminal_delivery(
+        &first_owner,
+        &first_wait,
+        &prepared.attempt_id,
+        true,
+        T0 + 24,
+    )
+    .unwrap();
+    let second_prepared = db
+        .prepare_job_terminal_delivery(&second_owner, &second_wait, T0 + 25)
+        .unwrap()
+        .unwrap();
+    db.finish_job_terminal_delivery(
+        &second_owner,
+        &second_wait,
+        &second_prepared.attempt_id,
+        false,
+        T0 + 26,
+    )
+    .unwrap();
+
+    let finished = db.match_job_terminal_fact(&terminal, T0 + 27).unwrap();
+    assert_eq!(finished.matched_count, 0);
+    assert!(finished.delivery_candidates.is_empty());
+}
+
+#[test]
 fn waiting_rows_survive_reopen_and_prepared_delivery_recovers_unknown_without_retry() {
     let temp = tempdir().unwrap();
     let path = temp.path().join("job-terminal-restart.db");
