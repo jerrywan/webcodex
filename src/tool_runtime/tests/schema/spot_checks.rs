@@ -129,7 +129,9 @@ fn tool_specs_structured_validation_schema_and_output() {
             &valid,
             &cargo_test.input_schema,
         )
-        .unwrap_or_else(|error| panic!("valid structural cargo_test input rejected: {valid}: {error}"));
+        .unwrap_or_else(|error| {
+            panic!("valid structural cargo_test input rejected: {valid}: {error}")
+        });
     }
     for invalid in [
         serde_json::json!({"project": "agent:demo:repo", "min_tests": 0}),
