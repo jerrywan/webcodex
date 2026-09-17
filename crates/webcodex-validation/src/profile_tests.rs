@@ -13,7 +13,7 @@ use webcodex_tool_runtime_contracts::{
     tool_audit::{
         is_structured_validation_target_identity, session_log_arguments_for_tool_request,
     },
-    ToolCall,
+    ToolCall, ToolCallAuditProjection,
 };
 
 #[test]
@@ -247,28 +247,7 @@ fn go_test_schema_and_audit_projection_are_bounded_and_explicit() {
         "unrecognized_private_field": "NEVER_PERSIST_GO_TEST_UNKNOWN"
     });
     let raw_audit = session_log_arguments_for_tool_request("go_test", &raw);
-    let target_id = raw_audit["validation_target_id"]
-        .as_str()
-        .expect("go_test audit projection should include validation_target_id");
-    assert!(
-        is_structured_validation_target_identity(target_id),
-        "unexpected go_test validation target identity: {target_id}"
-    );
-    let mut audit_without_target = raw_audit.clone();
-    audit_without_target
-        .as_object_mut()
-        .unwrap()
-        .remove("validation_target_id");
-    assert_eq!(
-        audit_without_target,
-        serde_json::json!({
-            "project": "agent:test:demo",
-            "cwd": "internal/control",
-            "packages_present": true,
-            "package_count": 2,
-            "timeout_secs": 90
-        })
-    );
+    assert_eq!(raw_audit, serde_json::json!({}));
     assert!(!raw_audit
         .to_string()
         .contains("NEVER_PERSIST_GO_TEST_UNKNOWN"));
@@ -283,7 +262,29 @@ fn go_test_schema_and_audit_projection_are_bounded_and_explicit() {
         }),
     )
     .unwrap();
-    assert_eq!(call.session_log_arguments(), raw_audit);
+    let typed_audit = call.session_log_arguments();
+    let target_id = typed_audit["validation_target_id"]
+        .as_str()
+        .expect("go_test audit projection should include validation_target_id");
+    assert!(
+        is_structured_validation_target_identity(target_id),
+        "unexpected go_test validation target identity: {target_id}"
+    );
+    let mut audit_without_target = typed_audit;
+    audit_without_target
+        .as_object_mut()
+        .unwrap()
+        .remove("validation_target_id");
+    assert_eq!(
+        audit_without_target,
+        serde_json::json!({
+            "project": "agent:test:demo",
+            "cwd": "internal/control",
+            "packages_present": true,
+            "package_count": 2,
+            "timeout_secs": 90
+        })
+    );
 }
 
 #[test]
