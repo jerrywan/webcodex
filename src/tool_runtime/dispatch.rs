@@ -2904,6 +2904,7 @@ impl ToolRuntime {
             | ToolCall::ListProjectTrackedFiles { .. }
             | ToolCall::ProjectOverview { .. }
             | ToolCall::SearchProjectTexts { .. }
+            | ToolCall::SearchAndRead { .. }
             | ToolCall::WriteProjectFile { .. }
             | ToolCall::SaveProjectArtifact { .. }
             | ToolCall::ProjectArtifact { .. }

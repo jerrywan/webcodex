@@ -194,6 +194,66 @@ fn internal_posix_interpreter_rejects_wsl_only_bash() {
 
 #[cfg(windows)]
 #[test]
+fn native_single_file_search_spec_builds_bounded_rg_argv() {
+    let payload = serde_json::json!({
+        "pattern": "needle\\.literal",
+        "path": "src/lib.rs",
+        "limit": 7,
+        "context_before": 3,
+        "context_after": 4,
+        "include_globs": [],
+        "exclude_globs": [],
+        "result_mode": "matches",
+        "timeout_secs": 30
+    })
+    .to_string();
+    let spec = native_single_file_search_spec(&payload).expect("eligible single-file search");
+    assert_eq!(spec.path, "src/lib.rs");
+    assert!(spec
+        .args
+        .windows(2)
+        .any(|pair| pair == ["--max-count", "8"]));
+    assert!(spec.args.windows(2).any(|pair| pair == ["-B", "3"]));
+    assert!(spec.args.windows(2).any(|pair| pair == ["-A", "4"]));
+    assert!(spec
+        .args
+        .windows(2)
+        .any(|pair| pair == ["-e", "needle\\.literal"]));
+    assert_eq!(spec.args.last().map(String::as_str), Some("src/lib.rs"));
+}
+
+#[cfg(windows)]
+#[test]
+fn native_single_file_search_spec_rejects_globs_and_absolute_paths() {
+    let with_glob = serde_json::json!({
+        "pattern": "needle",
+        "path": "src/lib.rs",
+        "limit": 1,
+        "context_before": 0,
+        "context_after": 0,
+        "include_globs": ["*.rs"],
+        "exclude_globs": [],
+        "result_mode": "matches"
+    })
+    .to_string();
+    assert!(native_single_file_search_spec(&with_glob).is_none());
+
+    let absolute = serde_json::json!({
+        "pattern": "needle",
+        "path": "C:\\secret.txt",
+        "limit": 1,
+        "context_before": 0,
+        "context_after": 0,
+        "include_globs": [],
+        "exclude_globs": [],
+        "result_mode": "matches"
+    })
+    .to_string();
+    assert!(native_single_file_search_spec(&absolute).is_none());
+}
+
+#[cfg(windows)]
+#[test]
 fn internal_posix_runtime_uses_git_bash_stdin_with_powershell_configured() {
     let cwd = tempfile::tempdir().unwrap();
     let project_registry_dir = tempfile::tempdir().unwrap();

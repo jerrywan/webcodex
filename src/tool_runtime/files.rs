@@ -53,6 +53,7 @@ pub(crate) use artifacts::{
 pub(crate) use artifacts::{MAX_PROJECT_ARTIFACT_BYTES, MAX_PROJECT_ARTIFACT_UPLOAD_BYTES};
 #[cfg(all(test, windows))]
 pub(crate) use inspection::LIST_TRACKED_STDERR_MAX_CHARS;
+pub(crate) use inspection::{effective_read_file_range, slice_read_file_success_output};
 #[cfg(test)]
 pub(crate) use inspection::{
     page_file_list_entries, parse_file_list_entries, LIST_TRACKED_SOURCE_MAX_BYTES,

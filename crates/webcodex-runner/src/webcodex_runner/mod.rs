@@ -94,6 +94,8 @@ pub(crate) use projects::{
 pub(crate) use runner_skills::{
     handle_runner_skill_request, run_skill_resource_with_profiles_and_execution_state,
 };
+#[cfg(windows)]
+pub(crate) use shell::run_windows_native_single_file_search_with_profiles;
 pub(crate) use shell::{
     configured_prepared_shell_job_command, configured_shell_job_command,
     configured_validation_job_command, cwd_allowed, prepare_detached_process_launch,

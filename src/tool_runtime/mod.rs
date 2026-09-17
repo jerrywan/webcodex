@@ -71,6 +71,7 @@ mod runtime;
 mod runtime_info;
 pub(crate) mod runtime_metrics;
 mod script;
+mod search_and_read;
 mod search_project_texts;
 mod semantic_navigation;
 mod session_context;

@@ -308,10 +308,10 @@ pub struct SearchProjectTextsQuery {
     /// Maximum records to return: matches in matches mode, files in files_with_matches/count modes.
     #[serde(default)]
     pub limit: Option<usize>,
-    /// Optional number of context lines before each match (clamped to 20).
+    /// Optional number of context lines before each match (clamped to 80).
     #[serde(default)]
     pub context_before: Option<usize>,
-    /// Optional number of context lines after each match (clamped to 20).
+    /// Optional number of context lines after each match (clamped to 80).
     #[serde(default)]
     pub context_after: Option<usize>,
     /// Optional ripgrep include globs. At most 32 entries of 1..256 bytes; negated and protected-path
@@ -3746,6 +3746,34 @@ pub enum ToolCall {
         max_result_bytes: Option<usize>,
     },
 
+    /// Search for text and immediately read bounded source ranges around the
+    /// returned matches in one model-visible round trip.
+    SearchAndRead {
+        /// Runner-registered project id.
+        project: String,
+        /// One bounded search query. Runtime forces match mode and zero search
+        /// context because source context is returned by the read phase.
+        query: SearchProjectTextsQuery,
+        /// Optional explicit wc_sess_* Workflow Session id.
+        #[serde(default)]
+        session_id: Option<String>,
+        #[schemars(extend("default" = 40))]
+        /// Source lines to read before each match; clamped to 0..100.
+        #[serde(default)]
+        read_before: Option<usize>,
+        #[schemars(extend("default" = 40))]
+        /// Source lines to read after each match; clamped to 0..100.
+        #[serde(default)]
+        read_after: Option<usize>,
+        #[schemars(extend("default" = 8))]
+        /// Maximum match-derived read requests; clamped to 1..8.
+        #[serde(default)]
+        max_reads: Option<usize>,
+        /// When true, successful source reads return numbered text.
+        #[serde(default)]
+        with_line_numbers: Option<bool>,
+    },
+
     /// Read-only model-facing git worktree summary for a project. Reports
     /// branch/head, parsed status counts/files, diff stat, warnings, suggested
     /// next actions, and optional bounded diff hunks. Routed to the owning
@@ -5016,6 +5044,7 @@ impl ToolCall {
             Self::ListProjectTrackedFiles { .. } => "list_project_tracked_files",
             Self::ProjectOverview { .. } => "project_overview",
             Self::SearchProjectTexts { .. } => "search_project_texts",
+            Self::SearchAndRead { .. } => "search_and_read",
             Self::ShowChanges { .. } => "show_changes",
             Self::WorkspaceHygieneCheck { .. } => "workspace_hygiene_check",
             Self::ListJobs { .. } => "list_jobs",
@@ -5103,6 +5132,7 @@ impl ToolCall {
             | Self::ListProjectTrackedFiles { session_id, .. }
             | Self::ProjectOverview { session_id, .. }
             | Self::SearchProjectTexts { session_id, .. }
+            | Self::SearchAndRead { session_id, .. }
             | Self::ShowChanges { session_id, .. }
             | Self::WriteProjectFile { session_id, .. }
             | Self::SaveProjectArtifact { session_id, .. }
@@ -5248,6 +5278,7 @@ impl ToolCall {
             | Self::ListProjectTrackedFiles { project, .. }
             | Self::ProjectOverview { project, .. }
             | Self::SearchProjectTexts { project, .. }
+            | Self::SearchAndRead { project, .. }
             | Self::ShowChanges { project, .. }
             | Self::WriteProjectFile { project, .. }
             | Self::SaveProjectArtifact { project, .. }

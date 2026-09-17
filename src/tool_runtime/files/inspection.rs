@@ -60,6 +60,100 @@ pub(crate) fn effective_read_file_range(
     (range.start_line, range.limit, range.end_line())
 }
 
+/// Re-project one caller-requested sub-range from a larger canonical plain-text
+/// read. `read_files` uses this after coalescing overlapping/nearby requests so
+/// the Runner performs fewer reads while the public result still preserves the
+/// original item order, range metadata, SHA, and optional line numbering.
+pub(crate) fn slice_read_file_success_output(
+    parent: &Value,
+    start_line: Option<usize>,
+    limit: Option<usize>,
+    with_line_numbers: bool,
+    path: &str,
+) -> Option<Value> {
+    if parent.get("format").and_then(Value::as_str) != Some("plain") {
+        return None;
+    }
+    let parent_text = parent.get("text")?.as_str()?;
+    let parent_sha256 = parent.get("sha256")?.as_str()?.to_string();
+    let total_lines = usize::try_from(parent.get("total_lines")?.as_u64()?).ok()?;
+    let parent_start = usize::try_from(parent.get("start_line")?.as_u64()?).ok()?;
+    let parent_returned = usize::try_from(parent.get("returned_lines")?.as_u64()?).ok()?;
+    let parent_end = if parent_returned == 0 {
+        None
+    } else {
+        Some(
+            parent_start
+                .saturating_add(parent_returned)
+                .saturating_sub(1),
+        )
+    };
+
+    let range = EffectiveRange::new(start_line, limit);
+    let returned_lines = if range.start_line > total_lines || total_lines == 0 {
+        0
+    } else {
+        range.limit.min(
+            total_lines
+                .saturating_sub(range.start_line)
+                .saturating_add(1),
+        )
+    };
+    let end_line = if returned_lines == 0 {
+        None
+    } else {
+        Some(
+            range
+                .start_line
+                .saturating_add(returned_lines)
+                .saturating_sub(1),
+        )
+    };
+
+    if returned_lines > 0 {
+        if range.start_line < parent_start || end_line > parent_end {
+            return None;
+        }
+    } else if range.start_line < parent_start && total_lines >= range.start_line {
+        return None;
+    }
+
+    let content = if returned_lines == 0 {
+        String::new()
+    } else {
+        let offset = range.start_line.saturating_sub(parent_start);
+        let segments = parent_text
+            .split('\n')
+            .take(parent_returned)
+            .skip(offset)
+            .take(returned_lines)
+            .collect::<Vec<_>>();
+        if segments.len() != returned_lines {
+            return None;
+        }
+        segments.join("\n")
+    };
+    let has_more = end_line.is_some_and(|end| end < total_lines);
+    let next_start_line = if has_more {
+        end_line.map(|end| end + 1)
+    } else {
+        None
+    };
+    let sliced = FileReadRange {
+        content,
+        sha256: parent_sha256,
+        total_lines,
+        start_line: range.start_line,
+        limit: range.limit,
+        returned_lines,
+        end_line,
+        has_more,
+        next_start_line,
+    };
+    let result = build_read_file_success(&sliced, with_line_numbers, Some(path));
+    result.success.then_some(result.output)
+}
+
 /// Build the unified `read_file` success [`ToolResult`] from a shared range
 /// result, enforcing the final serialized-output hard limit after JSON
 /// escaping and (optional) line numbering. The model output is reconstructed
@@ -1382,6 +1476,27 @@ mod tests {
         assert_eq!(result.output["start_line"], 2);
         assert_eq!(result.output["limit"], 2);
         assert_eq!(result.output["format"], "numbered");
+    }
+
+    #[test]
+    fn coalesced_read_slice_restores_original_range_and_numbering() {
+        let parent =
+            read_file_content_result("one\ntwo\nthree\nfour\nfive".to_string(), Some(1), Some(5));
+        assert!(parent.success);
+
+        let sliced =
+            slice_read_file_success_output(&parent.output, Some(2), Some(2), true, "src/lib.rs")
+                .expect("contained range should be sliceable");
+
+        assert_eq!(sliced["path"], "src/lib.rs");
+        assert_eq!(sliced["text"], "2 | two\n3 | three");
+        assert_eq!(sliced["format"], "numbered");
+        assert_eq!(sliced["start_line"], 2);
+        assert_eq!(sliced["limit"], 2);
+        assert_eq!(sliced["returned_lines"], 2);
+        assert_eq!(sliced["end_line"], 3);
+        assert_eq!(sliced["next_start_line"], 4);
+        assert_eq!(sliced["sha256"], parent.output["sha256"]);
     }
 
     #[test]

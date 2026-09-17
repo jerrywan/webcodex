@@ -500,6 +500,7 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
 pub const CODING_INTENT_TOOL_NAMES: &[&str] = &[
     "work_on_project",
     "project_overview",
+    "search_and_read",
     "search_project_texts",
     "read_files",
     "project_artifact",

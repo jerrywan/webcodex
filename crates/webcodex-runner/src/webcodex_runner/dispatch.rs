@@ -113,6 +113,20 @@ fn run_native_shell_or_internal_search(
                 "invalid_internal_search_request: generated search script is missing; command was not started",
             ));
         };
+        #[cfg(windows)]
+        if let Some(result) = super::run_windows_native_single_file_search_with_profiles(
+            config.generation,
+            &config.policy,
+            &config.shell,
+            project_registry_dir,
+            &jobs.prepared_profiles,
+            operation.cwd.as_deref(),
+            operation.stdin.as_deref(),
+            operation.timeout_secs,
+            Some(runtime.shutdown_flag()),
+        ) {
+            return result;
+        }
         return run_internal_search_script_with_profiles_and_execution_state(
             config.generation,
             &config.policy,

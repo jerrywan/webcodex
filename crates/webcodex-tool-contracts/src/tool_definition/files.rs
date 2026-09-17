@@ -103,9 +103,38 @@ pub(super) const SEARCH_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE.review(super::ToolReviewEvidence::Search).exploration(super::ToolExplorationEvidence::SearchBatch),
             ).with_composition_policy(super::ToolCompositionPolicy::Parallel),
-            "Batch-capable project-text search for 1..8 independent queries when bounded structured results, protected-path policy, isolated failures, or portable Runtime search semantics help. Runs at most two Runner requests in flight. For broad discovery prefer files_with_matches/count or a small bounded match set with little context, then target read_files/native reads. For one small known-scope search, native rg via run_process or a shell command is first-class. Batch only queries already known to be needed; keep result-dependent follow-ups sequential. Queries default to regex; prefer pattern_mode=literal for exact text and request context explicitly. Whole-query continuation uses one parser-ready suggested_call when the remaining batch fits the model result budget; otherwise Runtime truncates without a raw cursor or fake call. A truncated query has no safe match cursor and should be refined.",
-        ).with_gpt_action_description("Batch-search 1..8 predetermined independent queries. For broad discovery use files/count or small low-context matches, then targeted reads; keep result-dependent follow-ups sequential. Known-scope native rg is first-class. Follow returned batch continuation; never cursor-guess truncation."),
+            "Batch-capable project-text search for 1..8 independent queries when bounded structured results, protected-path policy, isolated failures, or portable Runtime search semantics help. Runs at most two Runner requests in flight. For broad discovery prefer files_with_matches/count or a small bounded match set with little context, then target read_files/native reads. When locating matches will predictably be followed immediately by reading their source code, prefer search_and_read to avoid a second outer model/tool round trip. For one small known-scope search without a follow-up read, native rg via run_process or a shell command is first-class. Batch only queries already known to be needed; keep result-dependent follow-ups sequential. Queries default to regex; prefer pattern_mode=literal for exact text and request context explicitly. Whole-query continuation uses one parser-ready suggested_call when the remaining batch fits the model result budget; otherwise Runtime truncates without a raw cursor or fake call. A truncated query has no safe match cursor and should be refined.",
+        ).with_gpt_action_description("Batch-search 1..8 predetermined independent queries. Prefer search_and_read when the expected next step is immediately reading the matched source. For broad discovery use files/count or small low-context matches, then targeted reads; keep result-dependent follow-ups sequential. Known-scope native rg is first-class. Follow returned batch continuation; never cursor-guess truncation."),
         40,
+    ),
+    adaptive_runtime_direct(
+        model_spec(
+            def(
+                "search_and_read",
+                super::ToolAuditPolicy::TYPED_CANONICAL
+                    .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&["query"])),
+                ModelVisible,
+                TOOL_CATEGORY_FILE,
+                Some(Shell),
+                TOOL_PROVIDER_RUNNER,
+                super::ToolSemanticContract {
+                    effect: super::ToolEffect::Observe,
+                    risk: Read,
+                    approval: super::ToolApprovalPolicy::None,
+                    idempotency: super::ToolIdempotency::PureRead,
+                },
+                Some(PROJECT_READ),
+                true,
+                NoPath,
+                false,
+                false,
+                super::ToolSessionEvidencePolicy::NONE
+                    .review(super::ToolReviewEvidence::ReadOnlyInspection)
+                    .exploration(super::ToolExplorationEvidence::SearchBatch),
+            ),
+            "Compound coding inspection tool: run one bounded project-text search, then immediately read source ranges around up to eight matches. Use it when the next action after locating matches is predictably to inspect their code. Runtime forces match-mode search with zero search context, converts matches to bounded read ranges, coalesces duplicate/overlapping/nearby ranges before returning source, and reuses the canonical read_files path so SHA/read-revision semantics stay consistent without duplicate code blocks. Prefer search_project_texts alone for discovery/count/files-only tasks.",
+        ),
+        55,
     ),
 ];
 

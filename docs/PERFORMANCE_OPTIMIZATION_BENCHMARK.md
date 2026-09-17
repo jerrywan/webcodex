@@ -1,0 +1,104 @@
+# WebCodex performance optimization benchmark
+
+Baseline commit: `2466a3e80d7c90c4b6c80a58978281995a8f8b45`
+
+Test host: Windows 11. Baseline and optimized builds used the same source baseline, machine, test project, and local loopback transport. Benchmark fixtures were read-only or used `apply_text_edits(dry_run=true)` so the test project was not mutated.
+
+## Changes under test
+
+1. `read_files` request planning
+   - deduplicate identical ranges
+   - merge overlapping and nearby ranges (`merge_gap=20`)
+   - cap a merged range at 400 lines
+   - preserve `expected_read_revision` fences
+   - reconstruct original read results when the ordinary `read_files` API requires per-request output
+
+2. Windows single-file native search fast-path
+   - directly execute native `rg.exe` for eligible single-file searches
+   - retain the existing generated Bash search as the fallback
+   - fall back for directories, include/exclude globs, unavailable `rg`, unsafe/out-of-project targets, or truncated native output
+   - literal patterns preserve canonical semantics because Runtime escapes literal text before producing the Runner search payload
+
+3. `search_and_read`
+   - one model-visible call performs bounded search and immediate source inspection
+   - search matches are converted into read ranges
+   - duplicate/overlapping/nearby ranges are coalesced before compound output
+   - source reads keep canonical SHA/read-revision semantics and the existing read result budget
+   - coding discovery recommends this tool when search is predictably followed by source inspection
+
+## Microbenchmarks
+
+### `read_files`
+
+| Scenario | Baseline | Optimized | Improvement |
+| --- | ---: | ---: | ---: |
+| 8 duplicate ranges | 11.92 ms | 6.05 ms | 49.2% |
+| 8 adjacent ranges | 9.09 ms | 6.66 ms | 26.8% |
+| mixed two-file ranges | 8.64 ms | 6.74 ms | 22.0% |
+
+Planner request-count examples:
+
+- duplicate ranges: `8 -> 1`
+- adjacent/nearby ranges: `8 -> 1`
+- mixed ranges: `8 -> 5`
+
+### Windows single-file search
+
+20 runs per scenario, same project and query shape:
+
+| Scenario | Baseline mean | Optimized mean | Improvement |
+| --- | ---: | ---: | ---: |
+| literal | 406.29 ms | 106.95 ms | 73.7% |
+| regex | 393.17 ms | 106.86 ms | 72.8% |
+| context ±20 | 392.13 ms | 108.81 ms | 72.3% |
+
+Directory and glob searches remained on the fallback path and showed baseline-equivalent latency.
+
+## Task-level benchmark
+
+Fixture: real Vue source (`index.vue`) in the test project.
+
+Task:
+
+1. locate four occurrences of `进入商店`
+2. inspect source around those matches
+3. prepare the same exact edit for the first occurrence
+4. run the edit as `dry_run=true`
+
+20 alternating baseline/optimized runs were used to reduce ordering bias.
+
+### Final result after compound-output coalescing
+
+| Metric | Baseline | Optimized | Improvement |
+| --- | ---: | ---: | ---: |
+| total mean | 464.63 ms | 129.11 ms | 72.2% |
+| total P50 | 468.63 ms | 119.46 ms | 74.5% |
+| total P95 | 529.71 ms | 176.44 ms | 66.7% |
+| inspect mean | 457.03 ms | 122.32 ms | 73.2% |
+| edit dry-run mean | 6.02 ms | 5.77 ms | approximately unchanged |
+| outer model-visible calls | 3 | 2 | 33.3% fewer |
+| average returned bytes | 23.9 KB | 10.7 KB | 55.3% fewer |
+
+All benchmark runs located the expected four matches and produced valid inspection/edit results.
+
+For the four nearby matches, compound inspection reduced four requested source ranges to one unique returned range (`index.vue:6-136`), avoiding repeated source text while preserving all match locations.
+
+## Interpretation
+
+The largest local latency gain comes from avoiding the Windows Bash process chain for eligible single-file searches. `read_files` coalescing mainly reduces redundant Runner work. `search_and_read` is primarily a model-round-trip optimization: its local execution time is similar to performing search plus read sequentially, but it removes one outer model/tool turn and, after coalescing, significantly reduces duplicated source bytes sent to the model.
+
+A cross-call read cache was intentionally not added. After the other optimizations, bounded local reads are already on the order of a few milliseconds, while cache invalidation must remain correct when editors, Git, scripts, or other agents modify files outside WebCodex.
+
+## Validation performed
+
+- formatting with `cargo fmt --all`
+- focused `read_files` planner/coalescing tests
+- focused `search_and_read` tests
+- ToolDefinition/audit contract tests
+- Adaptive MCP direct-surface tests
+- coding-intent discovery test
+- `cargo check -p webcodex`
+- optimized dogfood builds
+- real loopback A/B calls for search, compound inspection, fallback behavior, output budgeting, and task-level dry-run edit workflow
+
+Warnings observed during validation were pre-existing unrelated warnings in the baseline tree; the optimization work introduced no known compile errors.

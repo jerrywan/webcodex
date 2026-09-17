@@ -4924,6 +4924,21 @@ impl ToolCallAuditProjection for ToolCall {
                 "query_count": queries.len(),
                 "patterns_present": !queries.is_empty(),
             }),
+            Self::SearchAndRead {
+                project,
+                read_before,
+                read_after,
+                max_reads,
+                with_line_numbers,
+                ..
+            } => serde_json::json!({
+                "project": project,
+                "query_present": true,
+                "read_before": read_before,
+                "read_after": read_after,
+                "max_reads": max_reads,
+                "with_line_numbers": with_line_numbers,
+            }),
             Self::LspStatus { project, .. } => serde_json::json!({
                 "project": project,
             }),

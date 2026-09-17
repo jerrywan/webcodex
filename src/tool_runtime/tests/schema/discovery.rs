@@ -954,6 +954,7 @@ async fn tool_manifest_intent_coding_returns_ranked_compact_tools() {
     for direct in [
         "work_on_project",
         "search_project_texts",
+        "search_and_read",
         "read_files",
         "apply_text_edits",
         "run_process",

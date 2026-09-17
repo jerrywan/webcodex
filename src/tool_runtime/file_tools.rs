@@ -68,6 +68,39 @@ impl ToolRuntime {
                 Some(Err(error)) => error.into_tool_result(),
                 None => self.search_project_texts(project, queries).await,
             },
+            ToolCall::SearchAndRead {
+                project,
+                query,
+                session_id: _,
+                read_before,
+                read_after,
+                max_reads,
+                with_line_numbers,
+            } => match project_resolution {
+                Some(Ok(resolved)) => {
+                    self.search_and_read_resolved(
+                        &resolved,
+                        query,
+                        read_before,
+                        read_after,
+                        max_reads,
+                        with_line_numbers,
+                    )
+                    .await
+                }
+                Some(Err(error)) => error.into_tool_result(),
+                None => {
+                    self.search_and_read(
+                        project,
+                        query,
+                        read_before,
+                        read_after,
+                        max_reads,
+                        with_line_numbers,
+                    )
+                    .await
+                }
+            },
             ToolCall::WriteProjectFile {
                 project,
                 path,
