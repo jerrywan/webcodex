@@ -551,7 +551,7 @@ class AgentLoopReportTests(unittest.TestCase):
         self.insert_event(
             "e2b",
             tool="code_mode_exec_mutating",
-            composition=code_mode_composition(),
+            composition=code_mode_composition(input_bytes=80),
         )
         self.insert_event(
             "e2a",
@@ -563,6 +563,7 @@ class AgentLoopReportTests(unittest.TestCase):
                 nested_successes=1,
                 nested_failures=0,
                 duration_ms=20,
+                input_bytes=40,
                 returned_bytes=30,
                 nested_raw_result_bytes_total=1200,
                 nested_tool_counts={"cargo_check": 1},
@@ -580,12 +581,28 @@ class AgentLoopReportTests(unittest.TestCase):
         self.assertEqual(composition["job_handoffs"]["total"], 1)
         self.assertEqual(composition["outcome_unknown"]["total"], 0)
         self.assertEqual(composition["duration_ms"]["total"], 35)
+        self.assertEqual(composition["input_bytes"]["total"], 120)
         self.assertEqual(composition["returned_bytes"]["total"], 90)
         self.assertEqual(composition["nested_raw_result_bytes_total"]["total"], 4095)
         self.assertEqual(
             composition["nested_tool_counts"],
             {"apply_text_edits": 1, "cargo_check": 1, "read_files": 2},
         )
+
+    def test_historical_code_mode_composition_without_input_bytes_stays_valid(self) -> None:
+        self.insert_event(
+            "historical",
+            tool="code_mode_exec",
+            composition=code_mode_composition(),
+        )
+        result = self.summarize(variant="code_mode")
+
+        self.assertTrue(result["availability"]["code_mode_composition"]["available"])
+        self.assertEqual(result["composition"]["nested_calls"]["total"], 3)
+        input_bytes = result["composition"]["input_bytes"]
+        self.assertIsNone(input_bytes["total"])
+        self.assertEqual(input_bytes["observed_total"], 0)
+        self.assertEqual(input_bytes["missing"], 1)
 
     def test_direct_variant_with_code_mode_call_fails_composition_closed(self) -> None:
         self.insert_event(

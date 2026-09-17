@@ -174,6 +174,7 @@ impl ToolRuntime {
         let host = Arc::new(V8CodeModeHost {
             orchestration: Arc::clone(&orchestration),
         });
+        let input_bytes = source.len();
         let execution = webcodex_code_mode::execute(
             host as Arc<dyn CodeModeHost>,
             CodeModeExecuteRequest {
@@ -214,6 +215,7 @@ impl ToolRuntime {
         };
         let composition = orchestration.composition_summary(
             stats.duration_ms,
+            input_bytes,
             stats.returned_bytes,
             stats.slot_wait_ms,
         );
@@ -228,8 +230,10 @@ impl ToolRuntime {
             max_in_flight = composition.max_in_flight,
             duration_ms = composition.duration_ms,
             slot_wait_ms = composition.slot_wait_ms,
+            input_bytes = composition.input_bytes,
             returned_bytes = composition.returned_bytes,
             nested_raw_result_bytes_total = composition.nested_raw_result_bytes_total,
+            nested_tool_counts = ?composition.nested_tool_counts,
             "code_mode_composition_finished"
         );
         (result, composition)
@@ -261,6 +265,7 @@ impl ToolRuntime {
         let host = Arc::new(V8CodeModeHost {
             orchestration: Arc::clone(&orchestration),
         });
+        let input_bytes = source.len();
         let execution = webcodex_code_mode::execute_with_termination_mode(
             host as Arc<dyn CodeModeHost>,
             CodeModeExecuteRequest {
@@ -316,6 +321,7 @@ impl ToolRuntime {
         };
         let composition = orchestration.composition_summary(
             stats.duration_ms,
+            input_bytes,
             stats.returned_bytes,
             stats.slot_wait_ms,
         );
@@ -330,8 +336,10 @@ impl ToolRuntime {
             max_in_flight = composition.max_in_flight,
             duration_ms = composition.duration_ms,
             slot_wait_ms = composition.slot_wait_ms,
+            input_bytes = composition.input_bytes,
             returned_bytes = composition.returned_bytes,
             nested_raw_result_bytes_total = composition.nested_raw_result_bytes_total,
+            nested_tool_counts = ?composition.nested_tool_counts,
             consequential_calls = composition.consequential_calls,
             known_results = composition.known_results,
             job_handoffs = composition.job_handoffs,
@@ -366,6 +374,7 @@ impl ToolRuntime {
         let host = Arc::new(V8CodeModeHost {
             orchestration: Arc::clone(&orchestration),
         });
+        let input_bytes = source.len();
         let execution = webcodex_code_mode::execute_with_termination_mode(
             host as Arc<dyn CodeModeHost>,
             CodeModeExecuteRequest {
@@ -421,6 +430,7 @@ impl ToolRuntime {
         };
         let composition = orchestration.composition_summary(
             stats.duration_ms,
+            input_bytes,
             stats.returned_bytes,
             stats.slot_wait_ms,
         );
@@ -435,8 +445,10 @@ impl ToolRuntime {
             max_in_flight = composition.max_in_flight,
             duration_ms = composition.duration_ms,
             slot_wait_ms = composition.slot_wait_ms,
+            input_bytes = composition.input_bytes,
             returned_bytes = composition.returned_bytes,
             nested_raw_result_bytes_total = composition.nested_raw_result_bytes_total,
+            nested_tool_counts = ?composition.nested_tool_counts,
             consequential_calls = composition.consequential_calls,
             known_results = composition.known_results,
             job_handoffs = composition.job_handoffs,

@@ -341,6 +341,13 @@ impl RuntimeMetrics for TracingRuntimeMetrics {
             surface = "runtime",
             "runtime_metric"
         );
+        tracing::info!(
+            metric = "code_mode_input_bytes",
+            value = observation.input_bytes as u64,
+            tool = "code_mode_exec",
+            surface = "runtime",
+            "runtime_metric"
+        );
         for (nested_tool, value) in &observation.nested_tool_counts {
             tracing::info!(
                 metric = "code_mode_nested_tool_calls_total",
@@ -408,6 +415,7 @@ mod tests {
             max_in_flight: 1,
             duration_ms: 7,
             slot_wait_ms: 2,
+            input_bytes: 11,
             returned_bytes: 3,
             nested_raw_result_bytes_total: 9,
             nested_tool_counts: std::collections::BTreeMap::from([("read_files".to_string(), 1)]),

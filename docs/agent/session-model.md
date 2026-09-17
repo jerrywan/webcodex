@@ -4,6 +4,12 @@ WebCodex uses the word **session** for two independent systems. They share
 casual vocabulary only. They must not be merged, cross-wired, or inferred from
 each other.
 
+The default durable event tail retains up to 2,000 events per Session, while
+one model-facing summary remains capped at 200 events (50 by default). These are
+independent bounds: longer forensic/recovery retention does not enlarge one model
+response, and the ledger remains a bounded tail rather than an archive. If
+`retention_truncated` is true, event-derived summary counts describe the retained
+ledger rather than claiming lifetime-complete history.
 Executable constraints that agents must obey live in
 [`AGENTS.md`](../../AGENTS.md); this document is the Workflow Sessions domain
 source linked from §6. Standing architecture summary:

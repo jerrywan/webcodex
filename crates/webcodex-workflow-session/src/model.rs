@@ -27,7 +27,10 @@ pub const LOGICAL_INVOCATION_ID_PREFIX: &str = "wc_inv_";
 pub const LOGICAL_INVOCATION_ROLE_RECORDER: &str = "recorder";
 pub const LOGICAL_INVOCATION_ROLE_BUSINESS: &str = "business";
 pub const DEFAULT_MAX_SESSIONS: usize = 100;
-pub const DEFAULT_MAX_EVENTS_PER_SESSION: usize = 200;
+/// Durable per-Session event retention. This is intentionally larger than the
+/// model-facing summary ceiling: long-running coding Sessions keep forensic and
+/// recovery evidence without forcing that history into one model response.
+pub const DEFAULT_MAX_EVENTS_PER_SESSION: usize = 2000;
 /// Exact terminal-validation Job identities retained per Workflow Session. This
 /// matches the Runner's authoritative terminal Job inventory bound: while a
 /// terminal Job can still be a reconciliation candidate, one of these bounded
@@ -40,6 +43,8 @@ pub const MAX_MATERIALIZED_VALIDATION_JOB_IDS: usize =
 /// while keeping every event independently bounded.
 pub const MAX_OBSERVED_PATHS_PER_EVENT: usize = 201;
 pub const DEFAULT_SUMMARY_LIMIT: usize = 50;
+/// Maximum event tail projected by one model-facing Session summary. Durable
+/// retention is independently bounded by `DEFAULT_MAX_EVENTS_PER_SESSION`.
 pub const MAX_SUMMARY_LIMIT: usize = 200;
 pub const MAX_SUMMARY_STRING_CHARS: usize = 240;
 pub const MAX_INPUT_STRING_CHARS: usize = 120;
@@ -1100,26 +1105,36 @@ pub struct SessionSummary {
     pub updated_at: i64,
     pub counts: SessionCounts,
     pub events: Vec<SessionEvent>,
-    /// Total number of events retained in the durable ledger for the session
-    /// *before* the returned window was sliced. This is the source of truth for
-    /// whether older events (e.g. an attempt boundary `task_instruction`) were
-    /// evicted by the per-session event cap. Older persisted sessions that predate
-    /// these additive fields deserialize to 0/0/true and are treated as the
-    /// returned window being the whole retained ledger (no eviction observed).
+    /// Total events ever observed for this Session, including events already
+    /// evicted by the bounded durable ledger.
     #[serde(default)]
     pub events_total: usize,
-    /// Number of events actually returned in `events` (the retained tail).
+    /// Events currently retained in the durable ledger before model-facing tail
+    /// slicing is applied.
+    #[serde(default)]
+    pub events_retained: usize,
+    /// Events already evicted by the durable per-Session retention bound.
+    #[serde(default)]
+    pub events_evicted: usize,
+    /// True only when durable Session history has actually been evicted. This is
+    /// distinct from `events_truncated`, which may be true solely because one
+    /// model-facing summary returns at most `MAX_SUMMARY_LIMIT` events.
+    #[serde(default)]
+    pub retention_truncated: bool,
+    /// 0-based sequence of the first event still present in the durable ledger.
+    #[serde(default)]
+    pub ledger_first_retained_sequence: usize,
+    /// Number of events actually returned in `events` (the bounded tail).
     #[serde(default)]
     pub events_returned: usize,
-    /// True when the durable ledger retained more events than were returned
-    /// (`events_total > events_returned`), i.e. the returned window is a tail
-    /// slice and older events are not present.
+    /// True when the Session has more observed events than this response returns.
+    /// This covers both ordinary model-facing tail slicing and durable eviction;
+    /// use `retention_truncated` to distinguish actual history loss.
     #[serde(default)]
     pub events_truncated: bool,
-    /// 0-based sequence of the first returned event within the retained ledger
-    /// (`events_total - events_returned`). `0` means the returned window starts
-    /// at the ledger head. Read-only projections use this to avoid mistaking a
-    /// truncated tail for the session start.
+    /// 0-based absolute sequence of the first event returned in `events`.
+    /// The legacy field name is retained for compatibility with continuation
+    /// consumers that already interpret it as the returned-window base.
     #[serde(default)]
     pub first_retained_sequence: usize,
     pub messages: SessionMessagesSummary,

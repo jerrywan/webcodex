@@ -36,6 +36,9 @@ CODE_MODE_COMPOSITION_NUMERIC_FIELDS = (
     "job_handoffs",
     "outcome_unknown",
 )
+# Additive fields may be absent from historical ActionAudit rows. They get their
+# own availability/missing accounting and never invalidate the core composition.
+CODE_MODE_COMPOSITION_OPTIONAL_NUMERIC_FIELDS = ("input_bytes",)
 
 
 class ReportError(ValueError):
@@ -350,6 +353,13 @@ def _code_mode_composition(event: dict[str, Any]) -> dict[str, Any] | None:
         if isinstance(item, bool) or not isinstance(item, int) or item < 0:
             return None
         normalized[field] = item
+    for field in CODE_MODE_COMPOSITION_OPTIONAL_NUMERIC_FIELDS:
+        item = value.get(field)
+        if item is None:
+            continue
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            return None
+        normalized[field] = item
     counts = value.get("nested_tool_counts")
     if not isinstance(counts, dict):
         return None
@@ -403,7 +413,10 @@ def _summarize_code_mode_composition(
     if not action_audit_available:
         metrics = {
             field: _metric_distribution([], missing=1)
-            for field in CODE_MODE_COMPOSITION_NUMERIC_FIELDS
+            for field in (
+                *CODE_MODE_COMPOSITION_NUMERIC_FIELDS,
+                *CODE_MODE_COMPOSITION_OPTIONAL_NUMERIC_FIELDS,
+            )
         }
         return (
             {
@@ -442,6 +455,12 @@ def _summarize_code_mode_composition(
         field: _metric_distribution([int(value[field]) for value in parsed], missing=missing)
         for field in CODE_MODE_COMPOSITION_NUMERIC_FIELDS
     }
+    for field in CODE_MODE_COMPOSITION_OPTIONAL_NUMERIC_FIELDS:
+        values = [int(value[field]) for value in parsed if field in value]
+        metrics[field] = _metric_distribution(
+            values,
+            missing=len(code_mode_outer) - len(values),
+        )
     nested_tool_counts: Counter[str] = Counter()
     for value in parsed:
         nested_tool_counts.update(value["nested_tool_counts"])
@@ -807,7 +826,8 @@ _COMPARISON_METRICS = [
     "composition.consequential_calls.total", "composition.known_results.total",
     "composition.job_handoffs.total",
     "composition.outcome_unknown.total", "composition.duration_ms.total",
-    "composition.slot_wait_ms.total", "composition.returned_bytes.total",
+    "composition.slot_wait_ms.total", "composition.input_bytes.total",
+    "composition.returned_bytes.total",
     "composition.nested_raw_result_bytes_total.total", "timing.webcodex_service_ms.total",
     "timing.webcodex_service_ms.p50", "timing.webcodex_service_ms.p95",
     "timing.tool_runtime_ms.total", "timing.outside_webcodex_gap_ms.total",

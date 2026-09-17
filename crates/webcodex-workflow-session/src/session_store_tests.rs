@@ -1,4 +1,4 @@
-use crate::model::MESSAGE_ID_PREFIX;
+use crate::model::{MAX_SUMMARY_LIMIT, MESSAGE_ID_PREFIX};
 use crate::*;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -64,6 +64,79 @@ fn session_store_bounds_event_limit() {
     let summary = store.summary(&summary.session_id, Some(50)).unwrap();
     assert_eq!(summary.events.len(), 3);
     assert_eq!(summary.counts.tool_calls, 2);
+    assert_eq!(summary.events_retained, 3);
+    assert_eq!(summary.events_evicted, summary.events_total - 3);
+    assert!(summary.retention_truncated);
+    assert_eq!(
+        summary.ledger_first_retained_sequence,
+        summary.events_evicted
+    );
+}
+
+#[test]
+fn default_session_retention_exceeds_model_summary_window_and_persists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ledger = tmp.path().join("sessions.json");
+    let store = SessionStore::with_persistence(
+        &ledger,
+        DEFAULT_MAX_SESSIONS,
+        DEFAULT_MAX_EVENTS_PER_SESSION,
+    );
+    assert_eq!(store.status().max_events_per_session, 2000);
+    assert!(DEFAULT_MAX_EVENTS_PER_SESSION > MAX_SUMMARY_LIMIT);
+
+    let session = store.start_session(Some("agent:test:long-session".to_string()), None);
+    for index in 0..160 {
+        let start = store.record_tool_call_started(
+            Some(&session.session_id),
+            SessionTransport::Api,
+            "runtime_status",
+            &json!({"probe": index}),
+            session_tool_contract("runtime_status"),
+        );
+        store.record_tool_call_finished(start, true, &json!({"ok": true}), None, None);
+    }
+    store.flush_persistence();
+
+    let raw: Value = serde_json::from_str(&std::fs::read_to_string(&ledger).unwrap()).unwrap();
+    let persisted = raw["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["session_id"] == session.session_id)
+        .unwrap();
+    let persisted_events = persisted["events"].as_array().unwrap().len();
+    assert!(persisted_events > MAX_SUMMARY_LIMIT, "{persisted_events}");
+    assert!(persisted_events <= DEFAULT_MAX_EVENTS_PER_SESSION);
+
+    let summary = store
+        .summary(&session.session_id, Some(usize::MAX))
+        .unwrap();
+    assert_eq!(summary.events_returned, MAX_SUMMARY_LIMIT);
+    assert_eq!(summary.events.len(), MAX_SUMMARY_LIMIT);
+    assert_eq!(summary.events_total, persisted_events);
+    assert_eq!(summary.events_retained, persisted_events);
+    assert_eq!(summary.events_evicted, 0);
+    assert!(!summary.retention_truncated);
+    assert_eq!(summary.ledger_first_retained_sequence, 0);
+    assert!(summary.events_truncated);
+    assert_eq!(
+        summary.first_retained_sequence,
+        persisted_events - MAX_SUMMARY_LIMIT
+    );
+
+    drop(store);
+    let restored = SessionStore::with_persistence(
+        &ledger,
+        DEFAULT_MAX_SESSIONS,
+        DEFAULT_MAX_EVENTS_PER_SESSION,
+    );
+    let restored_summary = restored
+        .summary(&session.session_id, Some(usize::MAX))
+        .unwrap();
+    assert_eq!(restored_summary.events_total, persisted_events);
+    assert_eq!(restored_summary.events_returned, MAX_SUMMARY_LIMIT);
+    assert_eq!(restored.status().max_events_per_session, 2000);
 }
 
 #[test]

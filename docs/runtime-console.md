@@ -45,7 +45,7 @@ anchor.
 Legacy ActionAudit `window_ended_at_ms` remains the audit-record boundary and is
 not used as the HTTP response-handoff performance timestamp.
 
-When the experimental Code Mode feature is enabled, one outer `code_mode_exec` Window activity may also show a bounded composition projection: nested call/success/failure counts, maximum nested in-flight concurrency, Code Mode duration, returned bytes, and counts for the explicit admitted nested tool names. These fields come from the same outer ActionAudit row. Nested canonical calls do **not** create synthetic Window activities, and the projection never includes JavaScript source, nested arguments/results, paths, queries, commands, credentials, arbitrary error strings, or raw Window identity.
+When the experimental Code Mode feature is enabled, one outer `code_mode_exec` Window activity may also show a bounded composition projection: nested call/success/failure counts, maximum nested in-flight concurrency, Code Mode duration, input/returned bytes, nested raw-result bytes, and counts for the explicit admitted nested tool names. These fields come from the same outer ActionAudit row. Nested canonical calls do **not** create synthetic Window activities, and the projection never includes JavaScript source, nested arguments/results, paths, queries, commands, credentials, arbitrary error strings, or raw Window identity.
 
 The context panel still adapts between a docked rail, popover, and mobile sheet.
 Closing it leaves a labeled Context entry in the header. Context navigation uses

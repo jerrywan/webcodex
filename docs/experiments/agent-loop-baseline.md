@@ -159,7 +159,7 @@ The schema-v1 JSON summary reports, when evidence is available:
 - Code Mode composition distributions from outer ActionAudit
   `code_mode_composition`, including nested call/success/failure counts,
   `nested_tool_counts`, consequential known/Job/unknown outcomes, internal/slot
-  timing, and nested raw versus returned bytes;
+  timing, optional program input bytes, and nested raw versus returned bytes;
 - WebCodex service time and ToolRuntime duration distributions;
 - canonical serial `outside_webcodex_gap` distributions and overlap count;
 - exact serialized `ToolResult` byte totals/distributions;
@@ -174,6 +174,7 @@ it rather than assuming absent metrics are zero.
 Code Mode nested canonical child calls are now provable from the payload-safe
 outer ActionAudit composition summary and are reported under
 `composition.nested_calls` and `composition.nested_tool_counts`.
+`composition.input_bytes` is additive: historical ActionAudit rows remain valid composition evidence when it is absent, while its metric reports missing samples instead of treating them as zero.
 `canonical_calls.total` deliberately remains `null` for a `code_mode` report: that
 older field keeps its outer/direct counting contract instead of silently combining
 one parent invocation with its child invocations.

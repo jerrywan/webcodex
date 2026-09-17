@@ -970,13 +970,14 @@ async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
 
     let response = task.await.unwrap().expect("canonical nested read");
     assert!(response.success, "{response:?}");
-    let composition = host.composition_summary(17, 123, 5);
+    let composition = host.composition_summary(17, 77, 123, 5);
     assert_eq!(composition.nested_calls, 1);
     assert_eq!(composition.nested_successes, 1);
     assert_eq!(composition.nested_failures, 0);
     assert_eq!(composition.max_in_flight, 1);
     assert_eq!(composition.duration_ms, 17);
     assert_eq!(composition.slot_wait_ms, 5);
+    assert_eq!(composition.input_bytes, 77);
     assert_eq!(composition.returned_bytes, 123);
     assert!(composition.nested_raw_result_bytes_total > 0);
     assert_eq!(composition.nested_tool_counts.get("read_files"), Some(&1));
@@ -1062,7 +1063,7 @@ async fn canonical_orchestration_host_rejects_server_owned_metadata_without_fron
             .expect_err("server-owned nested metadata must fail before canonical dispatch");
         assert!(error.into_message().contains(field), "{field}");
     }
-    let composition = host.composition_summary(0, 0, 0);
+    let composition = host.composition_summary(0, 0, 0, 0);
     assert_eq!(composition.nested_calls, 0);
     assert!(composition.nested_tool_counts.is_empty());
 }
@@ -1124,6 +1125,7 @@ async fn code_mode_binds_exact_project_and_session_through_real_canonical_reads(
         .clone()
         .expect("outer Code Mode composition diagnostic");
     assert_eq!(composition.nested_calls, 3);
+    assert_eq!(composition.input_bytes, source.len());
     assert_eq!(composition.nested_successes, 3);
     assert_eq!(composition.nested_failures, 0);
     assert!(composition.max_in_flight >= 2);

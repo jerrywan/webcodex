@@ -423,6 +423,8 @@ struct RuntimeConsoleCodeModeComposition {
     max_in_flight: usize,
     duration_ms: u64,
     slot_wait_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    input_bytes: Option<usize>,
     returned_bytes: usize,
     nested_raw_result_bytes_total: usize,
     nested_tool_counts: BTreeMap<String, usize>,
