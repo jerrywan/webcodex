@@ -20,6 +20,18 @@ use webcodex_core::runtime_contract::{
     BUILTIN_CODING_WORKFLOW_VERSION,
 };
 
+fn finish_changes_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "show_changes output and hunk truncation metadata. The nested show_changes contract is formalized so structured recovery calls remain model-surface projectable; other closeout metadata stays additive.",
+        "properties": {
+            "show_changes": super::git::show_changes_output_value_schema(),
+            "hunks_truncated": schema_type("boolean", "Whether the nested show_changes diff hunks were truncated by limits.")
+        },
+        "additionalProperties": true
+    })
+}
+
 pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
     match name {
         "work_on_project" => Some(work_on_project_output_schema()),
@@ -50,10 +62,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 "workspace",
                 open_object_schema("Workspace cleanliness, changed file count, and warnings."),
             ),
-            (
-                "changes",
-                open_object_schema("show_changes output and hunk truncation metadata."),
-            ),
+            ("changes", finish_changes_schema()),
             (
                 "validation",
                 open_object_schema("Validation closeout evidence. Full closeout preserves bounded historical/resolved/unresolved evidence by stable identity and adds current_evidence for the current attempt after the latest trusted material content change. summary_only keeps final status/reason, historical and current success/failure counts, resolved/unresolved counts, current_status/stale_failure_count, and the zero-test integrity flag."),

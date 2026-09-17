@@ -2414,6 +2414,17 @@ fn finish_coding_task_output_schema_describes_ledger_validation_summary() {
     assert_permission_summary_schema_fields(&output_props["permissions"]);
     assert_job_lifecycle_summary_schema_fields(&output_props["jobs"]);
     assert_review_evidence_schema_fields(&output_props["review_evidence"]);
+    let nested_show_changes = &output_props["changes"]["properties"]["show_changes"];
+    let nested_recovery =
+        &nested_show_changes["properties"]["diff_review_handoff"]["properties"]["next_call"];
+    assert_eq!(
+        nested_recovery["properties"]["tool"]["const"], "git_diff_hunks",
+        "finish_coding_task must formally expose nested show_changes recovery"
+    );
+    assert_eq!(
+        nested_recovery["properties"]["arguments"]["additionalProperties"],
+        false
+    );
     let description = schema["properties"]["output"]["properties"]["validation"]["description"]
         .as_str()
         .unwrap();

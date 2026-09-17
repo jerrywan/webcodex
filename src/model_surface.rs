@@ -485,6 +485,90 @@ mod tests {
     }
 
     #[test]
+    fn finish_coding_task_nested_show_changes_recovery_projects_with_route() {
+        let canonical_schema =
+            webcodex_tool_contracts::output_schema_for_tool("finish_coding_task");
+        let canonical_call = json!({
+            "tool": "git_diff_hunks",
+            "arguments": {
+                "project": "demo",
+                "cached": false,
+                "paths": [],
+                "max_hunks": 30,
+                "max_hunk_lines": 400,
+                "max_page_bytes": webcodex_core::runtime_contract::DEFAULT_GIT_DIFF_HUNKS_PAGE_BYTES
+            }
+        });
+        let canonical_value = json!({
+            "success": true,
+            "output": {
+                "changes": {
+                    "show_changes": {
+                        "diff_review_handoff": {"next_call": canonical_call.clone()}
+                    },
+                    "hunks_truncated": true
+                }
+            }
+        });
+
+        let mut current_adaptive = canonical_value.clone();
+        project_suggested_tool_calls_in_value(
+            &mut current_adaptive,
+            &canonical_schema,
+            &|target| suggested_tool_call_route(target, false),
+        );
+        assert_eq!(
+            current_adaptive["output"]["changes"]["show_changes"]["diff_review_handoff"]
+                ["next_call"],
+            canonical_call,
+            "current Adaptive direct routing must preserve the canonical nested call"
+        );
+
+        let synthetic_gateway_route = |target: &str| {
+            if target == "git_diff_hunks" {
+                SuggestedToolCallRoute::Gateway(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME)
+            } else {
+                SuggestedToolCallRoute::Direct
+            }
+        };
+        let mut projected_value = canonical_value;
+        project_suggested_tool_calls_in_value(
+            &mut projected_value,
+            &canonical_schema,
+            &synthetic_gateway_route,
+        );
+        let projected_call = &projected_value["output"]["changes"]["show_changes"]
+            ["diff_review_handoff"]["next_call"];
+        assert_eq!(projected_call["tool"], ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME);
+        assert_eq!(projected_call["arguments"]["tool"], "git_diff_hunks");
+        assert_eq!(
+            projected_call["arguments"]["arguments"],
+            canonical_call["arguments"]
+        );
+
+        let mut projected_schema = canonical_schema;
+        project_suggested_tool_call_schema(&mut projected_schema, &synthetic_gateway_route);
+        let projected_call_schema = &projected_schema["properties"]["output"]["properties"]
+            ["changes"]["properties"]["show_changes"]["properties"]["diff_review_handoff"]
+            ["properties"]["next_call"];
+        assert_eq!(
+            projected_call_schema["properties"]["tool"]["const"],
+            ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME
+        );
+        assert_eq!(
+            projected_call_schema["properties"]["arguments"]["properties"]["tool"]["const"],
+            "git_diff_hunks"
+        );
+        crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+            &projected_value,
+            &projected_schema,
+        )
+        .unwrap_or_else(|error| {
+            panic!("projected finish_coding_task nested recovery must match schema: {error}")
+        });
+    }
+
+    #[test]
     fn compact_schema_policy_defaults_true_and_respects_override() {
         assert!(effective_mcp_compact_schemas(None));
         assert!(effective_mcp_compact_schemas(Some(true)));

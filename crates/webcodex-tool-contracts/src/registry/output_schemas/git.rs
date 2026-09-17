@@ -676,3 +676,11 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
         _ => None,
     }
 }
+
+pub(super) fn show_changes_output_value_schema() -> Value {
+    output_schema_for_tool("show_changes")
+        .expect("show_changes output schema")
+        .pointer("/properties/output")
+        .cloned()
+        .expect("show_changes wrapped output value schema")
+}
