@@ -4944,6 +4944,22 @@ impl ToolCallAuditProjection for ToolCall {
                 "priority": priority,
                 "requires_ack": requires_ack,
             }),
+            Self::PostPeerMessage {
+                peer_id,
+                kind,
+                message,
+                tags,
+                priority,
+                requires_ack,
+            } => serde_json::json!({
+                "peer_id": peer_id,
+                "kind": kind,
+                "body_present": !message.is_empty(),
+                "body_bytes": message.len(),
+                "tags_count": tags.len(),
+                "priority": priority,
+                "requires_ack": requires_ack,
+            }),
             Self::ListSessionMessages {
                 session_id,
                 kind,

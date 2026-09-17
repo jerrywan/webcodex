@@ -1818,6 +1818,26 @@ impl ToolRuntime {
                 )
             }
 
+            ToolCall::PostPeerMessage {
+                peer_id,
+                kind,
+                message,
+                tags,
+                priority,
+                requires_ack,
+            } => self.post_peer_message_tool(
+                peer_id,
+                kind,
+                message,
+                tags,
+                priority,
+                requires_ack,
+                auth,
+                window,
+                trusted_recording_session_id,
+                trusted_recording_session_project,
+            ),
+
             call @ (ToolCall::StartSession { .. }
             | ToolCall::SessionSummary { .. }
             | ToolCall::UpdateSessionContext { .. }

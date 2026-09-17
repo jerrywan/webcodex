@@ -455,7 +455,47 @@ impl Database {
                 ON action_event_workflow_links(workflow_session_id, linked_at_ms DESC);
             CREATE INDEX IF NOT EXISTS idx_action_events_window_started
                 ON action_events(client_window_key, window_started_at_ms DESC)
-                WHERE client_window_key IS NOT NULL;";
+                WHERE client_window_key IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS window_peer_messages (
+                message_id TEXT PRIMARY KEY,
+                principal_kind TEXT NOT NULL,
+                principal_id TEXT NOT NULL,
+                sender_window_key TEXT NOT NULL,
+                recipient_window_key TEXT NOT NULL,
+                sender_peer_id TEXT NOT NULL,
+                recipient_peer_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                message TEXT NOT NULL,
+                tags_json TEXT NOT NULL,
+                requires_ack INTEGER NOT NULL CHECK(requires_ack IN (0, 1)),
+                created_at_ms INTEGER NOT NULL,
+                sender_session_id TEXT,
+                sender_project TEXT,
+                first_projected_at_ms INTEGER,
+                last_projected_at_ms INTEGER,
+                projection_count INTEGER NOT NULL DEFAULT 0,
+                first_ack_observed_at_ms INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_window_peer_messages_recipient
+                ON window_peer_messages(
+                    principal_kind, principal_id, recipient_window_key,
+                    requires_ack, first_projected_at_ms, created_at_ms
+                );
+
+            CREATE TABLE IF NOT EXISTS window_peer_discoveries (
+                principal_kind TEXT NOT NULL,
+                principal_id TEXT NOT NULL,
+                observer_window_key TEXT NOT NULL,
+                peer_window_key TEXT NOT NULL,
+                project TEXT NOT NULL,
+                first_projected_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(
+                    principal_kind, principal_id, observer_window_key,
+                    peer_window_key, project
+                )
+            );";
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)

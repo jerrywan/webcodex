@@ -596,7 +596,7 @@ pub(crate) fn add_session_attention_projection(
     ack: &sessions::SessionAckObservation,
     ack_requested: bool,
 ) {
-    let attention = sessions.ack_required_guidance(session_id, &ack.accepted_ids);
+    let attention = sessions.ack_required_messages(session_id, &ack.accepted_ids);
     let unsuppressed_count = attention.messages.len();
     let mut remaining_bytes = SESSION_ATTENTION_MAX_BODY_BYTES;
     let mut messages = Vec::new();
@@ -634,9 +634,9 @@ pub(crate) fn add_session_attention_projection(
         }
     };
     // Strong hint fields are a counts-only fallback. Once this response has
-    // fully conveyed every unacknowledged urgent body (or the request ACK has
-    // suppressed it), keep only the ordinary inbox counts/tool suggestion.
-    // Preserve the strong fallback when any urgent body is omitted or truncated.
+    // fully conveyed every unacknowledged ACK-required body (or the request ACK
+    // has suppressed it), keep only the ordinary inbox counts/tool suggestion.
+    // Preserve the strong fallback when any required body is omitted or truncated.
     if omitted_count == 0 && !body_truncated {
         if let Some(hint) = output
             .get_mut("session_hint")

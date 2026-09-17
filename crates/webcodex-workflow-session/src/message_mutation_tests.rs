@@ -147,7 +147,7 @@ fn withdraw_before_ack_makes_stale_ack_ignored() {
     );
     assert!(retained.first_ack_observed_at.is_none());
     assert!(store
-        .ack_required_guidance(&session.session_id, &[])
+        .ack_required_messages(&session.session_id, &[])
         .messages
         .is_empty());
 }
@@ -321,7 +321,7 @@ fn replacement_requires_fresh_ack() {
             "new ACK target",
         ))
         .unwrap();
-    let attention = store.ack_required_guidance(&session.session_id, &[]);
+    let attention = store.ack_required_messages(&session.session_id, &[]);
     assert_eq!(attention.messages.len(), 1);
     assert_eq!(
         attention.messages[0].message_id,
@@ -764,7 +764,7 @@ fn ack_first_then_replace_requires_fresh_new_ack() {
     assert!(replaced.replacement.first_ack_observed_at.is_none());
     assert_eq!(
         store
-            .ack_required_guidance(&session.session_id, &[])
+            .ack_required_messages(&session.session_id, &[])
             .messages[0]
             .message_id,
         replaced.replacement.message_id
@@ -916,7 +916,7 @@ fn withdraw_durable_restart_stays_withdrawn_and_out_of_attention() {
     );
     assert_eq!(message.status, SessionMessageStatus::Resolved);
     assert!(restored
-        .ack_required_guidance(&session.session_id, &[])
+        .ack_required_messages(&session.session_id, &[])
         .messages
         .is_empty());
 }
@@ -962,7 +962,7 @@ fn replace_durable_restart_preserves_links_and_fresh_ack_requirement() {
     assert!(new.first_ack_observed_at.is_none());
     assert_eq!(
         restored
-            .ack_required_guidance(&session.session_id, &[])
+            .ack_required_messages(&session.session_id, &[])
             .messages[0]
             .message_id,
         replacement_id

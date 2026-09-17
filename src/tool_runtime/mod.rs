@@ -57,6 +57,7 @@ pub(crate) mod observations;
 mod observe_jobs;
 mod patch;
 mod patch_tools;
+pub(crate) mod peer_collaboration;
 pub(crate) mod permissions;
 mod process;
 mod project_resolution;

@@ -8,9 +8,9 @@ use super::model::{
     PostSessionMessageInput, ReplaceSessionMessageInput, ReplaceSessionMessageOutcome,
     SessionAckObservation, SessionAssignmentSnapshot, SessionAttentionSnapshot,
     SessionDiscussionSummary, SessionInboxHint, SessionMessage, SessionMessageError,
-    SessionMessageKind, SessionMessageObservationError, SessionMessageObservationOutcome,
-    SessionMessagePriority, SessionMessageStatus, WithdrawSessionMessageOutcome,
-    DEFAULT_MESSAGE_LIST_LIMIT, MAX_MESSAGE_LIST_LIMIT, MAX_SESSION_MESSAGE_OBSERVATION_TOKEN_LEN,
+    SessionMessageObservationError, SessionMessageObservationOutcome, SessionMessageStatus,
+    WithdrawSessionMessageOutcome, DEFAULT_MESSAGE_LIST_LIMIT, MAX_MESSAGE_LIST_LIMIT,
+    MAX_SESSION_MESSAGE_OBSERVATION_TOKEN_LEN,
 };
 use super::query::{build_discussion_summary, build_inbox_hint};
 use super::store::SessionStore;
@@ -116,7 +116,7 @@ impl SessionStore {
         outcome
     }
 
-    pub fn ack_required_guidance(
+    pub fn ack_required_messages(
         &self,
         session_id: &str,
         suppressed_ids: &[String],
@@ -130,10 +130,7 @@ impl SessionStore {
                 .messages
                 .iter()
                 .filter(|message| {
-                    message.status == SessionMessageStatus::Open
-                        && message.kind == SessionMessageKind::Guidance
-                        && message.priority == SessionMessagePriority::High
-                        && message.requires_ack
+                    message.status == SessionMessageStatus::Open && message.requires_ack
                 })
                 .map(|message| message.as_ref().clone())
                 .collect::<Vec<_>>();

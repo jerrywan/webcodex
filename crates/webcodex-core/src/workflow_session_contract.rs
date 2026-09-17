@@ -215,10 +215,9 @@ pub fn is_valid_session_message_id(value: &str) -> bool {
         .is_some_and(is_session_identity_suffix)
 }
 
-pub const SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_REASON: &str =
-    "high_priority_guidance_requires_ack";
-pub const SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_INSTRUCTION: &str =
-    "High-priority Session guidance is pending. Read session_discussion_summary before continuing.";
+pub const SESSION_INBOX_ACK_REQUIRED_ATTENTION_REASON: &str = "session_message_requires_ack";
+pub const SESSION_INBOX_ACK_REQUIRED_ATTENTION_INSTRUCTION: &str =
+    "A Session message requiring acknowledgement is pending. Read session_discussion_summary before continuing.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

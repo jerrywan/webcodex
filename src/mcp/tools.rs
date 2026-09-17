@@ -511,6 +511,25 @@ fn add_stateless_context_projection_output_schema(tool: &mut Value, accepts_cont
     }
 }
 
+fn stateless_collaboration_ack_schema() -> Value {
+    json!({
+        "type": "array",
+        "maxItems": crate::tool_runtime::sessions::MAX_TOOL_CALL_ACK_MESSAGE_IDS,
+        "items": {
+            "type": "string",
+            "pattern": "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
+        },
+        "description": "Proves the current model context still retains the listed ACK-required collaboration messages. For Session messages the id must belong to the explicit recording Session; Peer messages may target the current principal-bound ClientWindow without a recorder. Repeat while retained. If later omitted, unresolved Session messages or retained Peer messages may be surfaced again. ACK neither resolves messages nor grants authority or gates execution."
+    })
+}
+
+fn insert_stateless_collaboration_ack_property(properties: &mut serde_json::Map<String, Value>) {
+    properties.insert(
+        crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD.to_string(),
+        stateless_collaboration_ack_schema(),
+    );
+}
+
 pub(super) fn add_stateless_workflow_recorder_metadata(payload: &mut Value) {
     let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
         return;
@@ -542,23 +561,12 @@ pub(super) fn add_stateless_workflow_recorder_metadata(payload: &mut Value) {
                 "description": "Optional explicit Workflow Session used only to record this call and trusted collaboration provenance. Separate from any tool business Session input; grants no authority; removed before concrete parsing."
             }),
         );
-        properties.insert(
-            crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD.to_string(),
-            json!({
-                "type": "array",
-                "maxItems": crate::tool_runtime::sessions::MAX_TOOL_CALL_ACK_MESSAGE_IDS,
-                "items": {
-                    "type": "string",
-                    "pattern": "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
-                },
-                "description": "Proves the current model context still retains the listed open ACK-required Session messages. Repeat while retained. If later omitted, unresolved ACK-required guidance may be surfaced again. ACK neither resolves messages nor grants authority or gates execution."
-            }),
-        );
+        insert_stateless_collaboration_ack_property(properties);
         properties.insert(
             crate::tool_runtime::sessions::TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD.to_string(),
             json!({
                 "type": "object",
-                "description": "After handling one non-todo message in the explicit recording Session, attach its id and bounded resolution text here to resolve it on the same WebCodex call. ACK-required guidance also needs request-scoped ACK. Applies only to that exact recording Session; removed before concrete parsing; does not predict call success. Todos use the atomic completion path.",
+                "description": "After handling one non-todo message in the explicit recording Session, attach its id and bounded resolution text here to resolve it on the same WebCodex call. Any ACK-required Session message also needs request-scoped ACK. Applies only to that exact recording Session; removed before concrete parsing; does not apply to Peer messages and does not predict call success. Todos use the atomic completion path.",
                 "properties": {
                     "message_id": {
                         "type": "string",
@@ -949,7 +957,16 @@ pub(super) async fn handle_list(
     }
     if crate::mcp_gateway::authorized(auth) {
         if let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) {
-            tools.push(crate::mcp_gateway::tool_spec());
+            let mut spec = crate::mcp_gateway::tool_spec();
+            if stateless_2026 {
+                if let Some(properties) = spec
+                    .pointer_mut("/inputSchema/properties")
+                    .and_then(Value::as_object_mut)
+                {
+                    insert_stateless_collaboration_ack_property(properties);
+                }
+            }
+            tools.push(spec);
         }
     }
     McpOutcome::Ok(rpc_result(
@@ -1517,6 +1534,24 @@ pub(super) async fn handle_call(
     if let Some(lc) = lifecycle.as_deref_mut() {
         lc.set_tool_name(Some(params.name.clone()));
     }
+    // Parse model-context message ACK metadata before specialized fast paths branch away from
+    // the canonical ToolRuntime kernel. Adaptive gateway wrapper fields have already been folded
+    // into the target arguments above, so every model-visible runtime route consumes one canonical
+    // ACK representation. The wrapper is never forwarded to Plugin/MCP/SSH business parsers.
+    let ack_session_message_ids = if stateless_2026 {
+        match strip_stateless_ack_session_message_ids(&mut params.arguments) {
+            Ok(ids) => ids,
+            Err(message) => {
+                if let Some(lc) = lifecycle.as_deref() {
+                    lc.dispatch_failed("invalid_arguments");
+                    lc.dispatch_finished(false, Some(false), "invalid_arguments");
+                }
+                return McpOutcome::BadRequest(rpc_error(id, -32602, message));
+            }
+        }
+    } else {
+        Vec::new()
+    };
     if let Some(lc) = lifecycle.as_deref() {
         lc.capture_payload_lazy("raw_arguments", || {
             if params.name == crate::plugin_gateway::PLUGIN_TOOL_NAME {
@@ -1546,7 +1581,14 @@ pub(super) async fn handle_call(
         if let Some(lc) = lifecycle.as_deref() {
             lc.capture_payload("effective_arguments", &params.arguments);
         }
-        let result = crate::mcp_gateway::call(runtime, params.arguments, auth).await;
+        let mut result = crate::mcp_gateway::call(runtime, params.arguments, auth).await;
+        runtime.add_peer_collaboration_to_mcp_call_result(
+            &mut result,
+            auth,
+            window,
+            None,
+            &ack_session_message_ids,
+        );
         let ok = result.get("isError").and_then(Value::as_bool) != Some(true);
         if let Some(lc) = lifecycle.as_deref() {
             lc.dispatch_finished(true, Some(ok), if ok { "success" } else { "tool_error" });
@@ -1614,6 +1656,18 @@ pub(super) async fn handle_call(
                     lc.dispatch_failed("specialized_governance_denied");
                     lc.dispatch_finished(true, Some(false), "tool_error");
                 }
+                let mut result = result;
+                let project = recording_session_id
+                    .as_deref()
+                    .and_then(|session_id| runtime.sessions.session_project(session_id).flatten());
+                runtime.add_peer_collaboration_projection(
+                    &mut result,
+                    auth,
+                    window,
+                    project.as_deref(),
+                    &ack_session_message_ids,
+                );
+
                 let result = mcp_runtime_tool_result_fallback(result);
                 return McpOutcome::Ok(rpc_result(
                     id,
@@ -1646,7 +1700,17 @@ pub(super) async fn handle_call(
             });
             lc.dispatch_finished(true, Some(ok), if ok { "success" } else { "tool_error" });
         }
-        let result = invocation.to_mcp_result();
+        let project = recording_session_id
+            .as_deref()
+            .and_then(|session_id| runtime.sessions.session_project(session_id).flatten());
+        let mut result = invocation.to_mcp_result();
+        runtime.add_peer_collaboration_to_mcp_call_result(
+            &mut result,
+            auth,
+            window,
+            project.as_deref(),
+            &ack_session_message_ids,
+        );
         return McpOutcome::Ok(rpc_result(
             id,
             if stateless_2026 {
@@ -1677,8 +1741,18 @@ pub(super) async fn handle_call(
                         crate::ssh_resource_gateway::audit_arguments(&params.arguments)
                     });
                 }
-                let result =
+                let mut result =
                     crate::ssh_resource_gateway::call(runtime, params.arguments, auth).await;
+                let project = recording_session_id
+                    .as_deref()
+                    .and_then(|session_id| runtime.sessions.session_project(session_id).flatten());
+                runtime.add_peer_collaboration_to_mcp_call_result(
+                    &mut result,
+                    auth,
+                    window,
+                    project.as_deref(),
+                    &ack_session_message_ids,
+                );
                 let ok = result.get("isError").and_then(Value::as_bool) != Some(true);
                 if let Some(lc) = lifecycle.as_deref() {
                     lc.dispatch_finished(true, Some(ok), if ok { "success" } else { "tool_error" });
@@ -1703,8 +1777,18 @@ pub(super) async fn handle_call(
                         crate::ssh_resource_gateway::audit_arguments(&params.arguments)
                     });
                 }
-                let result =
+                let mut result =
                     crate::ssh_resource_gateway::call(runtime, params.arguments, auth).await;
+                let project = recording_session_id
+                    .as_deref()
+                    .and_then(|session_id| runtime.sessions.session_project(session_id).flatten());
+                runtime.add_peer_collaboration_to_mcp_call_result(
+                    &mut result,
+                    auth,
+                    window,
+                    project.as_deref(),
+                    &ack_session_message_ids,
+                );
                 let ok = result.get("isError").and_then(Value::as_bool) != Some(true);
                 if let Some(lc) = lifecycle.as_deref() {
                     lc.dispatch_finished(true, Some(ok), if ok { "success" } else { "tool_error" });
@@ -1746,6 +1830,18 @@ pub(super) async fn handle_call(
                     lc.dispatch_failed("specialized_governance_denied");
                     lc.dispatch_finished(true, Some(false), "tool_error");
                 }
+                let mut result = result;
+                let project = recording_session_id
+                    .as_deref()
+                    .and_then(|session_id| runtime.sessions.session_project(session_id).flatten());
+                runtime.add_peer_collaboration_projection(
+                    &mut result,
+                    auth,
+                    window,
+                    project.as_deref(),
+                    &ack_session_message_ids,
+                );
+
                 let result = mcp_runtime_tool_result_fallback(result);
                 return McpOutcome::Ok(rpc_result(
                     id,
@@ -1781,7 +1877,17 @@ pub(super) async fn handle_call(
             });
             lc.dispatch_finished(true, Some(ok), if ok { "success" } else { "tool_error" });
         }
-        let result = invocation.to_mcp_result();
+        let project = recording_session_id
+            .as_deref()
+            .and_then(|session_id| runtime.sessions.session_project(session_id).flatten());
+        let mut result = invocation.to_mcp_result();
+        runtime.add_peer_collaboration_to_mcp_call_result(
+            &mut result,
+            auth,
+            window,
+            project.as_deref(),
+            &ack_session_message_ids,
+        );
         return McpOutcome::Ok(rpc_result(
             id,
             if stateless_2026 {
@@ -1890,30 +1996,6 @@ pub(super) async fn handle_call(
     ) {
         session_id = None;
     }
-    let ack_session_message_ids = if stateless_2026 {
-        match strip_stateless_ack_session_message_ids(&mut params.arguments) {
-            Ok(ids) => ids,
-            Err(message) => {
-                if let Some(lc) = lifecycle.as_deref() {
-                    lc.dispatch_failed("invalid_arguments");
-                    lc.dispatch_finished(false, Some(false), "invalid_arguments");
-                }
-                if let (Some(slot), Some(timer)) = (
-                    model_ergonomics_out.as_deref_mut(),
-                    pre_kernel_model_ergonomics.take(),
-                ) {
-                    *slot = Some(
-                        timer
-                            .finish()
-                            .record_for_pre_result_failure("invalid_arguments"),
-                    );
-                }
-                return McpOutcome::BadRequest(rpc_error(id, -32602, message));
-            }
-        }
-    } else {
-        Vec::new()
-    };
     let session_message_resolution = if stateless_2026 {
         match strip_stateless_session_message_resolution(&mut params.arguments) {
             Ok(value) => value,

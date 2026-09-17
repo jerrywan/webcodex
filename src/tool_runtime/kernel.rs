@@ -517,9 +517,21 @@ impl ToolRuntime {
         }
         // Action-dependent gateways resolve exact policy before the generic
         // static Session/permission lifecycle and own one specialized ledger.
-        if let Some(outcome) =
+        if let Some(mut outcome) =
             super::specialized::try_dispatch_specialized_gateway(self, &request, context).await
         {
+            if super::tool_definition::is_model_visible_tool_name(&request.tool_name) {
+                let peer_project = outcome.project.clone();
+                if let Some(result) = outcome.result.as_mut() {
+                    self.add_peer_collaboration_projection(
+                        result,
+                        context.auth,
+                        context.window,
+                        peer_project.as_deref(),
+                        &recorder_metadata.ack_session_message_ids,
+                    );
+                }
+            }
             return outcome;
         }
         let concrete_arguments = strip_tool_call_expectation_metadata(request.arguments.clone());
@@ -1000,6 +1012,19 @@ impl ToolRuntime {
             if let Some(output) = result.output.as_object_mut() {
                 output.remove("workflow_recording_attention");
             }
+        }
+        if super::tool_definition::is_model_visible_tool_name(&request.tool_name) {
+            let peer_project = correlation
+                .resolved_project
+                .as_deref()
+                .or(recorder_metadata.recording_session_project.as_deref());
+            self.add_peer_collaboration_projection(
+                &mut result,
+                context.auth,
+                context.window,
+                peer_project,
+                &recorder_metadata.ack_session_message_ids,
+            );
         }
         if request.tool_name == "observe_jobs" {
             super::observe_jobs::sparsify_observe_jobs_model_result(&mut result);

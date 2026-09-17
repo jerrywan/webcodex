@@ -346,8 +346,37 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             super::ToolSessionEvidencePolicy::NONE.lifecycle(super::ToolSessionLifecycleEffect::Mutation),
         ),
-        "Post a bounded collaboration message (todo, question, progress, guidance, risk, or decision). High-priority guidance may require request-scoped ACK; ACK neither resolves nor gates work. Use complete_session_message to atomically answer and resolve a finished todo.",
+        "Post a bounded collaboration message (todo, question, progress, guidance, risk, or decision). Any message may request request-scoped ACK; ACK proves only current model-context retention and neither resolves nor gates work. Use complete_session_message to atomically answer and resolve a finished todo.",
     )),
+    model_spec(
+        def(
+            "post_peer_message",
+            super::ToolAuditPolicy::typed_fields(&[
+                super::ToolAuditResultField::value("success"),
+                super::ToolAuditResultField::value("message_id"),
+                super::ToolAuditResultField::value("sender_peer_id"),
+                super::ToolAuditResultField::value("recipient_peer_id"),
+                super::ToolAuditResultField::value("requires_ack"),
+            ]),
+            ModelVisible,
+            TOOL_CATEGORY_SESSION,
+            None,
+            TOOL_PROVIDER_CONTROL,
+            super::ToolSemanticContract {
+                effect: super::ToolEffect::Mutate,
+                risk: super::ToolRisk::SessionCollaborate,
+                approval: super::ToolApprovalPolicy::None,
+                idempotency: super::ToolIdempotency::NonIdempotent,
+            },
+            Some(SESSION_COLLABORATE),
+            false,
+            NoPath,
+            false,
+            false,
+            super::ToolSessionEvidencePolicy::NONE,
+        ),
+        "Send a bounded message to a principal-scoped peer window discovered through peer_awareness. Routing does not require Project equality, so a Project/worktree change alone does not invalidate the retained route; it grants no access to the recipient's Project, Workflow Session, files, or assignment authority. Ordinary messages are projected once; requires_ack messages repeat while retained whenever the recipient omits the request-scoped ACK.",
+    ),
     requires_explicit_business_session(model_spec(
         def(
             "list_session_messages",

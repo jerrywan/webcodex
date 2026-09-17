@@ -218,6 +218,13 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             ("message", open_object_schema("Created session message.")),
         ])),
+        "post_peer_message" => Some(wrapped_output_schema(vec![
+            ("success", schema_type("boolean", "Always true on success.")),
+            ("message_id", schema_type("string", "Created durable wc_msg_* peer message id.")),
+            ("sender_peer_id", schema_type("string", "Principal-scoped sender window identity.")),
+            ("recipient_peer_id", schema_type("string", "Principal-scoped recipient window identity.")),
+            ("requires_ack", schema_type("boolean", "Whether omission of the request-scoped ACK causes re-projection.")),
+        ])),
         "list_session_messages" => Some(wrapped_output_schema(vec![
             ("success", schema_type("boolean", "Always true on success.")),
             (

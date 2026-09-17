@@ -1206,6 +1206,52 @@ fn session_message_create_list_and_resolve_contract() {
 }
 
 #[test]
+fn requires_ack_is_kind_priority_independent_and_survives_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = dir.path().join("general-ack-session.json");
+    let store = SessionStore::with_persistence(&ledger, 10, 50);
+    let session = store.start_session(None, None);
+    let question = store
+        .post_message_with_ack(
+            PostSessionMessageInput {
+                session_id: session.session_id.clone(),
+                kind: SessionMessageKind::Question,
+                message: "which implementation path should we take?".to_string(),
+                tags: Vec::new(),
+                reply_to: None,
+                priority: SessionMessagePriority::Normal,
+            },
+            true,
+        )
+        .unwrap();
+    assert!(question.requires_ack);
+
+    let hint = store.inbox_hint(&session.session_id).unwrap();
+    assert_eq!(hint.attention_required, Some(true));
+    assert_eq!(
+        hint.attention_reason,
+        Some(SESSION_INBOX_ACK_REQUIRED_ATTENTION_REASON)
+    );
+    drop(store);
+
+    let restored = SessionStore::with_persistence(&ledger, 10, 50);
+    let attention = restored.ack_required_messages(&session.session_id, &[]);
+    assert_eq!(attention.total_open_requires_ack, 1);
+    assert_eq!(attention.messages.len(), 1);
+    assert_eq!(attention.messages[0].message_id, question.message_id);
+    assert!(attention.messages[0].requires_ack);
+
+    let ack = restored.observe_message_acks(
+        &session.session_id,
+        std::slice::from_ref(&question.message_id),
+    );
+    assert_eq!(ack.accepted_ids, vec![question.message_id.clone()]);
+    let suppressed = restored.ack_required_messages(&session.session_id, &ack.accepted_ids);
+    assert_eq!(suppressed.total_open_requires_ack, 1);
+    assert!(suppressed.messages.is_empty());
+}
+
+#[test]
 fn wrapper_resolution_requires_ack_rejects_todo_and_replays_idempotently() {
     let store = SessionStore::default();
     let session = store.start_session(None, None);

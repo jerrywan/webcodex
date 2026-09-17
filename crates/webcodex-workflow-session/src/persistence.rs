@@ -778,12 +778,6 @@ pub fn sanitize_persisted_message(
     }
     message.message = bound_chars(message.message.trim(), MAX_MESSAGE_CHARS);
     message.tags = validate_message_tags(message.tags).unwrap_or_default();
-    if message.requires_ack
-        && (message.kind != super::model::SessionMessageKind::Guidance
-            || message.priority != super::model::SessionMessagePriority::High)
-    {
-        message.requires_ack = false;
-    }
     message.first_ack_observed_at = message
         .first_ack_observed_at
         .filter(|value| *value > 0 && message.requires_ack);

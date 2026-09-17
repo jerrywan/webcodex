@@ -5,7 +5,7 @@ use webcodex_core::runtime_contract::{
     RECOVERY_KIND_VALUES,
 };
 use webcodex_core::workflow_session_contract::{
-    SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_INSTRUCTION, SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_REASON,
+    SESSION_INBOX_ACK_REQUIRED_ATTENTION_INSTRUCTION, SESSION_INBOX_ACK_REQUIRED_ATTENTION_REASON,
 };
 
 use crate::input_property_schema_for_tool;
@@ -476,7 +476,7 @@ pub(super) fn session_hint_schema() -> Value {
         "properties": {
             "has_open_messages": {
                 "type": "boolean",
-                "description": "True when any counted open session-local message exists."
+                "description": "True when any counted open Session message exists or an otherwise uncounted open message requires acknowledgement."
             },
             "open_counts": {
                 "type": "object",
@@ -498,17 +498,17 @@ pub(super) fn session_hint_schema() -> Value {
             "attention_required": {
                 "type": "boolean",
                 "const": true,
-                "description": "Counts-only fallback marker for open high-priority guidance requiring model-context acknowledgement; may be omitted when the same response already fully projects or ACK-suppresses the urgent guidance set."
+                "description": "Counts-only fallback marker for an open Session message requiring model-context acknowledgement; may be omitted when the same response already fully projects or ACK-suppresses the required message set."
             },
             "attention_reason": {
                 "type": "string",
-                "enum": [SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_REASON],
-                "description": "Stable reason for the strong counts-only attention fallback; omitted for ordinary hints and when the same response already fully covers the urgent guidance set."
+                "enum": [SESSION_INBOX_ACK_REQUIRED_ATTENTION_REASON],
+                "description": "Stable reason for the strong counts-only attention fallback; omitted for ordinary hints and when the same response already fully covers the ACK-required message set."
             },
             "attention_instruction": {
                 "type": "string",
-                "enum": [SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_INSTRUCTION],
-                "description": "Short fixed counts-only fallback instruction; never contains Session message body text and may be omitted when session_attention already fully covers the urgent guidance set."
+                "enum": [SESSION_INBOX_ACK_REQUIRED_ATTENTION_INSTRUCTION],
+                "description": "Short fixed counts-only fallback instruction; never contains Session message body text and may be omitted when session_attention already fully covers the ACK-required message set."
             },
             "suggested_next_tool": {
                 "type": "string",

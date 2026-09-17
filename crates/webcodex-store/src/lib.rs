@@ -27,6 +27,7 @@ mod job_terminal_wait_tests;
 mod memory;
 pub mod models;
 mod oauth;
+mod peer_collaboration;
 mod schema;
 mod server_instance;
 mod window_activity;
@@ -99,6 +100,10 @@ pub use self::memory::{
     validate_memory_summary, MAX_MEMORIES_PER_PROJECT, MEMORY_SCOPE_IDENTITY_ATTRIBUTED,
 };
 pub use self::oauth::RotateResult;
+pub use self::peer_collaboration::{
+    NewPeerMessage, PeerAttentionBatch, PeerMessageRecord, PeerProjectionRollback,
+    RecentProjectPeerRecord, MAX_PEER_DISCOVERY_LIMIT, MAX_PEER_MESSAGE_LIMIT,
+};
 pub use self::server_instance::ServerInstanceGuard;
 pub use self::window_activity::{MAX_WINDOW_ACTIVITY_LIMIT, MAX_WINDOW_LINK_LIMIT};
 

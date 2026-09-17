@@ -2791,14 +2791,6 @@ impl SessionStoreInner {
         let record = stored
             .hot_mut()
             .expect("active session message mutation must stay hot");
-        if requires_ack
-            && (input.kind != super::model::SessionMessageKind::Guidance
-                || input.priority != super::model::SessionMessagePriority::High)
-        {
-            return Err(SessionMessageError::InvalidInput(
-                "requires_ack is only valid for high-priority guidance".to_string(),
-            ));
-        }
         let message = validate_message_text(input.message)?;
         let tags = validate_message_tags(input.tags)?;
         if let Some(reply_to) = input.reply_to.as_deref() {
@@ -2875,8 +2867,6 @@ impl SessionStoreInner {
             let Some(index) = record.messages.iter().position(|message| {
                 message.message_id == *message_id
                     && message.status == SessionMessageStatus::Open
-                    && message.kind == super::model::SessionMessageKind::Guidance
-                    && message.priority == super::model::SessionMessagePriority::High
                     && message.requires_ack
             }) else {
                 outcome.ignored_count += 1;

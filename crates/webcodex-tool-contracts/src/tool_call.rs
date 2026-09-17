@@ -1115,8 +1115,37 @@ pub enum ToolCall {
         #[serde(default)]
         priority: SessionMessagePriority,
         #[schemars(extend("default" = false))]
-        /// Optional acknowledgement requirement. In this version only high-priority guidance may require
-        /// acknowledgement. ACK is context-scoped and never resolves or gates work.
+        /// Optional acknowledgement requirement. Any message kind may request acknowledgement; ACK is
+        /// context-scoped and never resolves, accepts, executes, or gates work.
+        #[serde(default)]
+        requires_ack: bool,
+    },
+
+    /// Send a bounded collaboration message to another recent ChatGPT/host window owned by the
+    /// same authenticated principal. Peer routing is project-independent and grants no access to the
+    /// recipient's current Project, Workflow Session, files, or task authority.
+    PostPeerMessage {
+        /// Opaque principal-scoped peer identity discovered through peer_awareness.
+        #[schemars(regex(pattern = "^wc_peer_[0-9a-f]{32}$"))]
+        peer_id: String,
+        /// Communication kind. A peer todo is only a request message; it does not create a fenced
+        /// Workflow Session assignment.
+        kind: SessionMessageKind,
+        /// Non-empty bounded message body.
+        #[schemars(length(max = 8000))]
+        message: String,
+        /// Optional tags for filtering and later analysis.
+        #[schemars(length(max = 16))]
+        #[schemars(inner(length(max = 64)))]
+        #[serde(default)]
+        tags: Vec<String>,
+        /// Optional priority; defaults to normal.
+        #[serde(default)]
+        priority: SessionMessagePriority,
+        #[schemars(extend("default" = false))]
+        /// When false, WebCodex attempts one ambient projection on the recipient's next model-facing
+        /// tool result. When true, omission of the request-scoped ACK causes the message to be projected
+        /// again. ACK never grants authority, resolves the message, or requires a reply.
         #[serde(default)]
         requires_ack: bool,
     },
@@ -4612,6 +4641,7 @@ impl ToolCall {
             Self::CloseSession { .. } => "close_session",
             Self::ValidationSummary { .. } => "validation_summary",
             Self::PostSessionMessage { .. } => "post_session_message",
+            Self::PostPeerMessage { .. } => "post_peer_message",
             Self::ListSessionMessages { .. } => "list_session_messages",
             Self::GetSessionAssignment { .. } => "get_session_assignment",
             Self::ObserveSessionMessages { .. } => "observe_session_messages",

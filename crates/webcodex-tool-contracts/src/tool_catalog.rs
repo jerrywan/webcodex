@@ -249,6 +249,7 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
             "update_session_context",
             "close_session",
             "post_session_message",
+            "post_peer_message",
             "list_session_messages",
             "get_session_assignment",
             "observe_session_messages",

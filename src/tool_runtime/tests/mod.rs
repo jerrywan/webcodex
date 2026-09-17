@@ -37,6 +37,7 @@ mod lsp;
 mod memory;
 mod metadata;
 mod observe_jobs;
+mod peer_collaboration;
 mod permission_gate;
 mod process;
 mod read_files;

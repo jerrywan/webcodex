@@ -103,6 +103,58 @@ async fn mcp_tools_list_uses_adaptive_inventory_in_both_schema_modes() {
     }
 }
 
+#[tokio::test]
+async fn stateless_mcp_gateway_advertises_peer_ack_without_session_wrappers() {
+    let mut auth = crate::auth::AuthContext::new(crate::auth::AuthKind::OAuth2Token);
+    auth.scopes = vec![crate::auth::SCOPE_MCP_LOCAL.to_string()];
+
+    let legacy =
+        crate::mcp::tools::handle_list(Some(Value::from(3004)), Some(&auth), false, false, false)
+            .await;
+    let McpOutcome::Ok(legacy) = legacy else {
+        panic!("expected legacy tools/list success");
+    };
+    let legacy_mcp_tool = legacy["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == crate::mcp_gateway::MCP_TOOL_NAME)
+        .expect("legacy mcp_tool spec");
+    assert!(!legacy_mcp_tool["inputSchema"]["properties"]
+        .as_object()
+        .unwrap()
+        .contains_key(crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD));
+
+    let stateless =
+        crate::mcp::tools::handle_list(Some(Value::from(3005)), Some(&auth), true, false, false)
+            .await;
+    let McpOutcome::Ok(stateless) = stateless else {
+        panic!("expected stateless tools/list success");
+    };
+    let stateless_mcp_tool = stateless["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == crate::mcp_gateway::MCP_TOOL_NAME)
+        .expect("stateless mcp_tool spec");
+    let properties = stateless_mcp_tool["inputSchema"]["properties"]
+        .as_object()
+        .unwrap();
+    assert!(properties
+        .contains_key(crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD));
+    for field in [
+        crate::tool_runtime::sessions::TOOL_CALL_RECORDING_SESSION_ID_FIELD,
+        crate::tool_runtime::sessions::TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD,
+        crate::tool_runtime::context_projection::TOOL_CALL_CONTEXT_REQUEST_FIELD,
+        crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD,
+    ] {
+        assert!(
+            !properties.contains_key(field),
+            "mcp_tool must not advertise unsupported wrapper metadata: {field}"
+        );
+    }
+}
+
 #[test]
 fn memory_tools_are_stateless_protocol_extensions_scope_filtered_and_schema_static() {
     let generic_names = registered_tool_specs()
