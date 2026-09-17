@@ -376,7 +376,7 @@ fn skill_runtime_tools_are_stateless_protocol_extensions_and_schema_static() {
         .is_none());
     assert_eq!(
         run_skill_resource["inputSchema"]["properties"]["path"]["pattern"],
-        "^scripts/"
+        "^scripts/.+$"
     );
     assert!(run_skill_resource["inputSchema"]["required"]
         .as_array()

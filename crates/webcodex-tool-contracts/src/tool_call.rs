@@ -2187,7 +2187,7 @@ pub enum ToolCall {
         skill_id: String,
         /// Skill-package-relative script path under scripts/. Absolute paths and traversal are rejected.
         #[schemars(length(min = 9, max = 512))]
-        #[schemars(regex(pattern = "^scripts/"))]
+        #[schemars(regex(pattern = "^scripts/.+$"))]
         path: String,
         /// Required SKILL.md definition digest fence. For configured live Skills this fences the definition
         /// only; script resource bytes are read live at execution. Managed installed Skills additionally
