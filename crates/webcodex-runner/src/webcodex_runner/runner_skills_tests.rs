@@ -394,6 +394,10 @@ fn interpreter_argv_binds_python_file_and_shell_zero_to_runner_owned_target() {
     );
     assert!(PYTHON_SKILL_WRAPPER.contains("sys.path[0] = os.path.dirname(p)"));
     assert!(PYTHON_SKILL_WRAPPER.contains("\"__file__\": p"));
+    let mut uppercase_request = request.clone();
+    uppercase_request.path = "scripts/probe.PY".to_string();
+    let uppercase_candidates = skill_execution_candidates(&uppercase_request, target).unwrap();
+    assert_eq!(uppercase_candidates[0].0, "python3");
 
     let shell_script = "printf '%s\\n' \"$0\"\n";
     let shell_request = execution_request(&configured, "scripts/probe.sh", shell_script);

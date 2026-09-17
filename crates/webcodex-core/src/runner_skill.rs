@@ -152,14 +152,12 @@ impl RunnerSkillExecutionRequest {
             return Err("invalid Runner Skill execution request");
         }
         let path = normalize_runner_skill_resource_path(&self.path)?;
-        if !path.starts_with("scripts/")
-            || !matches!(
-                Path::new(&path)
-                    .extension()
-                    .and_then(|value| value.to_str()),
-                Some("py" | "sh")
-            )
-        {
+        let extension = Path::new(&path)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !path.starts_with("scripts/") || !matches!(extension.as_str(), "py" | "sh") {
             return Err("invalid Runner Skill executable resource");
         }
         match self.expected_source {
@@ -623,6 +621,9 @@ mod tests {
             args: vec!["literal argument".to_string()],
         };
         configured_request.validate().unwrap();
+        let mut uppercase_configured = configured_request.clone();
+        uppercase_configured.path = "scripts/probe.PY".to_string();
+        uppercase_configured.validate().unwrap();
         let encoded = serde_json::to_string(&configured_request).unwrap();
         assert!(encoded.len() <= RUNNER_SKILL_EXECUTION_REQUEST_MAX_BYTES);
         assert_eq!(

@@ -3717,6 +3717,7 @@ mod envelope_tests {
                 "project_path_registration",
                 "managed_worktree",
                 "skill_runtime",
+                "skill_resource_execution",
                 "skill_management",
                 "computer_observe",
                 "computer_application_discovery",

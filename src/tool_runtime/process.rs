@@ -34,6 +34,27 @@ fn command_completed(state: ShellCommandExecutionState) -> bool {
     matches!(state, ShellCommandExecutionState::Completed)
 }
 
+fn skill_resource_validation_identity_args(request: &RunnerSkillExecutionRequest) -> Vec<String> {
+    let source = match request.expected_source {
+        webcodex_core::runner_skill::RunnerSkillSource::Configured => "configured",
+        webcodex_core::runner_skill::RunnerSkillSource::Managed => "managed",
+    };
+    let mut identity_args = Vec::with_capacity(request.args.len() + 6);
+    identity_args.push(request.skill_id.clone());
+    identity_args.push(source.to_string());
+    identity_args.push(request.path.clone());
+    identity_args.push(request.expected_definition_revision.clone());
+    identity_args.push(
+        request
+            .expected_package_revision
+            .clone()
+            .unwrap_or_else(|| "<live-configured>".to_string()),
+    );
+    identity_args.push(request.expected_resource_sha256.clone());
+    identity_args.extend(request.args.iter().cloned());
+    identity_args
+}
+
 pub(crate) fn success_output(
     exit_code: i32,
     stdout: String,
@@ -807,10 +828,7 @@ impl ToolRuntime {
         let declared_purpose = purpose.unwrap_or_default();
         let validation_identity = match skill_execution {
             Some(request) => {
-                let mut identity_args = Vec::with_capacity(request.args.len() + 2);
-                identity_args.push(request.path.clone());
-                identity_args.push(request.expected_resource_sha256.clone());
-                identity_args.extend(request.args.iter().cloned());
+                let identity_args = skill_resource_validation_identity_args(request);
                 run_process_validation_identity(
                     "run_skill_resource",
                     &identity_args,
@@ -1215,5 +1233,52 @@ impl ToolRuntime {
             async_handoff_available,
         );
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use webcodex_core::runner_skill::RunnerSkillSource;
+
+    fn validation_identity(request: &RunnerSkillExecutionRequest) -> String {
+        run_process_validation_identity(
+            "run_skill_resource",
+            &skill_resource_validation_identity_args(request),
+            None,
+            Some("."),
+            Some("test"),
+        )
+        .expect("test purpose is validation-like")
+        .identity
+    }
+
+    #[test]
+    fn skill_resource_validation_identity_includes_package_execution_context() {
+        let base = RunnerSkillExecutionRequest {
+            skill_id: "wc_skill_aaaaaaaaaaaaaaaaaaaaaA".to_string(),
+            expected_source: RunnerSkillSource::Managed,
+            path: "scripts/check.py".to_string(),
+            expected_definition_revision: "b".repeat(64),
+            expected_package_revision: Some(
+                "wc_skillpkg_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            ),
+            expected_resource_sha256: "c".repeat(64),
+            args: vec!["--fast".to_string()],
+        };
+        let base_identity = validation_identity(&base);
+
+        let mut different_skill = base.clone();
+        different_skill.skill_id = "wc_skill_bbbbbbbbbbbbbbbbbbbbbQ".to_string();
+        assert_ne!(base_identity, validation_identity(&different_skill));
+
+        let mut different_package = base.clone();
+        different_package.expected_package_revision =
+            Some("wc_skillpkg_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string());
+        assert_ne!(base_identity, validation_identity(&different_package));
+
+        let mut different_definition = base.clone();
+        different_definition.expected_definition_revision = "d".repeat(64);
+        assert_ne!(base_identity, validation_identity(&different_definition));
     }
 }

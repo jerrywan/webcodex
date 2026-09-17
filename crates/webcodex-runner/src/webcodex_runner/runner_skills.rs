@@ -86,8 +86,9 @@ fn skill_execution_candidates(
     let extension = Path::new(&request.path)
         .extension()
         .and_then(|value| value.to_str())
-        .unwrap_or_default();
-    let candidates = match extension {
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let candidates = match extension.as_str() {
         "py" => {
             let mut common = vec![
                 "-B".to_string(),

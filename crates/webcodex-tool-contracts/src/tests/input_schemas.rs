@@ -1039,6 +1039,20 @@ fn agent_continuation_bind_requires_canonical_view_fence_without_model_exposure(
 
 #[test]
 fn skill_runtime_and_management_schemas_preserve_typed_bounds() {
+    let run = input_schema_for_tool("run_skill_resource");
+    assert_eq!(run["properties"]["path"]["pattern"], "^scripts/");
+    let args_description = run["properties"]["args"]["description"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(args_description.contains("package/script execution identity"));
+    assert!(args_description.contains("requested Project cwd"));
+    assert!(!args_description.contains("stdin-reading"));
+    let cwd_description = run["properties"]["cwd"]["description"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(cwd_description.contains("business cwd"));
+    assert!(!cwd_description.contains("run_process"));
+
     let list = input_schema_for_tool("skill_list");
     assert_eq!(list["properties"]["project"]["minLength"], 1);
     assert_eq!(list["properties"]["query"]["maxLength"], 200);

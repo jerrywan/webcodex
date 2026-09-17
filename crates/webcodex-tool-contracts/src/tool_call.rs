@@ -2174,10 +2174,11 @@ pub enum ToolCall {
         session_id: Option<String>,
     },
 
-    /// Execute one trusted Runner Skill script through the existing structured
-    /// process contract. WebCodex selects the interpreter from the resource
-    /// extension and supplies the resource over stdin; callers provide only
-    /// script arguments and native Skill package paths are never exposed.
+    /// Execute one trusted Runner Skill script through the dedicated Runner Skill execution contract.
+    /// The Runner resolves the trusted package again at execution under the supplied revision/digest
+    /// fences, preserves package-relative script identity while keeping the requested Project cwd, and
+    /// receives only caller-provided script arguments; source bytes and Runner-native package paths are
+    /// never model inputs.
     RunSkillResource {
         /// Configured project id.
         project: String,
@@ -2198,9 +2199,10 @@ pub enum ToolCall {
         #[schemars(regex(pattern = "^wc_skillpkg_[A-Za-z0-9_-]{43}$"))]
         #[serde(default)]
         expected_package_revision: Option<String>,
-        /// Ordered literal script arguments. WebCodex selects the interpreter and stdin-reading invocation
-        /// from the trusted Skill resource extension, then appends these values after the interpreter's
-        /// script marker. The Skill script body is never present in model arguments.
+        /// Ordered literal script arguments. WebCodex selects the interpreter from the trusted Skill
+        /// resource extension and preserves the selected package/script execution identity while keeping
+        /// the requested Project cwd. The Skill script body and Runner-native package path are never model
+        /// arguments.
         #[schemars(length(max = 256))]
         #[schemars(inner(length(max = 8192)))]
         #[serde(default)]
@@ -2225,8 +2227,8 @@ pub enum ToolCall {
         #[schemars(range(min = 1))]
         #[serde(default)]
         sync_wait_secs: Option<u64>,
-        /// Project-relative working directory. Omit, empty string, or '.' for the project root. Named
-        /// Session SSH resources are unsupported for run_process.
+        /// Project-relative working directory. Omit, empty string, or '.' for the project root. Skill
+        /// package resolution remains Runner-owned and does not change the requested business cwd.
         #[schemars(length(max = 1024))]
         #[serde(default)]
         cwd: Option<String>,
