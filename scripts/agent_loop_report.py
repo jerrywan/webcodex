@@ -20,6 +20,22 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = 1
 DEFAULT_CASE_MANIFEST = Path(__file__).with_name("agent_loop_cases.json")
+CODE_MODE_TOOLS = frozenset(("code_mode_exec", "code_mode_exec_effectful", "code_mode_exec_mutating"))
+CODE_MODE_SURFACES = frozenset(("e1", "e2a", "e2b"))
+CODE_MODE_COMPOSITION_NUMERIC_FIELDS = (
+    "nested_calls",
+    "nested_successes",
+    "nested_failures",
+    "max_in_flight",
+    "duration_ms",
+    "slot_wait_ms",
+    "returned_bytes",
+    "nested_raw_result_bytes_total",
+    "consequential_calls",
+    "known_results",
+    "job_handoffs",
+    "outcome_unknown",
+)
 
 
 class ReportError(ValueError):
@@ -324,6 +340,40 @@ def _telemetry(event: dict[str, Any]) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _code_mode_composition(event: dict[str, Any]) -> dict[str, Any] | None:
+    value = event.get("summary", {}).get("code_mode_composition")
+    if not isinstance(value, dict):
+        return None
+    normalized: dict[str, Any] = {}
+    for field in CODE_MODE_COMPOSITION_NUMERIC_FIELDS:
+        item = value.get(field)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            return None
+        normalized[field] = item
+    counts = value.get("nested_tool_counts")
+    if not isinstance(counts, dict):
+        return None
+    normalized_counts: dict[str, int] = {}
+    for tool, count in counts.items():
+        if (
+            not isinstance(tool, str)
+            or not tool
+            or isinstance(count, bool)
+            or not isinstance(count, int)
+            or count < 0
+        ):
+            return None
+        normalized_counts[tool] = count
+    if normalized["nested_successes"] + normalized["nested_failures"] != normalized["nested_calls"]:
+        return None
+    if sum(normalized_counts.values()) != normalized["nested_calls"]:
+        return None
+    if normalized["known_results"] + normalized["job_handoffs"] + normalized["outcome_unknown"] != normalized["consequential_calls"]:
+        return None
+    normalized["nested_tool_counts"] = normalized_counts
+    return normalized
+
+
 def _nearest_rank(values: Iterable[int], percentile: float) -> int | None:
     ordered = sorted(values)
     if not ordered:
@@ -342,6 +392,69 @@ def _metric_distribution(values: list[int], *, missing: int = 0) -> dict[str, An
         "samples": len(values),
         "missing": missing,
     }
+
+
+def _summarize_code_mode_composition(
+    outer: list[dict[str, Any]],
+    variant: str | None,
+    *,
+    action_audit_available: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not action_audit_available:
+        metrics = {
+            field: _metric_distribution([], missing=1)
+            for field in CODE_MODE_COMPOSITION_NUMERIC_FIELDS
+        }
+        return (
+            {
+                "outer_code_mode_calls": None,
+                "outer_calls_with_summary": None,
+                "nested_tool_counts": {},
+                **metrics,
+            },
+            {
+                "available": False,
+                "reason": "Code Mode composition is persisted in ActionAudit summary metadata, not in trace-only evidence",
+            },
+        )
+
+    code_mode_outer = [event for event in outer if event.get("operation") in CODE_MODE_TOOLS]
+    parsed = [
+        composition
+        for event in code_mode_outer
+        if (composition := _code_mode_composition(event)) is not None
+    ]
+    missing = len(code_mode_outer) - len(parsed)
+    reason = None
+    if variant == "code_mode" and not code_mode_outer:
+        missing = max(missing, 1)
+        reason = (
+            "no Code Mode outer ActionAudit row was selected; benchmark calls must link their outer "
+            "ActionAudit rows with recording_session_id"
+        )
+    elif variant == "direct" and code_mode_outer:
+        missing = max(missing, 1)
+        reason = "a direct report selected one or more Code Mode outer calls"
+    elif missing:
+        reason = "one or more Code Mode outer calls lack a valid code_mode_composition summary"
+
+    metrics = {
+        field: _metric_distribution([int(value[field]) for value in parsed], missing=missing)
+        for field in CODE_MODE_COMPOSITION_NUMERIC_FIELDS
+    }
+    nested_tool_counts: Counter[str] = Counter()
+    for value in parsed:
+        nested_tool_counts.update(value["nested_tool_counts"])
+    available = missing == 0 and reason is None
+    return (
+        {
+            "outer_code_mode_calls": len(code_mode_outer),
+            "outer_calls_with_summary": len(parsed),
+            "nested_tool_counts": dict(sorted(nested_tool_counts.items())),
+            **metrics,
+        },
+        {"available": available, "reason": reason},
+    )
 
 
 def _audit_sort_key(event: dict[str, Any]) -> tuple[int, str]:
@@ -417,6 +530,7 @@ def _summarize_audit(
     outer = [event for event in audit_events if event.get("action_name") == "toolsCall"]
     statuses = Counter(str(event.get("status") or "unknown") for event in outer)
     outer_tools = Counter(event["operation"] for event in outer if isinstance(event.get("operation"), str))
+    composition, composition_availability = _summarize_code_mode_composition(outer, variant)
 
     service_values: list[int] = []
     for event in outer:
@@ -450,7 +564,7 @@ def _summarize_audit(
         canonical_reason = None if canonical_total is not None else "one or more outer calls lack ModelErgonomics evidence"
     elif variant == "code_mode":
         canonical_total = None
-        canonical_reason = "ActionAudit records the outer composition call but does not prove the complete nested canonical child-call count"
+        canonical_reason = "canonical_calls.total keeps the outer/direct counting contract; use composition.nested_calls for persisted Code Mode child-call totals"
     else:
         canonical_total = None
         canonical_reason = "declare --variant direct or code_mode before interpreting canonical call count"
@@ -471,6 +585,7 @@ def _summarize_audit(
             "observed_outer_runtime_records": canonical_observed,
             "by_name": dict(sorted(canonical_by_name.items())),
         },
+        "composition": composition,
         "timing": {
             "webcodex_service_ms": service,
             "tool_runtime_ms": runtime_duration,
@@ -490,6 +605,7 @@ def _summarize_audit(
             "tool_runtime_timing": {"available": runtime_duration["total"] is not None, "reason": None if runtime_duration["total"] is not None else "one or more outer calls lack ModelErgonomics runtime duration evidence"},
             "window_timing": {"available": missing_serial == 0, "reason": None if missing_serial == 0 else "one or more canonical serial transitions lack the predecessor timestamps needed for a gap"},
             "canonical_calls": {"available": canonical_total is not None, "reason": canonical_reason},
+            "code_mode_composition": composition_availability,
             "serialized_tool_result_bytes": {"available": result_byte_metric["total"] is not None, "reason": None if result_byte_metric["total"] is not None else "one or more outer calls lack a serialized ToolResult byte count; missing values are not treated as zero"},
             "resolved_recoveries": {"available": False, "reason": "recovery_kind is guidance metadata, not proof that a later call resolved the failure"},
         },
@@ -512,7 +628,7 @@ def _trace_handler_events(trace_events: list[dict[str, Any]]) -> list[dict[str, 
     return handlers
 
 
-def _summarize_trace_only(trace_events: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize_trace_only(trace_events: list[dict[str, Any]], variant: str | None) -> dict[str, Any]:
     handlers = _trace_handler_events(trace_events)
     statuses: Counter[str] = Counter()
     tools: Counter[str] = Counter()
@@ -528,6 +644,9 @@ def _summarize_trace_only(trace_events: list[dict[str, Any]]) -> dict[str, Any]:
         tool_name = event.get("tool_name")
         if isinstance(tool_name, str) and tool_name:
             tools[tool_name] += 1
+    composition, composition_availability = _summarize_code_mode_composition(
+        [], variant, action_audit_available=False
+    )
     unavailable = {
         "webcodex_service_timing": {"available": False, "reason": "tool_handler_returned duration is not the canonical request-observed to response-handoff service interval"},
         "tool_runtime_timing": {"available": False, "reason": "events.jsonl does not persist canonical ModelErgonomics runtime duration evidence"},
@@ -541,6 +660,7 @@ def _summarize_trace_only(trace_events: list[dict[str, Any]]) -> dict[str, Any]:
         "outer_calls": {"total": len(handlers), "meaningful": None, "successful": statuses.get("success", 0), "failed": statuses.get("failed", 0), "timeout_or_unknown": statuses.get("unknown", 0), "by_status": dict(sorted(statuses.items()))},
         "tools": {"outer_by_name": dict(sorted(tools.items()))},
         "canonical_calls": {"total": None, "observed_outer_runtime_records": None, "by_name": {}},
+        "composition": composition,
         "timing": {
             "webcodex_service_ms": _metric_distribution([], missing=len(handlers)),
             "tool_runtime_ms": _metric_distribution([], missing=len(handlers)),
@@ -549,7 +669,11 @@ def _summarize_trace_only(trace_events: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "results": {"serialized_tool_result_bytes": _metric_distribution([], missing=len(handlers))},
         "failures": {"error_kind_by_name": {}, "failure_kind_by_name": {}, "recovery_guidance_by_kind": {}, "resolved_recoveries": None},
-        "availability": {"action_audit": {"available": False, "reason": "no ActionAudit DB evidence was provided"}, **unavailable},
+        "availability": {
+            "action_audit": {"available": False, "reason": "no ActionAudit DB evidence was provided"},
+            "code_mode_composition": composition_availability,
+            **unavailable,
+        },
     }
 
 
@@ -593,21 +717,31 @@ def _is_exact_git_revision(value: Any) -> bool:
     )
 
 
-def _benchmark_metadata(*, case_manifest: Path | None, case_id: str | None, variant: str | None, base_revision: str | None) -> dict[str, Any] | None:
+def _benchmark_metadata(*, case_manifest: Path | None, case_id: str | None, variant: str | None, surface: str | None = None, base_revision: str | None = None) -> dict[str, Any] | None:
     if case_id is None:
-        if case_manifest is not None or base_revision is not None:
-            raise ReportError("--case-manifest/--base-revision require --case-id")
+        if case_manifest is not None or base_revision is not None or surface is not None:
+            raise ReportError("--case-manifest/--base-revision/--surface require --case-id")
         return None
     if variant is None:
         raise ReportError("--case-id requires --variant")
+    if variant == "direct":
+        if surface is None:
+            surface = "direct"
+        elif surface != "direct":
+            raise ReportError("--variant direct requires --surface direct")
+    elif variant == "code_mode":
+        if surface is None:
+            raise ReportError("--variant code_mode benchmark runs require --surface e1, e2a, or e2b")
+        if surface not in CODE_MODE_SURFACES:
+            raise ReportError("--variant code_mode requires --surface e1, e2a, or e2b")
     if not _is_exact_git_revision(base_revision):
         raise ReportError("--case-id requires --base-revision as an exact 40-hex Git commit")
     manifest = load_case_manifest(case_manifest or DEFAULT_CASE_MANIFEST)
     case = _case_by_id(manifest, case_id)
-    return {"manifest_schema_version": manifest["schema_version"], "case_id": case_id, "case_title": case["title"], "target": case["target"], "variant": variant, "base_revision": base_revision}
+    return {"manifest_schema_version": manifest["schema_version"], "case_id": case_id, "case_title": case["title"], "target": case["target"], "variant": variant, "surface": surface, "base_revision": base_revision}
 
 
-def summarize(*, trace_root: Path | None, audit_db: Path | None, workflow_session_id: str | None, case_manifest: Path | None, case_id: str | None, variant: str | None, base_revision: str | None) -> dict[str, Any]:
+def summarize(*, trace_root: Path | None, audit_db: Path | None, workflow_session_id: str | None, case_manifest: Path | None, case_id: str | None, variant: str | None, surface: str | None = None, base_revision: str | None = None) -> dict[str, Any]:
     if trace_root is None and audit_db is None:
         raise ReportError("summarize requires --trace-root and/or --audit-db")
     if workflow_session_id is not None and audit_db is None:
@@ -631,7 +765,7 @@ def summarize(*, trace_root: Path | None, audit_db: Path | None, workflow_sessio
     core = (
         _summarize_audit(audit_events, variant, continuity_events)
         if audit_db is not None
-        else _summarize_trace_only(trace_events)
+        else _summarize_trace_only(trace_events, variant)
     )
     trace_metadata_present = trace_files > 0
     runner, runner_availability = _runner_summary(trace_events, trace_metadata_present)
@@ -640,7 +774,7 @@ def summarize(*, trace_root: Path | None, audit_db: Path | None, workflow_sessio
     core["jobs"] = jobs
     core["availability"]["runner_requests"] = runner_availability
     core["availability"]["job_handoffs"] = jobs_availability
-    benchmark = _benchmark_metadata(case_manifest=case_manifest, case_id=case_id, variant=variant, base_revision=base_revision)
+    benchmark = _benchmark_metadata(case_manifest=case_manifest, case_id=case_id, variant=variant, surface=surface, base_revision=base_revision)
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "agent_loop_summary",
@@ -668,7 +802,13 @@ def _get_path(value: dict[str, Any], path: str) -> Any:
 _COMPARISON_METRICS = [
     "observed_span_ms", "outer_calls.total", "outer_calls.meaningful",
     "outer_calls.successful", "outer_calls.failed", "canonical_calls.total",
-    "runner.requests_observed", "timing.webcodex_service_ms.total",
+    "runner.requests_observed", "composition.nested_calls.total",
+    "composition.nested_successes.total", "composition.nested_failures.total",
+    "composition.consequential_calls.total", "composition.known_results.total",
+    "composition.job_handoffs.total",
+    "composition.outcome_unknown.total", "composition.duration_ms.total",
+    "composition.slot_wait_ms.total", "composition.returned_bytes.total",
+    "composition.nested_raw_result_bytes_total.total", "timing.webcodex_service_ms.total",
     "timing.webcodex_service_ms.p50", "timing.webcodex_service_ms.p95",
     "timing.tool_runtime_ms.total", "timing.outside_webcodex_gap_ms.total",
     "timing.outside_webcodex_gap_ms.p50", "timing.outside_webcodex_gap_ms.p95",
@@ -717,6 +857,8 @@ def compare_reports(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict
             "candidate_outer_by_name": _get_path(candidate, "tools.outer_by_name") or {},
             "baseline_canonical_by_name": _get_path(baseline, "canonical_calls.by_name") or {},
             "candidate_canonical_by_name": _get_path(candidate, "canonical_calls.by_name") or {},
+            "baseline_nested_by_name": _get_path(baseline, "composition.nested_tool_counts") or {},
+            "candidate_nested_by_name": _get_path(candidate, "composition.nested_tool_counts") or {},
         },
         "notes": ["deltas are candidate minus baseline and are descriptive only", "no metric ordering, score, or winner is inferred"],
     }
@@ -744,6 +886,7 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize_parser.add_argument("--case-manifest", type=Path)
     summarize_parser.add_argument("--case-id")
     summarize_parser.add_argument("--variant", choices=("direct", "code_mode"))
+    summarize_parser.add_argument("--surface", choices=("direct", "e1", "e2a", "e2b"))
     summarize_parser.add_argument("--base-revision")
     summarize_parser.add_argument("--output", type=Path)
     compare_parser = subparsers.add_parser("compare", help="compare two summary JSON reports")
@@ -758,7 +901,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "summarize":
-            report = summarize(trace_root=args.trace_root, audit_db=args.audit_db, workflow_session_id=args.workflow_session_id, case_manifest=args.case_manifest, case_id=args.case_id, variant=args.variant, base_revision=args.base_revision)
+            report = summarize(trace_root=args.trace_root, audit_db=args.audit_db, workflow_session_id=args.workflow_session_id, case_manifest=args.case_manifest, case_id=args.case_id, variant=args.variant, surface=args.surface, base_revision=args.base_revision)
             _write_json(report, args.output)
             return 0
         comparison = compare_reports(_read_report(args.baseline), _read_report(args.candidate))

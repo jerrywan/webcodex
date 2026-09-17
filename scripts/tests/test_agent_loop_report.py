@@ -10,6 +10,26 @@ from pathlib import Path
 from scripts import agent_loop_report as report
 
 
+def code_mode_composition(**overrides: object) -> dict[str, object]:
+    value: dict[str, object] = {
+        "nested_calls": 3,
+        "nested_successes": 3,
+        "nested_failures": 0,
+        "max_in_flight": 1,
+        "duration_ms": 15,
+        "slot_wait_ms": 0,
+        "returned_bytes": 60,
+        "nested_raw_result_bytes_total": 2895,
+        "nested_tool_counts": {"apply_text_edits": 1, "read_files": 2},
+        "consequential_calls": 1,
+        "known_results": 1,
+        "job_handoffs": 0,
+        "outcome_unknown": 0,
+    }
+    value.update(overrides)
+    return value
+
+
 class AgentLoopReportTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -73,6 +93,7 @@ class AgentLoopReportTests(unittest.TestCase):
         include_telemetry: bool = True,
         link: bool = True,
         ids: dict[str, object] | None = None,
+        composition: dict[str, object] | None = None,
     ) -> None:
         telemetry: dict[str, object] = {
             "schema_version": 5,
@@ -89,7 +110,11 @@ class AgentLoopReportTests(unittest.TestCase):
                     "recovery_kind": "inspect_diagnostic",
                 }
             )
-        summary = {"model_ergonomics": telemetry} if include_telemetry else {}
+        summary: dict[str, object] = {}
+        if include_telemetry:
+            summary["model_ergonomics"] = telemetry
+        if composition is not None:
+            summary["code_mode_composition"] = composition
         with sqlite3.connect(self.audit_db) as connection:
             connection.execute(
                 """
@@ -138,6 +163,7 @@ class AgentLoopReportTests(unittest.TestCase):
             "case_manifest": None,
             "case_id": None,
             "variant": "direct",
+            "surface": None,
             "base_revision": None,
         }
         arguments.update(kwargs)
@@ -352,6 +378,7 @@ class AgentLoopReportTests(unittest.TestCase):
                 case_manifest=None,
                 case_id=None,
                 variant=None,
+                surface=None,
                 base_revision=None,
             )
 
@@ -366,6 +393,7 @@ class AgentLoopReportTests(unittest.TestCase):
             case_manifest=None,
             case_id=None,
             variant=None,
+            surface=None,
             base_revision=None,
         )
 
@@ -485,6 +513,7 @@ class AgentLoopReportTests(unittest.TestCase):
             case_manifest=None,
             case_id=None,
             variant=None,
+            surface=None,
             base_revision=None,
         )
 
@@ -496,13 +525,100 @@ class AgentLoopReportTests(unittest.TestCase):
         self.assertIsNone(result["timing"]["webcodex_service_ms"]["total"])
         self.assertFalse(result["availability"]["webcodex_service_timing"]["available"])
 
-    def test_code_mode_canonical_count_is_explicitly_unavailable(self) -> None:
-        self.insert_event("code", tool="code_mode_exec")
+    def test_code_mode_canonical_count_stays_separate_from_persisted_child_count(self) -> None:
+        self.insert_event(
+            "code",
+            tool="code_mode_exec_mutating",
+            composition=code_mode_composition(),
+        )
+        self.insert_event("validation", tool="cargo_check", started=140, handed=160)
         result = self.summarize(variant="code_mode")
 
         self.assertIsNone(result["canonical_calls"]["total"])
-        self.assertEqual(result["canonical_calls"]["observed_outer_runtime_records"], 1)
+        self.assertEqual(result["canonical_calls"]["observed_outer_runtime_records"], 2)
         self.assertFalse(result["availability"]["canonical_calls"]["available"])
+        self.assertTrue(result["availability"]["code_mode_composition"]["available"])
+        composition = result["composition"]
+        self.assertEqual(composition["outer_code_mode_calls"], 1)
+        self.assertEqual(composition["outer_calls_with_summary"], 1)
+        self.assertEqual(composition["nested_calls"]["total"], 3)
+        self.assertEqual(
+            composition["nested_tool_counts"],
+            {"apply_text_edits": 1, "read_files": 2},
+        )
+
+    def test_code_mode_composition_aggregates_effect_and_projection_counters(self) -> None:
+        self.insert_event(
+            "e2b",
+            tool="code_mode_exec_mutating",
+            composition=code_mode_composition(),
+        )
+        self.insert_event(
+            "e2a",
+            tool="code_mode_exec_effectful",
+            started=140,
+            handed=170,
+            composition=code_mode_composition(
+                nested_calls=1,
+                nested_successes=1,
+                nested_failures=0,
+                duration_ms=20,
+                returned_bytes=30,
+                nested_raw_result_bytes_total=1200,
+                nested_tool_counts={"cargo_check": 1},
+                consequential_calls=1,
+                known_results=0,
+                job_handoffs=1,
+            ),
+        )
+        result = self.summarize(variant="code_mode")
+        composition = result["composition"]
+
+        self.assertEqual(composition["nested_calls"]["total"], 4)
+        self.assertEqual(composition["consequential_calls"]["total"], 2)
+        self.assertEqual(composition["known_results"]["total"], 1)
+        self.assertEqual(composition["job_handoffs"]["total"], 1)
+        self.assertEqual(composition["outcome_unknown"]["total"], 0)
+        self.assertEqual(composition["duration_ms"]["total"], 35)
+        self.assertEqual(composition["returned_bytes"]["total"], 90)
+        self.assertEqual(composition["nested_raw_result_bytes_total"]["total"], 4095)
+        self.assertEqual(
+            composition["nested_tool_counts"],
+            {"apply_text_edits": 1, "cargo_check": 1, "read_files": 2},
+        )
+
+    def test_direct_variant_with_code_mode_call_fails_composition_closed(self) -> None:
+        self.insert_event(
+            "code",
+            tool="code_mode_exec",
+            composition=code_mode_composition(
+                consequential_calls=0,
+                known_results=0,
+            ),
+        )
+        result = self.summarize(variant="direct")
+
+        self.assertFalse(result["availability"]["code_mode_composition"]["available"])
+        self.assertIsNone(result["composition"]["nested_calls"]["total"])
+
+    def test_missing_code_mode_composition_fails_closed(self) -> None:
+        self.insert_event("code", tool="code_mode_exec_mutating")
+        result = self.summarize(variant="code_mode")
+
+        self.assertFalse(result["availability"]["code_mode_composition"]["available"])
+        metric = result["composition"]["nested_calls"]
+        self.assertIsNone(metric["total"])
+        self.assertEqual(metric["observed_total"], 0)
+        self.assertEqual(metric["missing"], 1)
+
+    def test_code_mode_variant_without_code_mode_outer_call_flags_selection_gap(self) -> None:
+        self.insert_event("read", tool="read_files")
+        result = self.summarize(variant="code_mode")
+
+        availability = result["availability"]["code_mode_composition"]
+        self.assertFalse(availability["available"])
+        self.assertIn("recording_session_id", availability["reason"])
+        self.assertIsNone(result["composition"]["nested_calls"]["total"])
 
     def test_comparison_with_missing_metric_is_not_comparable(self) -> None:
         self.insert_event("direct")
@@ -570,8 +686,38 @@ class AgentLoopReportTests(unittest.TestCase):
                 case_manifest=None,
                 case_id="focused_edit_validation",
                 variant="direct",
+                surface=None,
                 base_revision="main",
             )
+
+    def test_benchmark_code_mode_requires_explicit_surface(self) -> None:
+        with self.assertRaisesRegex(report.ReportError, "require --surface"):
+            report._benchmark_metadata(
+                case_manifest=None,
+                case_id="focused_edit_validation",
+                variant="code_mode",
+                surface=None,
+                base_revision="a" * 40,
+            )
+
+        metadata = report._benchmark_metadata(
+            case_manifest=None,
+            case_id="focused_edit_validation",
+            variant="code_mode",
+            surface="e2b",
+            base_revision="a" * 40,
+        )
+        self.assertEqual(metadata["surface"], "e2b")
+
+    def test_benchmark_direct_surface_is_inferred(self) -> None:
+        metadata = report._benchmark_metadata(
+            case_manifest=None,
+            case_id="readonly_review",
+            variant="direct",
+            surface=None,
+            base_revision="a" * 40,
+        )
+        self.assertEqual(metadata["surface"], "direct")
 
     def test_compare_case_compatibility_requires_exact_git_base_revision(self) -> None:
         baseline = {"benchmark": {"case_id": "focused_edit_validation", "base_revision": "main"}}

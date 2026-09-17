@@ -19,7 +19,10 @@ It accepts two payload-safe evidence sources:
    `ClientWindow`, canonical meaningful classification, request-observed and
    response-handoff timestamps, serial/overlap classification, status, tool
    identity, and `model_ergonomics` metadata including serialized `ToolResult`
-   bytes.
+   bytes. Code Mode outer rows also persist the payload-safe
+   `code_mode_composition` summary: nested call counts/tool distribution,
+   consequential outcome counters, slot wait/internal duration, and nested/raw
+   versus returned byte counts.
 2. **Per-trace `events.jsonl`** is an optional supplement for observed Runner
    enqueue events. The profiler reads only JSONL metadata; it never opens captured
    request/result payload files.
@@ -99,8 +102,20 @@ work.
 
 Record the exact Workflow Session id and 40-hex Git base revision for each real
 run. Session selection is authoritative only through ActionAudit; trace-only input
-cannot apply `--workflow-session-id`. The core report needs only the server's
-ActionAudit SQLite database:
+cannot apply `--workflow-session-id`.
+
+Start each benchmark run with its fresh `work_on_project` bootstrap; that call
+links its own ActionAudit row through the canonical `WorkOnProject` relation. Once
+the bootstrap returns the exact run Session id, **every subsequent model-facing
+outer call in the run must pass that id as `recording_session_id`**. A business
+`session_id` does not substitute for ActionAudit recorder provenance. Code Mode
+calls that require a business Session should pass both fields with the same exact
+benchmark Session id. Otherwise the Workflow Session ledger can contain the
+nested work while `--workflow-session-id` selects no corresponding outer
+ActionAudit row, producing an invalid measurement sample rather than proof of zero
+calls.
+
+The core report needs only the server's ActionAudit SQLite database:
 
 ```bash
 python3 scripts/agent_loop_report.py summarize \
@@ -108,6 +123,7 @@ python3 scripts/agent_loop_report.py summarize \
   --workflow-session-id <wc_sess_...> \
   --case-id focused_edit_validation \
   --variant direct \
+  --surface direct \
   --base-revision <40-hex-base> \
   --output direct.json
 ```
@@ -119,9 +135,19 @@ useful, add:
 --trace-root <tool-request-trace-root>
 ```
 
-For a Code Mode run, use the same case id/base and `--variant code_mode`.
-`--variant` can also be used without a benchmark case when profiling an ad-hoc
+For a Code Mode benchmark run, use the same case id/base, `--variant code_mode`,
+and the exact experimental surface: `--surface e1`, `e2a`, or `e2b`. Direct
+benchmark runs use `--surface direct` (and the profiler also infers `direct` when
+that argument is omitted). A Code Mode benchmark intentionally requires an
+explicit surface so E1/E2a/E2b samples cannot be mixed under one generic label.
+`--variant` can still be used without a benchmark case when profiling an ad-hoc
 run; case metadata is only attached when `--case-id` is supplied.
+
+For the initial E2b-M capture pilot, use `readonly_review` with E1,
+`focused_edit_validation` with E2b plus the validation call outside the mutating
+cell, and `long_validation_handoff` with E2a. The pilot is for evidence-shape and
+capture validation first; repeated paired runs come only after these three reports
+are complete and correctly selected.
 
 ## Reported metrics
 
@@ -130,6 +156,10 @@ The schema-v1 JSON summary reports, when evidence is available:
 - outer model-facing tool calls: total, meaningful, success/failure, and tool-name
   distribution;
 - Direct Tools canonical-call count from per-outer `model_ergonomics` records;
+- Code Mode composition distributions from outer ActionAudit
+  `code_mode_composition`, including nested call/success/failure counts,
+  `nested_tool_counts`, consequential known/Job/unknown outcomes, internal/slot
+  timing, and nested raw versus returned bytes;
 - WebCodex service time and ToolRuntime duration distributions;
 - canonical serial `outside_webcodex_gap` distributions and overlap count;
 - exact serialized `ToolResult` byte totals/distributions;
@@ -139,18 +169,24 @@ The schema-v1 JSON summary reports, when evidence is available:
 The report also carries an explicit `availability` object. Consumers must inspect
 it rather than assuming absent metrics are zero.
 
-### Explicitly unavailable today
+### Counting semantics and explicitly unavailable facts
 
-Some desired comparison facts are not provable from the current metadata contract:
+Code Mode nested canonical child calls are now provable from the payload-safe
+outer ActionAudit composition summary and are reported under
+`composition.nested_calls` and `composition.nested_tool_counts`.
+`canonical_calls.total` deliberately remains `null` for a `code_mode` report: that
+older field keeps its outer/direct counting contract instead of silently combining
+one parent invocation with its child invocations.
 
-- **Code Mode nested canonical child-call total.** The current ActionAudit row
-  proves the outer composition call, not a complete offline ledger of all nested
-  canonical invocations. `canonical_calls.total` is therefore `null` for a
-  `code_mode` report.
-- **Same-execution Job handoff count and terminal-observation count.** A Runner
-  `job_id` can exist before a command returns synchronously; its presence does not
-  prove that the model received a Job handoff. `jobs.handoffs` and `jobs.terminal`
-  remain `null` rather than using that unsafe proxy.
+Some desired comparison facts remain unprovable from the current metadata
+contract:
+
+- **Generic same-execution Job handoff count and terminal-observation count.** A
+  Runner `job_id` can exist before a command returns synchronously; its presence
+  does not prove that the model received a Job handoff. `jobs.handoffs` and
+  `jobs.terminal` remain `null` rather than using that unsafe proxy. For
+  consequential children inside E2a, the authoritative parent receipt-derived
+  count is separately available as `composition.job_handoffs`.
 - **Resolved recovery count.** `recovery_kind` is guidance attached to one failed
   result. It does not itself prove that a later call resolved that failure.
 - **Complete Runner-request total from trace files.** Trace persistence is
@@ -170,8 +206,11 @@ python3 scripts/agent_loop_report.py compare \
 ```
 
 JSON is the authoritative comparison shape. Each numeric entry carries baseline,
-candidate, candidate-minus-baseline delta, and a `comparable` flag. A metric that
-is unavailable on either side is emitted with `comparable: false` and an explicit
+candidate, candidate-minus-baseline delta, and a `comparable` flag. Composition
+comparisons include nested calls, consequential outcomes, Code Mode internal/slot
+time, and nested/raw versus returned bytes; nested tool-name distributions are
+reported alongside the outer/canonical tool distributions. A metric that is
+unavailable on either side is emitted with `comparable: false` and an explicit
 reason. The comparison is descriptive and does not select a winner or score.
 
 `case_compatibility` is true only when both reports name the same benchmark case
