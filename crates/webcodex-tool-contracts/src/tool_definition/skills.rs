@@ -23,7 +23,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolAuditResultField::value("project"),
                     super::ToolAuditResultField::value("catalog_revision"),
                     super::ToolAuditResultField::value("skill_id"),
-                    super::ToolAuditResultField::value("name"),
                     super::ToolAuditResultField::value("source_scope"),
                     super::ToolAuditResultField::value("trust"),
                     super::ToolAuditResultField::value("package_revision"),
@@ -37,10 +36,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolAuditResultField::value("error_kind"),
                     super::ToolAuditResultField::value("state_changed"),
                 ])
+                .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&["name"]))
                 .context(super::ToolAuditContextPolicy::Fields(&[
                     super::ToolAuditResultField::value("catalog_revision"),
                     super::ToolAuditResultField::value("skill_id"),
-                    super::ToolAuditResultField::value("name"),
                     super::ToolAuditResultField::value("source_scope"),
                     super::ToolAuditResultField::value("trust"),
                     super::ToolAuditResultField::value("package_revision"),
@@ -71,7 +70,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Load one uniquely named Skill by exact name using Unicode lowercase matching for an authorized Project. Returns the selected descriptor plus bounded SKILL.md text and revision metadata in one read-only call. Ambiguous names fail closed; scripts and other Skill resources are never executed.",
+            "Load one uniquely named Skill by exact Unicode case folding. Returns its descriptor, bounded SKILL.md, and revisions in one read-only Project call. Missing, ambiguous, or truncated discovery fails closed; scripts and other Skill resources are never executed.",
             skill_load_input_schema,
         ),
         27,

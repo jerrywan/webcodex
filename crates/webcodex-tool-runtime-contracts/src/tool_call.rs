@@ -1333,7 +1333,7 @@ pub enum ToolCall {
         max_result_bytes: Option<usize>,
     },
 
-    /// Load one Skill definition by unique exact name using Unicode lowercase matching.
+    /// Load one Skill definition by unique exact Unicode case-folded name.
     SkillLoad {
         project: String,
         name: String,

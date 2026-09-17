@@ -80,7 +80,7 @@ pub fn skill_load_input_schema() -> Value {
         "type": "object",
         "properties": {
             "project": {"type": "string", "minLength": 1, "description": "Required authorized runtime Project id."},
-            "name": {"type": "string", "minLength": 1, "maxLength": MAX_SKILL_NAME_CHARS, "description": "Exact Skill name to load. Matching uses Unicode lowercase mapping; substring and fuzzy matching are not used."},
+            "name": {"type": "string", "minLength": 1, "maxLength": MAX_SKILL_NAME_CHARS, "description": "Exact Skill name to load. Matching uses Unicode case folding; substring and fuzzy matching are not used."},
             "session_id": {"type": "string", "description": "Optional explicit Workflow Session for this tool call. No implicit current-Session fallback is used."}
         },
         "required": ["project", "name"],
