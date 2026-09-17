@@ -408,6 +408,37 @@ pub(crate) fn adaptive_runtime_direct_tool_specs() -> Vec<ToolSpec> {
 mod tests {
     use super::*;
 
+    fn collect_suggested_call_targets(
+        schema: &Value,
+        targets: &mut std::collections::BTreeSet<String>,
+    ) {
+        if let Some(target) = webcodex_tool_contracts::suggested_tool_call_schema_target(schema) {
+            targets.insert(target.to_string());
+            return;
+        }
+        match schema {
+            Value::Object(object) => {
+                for child in object.values() {
+                    collect_suggested_call_targets(child, targets);
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    collect_suggested_call_targets(child, targets);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn test_suggested_call_route(target: &str) -> SuggestedToolCallRoute {
+        let operator_extension_admitted =
+            crate::tool_runtime::stateless_operator_extension_tool_specs()
+                .iter()
+                .any(|spec| spec.name == target);
+        suggested_tool_call_route(target, operator_extension_admitted)
+    }
+
     #[test]
     fn direct_specs_are_definition_derived_and_model_visible() {
         let specs = adaptive_runtime_direct_tool_specs();
@@ -482,6 +513,163 @@ mod tests {
             adaptive_runtime_gateway_target_route(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME),
             AdaptiveRuntimeGatewayTargetRoute::Recursive
         );
+    }
+
+    #[test]
+    fn structured_suggested_call_targets_project_to_actionable_adaptive_routes() {
+        let mut targets = std::collections::BTreeSet::new();
+        for spec in registered_tool_specs()
+            .into_iter()
+            .chain(crate::tool_runtime::stateless_operator_extension_tool_specs())
+        {
+            collect_suggested_call_targets(&spec.output_schema, &mut targets);
+        }
+        for expected in [
+            "list_runners",
+            "git_log",
+            "read_project_artifact",
+            "skill_versions",
+        ] {
+            assert!(
+                targets.contains(expected),
+                "formal SuggestedToolCall discovery missed representative target {expected}: {targets:?}"
+            );
+        }
+        assert!(!targets.is_empty());
+        for target in targets {
+            assert_ne!(
+                test_suggested_call_route(&target),
+                SuggestedToolCallRoute::Unavailable,
+                "Adaptive projection must make formal SuggestedToolCall target {target} immediately executable"
+            );
+        }
+
+        assert_eq!(
+            adaptive_runtime_tool_invocation_route("session_discussion_summary"),
+            (TOOL_SURFACE_AVAILABILITY_DIRECT, None),
+            "session_hint.suggested_next_tool remains a non-parser-ready direct-only hint"
+        );
+        assert_eq!(
+            adaptive_runtime_tool_invocation_route("apply_patch"),
+            (
+                TOOL_SURFACE_AVAILABILITY_GATEWAY,
+                Some(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME)
+            ),
+            "specialized patching should remain behind the Adaptive gateway"
+        );
+    }
+
+    #[test]
+    fn suggested_call_value_and_schema_projection_cover_representative_gateway_edges() {
+        for (source_tool, target_tool, arguments) in [
+            (
+                "work_on_project",
+                "list_runners",
+                json!({"include_projects": false, "summary_only": true}),
+            ),
+            (
+                "git_log",
+                "git_log",
+                json!({"project": "demo", "head_commit": "0123456789012345678901234567890123456789", "limit": 20, "skip": 20}),
+            ),
+            (
+                "read_project_artifact",
+                "read_project_artifact",
+                json!({"project": "demo", "path": "out.bin", "encoding": "base64", "offset": 65536, "length": 65536, "expected_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+            ),
+            (
+                "skill_install",
+                "skill_versions",
+                json!({"project": "demo", "skill_key": "trusted-skill"}),
+            ),
+        ] {
+            assert!(
+                matches!(
+                    test_suggested_call_route(target_tool),
+                    SuggestedToolCallRoute::Gateway(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME)
+                ),
+                "representative edge {source_tool}->{target_tool} should remain Adaptive gateway-routed"
+            );
+            let canonical_schema = webcodex_tool_contracts::output_schema_for_tool(source_tool);
+            let canonical_call = json!({"tool": target_tool, "arguments": arguments});
+            let mut projected_value = json!({
+                "success": false,
+                "output": {"suggested_call": canonical_call.clone()},
+                "error": "recovery"
+            });
+            project_suggested_tool_calls_in_value(
+                &mut projected_value,
+                &canonical_schema,
+                &test_suggested_call_route,
+            );
+            let projected_call = &projected_value["output"]["suggested_call"];
+            assert_eq!(projected_call["tool"], ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME);
+            assert_eq!(projected_call["arguments"]["tool"], target_tool);
+            assert_eq!(
+                projected_call["arguments"]["arguments"],
+                canonical_call["arguments"]
+            );
+
+            let mut projected_schema = canonical_schema;
+            project_suggested_tool_call_schema(&mut projected_schema, &test_suggested_call_route);
+            let suggested_schema =
+                &projected_schema["properties"]["output"]["properties"]["suggested_call"];
+            assert_eq!(
+                suggested_schema["properties"]["tool"]["const"],
+                ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME
+            );
+            assert_eq!(
+                suggested_schema["properties"]["arguments"]["properties"]["tool"]["const"],
+                target_tool
+            );
+            crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+                projected_call,
+                suggested_schema,
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "Adaptive projected SuggestedToolCall {source_tool}->{target_tool} must match its projected schema: {error}"
+                )
+            });
+        }
+    }
+
+    #[test]
+    fn unavailable_suggested_call_is_removed_from_value_and_schema() {
+        let mut value = json!({
+            "type": "result",
+            "next": {"tool": "not_available_here", "arguments": {"x": 1}}
+        });
+        let mut schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "type": {"type": "string"},
+                "next": webcodex_tool_contracts::suggested_tool_call_schema(
+                    "not_available_here",
+                    json!({
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {"x": {"type": "integer"}},
+                        "required": ["x"]
+                    }),
+                    "unavailable edge"
+                )
+            },
+            "required": ["type", "next"]
+        });
+        let canonical_schema = schema.clone();
+        project_suggested_tool_calls_in_value(&mut value, &canonical_schema, &|_| {
+            SuggestedToolCallRoute::Unavailable
+        });
+        project_suggested_tool_call_schema(&mut schema, &|_| SuggestedToolCallRoute::Unavailable);
+        assert!(value.get("next").is_none());
+        assert!(schema["properties"].get("next").is_none());
+        assert_eq!(schema["required"], json!(["type"]));
+        crate::tool_runtime::startup_brief::validate_schema_instance_for_test(&value, &schema)
+            .unwrap_or_else(|error| {
+                panic!("unavailable edge removal must stay schema-valid: {error}")
+            });
     }
 
     #[test]
