@@ -332,12 +332,15 @@ pub(super) fn mcp_tools_list_payload_with_features_for_auth(
                 .chain(crate::tool_runtime::work_result_app_tool_specs())
                 .chain(crate::tool_runtime::changes_app_tool_specs())
                 .chain(crate::tool_runtime::agent_continuation_app_tool_specs())
+                .chain(crate::tool_runtime::job_terminal_continuation_app_tool_specs())
                 .collect(),
             auth,
         )
         .into_iter()
         .map(|spec| {
             let agent_continuation_tool = is_agent_continuation_app_tool_name(&spec.name);
+            let job_terminal_continuation_tool =
+                is_job_terminal_continuation_app_tool_name(&spec.name);
             let mut value = mcp_tool_spec_json(spec, compact, false);
             attach_app_visibility(&mut value);
             if agent_continuation_tool {
@@ -348,6 +351,13 @@ pub(super) fn mcp_tools_list_payload_with_features_for_auth(
                 attach_app_metadata(
                     &mut value,
                     resources::MCP_AGENT_CONTINUATION_UI_RESOURCE_URI,
+                );
+                attach_agent_continuation_app_diagnostic_schema(&mut value);
+            }
+            if job_terminal_continuation_tool {
+                attach_app_metadata(
+                    &mut value,
+                    resources::MCP_JOB_TERMINAL_CONTINUATION_UI_RESOURCE_URI,
                 );
                 attach_agent_continuation_app_diagnostic_schema(&mut value);
             }
@@ -539,7 +549,7 @@ pub(super) fn add_stateless_workflow_recorder_metadata(payload: &mut Value) {
         if matches!(
             tool_name,
             Some("goal_plan_state" | "work_result_state" | "changes_file_diff")
-        ) || tool_name.is_some_and(is_agent_continuation_app_tool_name)
+        ) || tool_name.is_some_and(is_host_continuation_app_tool_name)
         {
             continue;
         }
@@ -661,6 +671,22 @@ fn is_agent_continuation_app_tool_name(tool_name: &str) -> bool {
     )
 }
 
+fn is_job_terminal_continuation_app_tool_name(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "job_terminal_continuation_bind"
+            | "job_terminal_continuation_state"
+            | "job_terminal_continuation_prepare"
+            | "job_terminal_continuation_finish"
+            | "job_terminal_continuation_unbind"
+    )
+}
+
+fn is_host_continuation_app_tool_name(tool_name: &str) -> bool {
+    is_agent_continuation_app_tool_name(tool_name)
+        || is_job_terminal_continuation_app_tool_name(tool_name)
+}
+
 const AGENT_CONTINUATION_APP_CALL_ID_FIELD: &str = "app_call_id";
 const AGENT_CONTINUATION_APP_CALL_ID_PATTERN: &str = "^wc_app_call_[0-9a-f]{16}_[1-9][0-9]{0,5}$";
 
@@ -683,7 +709,7 @@ fn valid_agent_continuation_app_call_id(value: &str) -> bool {
 
 pub(super) fn agent_continuation_app_call_id_from_params(params: &Value) -> Option<String> {
     let name = params.get("name").and_then(Value::as_str)?;
-    if !is_agent_continuation_app_tool_name(name) {
+    if !is_host_continuation_app_tool_name(name) {
         return None;
     }
     let value = params
@@ -899,6 +925,12 @@ fn mcp_tool_spec_json(mut spec: ToolSpec, compact: bool, app_enabled: bool) -> V
         attach_app_metadata(
             &mut value,
             resources::MCP_AGENT_CONTINUATION_UI_RESOURCE_URI,
+        );
+    }
+    if app_enabled && presentation::tool_supports_job_terminal_continuation_app(&tool_name) {
+        attach_app_metadata(
+            &mut value,
+            resources::MCP_JOB_TERMINAL_CONTINUATION_UI_RESOURCE_URI,
         );
     }
     value
@@ -1473,7 +1505,7 @@ pub(super) async fn handle_call(
             return McpOutcome::BadRequest(rpc_error(id, -32602, format!("Invalid params: {}", e)));
         }
     };
-    let app_call_id = if stateless_2026 && is_agent_continuation_app_tool_name(&params.name) {
+    let app_call_id = if stateless_2026 && is_host_continuation_app_tool_name(&params.name) {
         match strip_agent_continuation_app_call_id(&mut params.arguments) {
             Ok(app_call_id) => app_call_id,
             Err(message) => {
@@ -1905,11 +1937,14 @@ pub(super) async fn handle_call(
     let work_result_app_admitted = server_mcp_apps_enabled && stateless_2026;
     let changes_app_admitted = server_mcp_apps_enabled && stateless_2026;
     let agent_continuation_app_admitted = server_mcp_apps_enabled && stateless_2026;
+    let job_terminal_continuation_app_admitted = server_mcp_apps_enabled && stateless_2026;
     let app_only_goal_plan_state = goal_plan_app_admitted && params.name == "goal_plan_state";
     let app_only_work_result_state = work_result_app_admitted && params.name == "work_result_state";
     let app_only_changes_file_diff = changes_app_admitted && params.name == "changes_file_diff";
     let app_only_agent_continuation =
         agent_continuation_app_admitted && is_agent_continuation_app_tool_name(&params.name);
+    let app_only_job_terminal_continuation = job_terminal_continuation_app_admitted
+        && is_job_terminal_continuation_app_tool_name(&params.name);
     let protocol_extension_admitted = stateless_2026
         && crate::tool_runtime::stateless_operator_extension_tool_specs()
             .iter()
@@ -1918,6 +1953,7 @@ pub(super) async fn handle_call(
         && !app_only_work_result_state
         && !app_only_changes_file_diff
         && !app_only_agent_continuation
+        && !app_only_job_terminal_continuation
         && !protocol_extension_admitted
         && !via_adaptive_runtime_gateway
         && !is_adaptive_runtime_direct_tool(&params.name);
@@ -2188,7 +2224,7 @@ pub(super) async fn handle_call(
             mcp_runtime_tool_result_fallback(result)
         }
     };
-    if app_only_agent_continuation {
+    if app_only_agent_continuation || app_only_job_terminal_continuation {
         // ChatGPT production has been observed to complete View-originated
         // tools/call server-side while not forwarding structuredContent back to
         // the View. Keep structuredContent canonical, but duplicate this bounded
@@ -2198,6 +2234,14 @@ pub(super) async fn handle_call(
         attach_app_tool_content_fallback(&mut result);
     }
     if app_only_agent_continuation {
+        log_agent_continuation_app_result(
+            lifecycle.as_deref(),
+            &params.name,
+            app_call_id.as_deref(),
+            &result,
+        );
+    }
+    if app_only_job_terminal_continuation {
         log_agent_continuation_app_result(
             lifecycle.as_deref(),
             &params.name,

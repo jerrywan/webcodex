@@ -26,6 +26,36 @@ async fn attention_runtime() -> (TempDir, ToolRuntime, Arc<crate::Database>) {
     (temp, runtime, db)
 }
 
+async fn attention_runtime_with_controller() -> (
+    TempDir,
+    ToolRuntime,
+    Arc<crate::Database>,
+    JobTerminalContinuationController,
+) {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Arc::new(
+        crate::Database::open(&temp.path().join("job-terminal-attention-controller.db")).unwrap(),
+    );
+    let controller = JobTerminalContinuationController::new(db.clone());
+    let registry = Arc::new(
+        crate::job_receipts::production_registry_with_terminal_attention(
+            db.clone(),
+            controller.clone(),
+        )
+        .await,
+    );
+    let runtime = ToolRuntime::new(registry, Arc::new(RuntimeInfo::default()))
+        .with_job_terminal_attention(db.clone(), controller.clone());
+    (temp, runtime, db, controller)
+}
+
+fn app_binding(byte: u8) -> String {
+    format!(
+        "wc_host_binding_{}",
+        webcodex_core::compact::encode([byte; 16])
+    )
+}
+
 async fn start_owned_job(
     runtime: &ToolRuntime,
     client_id: &str,
@@ -236,6 +266,212 @@ async fn unauthorized_registration_is_existence_hiding_and_session_window_are_no
     assert!(
         old_token_error.contains("unknown field `after_observation_token`"),
         "{old_token_error}"
+    );
+}
+
+#[tokio::test]
+async fn keyed_replay_reports_current_exact_carrier_capability_only_for_its_wait() {
+    let (_temp, runtime, _db, controller) = attention_runtime_with_controller().await;
+    let auth = shared_key_auth_context(&"7".repeat(64));
+    let (job_id, _request) =
+        start_owned_job(&runtime, "e3-carrier", "project-carrier", &auth).await;
+    let armed = runtime
+        .dispatch_with_auth(
+            ToolCall::WaitForJobTerminal {
+                job_id: job_id.clone(),
+                idempotency_key: "exact-carrier-replay".to_string(),
+            },
+            Some(&auth),
+        )
+        .await;
+    assert!(armed.success, "{:?}", armed.error);
+    assert_eq!(armed.output["automatic_resume_available"], false);
+    let wait_id = armed.output["wait_id"].as_str().unwrap().to_string();
+    let principal = principal_for_auth(Some(&auth));
+    let binding_id = app_binding(21);
+    controller
+        .bind_mcp_app(
+            &principal,
+            &wait_id,
+            binding_id.clone(),
+            Some("window-replay"),
+            chrono::Utc::now().timestamp(),
+        )
+        .unwrap();
+
+    let replay = runtime
+        .dispatch_with_auth(
+            ToolCall::WaitForJobTerminal {
+                job_id: job_id.clone(),
+                idempotency_key: "exact-carrier-replay".to_string(),
+            },
+            Some(&auth),
+        )
+        .await;
+    assert!(replay.success, "{:?}", replay.error);
+    assert_eq!(replay.output["wait_id"], wait_id);
+    assert_eq!(replay.output["replayed"], true);
+    assert_eq!(replay.output["automatic_resume_available"], true);
+
+    let (other_job_id, _other_request) =
+        start_owned_job(&runtime, "e3-carrier-other", "project-carrier-other", &auth).await;
+    let other = runtime
+        .dispatch_with_auth(
+            ToolCall::WaitForJobTerminal {
+                job_id: other_job_id,
+                idempotency_key: "unrelated-carrier-wait".to_string(),
+            },
+            Some(&auth),
+        )
+        .await;
+    assert!(other.success, "{:?}", other.error);
+    assert_eq!(other.output["automatic_resume_available"], false);
+
+    controller
+        .unbind_mcp_app(
+            &principal,
+            &wait_id,
+            &binding_id,
+            Some("window-replay"),
+            chrono::Utc::now().timestamp(),
+        )
+        .unwrap();
+    let after_unbind = runtime
+        .dispatch_with_auth(
+            ToolCall::WaitForJobTerminal {
+                job_id,
+                idempotency_key: "exact-carrier-replay".to_string(),
+            },
+            Some(&auth),
+        )
+        .await;
+    assert!(after_unbind.success, "{:?}", after_unbind.error);
+    assert_eq!(after_unbind.output["automatic_resume_available"], false);
+}
+
+#[tokio::test]
+async fn presentation_reauthorizes_exact_wait_and_exposes_no_ambient_authority_selectors() {
+    let (_temp, runtime, _db) = attention_runtime().await;
+    let owner = shared_key_auth_context(&"8".repeat(64));
+    let foreign = shared_key_auth_context(&"9".repeat(64));
+    let (job_id, _request) =
+        start_owned_job(&runtime, "e3-present", "project-present", &owner).await;
+    let armed = runtime
+        .dispatch_with_auth(
+            ToolCall::WaitForJobTerminal {
+                job_id: job_id.clone(),
+                idempotency_key: "presentation-wait".to_string(),
+            },
+            Some(&owner),
+        )
+        .await;
+    let wait_id = armed.output["wait_id"].as_str().unwrap().to_string();
+
+    let presented = runtime
+        .present_job_terminal_continuation(Some(&owner), wait_id.clone())
+        .await;
+    assert!(presented.success, "{:?}", presented.error);
+    assert_eq!(
+        presented.output["job_terminal_continuation"]["wait_id"],
+        wait_id
+    );
+    assert_eq!(
+        presented.output["job_terminal_continuation"]["job_id"],
+        job_id
+    );
+    assert_eq!(
+        presented.output["job_terminal_continuation"]["automatic_resume_available"],
+        false
+    );
+
+    let denied = runtime
+        .present_job_terminal_continuation(Some(&foreign), wait_id.clone())
+        .await;
+    assert!(!denied.success);
+    assert_eq!(denied.output["error_kind"], "job_terminal_wait_not_found");
+
+    let spec = crate::tool_runtime::registered_tool_specs()
+        .into_iter()
+        .find(|spec| spec.name == "present_job_terminal_continuation")
+        .unwrap();
+    assert_eq!(spec.input_schema["required"], json!(["wait_id"]));
+    for forbidden in [
+        "job_id",
+        "session_id",
+        "client_window",
+        "peer_id",
+        "principal_digest",
+        "project",
+    ] {
+        assert!(spec.input_schema["properties"].get(forbidden).is_none());
+    }
+}
+
+#[tokio::test]
+async fn app_binding_uses_hashed_host_sideband_only_and_never_returns_raw_identity_or_fence() {
+    let (_temp, runtime, db, _controller) = attention_runtime_with_controller().await;
+    let auth = shared_key_auth_context(&"6".repeat(64));
+    let (job_id, _request) =
+        start_owned_job(&runtime, "e3-sideband", "project-sideband", &auth).await;
+    let armed = runtime
+        .dispatch_with_auth(
+            ToolCall::WaitForJobTerminal {
+                job_id,
+                idempotency_key: "host-sideband-wait".to_string(),
+            },
+            Some(&auth),
+        )
+        .await;
+    assert!(armed.success, "{:?}", armed.error);
+    let wait_id = armed.output["wait_id"].as_str().unwrap().to_string();
+    let raw_host_session = "PRIVATE_CHATGPT_HOST_SESSION_12345";
+    let params = json!({
+        "name": "job_terminal_continuation_bind",
+        "arguments": {},
+        "_meta": {"openai/session": raw_host_session}
+    });
+    let window = crate::client_window::stateless_mcp_window(&params);
+    let canonical = window.identity.as_ref().expect("valid Host sideband");
+    assert_ne!(canonical.key(), raw_host_session);
+    assert!(!canonical.key().contains(raw_host_session));
+
+    let binding_id = app_binding(22);
+    let bound = runtime
+        .job_terminal_continuation_bind_for_window(
+            Some(&auth),
+            Some(canonical),
+            wait_id.clone(),
+            binding_id.clone(),
+        )
+        .await;
+    assert!(bound.success, "{:?}", bound.error);
+    let serialized = serde_json::to_string(&bound).unwrap();
+    assert!(!serialized.contains(raw_host_session));
+    assert!(!serialized.contains(&binding_id));
+    assert_eq!(bound.output["host_binding"]["bound"], true);
+    assert_eq!(
+        bound.output["job_terminal_continuation"]["automatic_resume_available"],
+        true
+    );
+
+    let durable = db
+        .read_job_terminal_wait(
+            &principal_for_auth(Some(&auth)),
+            &wait_id,
+            chrono::Utc::now().timestamp(),
+        )
+        .unwrap();
+    let durable_json = serde_json::to_string(&durable).unwrap();
+    assert!(!durable_json.contains(raw_host_session));
+    assert!(!durable_json.contains(&binding_id));
+
+    let missing = runtime
+        .job_terminal_continuation_bind_for_window(Some(&auth), None, wait_id, app_binding(23))
+        .await;
+    assert!(!missing.success);
+    assert_eq!(
+        missing.output["error_kind"],
+        "job_terminal_client_window_unavailable"
     );
 }
 

@@ -1755,3 +1755,37 @@ fn agent_continuation_bind_requires_view_fence() {
     args.as_object_mut().unwrap().remove("binding_id");
     assert!(ToolCall::from_tool_name("agent_continuation_bind", args).is_err());
 }
+
+#[test]
+fn job_terminal_continuation_calls_require_explicit_wait_and_private_view_fence() {
+    let wait_id = "wc_job_wait_q6urq6urq6urq6ur".to_string();
+    let binding_id = format!(
+        "wc_host_binding_{}",
+        webcodex_core::compact::encode([0xb1; 16])
+    );
+    let present = ToolCall::from_tool_name(
+        "present_job_terminal_continuation",
+        json!({"wait_id": wait_id}),
+    )
+    .unwrap();
+    assert!(matches!(
+        present,
+        ToolCall::PresentJobTerminalContinuation { .. }
+    ));
+
+    let bind = ToolCall::from_tool_name(
+        "job_terminal_continuation_bind",
+        json!({"wait_id": wait_id, "binding_id": binding_id}),
+    )
+    .unwrap();
+    assert!(matches!(bind, ToolCall::JobTerminalContinuationBind { .. }));
+    for forbidden in ["client_window", "peer_id", "principal_digest", "session_id"] {
+        let mut args = json!({"wait_id": wait_id, "binding_id": binding_id});
+        args.as_object_mut()
+            .unwrap()
+            .insert(forbidden.to_string(), json!("caller-authored-routing"));
+        let error = ToolCall::from_tool_name("job_terminal_continuation_bind", args)
+            .expect_err("routing/authority sideband must not be accepted in business input");
+        assert!(error.contains("unknown field"), "{error}");
+    }
+}

@@ -3580,6 +3580,55 @@ pub enum ToolCall {
         idempotency_key: String,
     },
 
+    /// Present one exact caller-owned Job terminal continuation App card.
+    PresentJobTerminalContinuation {
+        #[schemars(regex(pattern = "^wc_job_wait_[A-Za-z0-9_-]{16}$"))]
+        wait_id: String,
+    },
+
+    /// App-only bind of one live Host View to one exact Job terminal wait.
+    JobTerminalContinuationBind {
+        #[schemars(regex(pattern = "^wc_job_wait_[A-Za-z0-9_-]{16}$"))]
+        wait_id: String,
+        #[schemars(regex(pattern = "^wc_host_binding_[A-Za-z0-9_-]{21}[AQgw]$"))]
+        binding_id: String,
+    },
+
+    /// App-only sparse state read for one exact current Job terminal binding.
+    JobTerminalContinuationState {
+        #[schemars(regex(pattern = "^wc_job_wait_[A-Za-z0-9_-]{16}$"))]
+        wait_id: String,
+        #[schemars(regex(pattern = "^wc_host_binding_[A-Za-z0-9_-]{21}[AQgw]$"))]
+        binding_id: String,
+    },
+
+    /// App-only crossing of the existing durable Job terminal delivery fence.
+    JobTerminalContinuationPrepare {
+        #[schemars(regex(pattern = "^wc_job_wait_[A-Za-z0-9_-]{16}$"))]
+        wait_id: String,
+        #[schemars(regex(pattern = "^wc_host_binding_[A-Za-z0-9_-]{21}[AQgw]$"))]
+        binding_id: String,
+    },
+
+    /// App-only record of Host ui/message acceptance or conservative uncertainty.
+    JobTerminalContinuationFinish {
+        #[schemars(regex(pattern = "^wc_job_wait_[A-Za-z0-9_-]{16}$"))]
+        wait_id: String,
+        #[schemars(regex(pattern = "^wc_host_binding_[A-Za-z0-9_-]{21}[AQgw]$"))]
+        binding_id: String,
+        #[schemars(regex(pattern = "^wc_job_delivery_[A-Za-z0-9_-]{16}$"))]
+        attempt_id: String,
+        outcome: String,
+    },
+
+    /// App-only best-effort withdrawal of one exact process-local Job View binding.
+    JobTerminalContinuationUnbind {
+        #[schemars(regex(pattern = "^wc_job_wait_[A-Za-z0-9_-]{16}$"))]
+        wait_id: String,
+        #[schemars(regex(pattern = "^wc_host_binding_[A-Za-z0-9_-]{21}[AQgw]$"))]
+        binding_id: String,
+    },
+
     /// List files in a Runner-registered project directory (bounded, read-only).
     /// Returns project-relative paths plus a file/dir kind. Routed to the
     /// owning registered Runner via the `file_list` op; the server never reads
@@ -4953,6 +5002,12 @@ impl ToolCall {
             Self::StopJob { .. } => "stop_job",
             Self::ObserveJobs { .. } => "observe_jobs",
             Self::WaitForJobTerminal { .. } => "wait_for_job_terminal",
+            Self::PresentJobTerminalContinuation { .. } => "present_job_terminal_continuation",
+            Self::JobTerminalContinuationBind { .. } => "job_terminal_continuation_bind",
+            Self::JobTerminalContinuationState { .. } => "job_terminal_continuation_state",
+            Self::JobTerminalContinuationPrepare { .. } => "job_terminal_continuation_prepare",
+            Self::JobTerminalContinuationFinish { .. } => "job_terminal_continuation_finish",
+            Self::JobTerminalContinuationUnbind { .. } => "job_terminal_continuation_unbind",
             Self::ListProjectFiles { .. } => "list_project_files",
             Self::ListProjectTrackedFiles { .. } => "list_project_tracked_files",
             Self::ProjectOverview { .. } => "project_overview",

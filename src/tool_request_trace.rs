@@ -1603,6 +1603,11 @@ fn tool_suppresses_payload_capture(tool_name: Option<&str>) -> bool {
                 | "agent_continuation_wake_prepare"
                 | "agent_continuation_wake_finish"
                 | "agent_continuation_unbind"
+                | "job_terminal_continuation_bind"
+                | "job_terminal_continuation_state"
+                | "job_terminal_continuation_prepare"
+                | "job_terminal_continuation_finish"
+                | "job_terminal_continuation_unbind"
         )
     )
 }
@@ -2055,6 +2060,25 @@ mod tests {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         env.remove("WEBCODEX_TOOL_REQUEST_TRACE");
+    }
+
+    #[test]
+    fn job_terminal_app_tools_suppress_full_payload_capture() {
+        for name in [
+            "job_terminal_continuation_bind",
+            "job_terminal_continuation_state",
+            "job_terminal_continuation_prepare",
+            "job_terminal_continuation_finish",
+            "job_terminal_continuation_unbind",
+        ] {
+            assert!(
+                tool_suppresses_payload_capture(Some(name)),
+                "{name} must not persist App-private binding/message payloads in full traces"
+            );
+        }
+        assert!(!tool_suppresses_payload_capture(Some(
+            "present_job_terminal_continuation"
+        )));
     }
 
     #[test]

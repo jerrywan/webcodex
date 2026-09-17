@@ -47,6 +47,12 @@ pub(super) fn tool_supports_agent_continuation_app(tool_name: &str) -> bool {
     )
 }
 
+/// Dedicated Job terminal continuation App. Only explicit presentation creates
+/// the card; wait_for_job_terminal remains Host-neutral terminal attention.
+pub(super) fn tool_supports_job_terminal_continuation_app(tool_name: &str) -> bool {
+    tool_name == "present_job_terminal_continuation"
+}
+
 /// Bounded presentation projections retained for current milestone cards and for
 /// already-cached older tool descriptors. Projection support does not itself bind
 /// a new App card in tools/list.

@@ -65,6 +65,8 @@ pub(super) const MCP_CHANGES_UI_RESOURCE_URI: &str = "ui://webcodex/changes/v3";
 pub(super) const MCP_GOAL_PLAN_UI_RESOURCE_URI: &str = "ui://webcodex/goal-plan/v2";
 pub(super) const MCP_AGENT_CONTINUATION_UI_RESOURCE_URI: &str =
     "ui://webcodex/agent-continuation/v17";
+pub(super) const MCP_JOB_TERMINAL_CONTINUATION_UI_RESOURCE_URI: &str =
+    "ui://webcodex/job-terminal-continuation/v1";
 pub(super) const MCP_UI_RESOURCE_MIME_TYPE: &str = "text/html;profile=mcp-app";
 pub(super) const MCP_COMPUTER_APP_HTML: &str = include_str!("../mcp_computer_app.html");
 pub(super) const MCP_RESULT_APP_HTML: &str = include_str!("../mcp_result_app.html");
@@ -73,6 +75,8 @@ pub(super) const MCP_CHANGES_APP_HTML: &str = include_str!("../mcp_changes_app.h
 pub(super) const MCP_GOAL_PLAN_APP_HTML: &str = include_str!("../mcp_goal_plan_app.html");
 pub(super) const MCP_AGENT_CONTINUATION_APP_HTML: &str =
     include_str!("../mcp_agent_continuation_app.html");
+pub(super) const MCP_JOB_TERMINAL_CONTINUATION_APP_HTML: &str =
+    include_str!("../mcp_job_terminal_continuation_app.html");
 
 pub(super) fn request_supports_mcp_apps(params: &Value) -> bool {
     let Some(extension) = request_client_capabilities(params)
@@ -163,6 +167,16 @@ pub(super) fn mcp_app_resources_list(domain: Option<&str>) -> Value {
             "uri": MCP_AGENT_CONTINUATION_UI_RESOURCE_URI,
             "name": "WebCodex Agent Continuation",
             "description": "Sparse Host controller for one explicit Durable Agent Endpoint generation. The View is a process-local carrier only: SQLite Wake/Wake Delivery Attempt remains authoritative, and Host dispatch is considered actually resumed only after exact consume_agent_wake.",
+            "mimeType": MCP_UI_RESOURCE_MIME_TYPE,
+            "_meta": mcp_app_resource_meta(domain)
+        }));
+    result["resources"]
+        .as_array_mut()
+        .expect("App resource list must be an array")
+        .push(json!({
+            "uri": MCP_JOB_TERMINAL_CONTINUATION_UI_RESOURCE_URI,
+            "name": "WebCodex Job Continuation",
+            "description": "Job-native Host continuation carrier for one explicit caller-owned Job terminal wait. The View is routing-only: canonical Job terminal truth and the durable delivery fence remain in the existing Job terminal wait ledger, while the App performs bounded state polling and at most one prepared ui/message dispatch.",
             "mimeType": MCP_UI_RESOURCE_MIME_TYPE,
             "_meta": mcp_app_resource_meta(domain)
         }));
@@ -300,6 +314,26 @@ pub(super) fn mcp_agent_continuation_app_resource_read(
     })
 }
 
+pub(super) fn is_mcp_job_terminal_continuation_app_resource_uri(uri: &str) -> bool {
+    uri == MCP_JOB_TERMINAL_CONTINUATION_UI_RESOURCE_URI
+}
+
+pub(super) fn mcp_job_terminal_continuation_app_resource_read(
+    uri: &str,
+    domain: Option<&str>,
+) -> Option<Value> {
+    is_mcp_job_terminal_continuation_app_resource_uri(uri).then(|| {
+        json!({
+            "contents": [{
+                "uri": uri,
+                "mimeType": MCP_UI_RESOURCE_MIME_TYPE,
+                "text": MCP_JOB_TERMINAL_CONTINUATION_APP_HTML,
+                "_meta": mcp_app_resource_meta(domain)
+            }]
+        })
+    })
+}
+
 fn mcp_static_app_resource_read(uri: &str, domain: Option<&str>) -> Option<Value> {
     mcp_computer_app_resource_read(uri, domain)
         .or_else(|| mcp_work_result_app_resource_read(uri, domain))
@@ -307,6 +341,7 @@ fn mcp_static_app_resource_read(uri: &str, domain: Option<&str>) -> Option<Value
         .or_else(|| mcp_result_app_resource_read(uri, domain))
         .or_else(|| mcp_goal_plan_app_resource_read(uri, domain))
         .or_else(|| mcp_agent_continuation_app_resource_read(uri, domain))
+        .or_else(|| mcp_job_terminal_continuation_app_resource_read(uri, domain))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

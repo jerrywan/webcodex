@@ -27,6 +27,35 @@ fn validation_job_projection_schema() -> Value {
     })
 }
 
+fn job_terminal_continuation_projection_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "version": {"type": "integer", "const": 1},
+            "wait_id": {"type": "string", "pattern": "^wc_job_wait_[A-Za-z0-9_-]{16}$"},
+            "job_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "state": {"type": "string", "enum": ["waiting", "triggered"]},
+            "delivery_state": {"type": "string", "enum": ["not_ready", "pending", "prepared", "delivered", "delivery_unknown"]},
+            "terminal_status": nullable_schema("string", "Sparse canonical terminal Job status."),
+            "terminal_outcome": nullable_schema("string", "Sparse canonical terminal Job outcome."),
+            "automatic_resume_available": {"type": "boolean"},
+            "expires_at": {"type": "integer"},
+            "fallback_tool": {"type": "string", "const": "observe_jobs"}
+        },
+        "required": ["version", "wait_id", "job_id", "state", "delivery_state", "terminal_status", "terminal_outcome", "automatic_resume_available", "expires_at", "fallback_tool"]
+    })
+}
+
+fn job_terminal_host_binding_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"bound": {"type": "boolean"}},
+        "required": ["bound"]
+    })
+}
+
 fn run_process_shell_recovery_arguments_schema() -> Value {
     fn scrub_exact_tool_name(value: &mut Value) {
         match value {
@@ -1288,6 +1317,48 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("automatic_resume_available", schema_type("boolean", "True only when a real current production Host continuation carrier is installed.")),
             ("expires_at", schema_type("integer", "Bounded wait/event expiry as Unix seconds.")),
             ("fallback_tool", schema_type("string", "Explicit logs/details and recovery fallback; currently observe_jobs.")),
+        ])),
+        "present_job_terminal_continuation" => Some(wrapped_output_schema(vec![
+            ("job_terminal_continuation", job_terminal_continuation_projection_schema()),
+        ])),
+        "job_terminal_continuation_bind" | "job_terminal_continuation_unbind" => Some(wrapped_output_schema(vec![
+            ("job_terminal_continuation", job_terminal_continuation_projection_schema()),
+            ("host_binding", job_terminal_host_binding_schema()),
+            ("state_changed", schema_type("boolean", "Whether the process-local Host binding changed.")),
+        ])),
+        "job_terminal_continuation_state" => Some(wrapped_output_schema(vec![
+            ("job_terminal_continuation", job_terminal_continuation_projection_schema()),
+            ("host_binding", job_terminal_host_binding_schema()),
+            ("app_protocol", json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "prepared_attempt_id": nullable_schema("string", "App-private exact prepared attempt identity, present only after the durable dispatch fence.")
+                },
+                "required": ["prepared_attempt_id"]
+            })),
+        ])),
+        "job_terminal_continuation_prepare" => Some(wrapped_output_schema(vec![
+            ("wait_id", schema_type("string", "Exact Job terminal wait identity.")),
+            ("job_id", schema_type("string", "Exact Job execution identity.")),
+            ("delivery_state", schema_type("string", "Prepared delivery state.")),
+            ("attempt_id", schema_type("string", "Exact durable Job terminal delivery attempt identity.")),
+            ("dispatch_observation", schema_type("string", "dispatch_prepared after the durable prepare fence.")),
+            ("state_changed", schema_type("boolean", "True when this call crosses pending to prepared.")),
+            ("app_protocol", json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {"automatic_message": {"type": "string", "maxLength": 1024}},
+                "required": ["automatic_message"]
+            })),
+        ])),
+        "job_terminal_continuation_finish" => Some(wrapped_output_schema(vec![
+            ("wait_id", schema_type("string", "Exact Job terminal wait identity.")),
+            ("job_id", schema_type("string", "Exact Job execution identity.")),
+            ("attempt_id", schema_type("string", "Exact durable delivery attempt identity.")),
+            ("delivery_state", schema_type("string", "delivered or delivery_unknown.")),
+            ("dispatch_observation", schema_type("string", "dispatch_accepted or delivery_unknown.")),
+            ("state_changed", schema_type("boolean", "True when prepared delivery is finalized.")),
         ])),
         "observe_jobs" => Some(observe_jobs_output_schema()),
         "job_tail" => {

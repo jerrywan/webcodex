@@ -2639,6 +2639,54 @@ impl ToolRuntime {
                 binding_id,
             ),
 
+            ToolCall::PresentJobTerminalContinuation { wait_id } => {
+                self.present_job_terminal_continuation(auth, wait_id).await
+            }
+
+            ToolCall::JobTerminalContinuationBind {
+                wait_id,
+                binding_id,
+            } => {
+                self.job_terminal_continuation_bind_for_window(auth, window, wait_id, binding_id)
+                    .await
+            }
+
+            ToolCall::JobTerminalContinuationState {
+                wait_id,
+                binding_id,
+            } => {
+                self.job_terminal_continuation_state_for_window(auth, window, wait_id, binding_id)
+                    .await
+            }
+
+            ToolCall::JobTerminalContinuationPrepare {
+                wait_id,
+                binding_id,
+            } => {
+                self.job_terminal_continuation_prepare_for_window(auth, window, wait_id, binding_id)
+                    .await
+            }
+
+            ToolCall::JobTerminalContinuationFinish {
+                wait_id,
+                binding_id,
+                attempt_id,
+                outcome,
+            } => {
+                self.job_terminal_continuation_finish_for_window(
+                    auth, window, wait_id, binding_id, attempt_id, outcome,
+                )
+                .await
+            }
+
+            ToolCall::JobTerminalContinuationUnbind {
+                wait_id,
+                binding_id,
+            } => {
+                self.job_terminal_continuation_unbind_for_window(auth, window, wait_id, binding_id)
+                    .await
+            }
+
             ToolCall::DetachAgentEndpoint { endpoint_id } => {
                 self.detach_agent_endpoint(auth, endpoint_id)
             }

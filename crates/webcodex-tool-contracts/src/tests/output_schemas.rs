@@ -333,6 +333,49 @@ fn agent_continuation_projection_schema_requires_strict_nullable_restart_recover
 }
 
 #[test]
+fn job_terminal_continuation_output_schemas_are_sparse_and_private_app_payload_is_bounded() {
+    let present = output_schema_for_tool("present_job_terminal_continuation");
+    let projection = &present["properties"]["output"]["properties"]["job_terminal_continuation"];
+    assert_eq!(projection["additionalProperties"], false);
+    let properties = projection["properties"].as_object().unwrap();
+    for required in [
+        "wait_id",
+        "job_id",
+        "state",
+        "delivery_state",
+        "terminal_status",
+        "terminal_outcome",
+        "automatic_resume_available",
+        "expires_at",
+        "fallback_tool",
+    ] {
+        assert!(properties.contains_key(required), "missing {required}");
+    }
+    for forbidden in [
+        "stdout",
+        "stderr",
+        "command",
+        "environment",
+        "cwd",
+        "path",
+        "client_window",
+        "session_id",
+        "principal_digest",
+        "binding_id",
+    ] {
+        assert!(!properties.contains_key(forbidden), "leaked {forbidden}");
+    }
+
+    let prepare = output_schema_for_tool("job_terminal_continuation_prepare");
+    let automatic_message = &prepare["properties"]["output"]["properties"]["app_protocol"]
+        ["properties"]["automatic_message"];
+    assert_eq!(automatic_message["type"], "string");
+    assert_eq!(automatic_message["maxLength"], 1024);
+    let serialized = serde_json::to_string(&prepare).unwrap();
+    assert!(!serialized.contains("binding_id"));
+}
+
+#[test]
 fn generic_agent_task_read_schema_never_exposes_attempt_fence_or_active_turn_token() {
     let schema = output_schema_for_tool("read_agent_task");
     let latest_attempt = &schema["properties"]["output"]["properties"]["task"]["properties"]

@@ -96,6 +96,33 @@ pub fn agent_continuation_app_tool_specs() -> Vec<ToolSpec> {
     ]
 }
 
+/// Fixed Job-native MCP App Host-continuation coordination contract. Definitions remain
+/// globally ModelHidden; only a UI-capable MCP adapter may project these five tools.
+pub fn job_terminal_continuation_app_tool_specs() -> Vec<ToolSpec> {
+    vec![
+        tool_spec(
+            "job_terminal_continuation_bind",
+            "App-only bind of one live View to one exact caller-owned Job terminal wait. ClientWindow arrives only from Host sideband; binding_id is a process/View fence, never Job authority.",
+        ),
+        tool_spec(
+            "job_terminal_continuation_state",
+            "App-only bounded state read for one exact current Job terminal binding. Polling is View-internal and never substitutes for model-facing Job observation.",
+        ),
+        tool_spec(
+            "job_terminal_continuation_prepare",
+            "App-only crossing of the existing durable pending-to-prepared Job terminal delivery fence. Returns one bounded private automatic_message and exact attempt_id; never blindly retry after a missing or malformed post-fence response.",
+        ),
+        tool_spec(
+            "job_terminal_continuation_finish",
+            "App-only record of one prepared Host ui/message dispatch as dispatch_accepted or delivery_unknown. It never proves the fresh model turn already ran and never retries delivery.",
+        ),
+        tool_spec(
+            "job_terminal_continuation_unbind",
+            "App-only best-effort withdrawal of one exact process-local Job View binding. Pre-prepare teardown leaves pending recoverable; post-prepare teardown reconciles conservatively to delivery_unknown.",
+        ),
+    ]
+}
+
 /// Fixed admin-only forensic trace reader. It remains globally ModelHidden and
 /// is projected only by capable Stateless MCP 2026 adapters.
 pub fn operator_diagnostic_tool_specs() -> Vec<ToolSpec> {

@@ -1395,6 +1395,38 @@ async fn code_mode_does_not_admit_effectful_or_recursive_tools() {
             "recursive",
             "await tools.code_mode_exec({source: `text('nested')`});",
         ),
+        (
+            "wait_for_job_terminal",
+            "await tools.wait_for_job_terminal({job_id: 'wc_job_forbidden', idempotency_key: 'forbidden'});",
+        ),
+        (
+            "present_job_terminal_continuation",
+            "await tools.present_job_terminal_continuation({wait_id: 'wc_job_wait_q6urq6urq6urq6ur'});",
+        ),
+        (
+            "job_terminal_continuation_bind",
+            "await tools.job_terminal_continuation_bind({wait_id: 'wc_job_wait_q6urq6urq6urq6ur', binding_id: 'wc_host_binding_qqqqqqqqqqqqqqqqqqqqqg'});",
+        ),
+        (
+            "job_terminal_continuation_state",
+            "await tools.job_terminal_continuation_state({wait_id: 'wc_job_wait_q6urq6urq6urq6ur', binding_id: 'wc_host_binding_qqqqqqqqqqqqqqqqqqqqqg'});",
+        ),
+        (
+            "job_terminal_continuation_prepare",
+            "await tools.job_terminal_continuation_prepare({wait_id: 'wc_job_wait_q6urq6urq6urq6ur', binding_id: 'wc_host_binding_qqqqqqqqqqqqqqqqqqqqqg'});",
+        ),
+        (
+            "job_terminal_continuation_finish",
+            "await tools.job_terminal_continuation_finish({wait_id: 'wc_job_wait_q6urq6urq6urq6ur', binding_id: 'wc_host_binding_qqqqqqqqqqqqqqqqqqqqqg', attempt_id: 'wc_job_delivery_ZmZmZmZmZmZmZmZm', outcome: 'dispatch_accepted'});",
+        ),
+        (
+            "job_terminal_continuation_unbind",
+            "await tools.job_terminal_continuation_unbind({wait_id: 'wc_job_wait_q6urq6urq6urq6ur', binding_id: 'wc_host_binding_qqqqqqqqqqqqqqqqqqqqqg'});",
+        ),
+        (
+            "observe_jobs",
+            "await tools.observe_jobs({items: [{job_id: 'wc_job_forbidden'}]});",
+        ),
     ] {
         let session = runtime
             .sessions

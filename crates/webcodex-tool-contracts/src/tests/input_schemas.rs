@@ -1038,6 +1038,102 @@ fn agent_continuation_bind_requires_canonical_view_fence_without_model_exposure(
 }
 
 #[test]
+fn job_terminal_continuation_app_contract_is_exact_wait_plus_private_view_fence_only() {
+    let specs = crate::registry::job_terminal_continuation_app_tool_specs();
+    assert_eq!(specs.len(), 5);
+    let names = specs
+        .iter()
+        .map(|spec| spec.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            "job_terminal_continuation_bind",
+            "job_terminal_continuation_state",
+            "job_terminal_continuation_prepare",
+            "job_terminal_continuation_finish",
+            "job_terminal_continuation_unbind",
+        ]
+    );
+    let binding_id = format!(
+        "wc_host_binding_{}",
+        webcodex_core::compact::encode([0xa1; 16])
+    );
+    let wait_id = format!("wc_job_wait_{}", webcodex_core::compact::encode([0xa2; 12]));
+    let attempt_id = format!(
+        "wc_job_delivery_{}",
+        webcodex_core::compact::encode([0xa3; 12])
+    );
+    for spec in &specs {
+        let properties = spec.input_schema["properties"].as_object().unwrap();
+        assert_eq!(
+            properties["wait_id"]["pattern"], "^wc_job_wait_[A-Za-z0-9_-]{16}$",
+            "{}",
+            spec.name
+        );
+        assert_eq!(
+            properties["binding_id"]["pattern"], "^wc_host_binding_[A-Za-z0-9_-]{21}[AQgw]$",
+            "{}",
+            spec.name
+        );
+        for forbidden in [
+            "client_window",
+            "openai_session",
+            "peer_id",
+            "principal_digest",
+            "session_id",
+            "job_id",
+            "project",
+        ] {
+            assert!(
+                !properties.contains_key(forbidden),
+                "{} unexpectedly accepts {forbidden}",
+                spec.name
+            );
+        }
+        assert!(!registered_tool_specs()
+            .iter()
+            .any(|registered| registered.name == spec.name));
+    }
+
+    let bind = specs
+        .iter()
+        .find(|spec| spec.name == "job_terminal_continuation_bind")
+        .unwrap();
+    assert!(test_support::validate_schema_instance(
+        &json!({"wait_id": wait_id, "binding_id": binding_id}),
+        &bind.input_schema,
+    )
+    .is_ok());
+    let finish = specs
+        .iter()
+        .find(|spec| spec.name == "job_terminal_continuation_finish")
+        .unwrap();
+    assert_eq!(
+        finish.input_schema["properties"]["attempt_id"]["pattern"],
+        "^wc_job_delivery_[A-Za-z0-9_-]{16}$"
+    );
+    assert!(test_support::validate_schema_instance(
+        &json!({
+            "wait_id": format!("wc_job_wait_{}", webcodex_core::compact::encode([0xa2; 12])),
+            "binding_id": format!("wc_host_binding_{}", webcodex_core::compact::encode([0xa1; 16])),
+            "attempt_id": attempt_id,
+            "outcome": "dispatch_accepted"
+        }),
+        &finish.input_schema,
+    )
+    .is_ok());
+
+    let registered = registered_tool_specs();
+    let present = spec_named(&registered, "present_job_terminal_continuation");
+    assert_eq!(present.input_schema["required"], json!(["wait_id"]));
+    assert_eq!(
+        present.input_schema["properties"]["wait_id"]["pattern"],
+        "^wc_job_wait_[A-Za-z0-9_-]{16}$"
+    );
+}
+
+#[test]
 fn skill_runtime_and_management_schemas_preserve_typed_bounds() {
     let run = input_schema_for_tool("run_skill_resource");
     assert_eq!(run["properties"]["path"]["pattern"], "^scripts/.+$");

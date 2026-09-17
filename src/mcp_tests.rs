@@ -143,6 +143,8 @@ mod file_import;
 mod goal_plan_app;
 #[path = "mcp_tests/http_transport.rs"]
 mod http_transport;
+#[path = "mcp_tests/job_terminal_continuation_app.rs"]
+mod job_terminal_continuation_app;
 #[path = "mcp_tests/model_ergonomics.rs"]
 mod model_ergonomics;
 #[path = "mcp_tests/model_surface.rs"]

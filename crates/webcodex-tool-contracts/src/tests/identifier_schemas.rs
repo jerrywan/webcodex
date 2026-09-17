@@ -19,6 +19,8 @@ fn durable_identifier_schemas_accept_compact_and_reject_retired_hex() {
         "wc_agent_task_fence_",
         "wc_wake_consume_",
         "wc_host_binding_",
+        "wc_job_wait_",
+        "wc_job_delivery_",
     ];
     fn visit(
         value: &serde_json::Value,
@@ -67,6 +69,7 @@ fn durable_identifier_schemas_accept_compact_and_reject_retired_hex() {
     for spec in registered_tool_specs()
         .into_iter()
         .chain(crate::registry::agent_continuation_app_tool_specs())
+        .chain(crate::registry::job_terminal_continuation_app_tool_specs())
     {
         visit(&spec.input_schema, &prefixes, &mut seen);
         visit(&spec.output_schema, &prefixes, &mut seen);
@@ -129,6 +132,7 @@ fn workflow_session_identifier_schemas_accept_compact_and_persisted_legacy_forms
     for spec in registered_tool_specs()
         .into_iter()
         .chain(crate::registry::agent_continuation_app_tool_specs())
+        .chain(crate::registry::job_terminal_continuation_app_tool_specs())
     {
         visit(&spec.input_schema, &mut seen);
         visit(&spec.output_schema, &mut seen);
@@ -167,6 +171,7 @@ fn registered_tool_string_length_bounds_are_not_inverted() {
     for spec in registered_tool_specs()
         .into_iter()
         .chain(crate::registry::agent_continuation_app_tool_specs())
+        .chain(crate::registry::job_terminal_continuation_app_tool_specs())
     {
         visit(&spec.input_schema, &format!("{}/input", spec.name));
         visit(&spec.output_schema, &format!("{}/output", spec.name));

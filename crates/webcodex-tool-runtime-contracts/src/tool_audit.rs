@@ -1967,6 +1967,80 @@ mod computer_privacy_tests {
     }
 
     #[test]
+    fn job_terminal_continuation_app_audit_omits_binding_and_private_message() {
+        let wait_id = "wc_job_wait_q6urq6urq6urq6ur";
+        let binding_id = format!(
+            "wc_host_binding_{}",
+            webcodex_core::compact::encode([0xc1; 16])
+        );
+        let attempt_id = format!(
+            "wc_job_delivery_{}",
+            webcodex_core::compact::encode([0xc2; 12])
+        );
+        let prepare_input = json!({
+            "wait_id": wait_id,
+            "binding_id": binding_id
+        });
+        let prepare_args = session_log_arguments_for_tool_request(
+            "job_terminal_continuation_prepare",
+            &prepare_input,
+        );
+        let prepare_args_text = serde_json::to_string(&prepare_args).unwrap();
+        assert_eq!(prepare_args["wait_id"], wait_id);
+        assert!(!prepare_args_text.contains(&binding_id));
+        assert!(!prepare_args_text.contains("binding_id"));
+        assert!(!prepare_args_text.contains("attempt_id"));
+
+        let finish_input = json!({
+            "wait_id": wait_id,
+            "binding_id": binding_id,
+            "attempt_id": attempt_id,
+            "outcome": "dispatch_accepted"
+        });
+        let finish_args = session_log_arguments_for_tool_request(
+            "job_terminal_continuation_finish",
+            &finish_input,
+        );
+        let finish_args_text = serde_json::to_string(&finish_args).unwrap();
+        assert_eq!(finish_args["wait_id"], wait_id);
+        assert_eq!(finish_args["attempt_id"], attempt_id);
+        assert_eq!(finish_args["outcome"], "dispatch_accepted");
+        assert!(!finish_args_text.contains(&binding_id));
+        assert!(!finish_args_text.contains("binding_id"));
+
+        let result = json!({
+            "wait_id": wait_id,
+            "job_id": "wc_job_private",
+            "delivery_state": "prepared",
+            "attempt_id": attempt_id,
+            "dispatch_observation": "dispatch_prepared",
+            "state_changed": true,
+            "app_protocol": {
+                "automatic_message": "PRIVATE MESSAGE BODY /private/path TOKEN=secret",
+                "binding_id": binding_id
+            }
+        });
+        let projected = session_log_result_for_tool("job_terminal_continuation_prepare", &result);
+        let projected_text = serde_json::to_string(&projected).unwrap();
+        assert_eq!(projected["wait_id"], wait_id);
+        assert_eq!(projected["attempt_id"], attempt_id);
+        assert_eq!(projected["dispatch_observation"], "dispatch_prepared");
+        for forbidden in [
+            "PRIVATE MESSAGE BODY",
+            "/private/path",
+            "TOKEN=secret",
+            "automatic_message",
+            "app_protocol",
+            "binding_id",
+        ] {
+            assert!(
+                !projected_text.contains(forbidden),
+                "Job terminal App audit leaked {forbidden}"
+            );
+        }
+    }
+
+    #[test]
     fn computer_application_list_ledger_omits_names_ids_and_native_identity() {
         let output = json!({
             "applications": [{
@@ -3848,6 +3922,23 @@ impl ToolCallAuditProjection for ToolCall {
             }),
             Self::WaitForJobTerminal { job_id, .. } => serde_json::json!({
                 "job_id": job_id,
+            }),
+            Self::PresentJobTerminalContinuation { wait_id }
+            | Self::JobTerminalContinuationBind { wait_id, .. }
+            | Self::JobTerminalContinuationState { wait_id, .. }
+            | Self::JobTerminalContinuationPrepare { wait_id, .. }
+            | Self::JobTerminalContinuationUnbind { wait_id, .. } => serde_json::json!({
+                "wait_id": wait_id,
+            }),
+            Self::JobTerminalContinuationFinish {
+                wait_id,
+                attempt_id,
+                outcome,
+                ..
+            } => serde_json::json!({
+                "wait_id": wait_id,
+                "attempt_id": attempt_id,
+                "outcome": outcome,
             }),
             Self::ApplyUnifiedDiff {
                 project,

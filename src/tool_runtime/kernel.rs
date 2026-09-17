@@ -437,6 +437,27 @@ impl ToolRuntime {
                 correlation: Default::default(),
             };
         }
+        if matches!(
+            request.tool_name.as_str(),
+            "job_terminal_continuation_bind"
+                | "job_terminal_continuation_state"
+                | "job_terminal_continuation_prepare"
+                | "job_terminal_continuation_finish"
+                | "job_terminal_continuation_unbind"
+        ) && !capabilities.agent_continuation_app
+        {
+            return ToolCallOutcome {
+                success: false,
+                result: None,
+                error_status: Some(ToolCallErrorStatus::InvalidArguments {
+                    message: "Job terminal continuation App coordination is available only on Stateless MCP 2026 requests with MCP App continuation capability"
+                        .to_string(),
+                }),
+                project: None,
+                model_ergonomics: None,
+                correlation: Default::default(),
+            };
+        }
         // Project Memory tools are kernel-known but globally model-hidden. One
         // explicit protocol capability gates all six fixed tools; their
         // canonical ToolDefinition authority decides caller access below.

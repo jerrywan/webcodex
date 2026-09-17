@@ -327,6 +327,11 @@ fn tool_definitions_are_activity_semantics_ssot() {
         "agent_continuation_wake_prepare",
         "agent_continuation_wake_finish",
         "agent_continuation_unbind",
+        "job_terminal_continuation_bind",
+        "job_terminal_continuation_state",
+        "job_terminal_continuation_prepare",
+        "job_terminal_continuation_finish",
+        "job_terminal_continuation_unbind",
     ] {
         assert_eq!(
             runtime_tool_activity_interaction(name),
