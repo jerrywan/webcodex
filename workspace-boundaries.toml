@@ -176,15 +176,15 @@ test_support = []
 
 [packages.webcodex-tool-runtime-contracts]
 layer = "runtime"
-role = "Tool runtime call, result, audit, and input contracts."
+role = "Tool runtime result, recorder metadata, and audit contracts."
 normal = [
     "webcodex-core",
     "webcodex-tool-contracts",
     "webcodex-workflow-session",
 ]
-dev = ["webcodex-tool-contracts"]
+dev = []
 build = []
-test_support = ["webcodex-tool-contracts"]
+test_support = []
 
 [packages.webcodex-validation]
 layer = "domain"
