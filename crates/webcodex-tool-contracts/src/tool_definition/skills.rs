@@ -23,7 +23,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolAuditResultField::value("project"),
                     super::ToolAuditResultField::value("catalog_revision"),
                     super::ToolAuditResultField::value("skill_id"),
-                    super::ToolAuditResultField::value("name"),
                     super::ToolAuditResultField::value("source_scope"),
                     super::ToolAuditResultField::value("trust"),
                     super::ToolAuditResultField::value("package_revision"),
@@ -37,10 +36,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolAuditResultField::value("error_kind"),
                     super::ToolAuditResultField::value("state_changed"),
                 ])
+                .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&["name"]))
                 .context(super::ToolAuditContextPolicy::Fields(&[
                     super::ToolAuditResultField::value("catalog_revision"),
                     super::ToolAuditResultField::value("skill_id"),
-                    super::ToolAuditResultField::value("name"),
                     super::ToolAuditResultField::value("source_scope"),
                     super::ToolAuditResultField::value("trust"),
                     super::ToolAuditResultField::value("package_revision"),
