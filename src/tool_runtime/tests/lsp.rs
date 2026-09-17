@@ -9,6 +9,7 @@ use crate::lsp_bridge::{
     WorkspaceSymbolsResult, AGENT_LSP_REQUEST_KIND,
 };
 use crate::runner_protocol::{RunnerCapabilities, RunnerRegisterRequest};
+use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use crate::tool_runtime::tool_definition::{
     lookup_tool_definition, model_visible_tool_definitions, RunnerCapabilityRequirement,
     TOOL_CATEGORY_LSP,

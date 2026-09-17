@@ -9,15 +9,6 @@ use crate::metadata::{
     ToolPathHint::None as NoPath, ToolRisk::Read, PROJECT_READ, PROJECT_WRITE, RUNTIME_READ,
     SESSION_COLLABORATE, TOOL_PROVIDER_CONTROL,
 };
-use crate::registry::input_schemas::{
-    close_session_input_schema, complete_session_message_input_schema,
-    finish_coding_task_input_schema, get_session_assignment_input_schema,
-    list_session_messages_input_schema, observe_session_messages_input_schema,
-    post_session_message_input_schema, resolve_session_message_input_schema,
-    session_discussion_summary_input_schema, session_handoff_summary_input_schema,
-    session_summary_input_schema, update_session_context_input_schema,
-    validation_summary_input_schema, work_on_project_input_schema, work_result_input_schema,
-};
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[
     def(
@@ -67,7 +58,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolActivityInteraction::Meaningful,
             ),
             "Canonical bootstrap for ordinary coding/review. Use project or client_id+path. Omit session_id for a fresh Workflow Session; a fresh Workflow Session does not imply a fresh model context. Use exact resume only for an active accessible Session and never guesses prior Session. Defaults return project instructions, workflow guidance, and Skills/Plugin selection metadata. If the current model context retains instructions/guidance, set the matching include_* false; use defaults for a fresh or uncertain model context. Session/window/transport identity never proves retention; Runtime still re-observes instruction files. Skill bodies require skill_read_file; Plugin calls require plugin_tool describe. Checkout does not require Git; mode=worktree uses an exact Git base for an isolated worktree without bypassing Project authority.",
-            work_on_project_input_schema,
         ).with_gpt_action_description("Start or resume exact project work. Use project or client_id+path; omit session_id for a fresh Workflow Session. Defaults return project/workflow/extension context. worktree mode creates an isolated Runner-managed Git worktree without widening authority.")),
         10,
     ),
@@ -95,7 +85,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             )
             .with_activity_kind(super::ToolActivityKind::Review),
             "Return an optional deterministic evidence snapshot for model review, including workspace, validation, jobs, and recorded tool events. The result is advisory: it does not decide task completion, replace direct diff or test review, or generate the user-facing final report.",
-            finish_coding_task_input_schema,
         )),
         150,
     ),
@@ -127,7 +116,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Optionally present one exact coding Workflow Session as a persistent read-only Work Result MCP App card when a user-visible work summary is genuinely useful. Requires explicit project + session_id, creates no work, runs no validation/review, changes no Session lifecycle, and grants no authority. The returned Work Result is the card's initial authoritative snapshot; do not call merely to acknowledge a clean worktree and do not call repeatedly to refresh. Later refresh is user-driven inside the existing card through one exact app-only state read per click. Presentation is UX only, never a correctness requirement; repeated explicit presentation may create another Host card.",
-            work_result_input_schema,
         ))
         .with_gpt_action_unsupported(),
         155,
@@ -164,7 +152,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolActivityInteraction::NonMeaningful,
             ),
             "Create one final frozen Changes MCP App presentation for the exact coding Workflow Session only when finish_coding_task returned this parser-ready follow-up. Requires exact project + session_id, re-authorizes both independently, creates no work or validation, changes no Session lifecycle, and grants no authority. Repeated explicit calls can create another Host card, so do not call it more than once for the same closeout.",
-            work_result_input_schema,
         ))
         .with_gpt_action_unsupported(),
         156,
@@ -250,7 +237,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Return a bounded structured summary from the session ledger for an explicit session_id: recorded events, message-board summary, task mode, guards, and lifecycle. Uses durable ledger data where session persistence is configured.",
-        session_summary_input_schema,
     ))),
     requires_explicit_business_session(permission_risk(
         model_spec(
@@ -275,7 +261,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.lifecycle(super::ToolSessionLifecycleEffect::Mutation),
             ),
             "Update Session defaults. Binding execution_context.resource selects an already active Runner-local named SSH resource; for a new explicit target use ssh_resource list/register and restart the Runner first, then list and bind the active name. open_session_shell uses that Session binding. Requires an authorized project matching the exact Session project; cross-project escape is not supported. Context and event commit under the store lock; the background writer persists, so success does not mean disk flush. Never falls back and never creates unknown Sessions.",
-            update_session_context_input_schema,
         ),
         PERMISSION_RISK_WRITE,
     )),
@@ -302,7 +287,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.persistent_shell(super::PersistentShellEvidenceAction::Close).lifecycle(super::ToolSessionLifecycleEffect::IdempotentClose),
             ),
             "Explicitly close a workflow session (Active to Closed) for a required session_id. Query remains available; write/shell/mutation tools are denied. Idempotent when already closed; unknown ids fail without create. finish_coding_task does not close.",
-            close_session_input_schema,
         ),
         PERMISSION_RISK_WRITE,
     )),
@@ -332,7 +316,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolActivityInteraction::Meaningful,
         ),
         "Read bounded structured validation evidence already recorded in an explicit project-scoped session ledger. Does not run Cargo or shell commands, enqueue a Runner request, read project files, mutate the workspace, or replace finish_coding_task.",
-        validation_summary_input_schema,
     ))),
     requires_explicit_business_session(model_spec(
         def(
@@ -364,7 +347,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.lifecycle(super::ToolSessionLifecycleEffect::Mutation),
         ),
         "Post a bounded collaboration message (todo, question, progress, guidance, risk, or decision). High-priority guidance may require request-scoped ACK; ACK neither resolves nor gates work. Use complete_session_message to atomically answer and resolve a finished todo.",
-        post_session_message_input_schema,
     )),
     requires_explicit_business_session(model_spec(
         def(
@@ -392,7 +374,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Read bounded session-local messages with exact filters. For an executable todo, prefer get_session_assignment so the todo, all retained direct replies, and its completion fence come from one store snapshot.",
-        list_session_messages_input_schema,
     )),
     requires_explicit_business_session(model_spec(
         def(
@@ -423,7 +404,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Atomically read one exact open todo plus all retained direct replies and return the opaque assignment_fence required by complete_session_message. Unrelated Session traffic and ACK bookkeeping do not stale it; incomplete retained assignment history fails closed.",
-        get_session_assignment_input_schema,
     )),
     requires_explicit_business_session(model_spec(
         def(
@@ -455,7 +435,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Observe Session message-state delta after an opaque durable cursor. No token establishes the current baseline and returns no history; token calls may wait once for change. Reports retention loss; never a subscription, delivery receipt, or model-context proof.",
-        observe_session_messages_input_schema,
     )),
     requires_explicit_business_session(permission_risk(
         model_spec(
@@ -486,7 +465,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.lifecycle(super::ToolSessionLifecycleEffect::Mutation),
             ),
             "Mark a session-local ledger message resolved. Idempotent when the message is already resolved; metadata-only and never modifies project files.",
-            resolve_session_message_input_schema,
         ),
         PERMISSION_RISK_WRITE,
     )),
@@ -521,7 +499,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.lifecycle(super::ToolSessionLifecycleEffect::Mutation),
             ),
             "Atomically answer and resolve one exact open todo. expected_assignment_fence is required and must be the exact opaque fence from get_session_assignment; completion_key separately keeps uncertain-result retries idempotent.",
-            complete_session_message_input_schema,
         ),
         PERMISSION_RISK_WRITE,
     )),
@@ -555,7 +532,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Return a bounded structured aggregate of session-local discussion from the recorded session ledger. Does not call an LLM or generate natural-language summaries.",
-            session_discussion_summary_input_schema,
         )),
         15,
     ),
@@ -596,7 +572,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolActivityInteraction::Meaningful,
         ),
             "Read-only handoff for multi-step tasks, explicit session_id. Reads session ledger collaboration and ledger-derived validation. Diagnostics use bounded tails or safe result metadata; validation.parser.available is false if absent. Use the default full view to recover unknown context; summary_only, limit below 20, or disabled include_* components cannot establish a new ACK baseline. No checkpoint allocation; grants no authority.",
-            session_handoff_summary_input_schema,
         ).with_gpt_action_description("Recover an explicit Workflow Session for multi-step work. Use full defaults to rebuild context/ACK baseline; summary_only or reduced sections are diagnostic only. Read-only and grants no authority."))),
         16,
     ),

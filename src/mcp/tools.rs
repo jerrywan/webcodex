@@ -866,6 +866,11 @@ fn mcp_tool_spec_json(mut spec: ToolSpec, compact: bool, app_enabled: bool) -> V
         }
     }
     if tool_name == "import_conversation_files_to_project" {
+        if let Some(required) =
+            value.pointer_mut("/inputSchema/properties/openaiFileIdRefs/items/required")
+        {
+            *required = json!(["download_url", "file_id"]);
+        }
         if let Some(meta) = tool_meta_object(&mut value) {
             meta.insert("openai/fileParams".to_string(), json!(["openaiFileIdRefs"]));
         }

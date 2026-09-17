@@ -8,6 +8,7 @@ use webcodex_core::workflow_session_contract::{
     SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_INSTRUCTION, SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_REASON,
 };
 
+use crate::input_property_schema_for_tool;
 use crate::tool_definition::exploration_tool_names;
 
 pub fn schema_type(kind: &str, description: &str) -> Value {
@@ -25,6 +26,45 @@ pub fn nullable_schema(kind: &str, description: &str) -> Value {
         ],
         "description": description,
     })
+}
+
+pub(super) fn session_mode_schema(description: &str) -> Value {
+    input_property_schema_for_tool("start_session", "mode", description)
+}
+
+pub(super) fn session_guards_schema(description: &str) -> Value {
+    json!({
+        "type": "object",
+        "description": description,
+        "additionalProperties": false,
+        "properties": {
+            "deny_write_tools": {"type": "boolean"},
+            "deny_shell_tools": {"type": "boolean"}
+        },
+        "required": ["deny_write_tools", "deny_shell_tools"]
+    })
+}
+
+pub(super) fn session_execution_context_schema(description: &str) -> Value {
+    input_property_schema_for_tool("start_session", "execution_context", description)
+}
+
+pub(super) fn session_lifecycle_schema(description: &str) -> Value {
+    json!({
+        "type": "string",
+        "enum": ["active", "closed"],
+        "description": description,
+    })
+}
+
+#[cfg(feature = "workspace-checkpoints")]
+pub(super) fn checkpoint_validation_schema(description: &str) -> Value {
+    input_property_schema_for_tool("workspace_checkpoint_create", "validation", description)
+}
+
+#[cfg(feature = "workspace-checkpoints")]
+pub(super) fn checkpoint_labels_schema(description: &str) -> Value {
+    input_property_schema_for_tool("workspace_checkpoint_create", "labels", description)
 }
 
 pub fn continuation_semantics_schema(

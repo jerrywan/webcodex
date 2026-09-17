@@ -5,6 +5,7 @@ use super::super::helpers::*;
 use super::super::*;
 use super::support::*;
 use crate::runner_protocol::{RunnerCapabilities, RunnerRequest, RunnerResultRequest};
+use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use serde_json::{json, Value};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;

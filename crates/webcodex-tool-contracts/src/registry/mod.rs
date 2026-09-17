@@ -1,5 +1,4 @@
 mod annotations;
-pub mod input_schemas;
 mod output_schemas;
 mod tool_specs;
 

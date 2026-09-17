@@ -138,6 +138,13 @@ fn validate_schema_instance_at(instance: &Value, schema: &Value, path: &str) -> 
     }
     if let Some(value) = instance.as_str() {
         if schema
+            .get("minLength")
+            .and_then(Value::as_u64)
+            .is_some_and(|minimum| value.chars().count() < minimum as usize)
+        {
+            return Err(format!("{path}: below minLength"));
+        }
+        if schema
             .get("maxLength")
             .and_then(Value::as_u64)
             .is_some_and(|maximum| value.chars().count() > maximum as usize)

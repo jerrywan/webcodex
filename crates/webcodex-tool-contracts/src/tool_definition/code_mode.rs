@@ -9,10 +9,6 @@ use crate::metadata::{
     ToolRisk::{JobRun, ProjectWrite, Read},
     JOB_RUN, PROJECT_READ, PROJECT_WRITE, TOOL_PROVIDER_CONTROL,
 };
-use crate::registry::input_schemas::{
-    code_mode_exec_effectful_input_schema, code_mode_exec_input_schema,
-    code_mode_exec_mutating_input_schema,
-};
 
 const RESULT_AUDIT_FIELDS: &[super::ToolAuditResultField] = &[
     super::ToolAuditResultField::pointer("tool_calls", "/stats/tool_calls"),
@@ -58,7 +54,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     .review(super::ToolReviewEvidence::ReadOnlyInspection),
             ),
             "Experimental read-only JavaScript orchestration for related/adaptive inspections. tools.<name>(args) re-enters canonical ToolRuntime under the outer-bound Project/Session; text(value) emits bounded output. Prefer a direct tool for one simple observation. No shell/fs/network/mutation/Jobs.",
-            code_mode_exec_input_schema,
         ))),
         45,
     ),
@@ -85,7 +80,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Experimental Code Mode E2a orchestration for E1 reads plus cargo_check/cargo_test. Every child re-enters canonical ToolRuntime with normal Project, Session, scope, permission, Runner, validation, and Job semantics. No source mutation, shell/process, nested Job observation, gateways, or recursive Code Mode.",
-            code_mode_exec_effectful_input_schema,
         ).with_gpt_action_description("Experimental E2a orchestration for E1 reads plus cargo_check/cargo_test. Every child re-enters canonical ToolRuntime; no source mutation, shell/process execution, nested Job observation, gateways, or recursive Code Mode.")),
         46,
     ),
@@ -113,7 +107,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
                 "Experimental Code Mode E2b guarded structured mutation. Admits E1 reads plus at most one canonical apply_text_edits attempt; validation, shell/process, Jobs, other mutations, gateways, and recursive Code Mode remain denied. The outer ProjectWrite envelope never replaces nested canonical write authority or first-class Edit evidence.",
-                code_mode_exec_mutating_input_schema,
             ).with_gpt_action_description("Experimental E2b guarded mutation: E1 reads plus at most one canonical apply_text_edits attempt. No nested validation, shell/process, Jobs, other writes, gateways, or recursive Code Mode.")),
             PERMISSION_RISK_WRITE,
         ),

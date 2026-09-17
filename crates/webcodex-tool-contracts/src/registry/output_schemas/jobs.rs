@@ -47,7 +47,7 @@ fn run_process_shell_recovery_arguments_schema() -> Value {
         }
     }
 
-    let mut schema = crate::registry::input_schemas::run_shell_input_schema();
+    let mut schema = crate::input_schema_for_tool("run_shell");
     scrub_exact_tool_name(&mut schema);
     schema
 }
@@ -442,7 +442,7 @@ fn list_jobs_recovery_call_schema(project: bool) -> Value {
 }
 
 fn observe_jobs_batch_followup_arguments_schema() -> Value {
-    let mut schema = crate::registry::input_schemas::observe_jobs_input_schema();
+    let mut schema = crate::input_schema_for_tool("observe_jobs");
     if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
         properties.remove("wait_secs");
         properties.remove("wake_on");

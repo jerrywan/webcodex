@@ -10,13 +10,6 @@ use crate::metadata::{
     ToolRisk::{ProjectWrite, Read},
     PROJECT_READ, PROJECT_WRITE, TOOL_PROVIDER_CONTROL, TOOL_PROVIDER_RUNNER,
 };
-use crate::registry::input_schemas::{
-    artifact_upload_abort_input_schema, artifact_upload_begin_input_schema,
-    artifact_upload_chunk_input_schema, artifact_upload_finish_input_schema,
-    export_project_artifact_input_schema, import_conversation_files_to_project_input_schema,
-    project_artifact_input_schema, read_project_artifact_input_schema,
-    read_project_artifact_metadata_input_schema, save_project_artifact_input_schema,
-};
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[
     permission_risk(
@@ -42,7 +35,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
             ),
             "Write a bounded binary project artifact when the caller already holds the bounded binary/base64 content. Do not read a current ChatGPT/host attachment and base64-encode it through the model; use import_conversation_files_to_project for host-native attachment import. Suitable for generated images, PDFs, ZIP archives, and DOCX/PPTX/XLSX Office artifacts already present as bounded caller data; not for UTF-8 source edits.",
-            save_project_artifact_input_schema,
         ),
         PERMISSION_RISK_ARTIFACT_WRITE,
     ),
@@ -70,7 +62,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
                 "Import 1..10 current ChatGPT/host attachments into a Runner project using openaiFileIdRefs from the host file-reference mechanism. This is the preferred host-native attachment-to-project transfer path: do not base64-transfer files, construct download URLs, or use local /mnt/data paths; Control downloads and saves them as project artifacts. Existing trusted MCP host/OAuth client and host rewrite checks still apply.",
-                import_conversation_files_to_project_input_schema,
             ).with_gpt_action_description("Import current ChatGPT attachments into a Runner project through host-populated openaiFileIdRefs. Do not invent file ids/URLs or base64-transfer attachments. Host provenance is adapter-derived; runtime authority remains canonical."),
             PERMISSION_RISK_ARTIFACT_WRITE,
         ),
@@ -99,7 +90,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Project artifact read: metadata=facts; inspect=fenced segment; image=MCP image; export=MCP ResourceLink. Use export for whole files, not repeated inspect calls; use import_conversation_files_to_project for host-to-Project attachments.",
-            project_artifact_input_schema,
         )
         .with_gpt_action_description("Project artifact read surface. GPT Actions supports metadata and bounded inspect; native image and ResourceLink export require MCP."),
         56,
@@ -126,7 +116,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Compatibility project artifact export specialist. Create one short-lived authenticated MCP ResourceLink for a bounded project artifact so the host/user can fetch the complete binary with resources/read without routing base64 through model output. Prefer project_artifact(action=export) on model surfaces that expose the unified facade.",
-        export_project_artifact_input_schema,
     )
     .with_gpt_action_unsupported(),
     model_spec(
@@ -151,7 +140,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Read bounded metadata for a binary artifact; images include dimensions and zip archives are counted but never extracted. Set allow_missing=true to make a missing artifact a successful exists=false negative assertion.",
-        read_project_artifact_metadata_input_schema,
     ),
     model_spec(
         def(
@@ -175,7 +163,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Bounded chunk inspection API for a project artifact. Returns base64 for one small segment plus full-file sha256/MIME metadata. A truncated ranged read emits one parser-ready suggested_call that carries the observed full-file sha256 as expected_sha256, so continuation either reads the same exact content incarnation or fails closed with snapshot_changed before returning changed bytes; do not manually translate next_offset or sha256 bookkeeping. If the goal is to deliver the complete file to ChatGPT/host/user, do not loop over base64 chunks; prefer export_project_artifact instead.",
-        read_project_artifact_input_schema,
     ),
     model_spec(
         def(
@@ -199,7 +186,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Begin a bounded low-level chunked binary artifact upload up to 256 MiB. Creates a project-local temporary upload session; finish commits atomically to the target path. This is not the preferred path for a current ChatGPT/host attachment; use import_conversation_files_to_project for host-native import. For smoke octet-stream uploads, use artifacts/smoke/<name>.artifact or omit mime_type when appropriate.",
-        artifact_upload_begin_input_schema,
     ),
     requires_artifact_upload_path_binding(model_spec(
         def(
@@ -223,7 +209,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Append one base64 chunk up to 1 MiB decoded to an active artifact upload. path is required and must exactly match artifact_upload_begin; this binds upload_id to the target path.",
-        artifact_upload_chunk_input_schema,
     )),
     requires_artifact_upload_path_binding(permission_risk(
         model_spec(
@@ -248,7 +233,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
             ),
             "Finish an active artifact upload. path is required and must exactly match artifact_upload_begin; this binds upload_id before atomic commit.",
-            artifact_upload_finish_input_schema,
         ),
         PERMISSION_RISK_ARTIFACT_WRITE,
     )),
@@ -275,7 +259,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
             ),
             "Abort an active artifact upload. path is required and must exactly match artifact_upload_begin; this binds upload_id before cleanup and reports final_file_exists without touching the final target.",
-            artifact_upload_abort_input_schema,
         ),
         PERMISSION_RISK_ARTIFACT_WRITE,
     )),

@@ -9,10 +9,6 @@ use crate::metadata::{
     ToolRisk::{ComputerControl as ComputerControlRisk, ProjectWrite, Read},
     COMPUTER_CONTROL, COMPUTER_LAUNCH, COMPUTER_READ, PROJECT_WRITE, TOOL_PROVIDER_CONTROL,
 };
-use crate::registry::input_schemas::{
-    computer_control_input_schema, computer_observe_input_schema,
-    computer_save_snapshot_input_schema,
-};
 
 const COMPUTER_CONTROL_GATEWAY_SCOPES: &[&str] = &[COMPUTER_CONTROL, COMPUTER_LAUNCH];
 
@@ -28,7 +24,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             Some(COMPUTER_READ), false, NoPath, false, false, super::ToolSessionEvidencePolicy::NONE,
         ),
         "Guaranteed read-only Computer observation gateway. Use the closed action vocabulary for targets, windows, displays, applications, Accessibility status/tree/search/state, window/display snapshots, or clipboard text. Exact action scopes and Runner capabilities are enforced before dispatch; opaque ephemeral identities, stale-handle failure, traversal/image/clipboard bounds, and snapshot-generation semantics remain unchanged. No action can activate, launch, focus, type, move/click the pointer, write the clipboard, save a project artifact, use shell fallback, or retry an uncertain effect.",
-        computer_observe_input_schema,
     ),
     require_any_scopes(
         permission_risk(
@@ -43,7 +38,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     None, false, NoPath, true, false, super::ToolSessionEvidencePolicy::NONE,
                 ),
                 "Effectful Computer control gateway with a closed action vocabulary: launch_application, activate_window, press, focus, scroll_to_element, key, input_text, pointer_move, pointer_click, and write_clipboard. Each action keeps its exact scopes, permission/session semantics, Runner capability fence, native validation, execution certainty, and observation-first recovery. The outer ToolDefinition is a worst-case effect annotation only; action-sensitive canonical governance resolves exact authority before any effect. No arbitrary argv/path/script input, implicit focus/activation, shell fallback, or blind retry after an uncertain effect.",
-                computer_control_input_schema,
             ),
             PERMISSION_RISK_WRITE,
         ),
@@ -85,7 +79,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Save one exact window snapshot as a create-only project artifact without returning image bytes. Reuses computer_observe(action=snapshot_window) region/downscale semantics and requires computer:read plus project:write. No overwrite or encoding control. Unknown writes require artifact-metadata reconciliation before retry.",
-            computer_save_snapshot_input_schema,
         ),
         &[PROJECT_WRITE, COMPUTER_READ],
     ),

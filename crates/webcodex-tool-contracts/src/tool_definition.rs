@@ -38,7 +38,6 @@ use super::metadata::{
     ToolIdempotency, ToolMetadata, ToolPathHint, ToolRisk, ToolSemanticContract, RUNTIME_READ,
     TOOL_PROVIDER_CONTROL,
 };
-use super::registry::input_schemas::list_tools_input_schema;
 #[cfg(any(test, feature = "root-test-support"))]
 pub use super::tool_catalog::TOOL_MANIFEST_INTENTS;
 pub use super::tool_catalog::{
@@ -277,12 +276,9 @@ impl ToolVisibility {
     }
 }
 
-pub type ToolInputSchemaFactory = fn() -> serde_json::Value;
-
 #[derive(Debug, Clone, Copy)]
 pub struct ToolModelSpecDeclaration {
     pub description: &'static str,
-    pub input_schema: ToolInputSchemaFactory,
     /// Optional GPT Actions presentation copy. Canonical/MCP descriptions stay
     /// unchanged; this exists only when the Action importer's 300-character
     /// operation-description ceiling needs a deliberately shorter rendering.
@@ -1162,15 +1158,10 @@ const fn def(
     }
 }
 
-const fn model_spec(
-    definition: ToolDefinition,
-    description: &'static str,
-    input_schema: ToolInputSchemaFactory,
-) -> ToolDefinition {
+const fn model_spec(definition: ToolDefinition, description: &'static str) -> ToolDefinition {
     ToolDefinition {
         model_spec: Some(ToolModelSpecDeclaration {
             description,
-            input_schema,
             gpt_action_description: None,
         }),
         ..definition
@@ -1345,5 +1336,4 @@ const TOOL_DEFINITION_HEAD: &[ToolDefinition] = &[context_reobservable(model_spe
         ToolActivityInteraction::NonMeaningful,
     ),
     "List runtime tools. Full output includes schemas and may be large; use summary_only with category, features, or limit for bounded GPT Action discovery.",
-    list_tools_input_schema,
 ))];

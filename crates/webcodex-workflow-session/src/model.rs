@@ -7,15 +7,19 @@ use std::time::Instant;
 use webcodex_core::project_instructions::{
     ProjectInstructionsSnapshot, ProjectInstructionsSummarySnapshot,
 };
-use webcodex_core::workflow_session_contract::{ExecutionShell, PermissionDecision, SessionMode};
+use webcodex_core::workflow_session_contract::PermissionDecision;
+pub use webcodex_core::workflow_session_contract::{
+    SessionExecutionContext, SessionMessageKind, SessionMessagePriority, SessionMessageStatus,
+    SessionMode,
+};
 pub use webcodex_core::workflow_session_contract::{
     MAX_MODEL_VALIDATION_ASSERTION_NAME_CHARS, MAX_TOOL_CALL_ACK_MESSAGE_IDS, SESSION_ID_PREFIX,
     SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_INSTRUCTION,
     SESSION_INBOX_HIGH_GUIDANCE_ATTENTION_REASON, TOOL_ACCEPTED_EXIT_CODES_FIELD,
     TOOL_ASSERTION_NAME_FIELD, TOOL_CALL_ACK_SESSION_CONTEXT_REVISION_FIELD,
-    TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD, TOOL_CALL_EXPECTATION_METADATA_FIELDS,
-    TOOL_CALL_RECORDING_SESSION_ID_FIELD, TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD,
-    TOOL_EXPECTED_FAILURE_FIELD, TOOL_EXPECTED_FAILURE_KIND_FIELD, TOOL_RESULT_EXPECTATION_FIELD,
+    TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD, TOOL_CALL_RECORDING_SESSION_ID_FIELD,
+    TOOL_CALL_SESSION_MESSAGE_RESOLUTION_FIELD, TOOL_EXPECTED_FAILURE_FIELD,
+    TOOL_EXPECTED_FAILURE_KIND_FIELD, TOOL_RESULT_EXPECTATION_FIELD,
 };
 
 pub const EVENT_ID_PREFIX: &str = "evt_";
@@ -64,138 +68,6 @@ pub const TOOL_EXPECTATION_RESULT_MATCHED_RESULT: &str = "matched_expected_resul
 pub const TOOL_EXPECTATION_RESULT_UNEXPECTED_FAILURE: &str = "unexpected_failure";
 pub const TOOL_EXPECTATION_RESULT_MISMATCH: &str = "expectation_mismatch";
 pub const TOOL_EXPECTATION_RESULT_UNEXPECTED_SUCCESS: &str = "unexpected_success";
-/// Durable execution defaults inherited by a closed set of execution tools
-/// attached to a project-scoped Workflow Session.
-///
-/// This intentionally contains no environment, credential, connection, or
-/// arbitrary option bag. `resource` is only a named Runner-local SSH resource;
-/// it never stores an SSH host, config, key, password, or transport.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SessionExecutionContext {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_shell: Option<ExecutionShell>,
-    /// Optional named SSH resource on the Runner that owns this Session's
-    /// project. It changes `run_shell`, `run_job`, and newly opened
-    /// `open_session_shell` execution location.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resource: Option<String>,
-}
-
-impl SessionExecutionContext {
-    pub fn is_empty(&self) -> bool {
-        self.default_cwd.is_none() && self.default_shell.is_none() && self.resource.is_none()
-    }
-
-    /// Validate and normalize persisted execution-context fields.
-    ///
-    /// Without an SSH resource, `default_cwd` remains project-relative and
-    /// follows the existing project-bound validation. With one, it is a remote
-    /// path instead and never reaches Runner-local project path validation.
-    pub fn validated(mut self) -> Result<Self, String> {
-        if let Some(raw_resource) = self.resource.take() {
-            let resource = raw_resource.trim();
-            if resource.is_empty()
-                || resource.len() > 80
-                || resource.contains("..")
-                || !resource
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-            {
-                return Err(
-                    "execution_context.resource must be a safe named SSH resource".to_string(),
-                );
-            }
-            self.resource = Some(resource.to_string());
-        }
-        if let Some(raw_cwd) = self.default_cwd.take() {
-            let cwd = raw_cwd.trim();
-            if self.resource.is_some() {
-                if cwd.is_empty() || cwd.len() > 4096 || cwd.chars().any(char::is_control) {
-                    return Err(
-                        "execution_context.default_cwd must be a bounded remote path without control characters"
-                            .to_string(),
-                    );
-                }
-                self.default_cwd = Some(cwd.to_string());
-            } else {
-                webcodex_core::validation_bridge::validate_project_relative_path(cwd)
-                    .map_err(|error| format!("execution_context.default_cwd {error}"))?;
-                let normalized = cwd
-                    .split(['/', '\\'])
-                    .filter(|component| !component.is_empty() && *component != ".")
-                    .collect::<Vec<_>>()
-                    .join("/");
-                self.default_cwd = Some(if normalized.is_empty() {
-                    ".".to_string()
-                } else {
-                    normalized
-                });
-            }
-        }
-        Ok(self)
-    }
-
-    /// Restore valid fields independently so a malformed persisted cwd cannot
-    /// bypass the project boundary or erase a valid explicit shell choice.
-    pub fn sanitized_for_restore(mut self) -> Self {
-        self.resource = self.resource.take().and_then(|raw_resource| {
-            Self {
-                default_cwd: None,
-                default_shell: None,
-                resource: Some(raw_resource),
-            }
-            .validated()
-            .ok()
-            .and_then(|context| context.resource)
-        });
-        if let Some(raw_cwd) = self.default_cwd.take() {
-            let cwd_only = Self {
-                default_cwd: Some(raw_cwd),
-                default_shell: None,
-                resource: self.resource.clone(),
-            };
-            self.default_cwd = cwd_only
-                .validated()
-                .ok()
-                .and_then(|context| context.default_cwd);
-        }
-        self
-    }
-
-    /// Audit-safe form for pre-validation request logging. Invalid cwd text is
-    /// represented only by booleans and never copied into evidence.
-    pub fn audit_summary(&self) -> Value {
-        let resource = Self {
-            default_cwd: None,
-            default_shell: None,
-            resource: self.resource.clone(),
-        }
-        .validated()
-        .ok()
-        .and_then(|context| context.resource);
-        let cwd = Self {
-            default_cwd: self.default_cwd.clone(),
-            default_shell: None,
-            resource: resource.clone(),
-        }
-        .validated()
-        .ok()
-        .and_then(|context| context.default_cwd);
-        serde_json::json!({
-            "default_cwd": cwd,
-            "default_cwd_present": self.default_cwd.is_some(),
-            "default_cwd_valid": self.default_cwd.is_none() || cwd.is_some(),
-            "default_shell": self.default_shell,
-            "resource": resource,
-            "resource_present": self.resource.is_some(),
-            "resource_valid": self.resource.is_none() || resource.is_some(),
-        })
-    }
-}
-
 /// Workflow session lifecycle state.
 ///
 /// Canonical wire values are `"active"` and `"closed"`. Lifecycle is explicit
@@ -911,43 +783,6 @@ pub struct SessionEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionMessageKind {
-    Note,
-    Proposal,
-    Question,
-    Answer,
-    Decision,
-    Risk,
-    Progress,
-    Guidance,
-    Todo,
-}
-
-impl SessionMessageKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Note => "note",
-            Self::Proposal => "proposal",
-            Self::Question => "question",
-            Self::Answer => "answer",
-            Self::Decision => "decision",
-            Self::Risk => "risk",
-            Self::Progress => "progress",
-            Self::Guidance => "guidance",
-            Self::Todo => "todo",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionMessageStatus {
-    Open,
-    Resolved,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum SessionMessageClosureKind {
     Withdrawn,
     Superseded,
@@ -965,15 +800,6 @@ where
         Some("superseded") => Some(SessionMessageClosureKind::Superseded),
         _ => None,
     })
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionMessagePriority {
-    Low,
-    #[default]
-    Normal,
-    High,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -578,7 +578,7 @@ fn call_hierarchy_parser_preserves_default_and_oversized_positive_limit_for_runt
 
 #[test]
 fn from_tool_name_records_and_strips_testing_metadata_before_parsing() {
-    let (call, metadata) = ToolCall::from_tool_name_with_recorder_metadata(
+    let (call, metadata) = parse_tool_call_with_recorder_metadata(
         "list_jobs",
         json!({
             "status": "failed",
@@ -602,7 +602,7 @@ fn from_tool_name_records_and_strips_testing_metadata_before_parsing() {
 
 #[test]
 fn from_tool_name_records_public_result_expectations_before_parsing() {
-    let (call, metadata) = ToolCall::from_tool_name_with_recorder_metadata(
+    let (call, metadata) = parse_tool_call_with_recorder_metadata(
         "run_process",
         json!({
             "project": "demo",
@@ -621,7 +621,7 @@ fn from_tool_name_records_public_result_expectations_before_parsing() {
     );
     assert_eq!(metadata.expectation.accepted_exit_codes, vec![0, 1]);
 
-    let (call, metadata) = ToolCall::from_tool_name_with_recorder_metadata(
+    let (call, metadata) = parse_tool_call_with_recorder_metadata(
         "cargo_test",
         json!({
             "project": "demo",
@@ -756,7 +756,7 @@ fn from_tool_name_rejects_unsafe_result_expectation_combinations() {
     ];
 
     for (tool, arguments) in invalid {
-        let error = ToolCall::from_tool_name_with_recorder_metadata(tool, arguments).unwrap_err();
+        let error = parse_tool_call_with_recorder_metadata(tool, arguments).unwrap_err();
         assert!(
             error.contains("result_expectation")
                 || error.contains("accepted_exit_codes")
@@ -768,7 +768,7 @@ fn from_tool_name_rejects_unsafe_result_expectation_combinations() {
 
 #[test]
 fn from_tool_name_rejects_removed_failure_kind_alias_as_tool_input() {
-    let error = ToolCall::from_tool_name_with_recorder_metadata(
+    let error = parse_tool_call_with_recorder_metadata(
         "list_jobs",
         json!({
             "expected_failure": true,

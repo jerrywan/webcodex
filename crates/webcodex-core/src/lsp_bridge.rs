@@ -4,6 +4,7 @@
 //! exposes only fixed read-only operations — never arbitrary LSP methods,
 //! JSON-RPC passthrough, or absolute project roots.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -84,7 +85,7 @@ pub fn is_known_error_code(code: &str) -> bool {
     )
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CallHierarchyDirection {
     Incoming,

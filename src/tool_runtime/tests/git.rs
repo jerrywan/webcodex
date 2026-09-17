@@ -6,6 +6,7 @@ use super::super::helpers::*;
 use super::super::*;
 use super::support::*;
 use crate::runner_protocol::{RunnerCapabilities, RunnerResultRequest};
+use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use crate::tool_runtime::ToolRuntime;
 use serde_json::{json, Value};
 use std::collections::HashSet;

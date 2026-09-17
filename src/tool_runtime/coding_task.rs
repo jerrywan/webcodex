@@ -5,6 +5,7 @@
 //! generate prose summaries, parse validation output, or hide underlying tool
 //! payloads.
 
+use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 

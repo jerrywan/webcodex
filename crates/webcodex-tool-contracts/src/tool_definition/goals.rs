@@ -8,11 +8,6 @@ use crate::metadata::{
     ToolRisk::{Read, WorkflowManage},
     COMMUNICATION_MANAGE, COMMUNICATION_READ, TOOL_PROVIDER_CONTROL,
 };
-use crate::registry::input_schemas::{
-    associate_goal_agent_task_input_schema, associate_goal_workflow_session_input_schema,
-    create_goal_input_schema, get_goal_input_schema, list_goals_input_schema,
-    present_goal_plan_input_schema, update_goal_input_schema,
-};
 use webcodex_core::authority::{
     COMMUNICATION_MANAGE_SCOPES, COMMUNICATION_READ_SCOPES, SCOPE_COMMUNICATION_MANAGE,
     SCOPE_COMMUNICATION_READ, SCOPE_SESSION_COLLABORATE,
@@ -56,7 +51,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Create one explicit durable high-level Goal owned by the current management principal. Goal is intent/control state only: creation never selects a Project, starts a Workflow Session, claims an AgentTaskAttempt, reaches a Runner, or dispatches a Job.",
-            create_goal_input_schema,
         ),
         COMMUNICATION_MANAGE_SCOPES,
     ),
@@ -88,7 +82,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Read one exact caller-owned durable Goal. Unauthorized and nonexistent ids are existence-hidden. Correlations expose only bounded identities and never target-domain authority, fences, tokens, credentials, Job state, or Workflow Session ledgers.",
-            get_goal_input_schema,
         ),
         COMMUNICATION_READ_SCOPES,
     ),
@@ -129,7 +122,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
                 "Present one exact caller-owned durable Goal as a sparse read-only Goal Plan MCP App card. Requires explicit goal_id and never infers Goal identity from Project, Workflow Session, Conversation, credential, ClientWindow, or recent activity. Presentation creates no work, grants no execution authority, and does not modify Goal lifecycle.",
-                present_goal_plan_input_schema,
             )
             .with_gpt_action_unsupported(),
             17,
@@ -206,7 +198,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "List bounded Goals visible to the current owner principal, optionally filtered by authoritative lifecycle. List projection omits objective, terminal reason, and exact correlation identities.",
-            list_goals_input_schema,
         ),
         COMMUNICATION_READ_SCOPES,
     ),
@@ -241,7 +232,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Update bounded Goal metadata or explicitly transition active to completed/cancelled using an exact revision and idempotency key. Terminal Goal state is immutable. No execution domain is mutated or inferred from this transition.",
-            update_goal_input_schema,
         ),
         COMMUNICATION_MANAGE_SCOPES,
     ),
@@ -274,7 +264,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Explicitly correlate one owned active Goal with one exact owned AgentTask after independently re-authorizing that AgentTask. The link is identity-only and grants no TaskAttempt, CodingAgentRun, Project, Runner, filesystem, or Job authority.",
-            associate_goal_agent_task_input_schema,
         ),
         COMMUNICATION_MANAGE_SCOPES,
     ),
@@ -307,7 +296,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Explicitly correlate one owned active Goal with one exact Workflow Session after independently re-authorizing the Session through its existing authority fingerprint and any bound Project authorization. The Goal link is never a Session or Project credential.",
-            associate_goal_workflow_session_input_schema,
         ),
         GOAL_SESSION_ASSOCIATE_SCOPES,
     ),

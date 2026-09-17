@@ -7,6 +7,7 @@ use crate::runner_protocol::{
     RunnerCapabilities, RunnerJobUpdateRequest, RunnerRequest, ShellJobActivity,
     ShellJobActivityPhase, ShellJobActivitySource, ShellJobActivityState,
 };
+use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

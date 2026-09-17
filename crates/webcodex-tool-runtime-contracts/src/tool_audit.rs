@@ -13,6 +13,15 @@ use webcodex_core::workflow_session_contract::is_validation_like_execution_purpo
 use webcodex_workflow_session::SessionExecutionContext;
 
 pub fn session_log_arguments_for_tool_request(tool_name: &str, arguments: &Value) -> Value {
+    let Ok(call) = ToolCall::from_tool_name(tool_name, arguments.clone()) else {
+        // Malformed requests fail closed. Raw input is never filtered, retried,
+        // or used as an audit fallback.
+        return empty_audit_projection();
+    };
+    session_log_arguments_for_typed_call(tool_name, &call)
+}
+
+pub fn session_log_arguments_for_typed_call(tool_name: &str, call: &ToolCall) -> Value {
     let Some(definition) = webcodex_tool_contracts::lookup_tool_definition(tool_name) else {
         return empty_audit_projection();
     };
@@ -25,9 +34,7 @@ pub fn session_log_arguments_for_tool_request(tool_name: &str, arguments: &Value
         return empty_audit_projection();
     }
 
-    let Some(call) = audit_tool_call_from_request(definition, tool_name, arguments) else {
-        return empty_audit_projection();
-    };
+    debug_assert_eq!(call.tool_name(), tool_name);
     let mut projected = call.session_log_arguments();
     if request_policy == webcodex_tool_contracts::ToolAuditRequestPolicy::TypedDropNullValues {
         if let Some(projected) = projected.as_object_mut() {
@@ -77,35 +84,6 @@ fn computer_control_audit_projection(call: &ComputerControlToolCall) -> Value {
         }
     }
     projection
-}
-
-fn audit_tool_call_from_request(
-    definition: &webcodex_tool_contracts::ToolDefinition,
-    tool_name: &str,
-    arguments: &Value,
-) -> Option<ToolCall> {
-    if let Ok(call) = ToolCall::from_tool_name(tool_name, arguments.clone()) {
-        return Some(call);
-    }
-
-    // Audit happens before the authoritative concrete parser so pre-execution
-    // denials can still be recorded. For model-visible tools, retry after
-    // dropping undeclared top-level fields using the canonical ToolDefinition
-    // schema. This preserves existing privacy summaries for malformed requests
-    // without ever persisting the unknown fields themselves.
-    let schema = definition.model_spec?.input_schema;
-    let schema = schema();
-    let allowed = schema.get("properties")?.as_object()?;
-    let source = arguments.as_object()?;
-    let filtered = source
-        .iter()
-        .filter(|(key, _)| allowed.contains_key(*key))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect::<serde_json::Map<_, _>>();
-    if filtered.len() == source.len() {
-        return None;
-    }
-    ToolCall::from_tool_name(tool_name, Value::Object(filtered)).ok()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2230,8 +2208,7 @@ mod computer_privacy_tests {
                 "idempotency_key": PRIVATE_KEY
             }),
         );
-        assert_eq!(request["consume_token_present"], true);
-        assert_eq!(request["expected_controller_generation"], 7);
+        assert_eq!(request, json!({}));
         let typed_request = ToolCall::ConsumeAgentWake {
             agent_id: "wc_dagent_iavN7wEjRWeJq83v".to_string(),
             endpoint_id: "wc_endpoint_iavN7wEjRWeJq83v".to_string(),
@@ -2241,6 +2218,7 @@ mod computer_privacy_tests {
         }
         .session_log_arguments();
         assert_eq!(typed_request["consume_token_present"], true);
+        assert_eq!(typed_request["expected_controller_generation"], 7);
         assert!(!typed_request.to_string().contains(PRIVATE_TOKEN));
         let request_text = request.to_string();
         for private in [
@@ -2436,9 +2414,7 @@ mod computer_privacy_tests {
                 "body": private_body,
             }),
         );
-        assert_eq!(purge_args["memory_scope_id"], scope_id);
-        assert_eq!(purge_args["expected_catalog_revision"], catalog_revision);
-        assert!(purge_args.get("confirm").is_none());
+        assert_eq!(purge_args, json!({}));
         assert!(!purge_args.to_string().contains(private_body));
         let typed_purge = ToolCall::MemoryScopePurge {
             memory_scope_id: scope_id.clone(),
@@ -2447,6 +2423,8 @@ mod computer_privacy_tests {
         }
         .session_log_arguments();
         assert!(typed_purge.get("confirm").is_none());
+        assert_eq!(typed_purge["memory_scope_id"], scope_id);
+        assert_eq!(typed_purge["expected_catalog_revision"], catalog_revision);
 
         let scope_list = session_log_result_for_tool(
             "memory_scope_list",
@@ -2557,8 +2535,15 @@ mod computer_privacy_tests {
             "global_x": -1920
         });
         let request_summary = session_log_arguments_for_tool_request("computer_observe", &request);
-        assert_eq!(request_summary["display_id"], display_id);
-        assert!(request_summary.get("global_x").is_none());
+        assert_eq!(request_summary, json!({}));
+        let typed_request = ToolCall::ComputerObserve(ComputerObserveToolCall::SnapshotDisplay {
+            client_id: "msi".to_string(),
+            display_id: display_id.to_string(),
+            max_width: Some(1024),
+            max_height: Some(768),
+        })
+        .session_log_arguments();
+        assert_eq!(typed_request["display_id"], display_id);
 
         let output = json!({
             "display_id": display_id,
@@ -2600,8 +2585,13 @@ mod computer_privacy_tests {
         });
         let read_request_summary =
             session_log_arguments_for_tool_request("computer_observe", &read_request);
+        assert_eq!(read_request_summary, json!({}));
+        let typed_read = ToolCall::ComputerObserve(ComputerObserveToolCall::ReadClipboard {
+            client_id: "msi".to_string(),
+        })
+        .session_log_arguments();
         assert_eq!(
-            read_request_summary,
+            typed_read,
             json!({"action":"read_clipboard", "client_id":"msi"})
         );
 
@@ -2614,12 +2604,15 @@ mod computer_privacy_tests {
         });
         let write_request_summary =
             session_log_arguments_for_tool_request("computer_control", &write_request);
-        assert_eq!(write_request_summary["client_id"], "msi");
-        assert_eq!(write_request_summary["text_bytes"], PRIVATE_TEXT.len());
-        let request_serialized = serde_json::to_string(&write_request_summary).unwrap();
-        for secret in [PRIVATE_TEXT, "PRIVATE_CLIPBOARD_HASH", "PRIVATE_HGLOBAL"] {
-            assert!(!request_serialized.contains(secret));
-        }
+        assert_eq!(write_request_summary, json!({}));
+        let typed_write = ToolCall::ComputerControl(ComputerControlToolCall::WriteClipboard {
+            client_id: "msi".to_string(),
+            text: PRIVATE_TEXT.to_string(),
+        })
+        .session_log_arguments();
+        assert_eq!(typed_write["client_id"], "msi");
+        assert_eq!(typed_write["text_bytes"], PRIVATE_TEXT.len());
+        assert!(!typed_write.to_string().contains(PRIVATE_TEXT));
 
         let read_output = json!({
             "available": true,
@@ -2684,13 +2677,19 @@ mod computer_privacy_tests {
             "native_identity": "PRIVATE_NATIVE_ID"
         });
         let request_summary = session_log_arguments_for_tool_request("computer_control", &request);
-        let request_serialized = serde_json::to_string(&request_summary).unwrap();
-        assert_eq!(request_summary["display_id"], display_id);
-        assert_eq!(request_summary["snapshot_generation"], 11);
-        assert_eq!(request_summary["x"], 321);
-        assert_eq!(request_summary["y"], 654);
-        assert!(!request_serialized.contains("global_x"));
-        assert!(!request_serialized.contains("PRIVATE_NATIVE_ID"));
+        assert_eq!(request_summary, json!({}));
+        let typed_request = ToolCall::ComputerControl(ComputerControlToolCall::PointerClick {
+            client_id: "msi".to_string(),
+            display_id: display_id.to_string(),
+            snapshot_generation: 11,
+            x: 321,
+            y: 654,
+        })
+        .session_log_arguments();
+        assert_eq!(typed_request["display_id"], display_id);
+        assert_eq!(typed_request["snapshot_generation"], 11);
+        assert_eq!(typed_request["x"], 321);
+        assert_eq!(typed_request["y"], 654);
 
         let output = json!({
             "display_id": display_id,
@@ -3022,11 +3021,16 @@ mod computer_privacy_tests {
             "keycode": 123
         });
         let request_summary = session_log_arguments_for_tool_request("computer_control", &request);
-        let request_serialized = serde_json::to_string(&request_summary).unwrap();
-        assert_eq!(request_summary["key"], "tab");
-        assert_eq!(request_summary["modifiers"], json!(["shift"]));
-        assert!(!request_serialized.contains("MUST_NOT_PERSIST"));
-        assert!(request_summary.get("keycode").is_none());
+        assert_eq!(request_summary, json!({}));
+        let typed_request = ToolCall::ComputerControl(ComputerControlToolCall::Key {
+            client_id: "mini".to_string(),
+            surface_id: "surface_safe".to_string(),
+            key: "tab".to_string(),
+            modifiers: Some(vec!["shift".to_string()]),
+        })
+        .session_log_arguments();
+        assert_eq!(typed_request["key"], "tab");
+        assert_eq!(typed_request["modifiers"], json!(["shift"]));
 
         let output = json!({
             "platform": "macos",
@@ -3253,14 +3257,29 @@ mod computer_privacy_tests {
         });
         let request_summary =
             session_log_arguments_for_tool_request("coding_agent_start", &request);
-        let request_serialized = serde_json::to_string(&request_summary).unwrap();
-        assert_eq!(request_summary["instruction_bytes"], PROMPT.len());
-        assert_eq!(request_summary["config_count"], 1);
-        assert_eq!(request_summary["idempotency_key_present"], true);
+        assert_eq!(request_summary, json!({}));
+
+        let typed_request = ToolCall::CodingAgentStart {
+            project: "agent:special:demo".to_string(),
+            provider_id: "codex".to_string(),
+            idempotency_key: IDEMPOTENCY.to_string(),
+            instruction: PROMPT.to_string(),
+            config: Some(std::collections::BTreeMap::from([(
+                "mode".to_string(),
+                webcodex_core::coding_agent::CodingAgentConfigValue::String("agent".to_string()),
+            )])),
+            timeout_secs: Some(60),
+            recording_session_id: Some("wc_sess_safe".to_string()),
+        }
+        .session_log_arguments();
+        let request_serialized = serde_json::to_string(&typed_request).unwrap();
+        assert_eq!(typed_request["instruction_bytes"], PROMPT.len());
+        assert_eq!(typed_request["config_count"], 1);
+        assert_eq!(typed_request["idempotency_key_present"], true);
         assert!(!request_serialized.contains(PROMPT));
         assert!(!request_serialized.contains(IDEMPOTENCY));
         assert!(!request_serialized.contains("agent\""));
-        assert!(request_summary.get("recording_session_id").is_none());
+        assert!(typed_request.get("recording_session_id").is_none());
         assert!(!request_serialized.contains("wc_sess_safe"));
 
         let observe_request = json!({
@@ -3307,8 +3326,16 @@ mod computer_privacy_tests {
     }
 }
 
-impl ToolCall {
-    pub fn session_log_arguments(&self) -> Value {
+/// Audit-safe projection over the canonical typed request.
+///
+/// This policy intentionally remains outside the structural input contract: it
+/// consumes ToolCall but never reparses raw request JSON or defines accepted fields.
+pub trait ToolCallAuditProjection {
+    fn session_log_arguments(&self) -> Value;
+}
+
+impl ToolCallAuditProjection for ToolCall {
+    fn session_log_arguments(&self) -> Value {
         match self {
             #[cfg(feature = "experimental-code-mode")]
             Self::CodeModeExec {

@@ -5,7 +5,14 @@ fn action_branch<'a>(schema: &'a Value, action: &str) -> &'a Value {
         .as_array()
         .expect("Computer gateway oneOf")
         .iter()
-        .find(|branch| branch["properties"]["action"]["const"] == action)
+        .find(|branch| {
+            let discriminator = &branch["properties"]["action"];
+            discriminator.get("const").and_then(Value::as_str) == Some(action)
+                || discriminator
+                    .get("enum")
+                    .and_then(Value::as_array)
+                    .is_some_and(|values| values.len() == 1 && values[0] == action)
+        })
         .unwrap_or_else(|| panic!("missing Computer action branch {action}"))
 }
 

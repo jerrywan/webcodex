@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -1571,7 +1572,7 @@ pub struct ShellProcessArgv {
 /// contract. The Runner owns the mapping from this semantic language to a
 /// concrete interpreter; no executable path or custom shell grammar is
 /// accepted from the model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ShellScriptLanguage {
     Sh,

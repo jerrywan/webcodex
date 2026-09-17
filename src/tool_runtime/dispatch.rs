@@ -8,6 +8,7 @@ use super::session_context::{
 use super::{permissions, session_context, sessions, ToolCall, ToolResult, ToolRuntime};
 use crate::auth::AuthContext;
 use crate::tool_runtime::project_resolution::{ProjectResolverError, ResolvedProject};
+use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use serde_json::Value;
 
 /// Add the Phase A lifecycle tuple to a definite pre-execution structured

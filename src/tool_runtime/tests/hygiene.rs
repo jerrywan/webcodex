@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::support::*;
+use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use serde_json::json;
 use std::fs;
 use tempfile::TempDir;

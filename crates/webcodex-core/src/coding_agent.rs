@@ -5,6 +5,7 @@
 //! and protocol callbacks; the Server sees only the bounded typed structures in
 //! this module.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -129,7 +130,7 @@ pub enum CodingAgentDispatchState {
     Completed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum CodingAgentConfigValue {
     String(String),

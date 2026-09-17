@@ -9,6 +9,7 @@ pub mod tool_call;
 pub mod tool_inputs;
 pub mod tool_result;
 
+pub use tool_audit::ToolCallAuditProjection;
 pub use tool_call::*;
 pub use tool_inputs::*;
 pub use tool_result::*;

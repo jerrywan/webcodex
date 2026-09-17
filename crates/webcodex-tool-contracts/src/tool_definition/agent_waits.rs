@@ -8,10 +8,6 @@ use crate::metadata::{
     ToolRisk::{Read, WorkflowManage},
     COMMUNICATION_MANAGE, COMMUNICATION_READ, TOOL_PROVIDER_CONTROL,
 };
-use crate::registry::input_schemas::{
-    cancel_agent_wait_input_schema, read_agent_wait_input_schema,
-    wait_for_agent_events_input_schema,
-};
 use webcodex_core::authority::{COMMUNICATION_MANAGE_SCOPES, COMMUNICATION_READ_SCOPES};
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[
@@ -48,7 +44,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolSessionEvidencePolicy::NONE,
                     ),
                     "Create one caller-owned durable one-shot AgentWait over 1..8 exact agent_task_terminal selectors with fixed ANY semantics. Re-authorizes the exact Agent, current Endpoint generation, and every source Task before atomically registering sources and already-terminal snapshots. The Endpoint is presentation only, not durable Wait ownership. First match creates one existing-carrier Wake; further matches coalesce only while that Wake is pending/claimed. Exact keyed replay returns the same Wait.",
-                    wait_for_agent_events_input_schema,
                 ).with_gpt_action_description("Create one durable one-shot AgentWait over exact AgentTask terminal selectors. ANY semantics; first match creates/coalesces the existing-carrier Wake. Exact idempotency replay returns the same Wait."),
                 PERMISSION_RISK_WRITE,
             ),
@@ -75,7 +70,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 Some(COMMUNICATION_READ), false, NoPath, false, false, super::ToolSessionEvidencePolicy::NONE,
             ),
             "Read one exact caller-owned AgentWait: wait_id, state, and matching Task/Attempt identities with terminal states when present. The result contains no source Task instruction/result/reason/log/fence/token and grants no Task, Project, Goal, Session, or execution authority; re-read source domains independently.",
-            read_agent_wait_input_schema,
         ),
         COMMUNICATION_READ_SCOPES,
     ),
@@ -99,7 +93,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     Some(COMMUNICATION_MANAGE), false, NoPath, false, false, super::ToolSessionEvidencePolicy::NONE,
                 ),
                 "Cancel an exact one-shot AgentWait only while waiting or while its Wait-origin Wake remains pre-dispatch pending/claimed. A claimed Wake is safely revoked/retired. Once Host dispatch preparation has occurred, cancellation fails closed because delivery cannot truthfully be withdrawn. Resumed/cancelled Waits are immutable.",
-                cancel_agent_wait_input_schema,
             ),
             PERMISSION_RISK_WRITE,
         ),

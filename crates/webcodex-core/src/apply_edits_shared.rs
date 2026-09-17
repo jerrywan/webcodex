@@ -5,6 +5,7 @@
 //! It must stay dependency-light: only `serde` and `std`, which both binaries
 //! have. Do not add main-crate-only imports here.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
@@ -78,7 +79,7 @@ pub fn restore_apply_text_line_endings(text: String, line_ending: ApplyTextLineE
 }
 
 /// Kind of atomic text edit performed by `apply_text_edits`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ApplyTextEditKind {
     ReplaceExact,
@@ -100,10 +101,12 @@ impl ApplyTextEditKind {
 
 /// Optional source-line safety fence for one exact edit. Lines are 1-based and
 /// inclusive against the canonicalized original file content for the batch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyTextLineScope {
+    #[schemars(range(min = 1))]
     pub start_line: usize,
+    #[schemars(range(min = 1))]
     pub end_line: usize,
 }
 
@@ -128,15 +131,20 @@ impl ApplyTextLineScope {
 
 /// A single atomic text edit against one file. Only the fields relevant to the
 /// `kind` are required; the runtime validates presence before dispatch.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ApplyTextEditInput {
     pub kind: ApplyTextEditKind,
+    #[schemars(length(min = 1, max = 524288))]
     #[serde(default)]
     pub old_text: Option<String>,
+    #[schemars(length(max = 524288))]
     #[serde(default)]
     pub new_text: Option<String>,
+    #[schemars(length(min = 1, max = 524288))]
     #[serde(default)]
     pub anchor_text: Option<String>,
+    #[schemars(range(min = 1))]
     #[serde(default)]
     pub occurrence: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -311,7 +319,7 @@ pub fn resolve_apply_text_match(
 
 /// Kind of project-file change performed by one transactional
 /// `apply_text_edits` batch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ApplyFileChangeKind {
     Edit,

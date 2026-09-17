@@ -1,10 +1,5 @@
 //! Compatibility facade for declarative tool schemas and registered specs.
 
-pub(super) mod input_schemas {
-    #[allow(unused_imports)]
-    pub(super) use webcodex_tool_contracts::registry::input_schemas::*;
-}
-
 #[allow(unused_imports)]
 pub(crate) use webcodex_tool_contracts::registry::{
     agent_continuation_app_tool_specs, changes_app_tool_specs, goal_plan_app_tool_specs,

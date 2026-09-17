@@ -86,7 +86,17 @@ fn project_artifact_is_compact_typed_project_read_facade() {
         json!(["metadata", "inspect", "image", "export"])
     );
     assert!(!props.contains_key("encoding"));
-    assert_eq!(spec.input_schema["allOf"].as_array().unwrap().len(), 2);
+    assert!(spec.input_schema.get("allOf").is_none());
+    assert!(ToolCall::from_tool_name(
+        "project_artifact",
+        json!({"project":"demo","path":"a.bin","action":"metadata","offset":0}),
+    )
+    .is_err());
+    assert!(ToolCall::from_tool_name(
+        "project_artifact",
+        json!({"project":"demo","path":"a.bin","action":"inspect","offset":0,"length":1024}),
+    )
+    .is_ok());
     let output_props = spec.output_schema["properties"]["output"]["properties"]
         .as_object()
         .expect("project_artifact output properties");

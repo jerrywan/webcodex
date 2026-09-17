@@ -1817,8 +1817,11 @@ async fn read_files_ignores_context_ack_and_preserves_bounded_attention() {
         "assertion_name": assertion_name,
     });
     let (_, recorder_metadata) =
-        ToolCall::from_tool_name_with_recorder_metadata("run_process", validation_request.clone())
-            .unwrap();
+        crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
+            "run_process",
+            validation_request.clone(),
+        )
+        .unwrap();
     let audited = crate::tool_runtime::tool_audit::session_log_arguments_for_tool_request(
         "run_process",
         &validation_request,

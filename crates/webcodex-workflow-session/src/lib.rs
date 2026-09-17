@@ -87,7 +87,9 @@ pub const TEST_ONLY_PROJECT_SESSION_AUTHORITY_FINGERPRINT: &str =
 #[cfg(test)]
 pub use events::session_input_summary_for_tool;
 #[cfg(test)]
-pub use model::{MAX_VALIDATION_EXCERPT_CHARS, TOOL_CALL_EXPECTATION_METADATA_FIELDS};
+pub use model::MAX_VALIDATION_EXCERPT_CHARS;
+#[cfg(test)]
+pub use webcodex_core::workflow_session_contract::TOOL_CALL_EXPECTATION_METADATA_FIELDS;
 
 #[cfg(feature = "root-test-support")]
 pub mod root_test_support {
@@ -97,7 +99,8 @@ pub mod root_test_support {
     };
     pub use crate::model::{
         PersistedSessionLedger, MAX_OBSERVED_PATHS_PER_EVENT, MAX_VALIDATION_EXCERPT_CHARS,
-        MESSAGE_ID_PREFIX, SESSION_LEDGER_VERSION, TOOL_CALL_EXPECTATION_METADATA_FIELDS,
+        MESSAGE_ID_PREFIX, SESSION_LEDGER_VERSION,
     };
     pub use crate::persistence::write_ledger_atomic;
+    pub use webcodex_core::workflow_session_contract::TOOL_CALL_EXPECTATION_METADATA_FIELDS;
 }

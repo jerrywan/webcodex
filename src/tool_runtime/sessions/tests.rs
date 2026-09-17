@@ -7,6 +7,7 @@ use super::events::{
 use super::model::{PersistedSessionLedger, MAX_OBSERVED_PATHS_PER_EVENT, SESSION_LEDGER_VERSION};
 use super::persistence::write_ledger_atomic;
 use super::*;
+use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 

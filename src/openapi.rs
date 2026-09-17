@@ -489,7 +489,7 @@ mod tests {
             schema["properties"]["action"]["enum"],
             json!(["metadata", "inspect"])
         );
-        assert_eq!(schema["allOf"].as_array().unwrap().len(), 2);
+        assert!(schema.get("allOf").is_none());
         let serialized = serde_json::to_string(schema).unwrap();
         assert!(!serialized.contains("\"image\""));
         assert!(!serialized.contains("\"export\""));

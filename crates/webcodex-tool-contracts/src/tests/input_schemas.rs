@@ -241,7 +241,7 @@ fn git_diff_hunks_page_budget_schema_defers_bounds_to_runtime_clamp() {
 }
 
 #[test]
-fn git_diff_hunks_committed_cached_false_matches_omission_but_true_conflicts() {
+fn git_diff_hunks_schema_leaves_committed_range_relationships_to_runtime() {
     let specs = registered_tool_specs();
     let schema = &spec_named(&specs, "git_diff_hunks").input_schema;
     let base = "a".repeat(40);
@@ -255,16 +255,18 @@ fn git_diff_hunks_committed_cached_false_matches_omission_but_true_conflicts() {
     ] {
         assert!(test_support::validate_schema_instance(&request, schema).is_ok());
     }
+    // committed-range pairing/cached conflicts are semantic runtime rules, not
+    // structural JSON Schema rules. Runtime tests cover both failure modes.
     assert!(test_support::validate_schema_instance(
         &json!({"project":"demo","base_commit":base,"head_commit":head,"cached":true}),
         schema,
     )
-    .is_err());
+    .is_ok());
     assert!(test_support::validate_schema_instance(
         &json!({"project":"demo","base_commit":base,"cached":false}),
         schema,
     )
-    .is_err());
+    .is_ok());
     assert!(test_support::validate_schema_instance(
         &json!({"project":"demo","base_commit":base,"head_commit":head,"unknown":false}),
         schema,
@@ -335,16 +337,6 @@ fn sync_validation_and_run_shell_timeout_schema_defers_upper_bounds_to_runtime()
     assert_eq!(sync_wait["minimum"], 1);
     assert!(sync_wait.get("maximum").is_none());
     assert!(sync_wait.get("default").is_none());
-    assert!(
-        cargo_fmt.input_schema["allOf"][0]["then"]["properties"]["timeout_secs"]
-            .get("maximum")
-            .is_none()
-    );
-    assert!(
-        cargo_fmt.input_schema["allOf"][0]["else"]["properties"]["timeout_secs"]
-            .get("maximum")
-            .is_none()
-    );
     for valid in [
         serde_json::json!({"project": "agent:demo:repo", "check": false, "sync_wait_secs": 1}),
         serde_json::json!({"project": "agent:demo:repo", "sync_wait_secs": 60}),
@@ -618,15 +610,30 @@ fn cargo_fmt_conditional_timeout_schema_matches_contract() {
         &json!({"project": "demo", "check": false, "timeout_secs": 121})
     ));
     assert!(validates(&json!({"project": "demo", "timeout_secs": 121})));
-    assert!(validates(
-        &json!({"project": "demo", "check": true, "result_expectation": "failure"})
-    ));
-    assert!(!validates(
-        &json!({"project": "demo", "check": false, "result_expectation": "failure"})
-    ));
-    assert!(!validates(
-        &json!({"project": "demo", "result_expectation": "observe"})
-    ));
+    for structurally_valid in [
+        json!({"project": "demo", "check": true, "result_expectation": "failure"}),
+        json!({"project": "demo", "check": false, "result_expectation": "failure"}),
+        json!({"project": "demo", "result_expectation": "observe"}),
+    ] {
+        assert!(validates(&structurally_valid));
+    }
+    // The recorder wrapper validator owns the action-dependent rule instead of
+    // encoding it as allOf/if/then in the Host schema.
+    assert!(ToolCall::from_tool_name(
+        "cargo_fmt",
+        json!({"project": "demo", "check": true, "result_expectation": "failure"}),
+    )
+    .is_ok());
+    assert!(ToolCall::from_tool_name(
+        "cargo_fmt",
+        json!({"project": "demo", "check": false, "result_expectation": "failure"}),
+    )
+    .is_err());
+    assert!(ToolCall::from_tool_name(
+        "cargo_fmt",
+        json!({"project": "demo", "result_expectation": "observe"}),
+    )
+    .is_err());
 }
 
 #[test]
@@ -835,7 +842,6 @@ fn heartbeat_agent_task_attempt_active_turn_proof_is_paired_and_server_timed() {
         heartbeat.input_schema["properties"]["active_turn_consume_token"]["pattern"],
         "^wc_wake_consume_[A-Za-z0-9_-]{21}[AQgw]$"
     );
-    assert_eq!(heartbeat.input_schema["allOf"].as_array().unwrap().len(), 2);
     let properties = heartbeat.input_schema["properties"].as_object().unwrap();
     for forbidden in [
         "lease_ms",
@@ -862,12 +868,12 @@ fn heartbeat_agent_task_attempt_active_turn_proof_is_paired_and_server_timed() {
 
     let mut wake_only = base.clone();
     wake_only["active_turn_wake_id"] = json!("wc_wake_VVVVVVVVVVVVVVVV".to_string());
-    assert!(test_support::validate_schema_instance(&wake_only, &heartbeat.input_schema).is_err());
+    assert!(test_support::validate_schema_instance(&wake_only, &heartbeat.input_schema).is_ok());
 
     let mut token_only = base.clone();
     token_only["active_turn_consume_token"] =
         json!("wc_wake_consume_ZmZmZmZmZmZmZmZmZmZmZg".to_string());
-    assert!(test_support::validate_schema_instance(&token_only, &heartbeat.input_schema).is_err());
+    assert!(test_support::validate_schema_instance(&token_only, &heartbeat.input_schema).is_ok());
 
     let mut paired = base.clone();
     paired["active_turn_wake_id"] = json!("wc_wake_VVVVVVVVVVVVVVVV".to_string());
@@ -975,6 +981,25 @@ fn code_mode_mutating_schema_keeps_authority_outer_bound_and_mutation_scope_narr
         .unwrap_or_default();
     assert!(source_description.contains("one canonical apply_text_edits mutation attempt"));
     assert!(source_description.contains("Validation"));
+}
+
+#[test]
+fn coding_agent_start_keeps_recorder_provenance_out_of_business_input() {
+    let specs = registered_tool_specs();
+    let spec = spec_named(&specs, "coding_agent_start");
+    let properties = spec.input_schema["properties"].as_object().unwrap();
+    assert!(!properties.contains_key("recording_session_id"));
+    assert!(ToolCall::from_tool_name(
+        "coding_agent_start",
+        json!({
+            "project": "demo",
+            "provider_id": "codex",
+            "idempotency_key": "start-1",
+            "instruction": "inspect",
+            "recording_session_id": "wc_sess_0123456789abcdef0123456789abcdef"
+        }),
+    )
+    .is_err());
 }
 
 #[test]

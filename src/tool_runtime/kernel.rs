@@ -3,7 +3,10 @@ use super::sessions::{
     strip_tool_call_expectation_metadata, SessionContextRevisionAck, SessionTransport,
     ToolCallRecorderMetadata, ToolCallSessionMessageResolution,
 };
-use super::tool_audit::{session_log_arguments_for_tool_request, session_log_result_for_tool};
+use super::tool_audit::{
+    session_log_arguments_for_tool_request, session_log_arguments_for_typed_call,
+    session_log_result_for_tool,
+};
 use super::tool_definition::{runtime_tool_operator_extension_family, ToolOperatorExtensionFamily};
 use super::{session_context, HostFileImportProvenance, ToolCall, ToolResult, ToolRuntime};
 use crate::auth::scopes::OAuthToolScopePolicy;
@@ -728,8 +731,15 @@ impl ToolRuntime {
             }
         }
 
-        let session_log_arguments =
-            session_log_arguments_for_tool_request(&request.tool_name, &concrete_arguments);
+        // Parse the business request once. Successful typed input drives both
+        // pre-execution audit projection and later dispatch. Malformed input is
+        // recorded with an empty request projection rather than reparsed through
+        // a schema-filter fallback.
+        let parsed_call = ToolCall::from_tool_name(&request.tool_name, concrete_arguments);
+        let session_log_arguments = parsed_call
+            .as_ref()
+            .map(|call| session_log_arguments_for_typed_call(&request.tool_name, call))
+            .unwrap_or_else(|_| Value::Object(Default::default()));
         let mut session_event = self.sessions.record_tool_call_started_with_metadata(
             context.session_id,
             context.transport.into(),
@@ -766,7 +776,7 @@ impl ToolRuntime {
             }
         }
 
-        let mut call = match ToolCall::from_tool_name(&request.tool_name, concrete_arguments) {
+        let mut call = match parsed_call {
             Ok(call) => call,
             Err(message) => {
                 self.sessions.record_tool_call_finished(

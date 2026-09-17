@@ -9,7 +9,6 @@ use crate::metadata::{
     ToolRisk::{JobRun, Read, SkillManage},
     ADMIN, JOB_RUN, PROJECT_READ, TOOL_PROVIDER_RUNNER,
 };
-use crate::registry::input_schemas::{run_skill_resource_input_schema, skill_load_input_schema};
 
 /// Project Skill runtime tools. `skill_load` is the narrow direct model path;
 /// the broader discovery/read compatibility tools remain hidden operator
@@ -71,7 +70,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Load one uniquely named Skill by exact Unicode case folding. Returns its descriptor, bounded SKILL.md, and revisions in one read-only Project call. Missing, ambiguous, or truncated discovery fails closed; scripts and other Skill resources are never executed.",
-            skill_load_input_schema,
         ),
         27,
     ),
@@ -114,7 +112,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
                 "Execute one supported scripts/*.py or scripts/*.sh resource from a trusted Runner-configured live Skill or Runner-installed managed Skill without exposing or retransmitting its source through model context. Configured Skills are live resources: expected_definition_revision fences the selected SKILL.md definition, while resource bytes are read at execution and are not package-revision-pinned; skill_sha256 reports the bytes actually executed. Managed installed Skills additionally require expected_package_revision to fence the immutable package. WebCodex selects the interpreter, supplies the script over stdin, and appends only caller-provided script arguments after the interpreter's script marker; project-content Skills are rejected.",
-                run_skill_resource_input_schema,
             )
             .with_gpt_action_description("Execute a trusted Runner Skill script. Configured Skills are live and definition-fenced by expected_definition_revision; managed Skills additionally require expected_package_revision. WebCodex selects the .py/.sh interpreter; project-content Skills are rejected.")
             .with_execution(super::ToolExecutionContract::new(

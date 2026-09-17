@@ -101,20 +101,21 @@ async fn completed_run_job_validation_enters_handoff_from_job_authority() {
     let assertion_name = "direct run job validation";
     let expected_identity =
         crate::tool_runtime::tool_audit::assertion_validation_identity(assertion_name);
-    let (call, recorder_metadata) = ToolCall::from_tool_name_with_recorder_metadata(
-        "run_job",
-        json!({
-            "project": project,
-            "command": "cargo test focused",
-            "session_id": session.session_id,
-            "timeout_secs": 30,
-            "cwd": ".",
-            "purpose": "test",
-            "shell": "bash",
-            "assertion_name": assertion_name,
-        }),
-    )
-    .unwrap();
+    let (call, recorder_metadata) =
+        crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
+            "run_job",
+            json!({
+                "project": project,
+                "command": "cargo test focused",
+                "session_id": session.session_id,
+                "timeout_secs": 30,
+                "cwd": ".",
+                "purpose": "test",
+                "shell": "bash",
+                "assertion_name": assertion_name,
+            }),
+        )
+        .unwrap();
     let execution = runtime
         .dispatch_with_auth_transport_options_and_metadata(
             call,
@@ -216,20 +217,21 @@ async fn promoted_run_process_cargo_test_materializes_canonical_validation_evide
     let assertion_name = "promoted process validation";
     let expected_identity =
         crate::tool_runtime::tool_audit::assertion_validation_identity(assertion_name);
-    let (call, recorder_metadata) = ToolCall::from_tool_name_with_recorder_metadata(
-        "run_process",
-        json!({
-            "project": project,
-            "executable": "cargo",
-            "args": ["test", "focused", "-p", "webcodex"],
-            "session_id": session_id,
-            "timeout_secs": 121,
-            "cwd": ".",
-            "purpose": "test",
-            "assertion_name": assertion_name,
-        }),
-    )
-    .unwrap();
+    let (call, recorder_metadata) =
+        crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
+            "run_process",
+            json!({
+                "project": project,
+                "executable": "cargo",
+                "args": ["test", "focused", "-p", "webcodex"],
+                "session_id": session_id,
+                "timeout_secs": 121,
+                "cwd": ".",
+                "purpose": "test",
+                "assertion_name": assertion_name,
+            }),
+        )
+        .unwrap();
     let task = tokio::spawn({
         let runtime = runtime.clone();
         let auth = auth.clone();

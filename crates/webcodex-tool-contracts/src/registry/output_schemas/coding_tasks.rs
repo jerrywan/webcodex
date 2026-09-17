@@ -1,10 +1,10 @@
 use serde_json::{json, Value};
 
-use super::super::input_schemas::session_execution_context_schema;
 use super::common::{
     array_schema, continuation_feedback_schema, evidence_history_schema, evidence_integrity_schema,
     handoff_brief_schema, job_lifecycle_summary_schema, nullable_schema, open_object_schema,
-    permission_summary_schema, schema_type, task_outcome_schema, wrapped_output_schema,
+    permission_summary_schema, schema_type, session_execution_context_schema, task_outcome_schema,
+    wrapped_output_schema,
 };
 #[cfg(any(test, feature = "root-test-support"))]
 use super::common::{

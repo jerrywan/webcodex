@@ -306,7 +306,7 @@ fn search_project_texts_output_schema() -> Value {
             "truncation_reason": {"type": "string", "enum": ["batch_response_budget", "hard_result_cap"]},
             "suggested_call": suggested_tool_call_schema(
                 "search_project_texts",
-                crate::registry::input_schemas::search_project_texts_input_schema(),
+                crate::input_schema_for_tool("search_project_texts"),
                 "Parser-ready whole-query suffix rerun when the complete call itself fits the bounded model result. If it cannot fit, Runtime keeps truncation truthful and exposes no raw cursor or oversized fake call. Zero-progress soft-budget results may raise max_result_bytes; hard-cap zero progress exposes no fake next call."
             ),
             "session_hint": session_hint_schema(),
