@@ -66,6 +66,41 @@ pub fn suggested_tool_call_schema(
     })
 }
 
+/// Recognize the canonical schema shape for one parser-ready SuggestedToolCall.
+///
+/// This is intentionally structural rather than a model-visible marker keyword:
+/// adapters use it to project only formally declared action edges and never scan
+/// arbitrary tool output for user/plugin objects that happen to contain `tool`
+/// and `arguments` keys.
+pub fn suggested_tool_call_schema_target(schema: &Value) -> Option<&str> {
+    if schema.get("type").and_then(Value::as_str) != Some("object")
+        || schema.get("additionalProperties").and_then(Value::as_bool) != Some(false)
+    {
+        return None;
+    }
+    let properties = schema.get("properties")?.as_object()?;
+    if properties.len() != 2
+        || !properties.contains_key("tool")
+        || !properties.contains_key("arguments")
+    {
+        return None;
+    }
+    let required = schema.get("required")?.as_array()?;
+    if required.len() != 2
+        || !required.iter().any(|field| field.as_str() == Some("tool"))
+        || !required
+            .iter()
+            .any(|field| field.as_str() == Some("arguments"))
+    {
+        return None;
+    }
+    let tool = properties.get("tool")?;
+    if tool.get("type").and_then(Value::as_str) != Some("string") {
+        return None;
+    }
+    tool.get("const").and_then(Value::as_str)
+}
+
 pub fn job_activity_schema() -> Value {
     json!({
         "anyOf": [

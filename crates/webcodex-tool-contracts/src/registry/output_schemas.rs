@@ -27,7 +27,9 @@ mod ssh_resources;
 mod testing;
 
 use common::default_output_schema;
-pub use common::{continuation_semantics_schema, suggested_tool_call_schema};
+pub use common::{
+    continuation_semantics_schema, suggested_tool_call_schema, suggested_tool_call_schema_target,
+};
 
 pub fn output_schema_for_tool(name: &str) -> Value {
     if let Some(schema) = agent_tasks::output_schema_for_tool(name) {

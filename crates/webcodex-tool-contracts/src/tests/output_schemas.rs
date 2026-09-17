@@ -63,6 +63,42 @@ fn structured_execution_output(
 }
 
 #[test]
+fn suggested_tool_call_schema_recognizer_is_strict_and_structural() {
+    let canonical = suggested_tool_call_schema(
+        "git_log",
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        "next page",
+    );
+    assert_eq!(
+        suggested_tool_call_schema_target(&canonical),
+        Some("git_log")
+    );
+
+    let incidental = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "tool": {"type": "string", "const": "git_log"},
+            "arguments": {"type": "object"},
+            "payload": {"type": "string"}
+        },
+        "required": ["tool", "arguments"]
+    });
+    assert_eq!(suggested_tool_call_schema_target(&incidental), None);
+
+    let open_object = json!({
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+            "tool": {"type": "string", "const": "git_log"},
+            "arguments": {"type": "object"}
+        },
+        "required": ["tool", "arguments"]
+    });
+    assert_eq!(suggested_tool_call_schema_target(&open_object), None);
+}
+
+#[test]
 fn observation_schemas_do_not_repeat_static_continuation_semantics() {
     let specs = registered_tool_specs();
     for name in [

@@ -248,6 +248,19 @@ async fn read_project_artifact_emits_parser_ready_snapshot_fenced_continuation()
     let next_call =
         ToolCall::from_tool_name(next["tool"].as_str().unwrap(), next["arguments"].clone())
             .expect("artifact suggested_call must be parser-ready");
+    let mut projected_first = crate::tool_runtime::ToolResult::ok(first.output.clone());
+    crate::model_surface::project_tool_result_suggested_calls(
+        "read_project_artifact",
+        &mut projected_first,
+        &|target| crate::model_surface::suggested_tool_call_route(target, false),
+    );
+    let projected_next = &projected_first.output["suggested_call"];
+    assert_eq!(
+        projected_next["tool"],
+        crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME
+    );
+    assert_eq!(projected_next["arguments"]["tool"], "read_project_artifact");
+    assert_eq!(projected_next["arguments"]["arguments"], next["arguments"]);
 
     let second_task = tokio::spawn({
         let runtime = runtime.clone();

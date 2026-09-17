@@ -256,3 +256,108 @@ async fn mcp_tools_call_show_changes_returns_structured_tool_error() {
         "unknown_project"
     );
 }
+
+#[test]
+fn mcp_suggested_call_output_schema_tracks_adaptive_route() {
+    let adaptive = mcp_tools_list_payload_with_compact(false);
+    let adaptive_work = adaptive["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "work_on_project")
+        .expect("Adaptive work_on_project");
+    let adaptive_call =
+        &adaptive_work["outputSchema"]["properties"]["output"]["properties"]["suggested_call"];
+    assert_eq!(
+        adaptive_call["properties"]["tool"]["const"],
+        crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME
+    );
+    assert_eq!(
+        adaptive_call["properties"]["arguments"]["properties"]["tool"]["const"],
+        "list_runners"
+    );
+    assert!(
+        crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(
+            "skill_versions",
+            true
+        )
+    );
+    assert!(
+        !crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(
+            "skill_versions",
+            false
+        ),
+        "ModelHidden Skill management recovery must require the stateless operator-extension admission context"
+    );
+}
+
+#[tokio::test]
+async fn adaptive_mcp_work_on_project_recovery_is_immediately_gateway_callable() {
+    let root = tempfile::tempdir().unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root.path())
+        .status()
+        .expect("git init");
+    assert!(status.success());
+    let path = root
+        .path()
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let runtime = test_runtime();
+
+    let outcome = handle_mcp_request(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(1493)),
+            mcp_2026_params(json!({
+                "name": "work_on_project",
+                "arguments": {
+                    "client_id": "missing-493-runner",
+                    "path": path,
+                    "instruction": "recover the unknown Runner"
+                }
+            })),
+        ),
+        None,
+    )
+    .await;
+    let value = match outcome {
+        McpOutcome::Ok(value) => value,
+        other => panic!("expected MCP tool result, got {other:?}"),
+    };
+    let suggested = &value["result"]["structuredContent"]["output"]["suggested_call"];
+    assert_eq!(
+        suggested["tool"],
+        crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME
+    );
+    assert_eq!(suggested["arguments"]["tool"], "list_runners");
+    assert_eq!(
+        suggested["arguments"]["arguments"],
+        json!({"include_projects": false, "summary_only": true})
+    );
+
+    let projected_tool = suggested["tool"].as_str().unwrap().to_string();
+    let projected_arguments = suggested["arguments"].clone();
+    let recovery = handle_mcp_request(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(1494)),
+            mcp_2026_params(json!({
+                "name": projected_tool,
+                "arguments": projected_arguments
+            })),
+        ),
+        None,
+    )
+    .await;
+    let recovery = match recovery {
+        McpOutcome::Ok(value) => value,
+        other => panic!("projected recovery must pass MCP gateway admission: {other:?}"),
+    };
+    assert_eq!(recovery["result"]["structuredContent"]["success"], true);
+}

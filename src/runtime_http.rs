@@ -663,6 +663,24 @@ fn gpt_action_admit_target(path_tool: &str, target: &str) -> Result<(), String> 
     }
 }
 
+fn gpt_action_suggested_tool_call_route(
+    target: &str,
+) -> crate::model_surface::SuggestedToolCallRoute {
+    use crate::model_surface::{AdaptiveRuntimeGatewayTargetRoute, SuggestedToolCallRoute};
+
+    if !webcodex_tool_contracts::gpt_action_tool_supported(target) {
+        return SuggestedToolCallRoute::Unavailable;
+    }
+    match crate::model_surface::adaptive_runtime_gateway_target_route(target) {
+        AdaptiveRuntimeGatewayTargetRoute::Direct => SuggestedToolCallRoute::Direct,
+        AdaptiveRuntimeGatewayTargetRoute::Gateway => SuggestedToolCallRoute::Gateway(
+            crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+        ),
+        AdaptiveRuntimeGatewayTargetRoute::Recursive
+        | AdaptiveRuntimeGatewayTargetRoute::Unknown => SuggestedToolCallRoute::Unavailable,
+    }
+}
+
 #[handler]
 pub async fn gpt_action_invoke(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let Some(path_tool) = req.param::<String>("tool_name") else {
@@ -783,12 +801,19 @@ pub async fn gpt_action_invoke(req: &mut Request, depot: &mut Depot, res: &mut R
             let result = outcome
                 .result
                 .expect("tool kernel outcome without error must include result");
-            let (status, response) = prepare_action_tools_call_response(
+            let (status, mut response) = prepare_action_tools_call_response(
                 &audit,
                 &tool,
                 outcome.project,
                 result,
                 outcome.model_ergonomics.as_ref(),
+            );
+            // ActionAudit above records canonical ToolRuntime truth. Only the
+            // response copy is projected to the callable Adaptive Action route.
+            crate::model_surface::project_tool_result_suggested_calls(
+                &tool,
+                &mut response,
+                &gpt_action_suggested_tool_call_route,
             );
             res.status_code(status);
             res.render(Json(response));

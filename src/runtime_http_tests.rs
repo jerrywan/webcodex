@@ -2232,6 +2232,62 @@ async fn gpt_action_direct_and_gateway_admission_fail_closed() {
 }
 
 #[tokio::test]
+async fn gpt_action_suggested_call_projection_preserves_canonical_generic_result() {
+    let (_tmp, service) = phase2_service();
+    let root = tempfile::tempdir().unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root.path())
+        .status()
+        .expect("git init");
+    assert!(status.success());
+    let path = root
+        .path()
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let arguments = json!({
+        "client_id": "missing-493-action-runner",
+        "path": path,
+        "instruction": "recover the unknown Runner"
+    });
+
+    let (_status, canonical) = http_tool_call(
+        &service,
+        json!({"tool": "work_on_project", "params": arguments.clone()}),
+    )
+    .await;
+    assert_eq!(canonical["success"], false, "{canonical}");
+    assert_eq!(
+        canonical["output"]["suggested_call"]["tool"],
+        "list_runners"
+    );
+
+    let (status, projected, _) =
+        oauth_action_call(&service, "secret", "work_on_project", arguments).await;
+    assert_ne!(status, StatusCode::NOT_FOUND, "{projected}");
+    assert_eq!(projected["success"], false, "{projected}");
+    let suggested = &projected["output"]["suggested_call"];
+    assert_eq!(suggested["tool"], "call_runtime_tool");
+    assert_eq!(suggested["arguments"]["tool"], "list_runners");
+    assert_eq!(
+        suggested["arguments"]["arguments"],
+        json!({"include_projects": false, "summary_only": true})
+    );
+
+    let (status, recovery, _) = oauth_action_call(
+        &service,
+        "secret",
+        suggested["tool"].as_str().unwrap(),
+        suggested["arguments"].clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recovery}");
+    assert_eq!(recovery["success"], true, "{recovery}");
+}
+
+#[tokio::test]
 async fn oauth2_gpt_action_direct_scope_outcomes_match_mcp_direct_policy() {
     let (_tmp, service, token) = phase2_oauth_service("project:read");
     let (status, body, _) = oauth_action_call(

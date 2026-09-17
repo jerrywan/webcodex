@@ -2802,6 +2802,19 @@ mod tests {
             assert!(result.output.get("recovery_tool").is_none());
             assert!(result.output.get("reconcile_with").is_none());
             assert!(result.output.get("recovery_kind").is_none());
+            let mut projected = ToolResult::err_with_output("recovery", result.output.clone());
+            crate::model_surface::project_tool_result_suggested_calls(
+                "skill_install",
+                &mut projected,
+                &|target| crate::model_surface::suggested_tool_call_route(target, true),
+            );
+            let carrier = &projected.output["suggested_call"];
+            assert_eq!(
+                carrier["tool"],
+                crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME
+            );
+            assert_eq!(carrier["arguments"]["tool"], "skill_versions");
+            assert_eq!(carrier["arguments"]["arguments"], suggested["arguments"]);
         };
 
         let unknown = skill_error_dynamic(

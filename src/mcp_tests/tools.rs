@@ -525,6 +525,23 @@ fn skill_management_tools_require_admin_and_remain_fixed_schema() {
 fn stateless_workflow_recorder_metadata_adds_protocol_projection() {
     let mut full = mcp_tools_list_payload_with_compact(false);
     add_stateless_workflow_recorder_metadata(&mut full);
+    let run_process = full["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "run_process")
+        .expect("Adaptive run_process schema");
+    let continuity_call = &run_process["outputSchema"]["properties"]["output"]["properties"]
+        ["session_continuity"]["properties"]["suggested_call"];
+    assert_eq!(
+        continuity_call["properties"]["tool"]["const"],
+        "session_handoff_summary"
+    );
+    assert_eq!(
+        crate::model_surface::adaptive_runtime_gateway_target_route("session_handoff_summary"),
+        crate::model_surface::AdaptiveRuntimeGatewayTargetRoute::Direct,
+        "adapter-injected structured Session recovery must remain immediately callable"
+    );
     for name in [
         "read_files",
         "search_project_texts",

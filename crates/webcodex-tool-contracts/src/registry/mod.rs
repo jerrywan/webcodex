@@ -8,6 +8,7 @@ pub use annotations::tool_annotations;
 pub use output_schemas::coding_workflow_diagnostic_output_schema_for_test;
 pub use output_schemas::{
     continuation_semantics_schema, output_schema_for_tool, suggested_tool_call_schema,
+    suggested_tool_call_schema_target,
 };
 pub use tool_specs::{
     agent_continuation_app_tool_specs, changes_app_tool_specs, goal_plan_app_tool_specs,

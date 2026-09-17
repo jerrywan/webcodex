@@ -315,6 +315,22 @@ async fn git_log_snapshot_continuation_survives_head_advance_without_gap_or_dupl
         first_next["arguments"].clone(),
     )
     .expect("git_log suggested_call must be parser-ready");
+    let mut projected_first = ToolResult::ok(first.output.clone());
+    crate::model_surface::project_tool_result_suggested_calls(
+        "git_log",
+        &mut projected_first,
+        &|target| crate::model_surface::suggested_tool_call_route(target, false),
+    );
+    let projected_next = &projected_first.output["suggested_call"];
+    assert_eq!(
+        projected_next["tool"],
+        crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME
+    );
+    assert_eq!(projected_next["arguments"]["tool"], "git_log");
+    assert_eq!(
+        projected_next["arguments"]["arguments"],
+        first_next["arguments"]
+    );
 
     commit_file(root, "paged.txt", "6\n", "commit 6");
     let current_head = std::process::Command::new("git")

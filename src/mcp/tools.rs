@@ -6,6 +6,9 @@ use super::response::{
 use super::{require_mcp_scope, scope_forbidden, McpOutcome};
 use crate::auth::AuthContext;
 pub(super) use crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME;
+use crate::model_surface::{
+    project_suggested_tool_call_schema, project_tool_result_suggested_calls, SuggestedToolCallRoute,
+};
 use crate::tool_request_trace::ToolRequestLifecycle;
 use crate::tool_runtime::kernel::{
     check_runtime_tool_scope, HostFileImportTrust, ToolCallContext, ToolCallErrorStatus,
@@ -156,6 +159,27 @@ pub(crate) fn adaptive_runtime_gateway_target_admitted_for_test(
     )
 }
 
+fn mcp_suggested_tool_call_route(target: &str, stateless_2026: bool) -> SuggestedToolCallRoute {
+    if target == ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME {
+        return SuggestedToolCallRoute::Unavailable;
+    }
+    if target == crate::mcp_gateway::MCP_TOOL_NAME {
+        return SuggestedToolCallRoute::Gateway(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME);
+    }
+    let operator_extension_admitted = stateless_2026
+        && crate::tool_runtime::stateless_operator_extension_tool_specs()
+            .iter()
+            .any(|spec| spec.name == target);
+    crate::model_surface::suggested_tool_call_route(target, operator_extension_admitted)
+}
+
+fn project_mcp_tool_spec_output_schema(mut spec: ToolSpec, stateless_2026: bool) -> ToolSpec {
+    project_suggested_tool_call_schema(&mut spec.output_schema, &|target| {
+        mcp_suggested_tool_call_route(target, stateless_2026)
+    });
+    spec
+}
+
 fn unwrap_adaptive_runtime_gateway_arguments(
     arguments: Value,
     stateless_2026: bool,
@@ -293,7 +317,13 @@ pub(super) fn mcp_tools_list_payload_with_features_for_auth(
     let mut tools = specs
         .into_iter()
         .filter(|spec| artifact_export_enabled || spec.name != "export_project_artifact")
-        .map(|spec| mcp_tool_spec_json(spec, compact, app_enabled))
+        .map(|spec| {
+            mcp_tool_spec_json(
+                project_mcp_tool_spec_output_schema(spec, stateless_2026),
+                compact,
+                app_enabled,
+            )
+        })
         .collect::<Vec<_>>();
     if app_enabled && stateless_2026 {
         let mut app_specs = filter_specs_for_oauth(
@@ -2040,6 +2070,9 @@ pub(super) async fn handle_call(
     };
     debug_assert_eq!(outcome.success, result.success);
     attach_ignored_invocation_metadata(&mut result, &ignored_invocation_metadata);
+    project_tool_result_suggested_calls(&params.name, &mut result, &|target| {
+        mcp_suggested_tool_call_route(target, stateless_2026)
+    });
     if let Some(lc) = lifecycle.as_deref() {
         // Protocol layer produced a JSON-RPC result (not -32xxx).
         // Tool kernel success is independent (isError / structuredContent).
