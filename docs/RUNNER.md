@@ -125,7 +125,7 @@ lifecycle models:
 | Source | Location / owner | Trust | Version semantics |
 | --- | --- | --- | --- |
 | Project Skills | `<project>/.agents/skills/<package>/SKILL.md` | `project_content` | Live project content; no package revision. |
-| Configured live Runner Skill roots | Operator-selected absolute directories on the Runner host | `operator_configured_guidance` | Live read-only filesystem content; no install, activation, rollback, or package revision. |
+| Configured live Runner Skill roots | Operator-selected absolute directories on the Runner host | `operator_configured_guidance` | Live filesystem content that WebCodex does not modify; supported scripts may execute through `run_skill_resource`; no install, activation, rollback, or package revision. |
 | Managed Runner Skill Store | Runner state under `runner-skills-v1` | `operator_installed_guidance` | Immutable package revisions with install, activation, removal, and rollback-oriented Store semantics. |
 
 Configured live roots are optional and have no implicit defaults. Each configured
@@ -152,23 +152,31 @@ roots = [
 ```
 
 A root has the form `<root>/<package>/SKILL.md`, with optional package resources
-such as `references/`. These directories are read directly by the Runner. WebCodex
-does not copy them into the managed Store, and `skill_install`, `skill_activate`,
-and `skill_remove_revision` continue to mutate only that Store.
+such as `references/` and `scripts/`. These directories are read directly by the
+Runner. WebCodex does not modify files in configured roots or copy them into the
+managed Store; `skill_install`, `skill_activate`, and `skill_remove_revision`
+continue to mutate only that Store. This non-mutating behavior does not make the
+source non-executable: `run_skill_resource` may execute supported `scripts/*.py`
+or `scripts/*.sh` from an operator-configured trusted Skill.
 
 The configured paths belong to the **Runner host**, even when the Server is on a
-different machine. They are not added to `[policy].allowed_roots`, do not grant
-ordinary Project file/shell/process tools access to those directories, and native
-root paths are not projected through the model-facing Skill catalog. Skill reads
-accept only an opaque `skill_id` plus a package-relative resource path; the Runner
-resolves the root from its trusted configuration and rejects traversal or link
-escapes.
+different machine, and selecting them is an explicit operator trust decision for
+the narrow Skill runtime. They are not added to `[policy].allowed_roots`, do not
+grant ordinary Project file/shell/process tools access to those directories, and
+native root paths are not projected through the model-facing Skill catalog. Skill
+reads and `run_skill_resource` accept only an opaque `skill_id` plus a
+package-relative resource path; the Runner resolves the root from its trusted
+configuration and rejects traversal or link escapes.
 
 Skill files remain live: editing `SKILL.md` or a resource is visible to the next
-discovery/read without any reload. Changing the configured `roots` list is a
-hot-reloadable Runner configuration change: edit `runner.toml`, run
-`runner_config_check`, then `runner_config_reload` with the current generation.
-No Runner process restart is required.
+discovery/read without any reload. For configured Skills,
+`expected_definition_revision` fences the `SKILL.md` definition, not the resource
+bytes: `run_skill_resource` re-reads the selected script at execution and returns
+`skill_sha256` for the actual bytes executed. Managed installed Skills additionally
+use `expected_package_revision` to fence the immutable package. Changing the
+configured `roots` list is a hot-reloadable Runner configuration change: edit
+`runner.toml`, run `runner_config_check`, then `runner_config_reload` with the
+current generation. No Runner process restart is required.
 
 ## Local MCP providers
 

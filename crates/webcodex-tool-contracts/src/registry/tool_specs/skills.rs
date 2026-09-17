@@ -23,12 +23,12 @@ pub(super) fn tool_specs() -> Vec<ToolSpec> {
         ),
         tool_spec(
             "run_skill_resource",
-            "Execute one trusted Runner-configured or Runner-installed Skill script without exposing or retransmitting its source through model context. Only supported scripts/ resources are executable. WebCodex selects the interpreter from the resource extension (.py or .sh); callers supply only script arguments. expected_definition_revision is mandatory; installed Skills also require expected_package_revision.",
+            "Execute one supported scripts/*.py or scripts/*.sh resource from a trusted Runner-configured live Skill or Runner-installed managed Skill without exposing or retransmitting its source through model context. Configured Skills are live resources: expected_definition_revision fences the selected SKILL.md definition, but resource bytes are read at execution and are not package-revision-pinned; skill_sha256 reports the bytes actually executed. Managed installed Skills additionally require expected_package_revision to fence the immutable package. WebCodex selects the interpreter from the resource extension and callers supply only script arguments; project-content Skills are rejected.",
             run_skill_resource_input_schema(),
         ),
         tool_spec(
             "skill_list",
-            "Fresh, bounded discovery of project-scoped Skills, configured live read-only Skills on the Project's exact owning Runner, and active operator-installed immutable Skills. Returns lightweight descriptors only; bodies require skill_read_file. trust and package_revision distinguish live configured content from managed installed revisions, and same names across sources remain independently selectable by opaque skill_id.",
+            "Fresh, bounded discovery of project-scoped Skills, configured live Skills on the Project's exact owning Runner, and active operator-installed immutable Skills. WebCodex does not modify configured Skill roots, but supported scripts from that operator-trusted source may execute through run_skill_resource. Returns lightweight descriptors only; bodies require skill_read_file. trust and package_revision distinguish live configured content from managed installed revisions, and same names across sources remain independently selectable by opaque skill_id.",
             skill_list_input_schema(),
         ),
         tool_spec(

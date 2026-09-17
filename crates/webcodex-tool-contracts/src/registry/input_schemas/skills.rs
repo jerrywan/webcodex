@@ -57,7 +57,7 @@ pub fn run_skill_resource_input_schema() -> Value {
     properties.insert("expected_definition_revision".to_string(), json!({
         "type": "string",
         "pattern": "^[0-9a-f]{64}$",
-        "description": "Required SKILL.md digest fence. Execution fails if the selected configured or installed Skill definition changed."
+        "description": "Required SKILL.md definition digest fence. For configured live Skills this fences the definition only; script resource bytes are read live at execution. Managed installed Skills additionally use expected_package_revision to fence the immutable package."
     }));
     properties.insert("expected_package_revision".to_string(), json!({
         "type": "string",

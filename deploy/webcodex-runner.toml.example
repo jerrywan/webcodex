@@ -72,10 +72,12 @@ conda activate ml
 # host = "tmp"
 # default_cwd = "/opt/webcodex-edge"
 
-# Optional read-only live Skill roots on this Runner host. These paths do not
-# expand [policy].allowed_roots and are not copied into the managed Skill Store.
-# Editing files under a root is visible on the next Skill discovery/read; editing
-# this roots list is applied with runner config check/reload, without a restart.
+# Optional live Skill roots on this Runner host. WebCodex does not modify files
+# under these roots, but supported scripts/*.py and scripts/*.sh may execute via
+# run_skill_resource because the configured root is an operator-trusted Skill source.
+# These paths do not expand [policy].allowed_roots and are not copied into the
+# managed Skill Store. File edits are visible to the next discovery/read/execution;
+# editing this roots list is applied with runner config check/reload, without restart.
 [skills]
 roots = []
 # roots = ["/home/webcodex/.codex/skills", "/opt/company/agent-skills"]

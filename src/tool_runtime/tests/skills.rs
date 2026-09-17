@@ -2255,6 +2255,11 @@ async fn configured_skill_resource_executes_without_model_source_roundtrip_and_f
     assert_eq!(result.output["skill_path"], "scripts/probe.py");
     assert_eq!(result.output["skill_trust"], "operator_configured_guidance");
     assert_eq!(
+        result.output["skill_definition_revision"],
+        definition_revision
+    );
+    assert!(result.output["skill_package_revision"].is_null());
+    assert_eq!(
         result.output["skill_sha256"],
         "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     );

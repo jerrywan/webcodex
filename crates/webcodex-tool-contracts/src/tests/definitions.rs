@@ -590,3 +590,69 @@ fn operator_extension_families_are_definition_owned_and_registry_derived() {
     assert_eq!(runtime_tool_operator_extension_family("run_shell"), None);
     assert_eq!(runtime_tool_operator_extension_family("unknown_tool"), None);
 }
+
+#[test]
+fn run_skill_resource_contract_distinguishes_live_configured_and_managed_fences() {
+    let specs = registered_tool_specs();
+    let run_spec = spec_named(&specs, "run_skill_resource")
+        .description
+        .to_ascii_lowercase();
+    for phrase in [
+        "configured skills are live resources",
+        "expected_definition_revision",
+        "resource bytes are read at execution",
+        "expected_package_revision",
+        "immutable package",
+    ] {
+        assert!(
+            run_spec.contains(phrase),
+            "run_skill_resource ToolSpec must describe {phrase:?}: {run_spec}"
+        );
+    }
+    assert!(
+        !run_spec.contains("revision-fenced script"),
+        "configured resources must not be described as pre-pinned immutable scripts: {run_spec}"
+    );
+
+    let extension_specs = stateless_operator_extension_tool_specs();
+    let list_spec = spec_named(&extension_specs, "skill_list")
+        .description
+        .to_ascii_lowercase();
+    assert!(list_spec.contains("webcodex does not modify configured skill roots"));
+    assert!(list_spec.contains("run_skill_resource"));
+    assert!(!list_spec.contains("configured live read-only skills"));
+
+    let definition =
+        lookup_tool_definition("run_skill_resource").expect("run_skill_resource definition");
+    let model_description = definition
+        .model_spec
+        .expect("run_skill_resource model spec")
+        .description
+        .to_ascii_lowercase();
+    for phrase in [
+        "configured skills are live resources",
+        "expected_definition_revision",
+        "resource bytes are read at execution",
+        "expected_package_revision",
+        "immutable package",
+    ] {
+        assert!(
+            model_description.contains(phrase),
+            "run_skill_resource ToolDefinition must describe {phrase:?}: {model_description}"
+        );
+    }
+    let action_description = definition
+        .gpt_action_description()
+        .expect("run_skill_resource GPT Action description")
+        .to_ascii_lowercase();
+    for phrase in [
+        "configured skills are live",
+        "expected_definition_revision",
+        "managed skills additionally require expected_package_revision",
+    ] {
+        assert!(
+            action_description.contains(phrase),
+            "run_skill_resource GPT Action description must describe {phrase:?}: {action_description}"
+        );
+    }
+}

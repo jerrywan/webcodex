@@ -113,7 +113,7 @@ runtime 工具 `register_project` 与 `create_project` 让客户端在在线 Run
 | 来源 | 位置 / owner | Trust | 版本语义 |
 | --- | --- | --- | --- |
 | Project Skills | `<project>/.agents/skills/<package>/SKILL.md` | `project_content` | Project live content；没有 package revision。 |
-| Configured live Runner Skill roots | Runner 主机上由 operator 配置的绝对目录 | `operator_configured_guidance` | 直接读取的只读 live filesystem content；没有 install、activation、rollback 或 package revision。 |
+| Configured live Runner Skill roots | Runner 主机上由 operator 配置的绝对目录 | `operator_configured_guidance` | WebCodex 不修改的 live filesystem content；受支持脚本可通过 `run_skill_resource` 执行；没有 install、activation、rollback 或 package revision。 |
 | Managed Runner Skill Store | Runner state 下的 `runner-skills-v1` | `operator_installed_guidance` | immutable package revision，并保留 install、activation、remove 与 rollback-oriented Store 语义。 |
 
 Configured live roots 默认不存在，需要在 Runner 的 `runner.toml` 中显式配置：
@@ -138,19 +138,27 @@ roots = [
 ```
 
 每个 root 直接包含 `<root>/<package>/SKILL.md`，package 内可以有 `references/`
-等 resource。WebCodex 不会把它们复制到 managed Store；`skill_install`、
-`skill_activate` 与 `skill_remove_revision` 仍然只修改 managed Store。
+与 `scripts/` 等 resource。WebCodex 不会修改 configured root 内的文件，也不会把
+它们复制到 managed Store；`skill_install`、`skill_activate` 与
+`skill_remove_revision` 仍然只修改 managed Store。这里的“不修改”不等于“不可执行”：
+operator 配置的 trusted Skill 中，受支持的 `scripts/*.py` / `scripts/*.sh` 可以通过
+`run_skill_resource` 执行。
 
 这些路径始终属于 **Runner 主机**；Server 与 Runner 不在同一台机器时也不会改用
-Server 的 filesystem。Configured roots 不会加入 `[policy].allowed_roots`，因此不会给普通
-Project file/shell/process 工具扩大文件系统 authority，native root path 也不会投影到
-model-facing Skill catalog。Skill read 只提交 opaque `skill_id` 与 package-relative resource
-path，由 Runner 根据 trusted config 解析 root，并拒绝 traversal 与 link escape。
+Server 的 filesystem。把 root 放进配置本身就是 operator 对该 Skill source 的显式 trust
+选择，但该 trust 只用于 narrow Skill runtime。Configured roots 不会加入
+`[policy].allowed_roots`，因此不会给普通 Project file/shell/process 工具扩大文件系统
+authority，native root path 也不会投影到 model-facing Skill catalog。Skill read 与
+`run_skill_resource` 只提交 opaque `skill_id` 与 package-relative resource path，由 Runner
+根据 trusted config 解析 root，并拒绝 traversal 与 link escape。
 
 Skill 文件本身是 live 的：修改 `SKILL.md` 或 resource 后，下一次 discovery/read 会直接
-看到新内容，不需要 reload。只有修改 `roots` 配置列表时才需要按正式流程先执行
-`runner_config_check`，再携带当前 generation 执行 `runner_config_reload`；该字段支持 hot
-reload，不需要重启 Runner 进程。
+看到新内容，不需要 reload。对 configured Skill，`expected_definition_revision` 只 fence
+`SKILL.md` definition，并不会把 resource bytes 固定为 immutable 内容；
+`run_skill_resource` 会在执行时重新读取脚本，并通过 `skill_sha256` 返回实际执行 bytes 的
+SHA-256。Managed installed Skill 还会用 `expected_package_revision` fence immutable package。
+只有修改 `roots` 配置列表时才需要按正式流程先执行 `runner_config_check`，再携带当前
+generation 执行 `runner_config_reload`；该字段支持 hot reload，不需要重启 Runner 进程。
 
 ## 本地 MCP provider
 
