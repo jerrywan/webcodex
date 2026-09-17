@@ -71,6 +71,32 @@ fn record_meaningful_window_activity(
     );
 }
 
+fn establish_peer_route(
+    db: &Arc<crate::Database>,
+    runtime: &ToolRuntime,
+    auth: &AuthContext,
+    observer: &ClientWindow,
+    peer: &ClientWindow,
+    project: &str,
+    operation: &str,
+    at_ms: i64,
+) {
+    record_meaningful_window_activity(db, auth, peer, project, operation, at_ms);
+    let mut discovery = ToolResult::ok(json!({"success": true}));
+    runtime.add_peer_collaboration_projection(
+        &mut discovery,
+        Some(auth),
+        Some(observer),
+        Some(project),
+        &[],
+    );
+    assert_eq!(
+        discovery.output["peer_awareness"]["new_peers"][0]["peer_id"],
+        peer.peer_id(),
+        "fixture must establish the same retained route production discovery exposes"
+    );
+}
+
 async fn call_in_window(
     runtime: &ToolRuntime,
     auth: &AuthContext,
@@ -112,9 +138,11 @@ async fn ordinary_peer_message_is_projected_once_on_the_next_tool_result() {
     let sender = ClientWindow::for_test("peer-sender-once");
     let recipient = ClientWindow::for_test("peer-recipient-once");
     let now_ms = chrono::Utc::now().timestamp_millis();
-    record_meaningful_window_activity(
-        runtime.window_activity_db.as_ref().unwrap(),
+    establish_peer_route(
+        &_db,
+        &runtime,
         &auth,
+        &sender,
         &recipient,
         "agent:special:source-project",
         "read_files",
@@ -185,9 +213,11 @@ async fn ack_required_peer_message_repeats_on_omission_and_current_ack_suppresse
     let sender = ClientWindow::for_test("peer-sender-ack");
     let recipient = ClientWindow::for_test("peer-recipient-ack");
     let now_ms = chrono::Utc::now().timestamp_millis();
-    record_meaningful_window_activity(
+    establish_peer_route(
         &db,
+        &runtime,
         &auth,
+        &sender,
         &recipient,
         "agent:special:ack-source",
         "read_files",
@@ -279,6 +309,64 @@ async fn ack_required_peer_message_repeats_on_omission_and_current_ack_suppresse
         .unwrap();
     assert_eq!(projection_count, 3);
     assert!(first_ack.is_some());
+}
+
+#[tokio::test]
+async fn peer_route_requires_retained_discovery_or_message_state() {
+    let (_temp, db, runtime) = runtime_with_peer_db();
+    let auth = shared_key_auth_context("peer-owner-route-retention");
+    let sender = ClientWindow::for_test("peer-route-sender");
+    let peer = ClientWindow::for_test("peer-route-target");
+    let project = "agent:special:peer-route";
+    let now_ms = chrono::Utc::now().timestamp_millis();
+
+    // ActionAudit supplies recent meaningful activity for discovery, but it is
+    // not itself a retained communication route. A caller that somehow knows
+    // the peer id cannot bypass the awareness projection step.
+    record_meaningful_window_activity(&db, &auth, &peer, project, "read_files", now_ms - 1_000);
+    let undiscovered = call_in_window(
+        &runtime,
+        &auth,
+        &sender,
+        "post_peer_message",
+        json!({
+            "peer_id": peer.peer_id(),
+            "kind": "note",
+            "message": "must not route from ActionAudit alone"
+        }),
+        ToolInvocationMetadata::default(),
+    )
+    .await;
+    assert!(!undiscovered.success);
+    assert_eq!(undiscovered.output["failure_kind"], "peer_not_found");
+
+    let mut discovery = ToolResult::ok(json!({"success": true}));
+    runtime.add_peer_collaboration_projection(
+        &mut discovery,
+        Some(&auth),
+        Some(&sender),
+        Some(project),
+        &[],
+    );
+    assert_eq!(
+        discovery.output["peer_awareness"]["new_peers"][0]["peer_id"],
+        peer.peer_id()
+    );
+
+    let discovered = call_in_window(
+        &runtime,
+        &auth,
+        &sender,
+        "post_peer_message",
+        json!({
+            "peer_id": peer.peer_id(),
+            "kind": "note",
+            "message": "retained awareness establishes the route"
+        }),
+        ToolInvocationMetadata::default(),
+    )
+    .await;
+    assert!(discovered.success, "{:?}", discovered.error);
 }
 
 #[tokio::test]
@@ -424,9 +512,11 @@ async fn specialized_mcp_structured_content_receives_peer_projection_without_rew
     let sender = ClientWindow::for_test("peer-specialized-sender");
     let recipient = ClientWindow::for_test("peer-specialized-recipient");
     let now_ms = chrono::Utc::now().timestamp_millis();
-    record_meaningful_window_activity(
+    establish_peer_route(
         &db,
+        &runtime,
         &auth,
+        &sender,
         &recipient,
         "agent:special:specialized-source",
         "plugin_tool",
@@ -503,9 +593,11 @@ async fn peer_message_input_is_trimmed_deduplicated_and_empty_rejected() {
     let sender = ClientWindow::for_test("peer-input-sender");
     let recipient = ClientWindow::for_test("peer-input-recipient");
     let now_ms = chrono::Utc::now().timestamp_millis();
-    record_meaningful_window_activity(
+    establish_peer_route(
         &db,
+        &runtime,
         &auth,
+        &sender,
         &recipient,
         "agent:special:peer-input",
         "read_files",
@@ -586,9 +678,11 @@ async fn newly_unprojected_message_is_not_starved_by_old_ack_reminders() {
     let sender = ClientWindow::for_test("peer-priority-sender");
     let recipient = ClientWindow::for_test("peer-priority-recipient");
     let now_ms = chrono::Utc::now().timestamp_millis();
-    record_meaningful_window_activity(
+    establish_peer_route(
         &db,
+        &runtime,
         &auth,
+        &sender,
         &recipient,
         "agent:special:peer-priority",
         "read_files",
@@ -668,9 +762,11 @@ async fn oversized_result_rolls_back_one_shot_peer_projection() {
     let sender = ClientWindow::for_test("peer-oversized-sender");
     let recipient = ClientWindow::for_test("peer-oversized-recipient");
     let now_ms = chrono::Utc::now().timestamp_millis();
-    record_meaningful_window_activity(
+    establish_peer_route(
         &db,
+        &runtime,
         &auth,
+        &sender,
         &recipient,
         "agent:special:peer-oversized",
         "read_files",

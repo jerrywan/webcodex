@@ -521,7 +521,7 @@ fn urgent_guidance_attention_is_bounded_safe_and_also_decorates_failure_results(
     assert_eq!(failed.output["session_hint"]["attention_required"], true);
     assert_eq!(
         failed.output["session_hint"]["attention_reason"],
-        "high_priority_guidance_requires_ack"
+        "session_message_requires_ack"
     );
     let body_bytes: usize = attention["messages"]
         .as_array()

@@ -3214,7 +3214,7 @@ impl SessionStoreInner {
         }
         if snapshot.requires_ack && !current_request_acknowledged {
             return Err(SessionMessageError::InvalidInput(
-                "requires_ack guidance must be acknowledged on the same request before wrapper resolution"
+                "requires_ack message must be acknowledged on the same request before wrapper resolution"
                     .to_string(),
             ));
         }

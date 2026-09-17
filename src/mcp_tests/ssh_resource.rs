@@ -478,20 +478,61 @@ async fn read_only_session_allows_ssh_inspect_but_denies_management_before_runne
 }
 
 #[tokio::test]
-async fn ssh_resource_does_not_accept_stateless_continuity_wrappers() {
+async fn ssh_resource_accepts_collaboration_ack_but_rejects_other_stateless_wrappers() {
     let runtime = Arc::new(test_runtime());
     let auth = ssh_auth();
     register_managed_runner(&runtime, "instance-a").await;
 
+    let ack_task = {
+        let runtime = Arc::clone(&runtime);
+        let auth = auth.clone();
+        tokio::spawn(async move {
+            handle_mcp_request(
+                &runtime,
+                rpc(
+                    "tools/call",
+                    Some(json!(811)),
+                    mcp_2026_params(adaptive_runtime_gateway_params(
+                        crate::ssh_resource_gateway::SSH_RESOURCE_TOOL_NAME,
+                        json!({
+                            "action":"list",
+                            "runner":"runner-a",
+                            crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD: ["wc_msg_0123456789abcdef"]
+                        }),
+                    )),
+                ),
+                Some(&auth),
+            )
+            .await
+        })
+    };
+    let ack_request = wait_for_request(&runtime, "instance-a").await;
+    assert_eq!(ack_request.kind, "ssh_resource");
+    let business: webcodex_core::ssh_resource::SshResourceRequest =
+        serde_json::from_str(ack_request.content.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        business,
+        webcodex_core::ssh_resource::SshResourceRequest::List
+    );
+    assert!(!ack_request
+        .content
+        .as_deref()
+        .unwrap_or_default()
+        .contains("ack_session_message_ids"));
+    complete_response(
+        &runtime,
+        ack_request,
+        "instance-a",
+        SshResourceResponse::List {
+            revision: 0,
+            resources: vec![],
+        },
+    )
+    .await;
+    let ack_result = tool_result(ack_task.await.unwrap());
+    assert_eq!(ack_result["isError"], false, "{ack_result}");
+
     for (id, arguments) in [
-        (
-            811,
-            json!({
-                "action":"list",
-                "runner":"runner-a",
-                crate::tool_runtime::sessions::TOOL_CALL_ACK_SESSION_MESSAGE_IDS_FIELD: ["wc_msg_cached"]
-            }),
-        ),
         (
             812,
             json!({
@@ -537,7 +578,7 @@ async fn ssh_resource_does_not_accept_stateless_continuity_wrappers() {
         assert_eq!(result["isError"], true, "{result}");
         assert_eq!(
             result["structuredContent"]["error"]["code"], "ssh_resource_invalid",
-            "generic wrappers must remain invalid specialized SSH arguments"
+            "non-ACK wrappers must remain invalid specialized SSH arguments"
         );
         assert!(runtime
             .runner_registry

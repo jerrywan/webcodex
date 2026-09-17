@@ -137,7 +137,7 @@ fn assert_builtin_workflow(output: &Value) {
     assert!(message_ack_guidance.contains("session_attention"));
     assert!(message_ack_guidance.contains("requires_ack"));
     assert!(message_ack_guidance.contains("ack_session_message_ids"));
-    assert!(message_ack_guidance.contains("request-scoped model-context proof"));
+    assert!(message_ack_guidance.contains("model-context retention"));
     assert!(message_ack_guidance.contains("resolves messages"));
     assert!(message_ack_guidance.contains("grants authority"));
     assert!(message_ack_guidance.contains("gates execution"));

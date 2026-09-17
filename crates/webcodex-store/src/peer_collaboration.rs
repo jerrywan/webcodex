@@ -93,13 +93,6 @@ impl Database {
                  FROM window_peer_messages m
                  WHERE m.principal_kind = ?1
                    AND m.principal_id = ?2
-                 UNION ALL
-                 SELECT e.client_window_key,
-                        COALESCE(e.window_ended_at_ms, e.window_started_at_ms, 0) AS observed_at_ms
-                 FROM action_events e
-                 WHERE e.client_window_key IS NOT NULL
-                   AND e.principal_correlation_kind = ?1
-                   AND e.principal_correlation_id = ?2
              ) candidate
              WHERE substr(candidate.client_window_key, 1, 32) = ?3
              GROUP BY candidate.client_window_key

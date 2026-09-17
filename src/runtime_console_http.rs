@@ -5211,24 +5211,24 @@ mod tests {
             .unwrap_err(),
             RuntimeConsoleError::NotFound
         );
-        assert_eq!(
-            session_post_message_for_auth(
-                &runtime,
-                &auth_a,
-                WorkflowSessionPostMessageInput {
-                    project: project_id.to_string(),
-                    session_id: session.session_id.clone(),
-                    kind: SessionMessageKind::Note,
-                    priority: SessionMessagePriority::High,
-                    message: "invalid ack mode".to_string(),
-                    reply_to: None,
-                    requires_ack: true,
-                },
-            )
-            .await
-            .unwrap_err(),
-            RuntimeConsoleError::Invalid
-        );
+        let ack_required_note = session_post_message_for_auth(
+            &runtime,
+            &auth_a,
+            WorkflowSessionPostMessageInput {
+                project: project_id.to_string(),
+                session_id: session.session_id.clone(),
+                kind: SessionMessageKind::Note,
+                priority: SessionMessagePriority::High,
+                message: "ack-required note".to_string(),
+                reply_to: None,
+                requires_ack: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(ack_required_note.kind, "note");
+        assert_eq!(ack_required_note.priority, "high");
+        assert!(ack_required_note.requires_ack);
         assert_eq!(
             session_post_message_for_auth(
                 &runtime,

@@ -297,13 +297,10 @@ async fn high_ack_guidance_hint_is_actionable_and_inner_recorder_projects_attent
     let raw_hint =
         serde_json::to_value(runtime.sessions.inbox_hint(&session.session_id).unwrap()).unwrap();
     assert_eq!(raw_hint["attention_required"], true);
-    assert_eq!(
-        raw_hint["attention_reason"],
-        "high_priority_guidance_requires_ack"
-    );
+    assert_eq!(raw_hint["attention_reason"], "session_message_requires_ack");
     assert_eq!(
         raw_hint["attention_instruction"],
-        "High-priority Session guidance is pending. Read session_discussion_summary before continuing."
+        "A Session message requiring acknowledgement is pending. Read session_discussion_summary before continuing."
     );
 
     // No outer recording_session_id is supplied here. The existing authorized
