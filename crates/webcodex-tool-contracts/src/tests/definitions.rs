@@ -119,6 +119,10 @@ fn experimental_code_mode_mutating_has_conservative_e2b_envelope() {
     assert_eq!(metadata.risk, ToolRisk::ProjectWrite);
     assert_eq!(metadata.approval, ToolApprovalPolicy::Standard);
     assert_eq!(metadata.idempotency, ToolIdempotency::NonIdempotent);
+    assert!(
+        metadata.destructive,
+        "E2b can create/edit/delete/rename through apply_text_edits"
+    );
     assert_eq!(
         metadata.authority,
         ToolAuthorityPolicy::Require(PROJECT_WRITE)

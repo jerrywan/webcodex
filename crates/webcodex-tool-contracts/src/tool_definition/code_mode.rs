@@ -108,7 +108,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     Some(PROJECT_WRITE),
                     true,
                     NoPath,
-                    false,
+                    true,
                     false,
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
