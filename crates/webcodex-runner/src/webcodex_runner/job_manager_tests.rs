@@ -4580,7 +4580,14 @@ fn runner_real_process_job_cleanup_after_parent_exit_terminates_descendant_and_r
     // This is exactly what the job worker runs after the direct child's status
     // is decided.
     cleanup_managed_tree(&child);
-    let detached = join_reader_threads_until(readers, Instant::now() + Duration::from_secs(1));
+    let mut stderr = String::new();
+    let detached = drain_and_join_reader_threads_until(
+        readers,
+        &rx,
+        &mut accumulated,
+        &mut stderr,
+        Instant::now() + Duration::from_secs(1),
+    );
     assert_eq!(
         detached, 0,
         "stdout reader must finish on EOF instead of being detached"

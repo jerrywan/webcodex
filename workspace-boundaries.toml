@@ -61,6 +61,14 @@ dev = []
 build = []
 test_support = []
 
+[packages.webcodex-browser]
+layer = "domain"
+role = "First-class bounded CDP browser runtime built on process lifecycle primitives."
+normal = ["webcodex-process"]
+dev = []
+build = []
+test_support = []
+
 [packages.webcodex-cli]
 layer = "entrypoint"
 role = "User-facing CLI entrypoint over server composition and shared setup helpers."
@@ -130,6 +138,7 @@ test_support = []
 layer = "runtime"
 role = "Runner executable/runtime composition for local project execution."
 normal = [
+    "webcodex-browser",
     "webcodex-computer",
     "webcodex-core",
     "webcodex-lsp",

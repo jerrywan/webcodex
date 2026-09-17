@@ -2925,17 +2925,13 @@ fn search_overlong_match_line_does_not_overflow_byte_budget() {
     std::fs::create_dir_all(&root).unwrap();
     // Fake rg emits one small complete match followed by a single enormous
     // match line that itself exceeds the byte budget; it then exits cleanly.
-    // Pure shell so it needs nothing from the restricted PATH.
-    write_executable_script(
-        &bin.join("rg"),
-        "#!/bin/sh\n\
-         printf 'src/small.rs:1:needle ok\\n'\n\
-         printf 'src/big.rs:2:'\n\
-         i=0\n\
-         while [ \"$i\" -lt 200000 ]; do printf 'x'; i=$((i + 1)); done\n\
-         printf '\\n'\n\
-         exit 0\n",
+    // Materialize the long payload once in the fixture instead of performing
+    // hundreds of thousands of shell-loop iterations under the test deadline.
+    let oversized_preview = "x".repeat(SEARCH_OUTPUT_BYTE_BUDGET + 1024);
+    let fake_rg = format!(
+        "#!/bin/sh\nprintf 'src/small.rs:1:needle ok\\n'\nprintf 'src/big.rs:2:{oversized_preview}\\n'\nexit 0\n"
     );
+    write_executable_script(&bin.join("rg"), &fake_rg);
     // Real-head semantics: byte-accurate -n/-c truncation. The restricted PATH
     // contains only this delegating head plus the fake rg.
     write_executable_script(&bin.join("head"), "#!/bin/sh\nexec /usr/bin/head \"$@\"\n");

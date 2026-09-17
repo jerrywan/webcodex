@@ -27,16 +27,59 @@ fn run_command_sync_with_shell(
     command.arg("-s").stdin(std::process::Stdio::piped());
     #[cfg(not(windows))]
     command.arg("-c").arg(cmd);
+    let mut stdout_capture = match tempfile::tempfile() {
+        Ok(file) => file,
+        Err(error) => {
+            return (
+                -1,
+                String::new(),
+                format!("Failed to create stdout capture: {error}"),
+                start.elapsed().as_millis() as u64,
+            );
+        }
+    };
+    let mut stderr_capture = match tempfile::tempfile() {
+        Ok(file) => file,
+        Err(error) => {
+            return (
+                -1,
+                String::new(),
+                format!("Failed to create stderr capture: {error}"),
+                start.elapsed().as_millis() as u64,
+            );
+        }
+    };
+    let stdout_sink = match stdout_capture.try_clone() {
+        Ok(file) => file,
+        Err(error) => {
+            return (
+                -1,
+                String::new(),
+                format!("Failed to clone stdout capture: {error}"),
+                start.elapsed().as_millis() as u64,
+            );
+        }
+    };
+    let stderr_sink = match stderr_capture.try_clone() {
+        Ok(file) => file,
+        Err(error) => {
+            return (
+                -1,
+                String::new(),
+                format!("Failed to clone stderr capture: {error}"),
+                start.elapsed().as_millis() as u64,
+            );
+        }
+    };
     command
         .current_dir(cwd)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .stdout(std::process::Stdio::from(stdout_sink))
+        .stderr(std::process::Stdio::from(stderr_sink));
     // Put the command in its own process group so its whole subtree can be
     // reaped as a group. Argument 0 makes the child a group leader whose pgid
-    // equals its pid. Without this, a backgrounded grandchild that inherits the
-    // stdout/stderr pipes (e.g. `some-daemon &`) keeps the pipe write-end open,
-    // and `wait_with_output()` below blocks on pipe EOF *forever* — the exact
-    // intermittent "no reply" hang this guards against.
+    // equals its pid. This is separate from output capture: regular-file capture
+    // prevents pipe-capacity deadlocks, while process-group ownership prevents a
+    // backgrounded descendant from leaking beyond the fixture.
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -98,18 +141,33 @@ fn run_command_sync_with_shell(
             }
         }
     }
+    // Capture stdout/stderr into regular temporary files rather than pipes. The
+    // old test helper waited for process exit before draining its pipes, so a
+    // healthy child that produced more than the host pipe capacity could block
+    // forever in write(2) and be misclassified as a command timeout. File-backed
+    // capture keeps the real wall-clock timeout independent of output volume.
+    if timed_out {
+        let _ = child.kill();
+    }
     // Whether the command timed out or exited on its own, reap the entire
-    // process group before draining output. This kills any backgrounded
-    // grandchildren still holding the stdout/stderr pipes so `wait_with_output`
-    // observes EOF promptly instead of blocking indefinitely. On a clean exit
-    // with no stragglers the signal simply finds nothing to kill.
+    // process group so backgrounded descendants do not leak past the fixture.
     reap_process_group(pgid);
-    let output = child.wait_with_output();
+    let status = child.wait();
     let elapsed = start.elapsed().as_millis() as u64;
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let mut stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    use std::io::{Read, Seek, SeekFrom};
+    let read_capture = |file: &mut std::fs::File| -> std::io::Result<Vec<u8>> {
+        file.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    };
+    let stdout = read_capture(&mut stdout_capture);
+    let stderr = read_capture(&mut stderr_capture);
+    match (status, stdout, stderr) {
+        (Ok(status), Ok(stdout), Ok(stderr)) => {
+            let stdout = String::from_utf8_lossy(&stdout).to_string();
+            let mut stderr = String::from_utf8_lossy(&stderr).to_string();
             if timed_out {
                 if !stderr.is_empty() && !stderr.ends_with('\n') {
                     stderr.push('\n');
@@ -117,23 +175,28 @@ fn run_command_sync_with_shell(
                 stderr.push_str(&format!("Command timed out after {} seconds", timeout_secs));
                 (-1, stdout, stderr, elapsed)
             } else {
-                let code = out.status.code().unwrap_or(-1);
-                (code, stdout, stderr, elapsed)
+                (status.code().unwrap_or(-1), stdout, stderr, elapsed)
             }
         }
-        Err(e) if timed_out => (
+        (Err(error), _, _) if timed_out => (
             -1,
             String::new(),
             format!(
-                "Command timed out after {} seconds; failed to collect output: {}",
-                timeout_secs, e
+                "Command timed out after {} seconds; failed to reap command: {}",
+                timeout_secs, error
             ),
             elapsed,
         ),
-        Err(e) => (
+        (Err(error), _, _) => (
             -1,
             String::new(),
-            format!("Failed to collect command output: {}", e),
+            format!("Failed to wait for command: {error}"),
+            elapsed,
+        ),
+        (_, Err(error), _) | (_, _, Err(error)) => (
+            -1,
+            String::new(),
+            format!("Failed to collect command output: {error}"),
             elapsed,
         ),
     }
@@ -807,6 +870,24 @@ mod tests {
 
         let (code, _stdout, _stderr, _ms) = run_command_sync("exit 3", &dir, 10);
         assert_eq!(code, 3, "non-zero exit codes must survive the reap");
+    }
+
+    /// Large test-process output must not turn into a fake timeout because the
+    /// parent waited for exit before draining a bounded OS pipe.
+    #[cfg(unix)]
+    #[test]
+    fn run_command_sync_captures_output_larger_than_pipe_capacity() {
+        let dir = std::env::temp_dir();
+        let (code, stdout, stderr, _ms) =
+            run_command_sync("printf '%98304s' x; printf '%98304s' y >&2", &dir, 5);
+        assert_eq!(
+            code,
+            0,
+            "stderr tail: {}",
+            &stderr[stderr.len().saturating_sub(200)..]
+        );
+        assert_eq!(stdout.len(), 98_304);
+        assert_eq!(stderr.len(), 98_304);
     }
 
     /// A genuinely slow foreground command still hits the timeout path.

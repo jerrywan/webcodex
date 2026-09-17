@@ -181,6 +181,7 @@ impl ShutdownReport {
                             | "active_jobs_signal"
                             | "active_jobs_drain"
                             | "external_providers_stop"
+                            | "browser_runtimes_stop"
                             | "lsp_servers_stop"
                     ))
             })
@@ -487,6 +488,7 @@ mod tests {
         let report = ShutdownReport::new(
             Instant::now(),
             vec![
+                ShutdownPhaseResult::completed("browser_runtimes_stop", Instant::now(), 1),
                 ShutdownPhaseResult::timed_out("external_providers_stop", Instant::now(), 2),
                 ShutdownPhaseResult::failed(
                     "background_threads_join",
@@ -496,7 +498,13 @@ mod tests {
                 ),
             ],
         );
-        for line in report.log_lines() {
+        let lines = report.log_lines();
+        assert!(lines.iter().any(|line| {
+            line.starts_with(
+                "webcodex-runner shutdown phase completed phase=browser_runtimes_stop ",
+            )
+        }));
+        for line in lines {
             assert!(!line.contains('\n'));
             assert!(line.len() < 512);
             for forbidden in [

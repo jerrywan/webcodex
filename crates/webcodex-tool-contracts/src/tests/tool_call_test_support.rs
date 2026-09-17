@@ -44,6 +44,13 @@ fn sample_tool_args_for_spec(spec: &ToolSpec) -> Value {
         "observe_jobs" => {
             args.insert("items".to_string(), json!([{"job_id": "job_123"}]));
         }
+        "browser_observe" => {
+            args.insert("action".to_string(), json!("targets"));
+        }
+        "browser_act" => {
+            args.insert("action".to_string(), json!("launch"));
+            args.insert("client_id".to_string(), json!("oe"));
+        }
         "computer_observe" => {
             args.insert("action".to_string(), json!("targets"));
         }

@@ -122,6 +122,22 @@ fn run_python_candidate(
 }
 
 #[cfg(feature = "runner-real-process-tests")]
+fn output_field<'a>(stdout: &'a str, name: &str) -> &'a str {
+    let prefix = format!("{name}=");
+    stdout
+        .lines()
+        .find_map(|line| line.strip_prefix(&prefix))
+        .unwrap_or_else(|| panic!("missing {name} field in Skill Python output: {stdout}"))
+}
+
+#[cfg(feature = "runner-real-process-tests")]
+fn canonical_output_path(stdout: &str, name: &str) -> std::path::PathBuf {
+    let raw = output_field(stdout, name);
+    fs::canonicalize(raw)
+        .unwrap_or_else(|error| panic!("could not canonicalize {name} path {raw:?}: {error}"))
+}
+
+#[cfg(feature = "runner-real-process-tests")]
 fn assert_python_package_context(
     config: &SkillsConfig,
     store: &SkillStore,
@@ -142,19 +158,20 @@ fn assert_python_package_context(
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    let expected_file = prepared.target_path.to_string_lossy();
+    assert_eq!(output_field(&stdout, "VALUE"), expected_value, "{stdout}");
+
+    let actual_file = canonical_output_path(&stdout, "FILE");
+    let expected_file = fs::canonicalize(&prepared.target_path).unwrap();
+    assert_eq!(
+        actual_file, expected_file,
+        "Skill __file__ must identify the prepared Runner-owned target: {stdout}"
+    );
+
+    let actual_cwd = canonical_output_path(&stdout, "CWD");
     let expected_cwd = business.path().canonicalize().unwrap();
-    assert!(
-        stdout.contains(&format!("VALUE={expected_value}\n")),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!("FILE={expected_file}\n")),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!("CWD={}\n", expected_cwd.to_string_lossy())),
-        "{stdout}"
+    assert_eq!(
+        actual_cwd, expected_cwd,
+        "Skill cwd must identify the business working directory: {stdout}"
     );
 }
 

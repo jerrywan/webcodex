@@ -565,12 +565,10 @@ exit "$status""#,
 /// byte only as proof of truncation and never exposes it. A record cut mid-line
 /// is dropped and reports `truncation_reason = "output_bytes"`.
 ///
-/// Kept at 32 KiB, not larger: unit tests execute the same command through
-/// [`run_command_sync`](crate::tool_runtime::helpers::run_command_sync), whose
-/// polling loop does not drain stdout while waiting. Output over the ~64 KiB
-/// Linux pipe buffer would block the producer until the hard timeout. 32 KiB
-/// plus the backend marker stays comfortably under that buffer while still
-/// bounding any single over-long record well below the transport cap.
+/// Kept at 32 KiB so a single over-long record remains well below the Runner
+/// transport cap while still leaving useful room for the bounded marker and
+/// result metadata. The test harness drains subprocess pipes concurrently, so
+/// this production budget does not depend on host-specific pipe capacity.
 pub(crate) const SEARCH_OUTPUT_BYTE_BUDGET: usize = 32 * 1024;
 
 fn search_output_line_budget(options: &SearchOptions) -> usize {

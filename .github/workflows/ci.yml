@@ -190,13 +190,10 @@ jobs:
           bash scripts/test_inventory.sh
       - name: Check schema and metadata contracts
         run: |
-          cargo test --locked -p webcodex --lib -- \
-            openapi_operation_ids_are_minimal \
-            openapi_all_local_refs_resolve \
-            openapi_tool_call_request_does_not_advertise_hidden_start_bootstrap \
-            mcp_tools_list_returns_same_names_as_runtime \
-            explicit_resume_advanced_compatibility_schema_and_metadata_are_retained \
-            http_project_connector_lists_and_dispatches_only_canonical_capabilities
+          cargo test --locked -p webcodex --lib openapi
+          cargo test --locked -p webcodex --lib mcp_tools_list
+          cargo test --locked -p webcodex --lib tool_definition_surface_counts_and_action_projection_stay_canonical
+          cargo test --locked -p webcodex --lib external_provider_discovery_cannot_change_public_tool_or_openapi_surface
 
   mcp-conformance:
     # Dated MCP wire evidence is independent from ordinary unit/integration tests.
@@ -579,10 +576,9 @@ jobs:
           require_lane core "$NEEDS_CORE" "$CORE_RESULT"
           require_lane desktop "$NEEDS_DESKTOP" "$DESKTOP_RESULT"
 
-  # Keep the Runner/Computer suite at two libtest threads for now because a few
-  # ordinary subprocess fixtures still share this default lane. Timing-sensitive
-  # lifecycle/process-tree fixtures are ignored and run only by explicit local commands.
-  # Core/library, Runner, and packaging coverage run independently.
+  # Ordinary Runner/Computer fixtures must tolerate default libtest parallelism.
+  # Timing-sensitive lifecycle/process-tree fixtures remain ignored here and run only
+  # by explicit local commands. Core/library, Runner, and packaging coverage are independent.
   test-windows-core:
     needs: changes
     if: needs.changes.outputs.needs_windows_core == 'true'
@@ -618,11 +614,7 @@ jobs:
         with:
           shared-key: windows-runner-ci
       - name: Run Windows Runner and Computer tests
-        # The Runner suite mixes timing-sensitive process, PowerShell, and cache tests.
-        # Even two concurrent test functions can starve bounded startup/timeout windows
-        # on loaded Windows hosts. Serialize test functions; concurrency exercised
-        # inside each individual test remains unchanged.
-        run: cargo test --locked -p webcodex-runner -p webcodex-lsp -p webcodex-computer --features runner-real-process-tests -- --test-threads=1
+        run: cargo test --locked -p webcodex-runner -p webcodex-lsp -p webcodex-computer --features runner-real-process-tests
 
   test-windows-package:
     needs: changes

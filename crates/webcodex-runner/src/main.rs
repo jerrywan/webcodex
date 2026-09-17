@@ -2579,14 +2579,30 @@ fn spawn_reader<R: Read + Send + 'static>(
     })
 }
 
-/// Join the output reader threads until `deadline`. Returns the number of
-/// readers that had not finished by the deadline and were detached (their
-/// `JoinHandle`s dropped without joining).
-fn join_reader_threads_until(
+fn drain_output_chunks(rx: &mpsc::Receiver<OutputChunk>, stdout: &mut String, stderr: &mut String) {
+    while let Ok(chunk) = rx.try_recv() {
+        match chunk {
+            OutputChunk::Stdout(text) => stdout.push_str(&text),
+            OutputChunk::Stderr(text) => stderr.push_str(&text),
+        }
+    }
+}
+
+/// Drain the bounded output channel while joining reader threads until
+/// `deadline`. Draining and joining must progress together: a reader can be
+/// blocked in `SyncSender::send` after the child exits, so waiting for the
+/// reader before draining the channel creates a terminal-output race and can
+/// drop the final validation summary. Returns the number of readers detached
+/// after the existing bounded cleanup deadline.
+fn drain_and_join_reader_threads_until(
     mut readers: Vec<std::thread::JoinHandle<()>>,
+    rx: &mpsc::Receiver<OutputChunk>,
+    stdout: &mut String,
+    stderr: &mut String,
     deadline: Instant,
 ) -> usize {
     loop {
+        drain_output_chunks(rx, stdout, stderr);
         let mut index = 0;
         while index < readers.len() {
             if readers[index].is_finished() {
@@ -2597,6 +2613,9 @@ fn join_reader_threads_until(
             }
         }
         if readers.is_empty() {
+            // A finished reader may have sent its final chunk just before the
+            // join became observable.
+            drain_output_chunks(rx, stdout, stderr);
             return 0;
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -2604,6 +2623,7 @@ fn join_reader_threads_until(
             // Dropping a JoinHandle detaches it. The output channel is bounded,
             // so an abnormal pipe holder cannot retain unbounded runner memory
             // or block process shutdown.
+            drain_output_chunks(rx, stdout, stderr);
             return readers.len();
         }
         std::thread::sleep(Duration::from_millis(10).min(remaining));
@@ -5088,15 +5108,15 @@ impl JobManager {
                 // its own, then force-terminate whatever remains before the
                 // bounded reader join, so cleanup cannot wait forever on EOF.
                 cleanup_managed_tree(&child);
-                join_reader_threads_until(readers, Instant::now() + Duration::from_secs(1));
                 let mut out = String::new();
                 let mut err = String::new();
-                while let Ok(chunk) = rx.try_recv() {
-                    match chunk {
-                        OutputChunk::Stdout(text) => out.push_str(&text),
-                        OutputChunk::Stderr(text) => err.push_str(&text),
-                    }
-                }
+                drain_and_join_reader_threads_until(
+                    readers,
+                    &rx,
+                    &mut out,
+                    &mut err,
+                    Instant::now() + Duration::from_secs(1),
+                );
                 observe_cargo_test_count_chunks(&mut test_count_accumulator, &out, &err);
                 if step_status.0 == "completed" && step_index + 1 < step_count {
                     step_index += 1;
@@ -5535,15 +5555,15 @@ impl JobManager {
                 };
                 result.err()
             });
-            join_reader_threads_until(readers, Instant::now() + Duration::from_secs(1));
             let mut final_out = String::new();
             let mut final_err = String::new();
-            while let Ok(chunk) = rx.try_recv() {
-                match chunk {
-                    OutputChunk::Stdout(text) => final_out.push_str(&text),
-                    OutputChunk::Stderr(text) => final_err.push_str(&text),
-                }
-            }
+            drain_and_join_reader_threads_until(
+                readers,
+                &rx,
+                &mut final_out,
+                &mut final_err,
+                Instant::now() + Duration::from_secs(1),
+            );
             if !final_err.is_empty() {
                 append_bounded_tail(&mut transport_stderr, &final_err, 16 * 1024);
             }

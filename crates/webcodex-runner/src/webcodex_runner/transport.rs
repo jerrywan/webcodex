@@ -284,7 +284,7 @@ impl RunnerRuntimeState {
     }
 
     fn cleanup(&self, deadline: ShutdownDeadline) -> Vec<ShutdownPhaseResult> {
-        let mut phases = Vec::with_capacity(10);
+        let mut phases = Vec::with_capacity(11);
 
         let started = Instant::now();
         phases.push(if self.coordinator.signal_received() {

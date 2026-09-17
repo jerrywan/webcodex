@@ -102,6 +102,29 @@ async fn call_hygiene_in_window_with_local_runner(
     auth: &crate::auth::AuthContext,
     window_id: &str,
 ) -> crate::tool_runtime::kernel::ToolCallOutcome {
+    call_hygiene_in_window_with_local_runner_transport(
+        runtime,
+        client_id,
+        project,
+        recording_session_id,
+        business_session_id,
+        auth,
+        window_id,
+        ToolTransport::Mcp,
+    )
+    .await
+}
+
+async fn call_hygiene_in_window_with_local_runner_transport(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    project: &str,
+    recording_session_id: Option<&str>,
+    business_session_id: Option<&str>,
+    auth: &crate::auth::AuthContext,
+    window_id: &str,
+    transport: ToolTransport,
+) -> crate::tool_runtime::kernel::ToolCallOutcome {
     let runtime_for_task = runtime.clone();
     let project = project.to_string();
     let recording_session_id = recording_session_id.map(str::to_string);
@@ -121,7 +144,7 @@ async fn call_hygiene_in_window_with_local_runner(
                     arguments,
                 },
                 ToolCallContext {
-                    transport: ToolTransport::Mcp,
+                    transport,
                     session_id: recording_session_id.as_deref(),
                     auth: Some(&auth),
                     window: Some(&window),
@@ -132,19 +155,38 @@ async fn call_hygiene_in_window_with_local_runner(
             .await
     });
 
-    // Agent-backed hygiene is asynchronous: service its synthetic Runner
-    // requests instead of waiting for each 30-second production script timeout.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    // These tests exercise Session/window recording semantics, not Git or shell
+    // integration. Complete the one expected hygiene diagnostic in-memory so a
+    // missed fixture response cannot fall through to the 30-second production
+    // script timeout. The absolute deadline is a real wall-clock test bound.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while !task.is_finished() {
         assert!(
             std::time::Instant::now() < deadline,
-            "window-correlation hygiene call did not finish within 30 seconds for {client_id}"
+            "window-correlation hygiene fixture did not finish within 2 seconds for {client_id}"
         );
         if let Some(request) = probe_patch_agent_request(runtime, client_id).await {
             assert_eq!(request.kind, "run_internal_posix_script");
-            complete_agent_request_by_running_locally(runtime, client_id, request).await;
+            let script = request
+                .script
+                .as_ref()
+                .expect("hygiene diagnostics must use the typed internal script payload");
+            assert_eq!(
+                script.script,
+                crate::tool_runtime::hygiene::hygiene_diagnostic_command(),
+                "Session fixture must not hide an unexpected hygiene subprocess"
+            );
+            complete_patch_agent_request(
+                runtime,
+                client_id,
+                &request.request_id,
+                0,
+                "\n@@WEBCODEX_HYGIENE_STATUS@@0\n",
+                "",
+            )
+            .await;
         } else {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
     }
     task.await.unwrap()
@@ -1893,25 +1935,17 @@ async fn work_on_project_without_session_id_always_creates_fresh_session() {
         .unwrap()
         .events
         .len();
-    let ordinary_window = crate::client_window::ClientWindow::for_test(
+    let ordinary = call_hygiene_in_window_with_local_runner_transport(
+        &runtime,
+        "wop-create",
+        &project,
+        None,
+        None,
+        &auth,
         "ordinary_project_tool_without_explicit_session_is_unrecorded",
-    );
-    let ordinary = runtime
-        .call_tool_with_context(
-            ToolCallRequest {
-                tool_name: "workspace_hygiene_check".to_string(),
-                arguments: json!({"project": project}),
-            },
-            ToolCallContext {
-                transport: ToolTransport::Api,
-                session_id: None,
-                auth: Some(&auth),
-                window: Some(&ordinary_window),
-                record_oauth_scope_denials: true,
-                host_file_import_trust: HostFileImportTrust::Untrusted,
-            },
-        )
-        .await;
+        ToolTransport::Api,
+    )
+    .await;
     assert!(ordinary.success, "{:?}", ordinary.error_status);
     assert_eq!(
         runtime

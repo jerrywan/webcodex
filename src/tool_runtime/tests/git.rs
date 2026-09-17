@@ -3757,7 +3757,10 @@ async fn git_diff_hunks_binary_records_advance_across_byte_bounded_pages() {
         bytes[1] = index as u8;
         fs::write(repo.path().join(name), bytes).unwrap();
     }
-    git_test_command_ok(repo.path(), "git add -- . && git commit -m binary-baseline");
+    git_test_command_ok(
+        repo.path(),
+        "git add -- . && git commit -q -m binary-baseline",
+    );
     for (index, name) in names.iter().enumerate() {
         let mut bytes = vec![0u8; 512];
         bytes[1] = index as u8;

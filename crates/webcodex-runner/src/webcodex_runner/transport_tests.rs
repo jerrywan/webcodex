@@ -165,6 +165,7 @@ fn runtime_shutdown_is_fast_ordered_and_runs_once_without_resources() {
             "active_jobs_signal",
             "active_jobs_drain",
             "external_providers_stop",
+            "browser_runtimes_stop",
             "lsp_servers_stop",
             "background_threads_join",
             "shutdown_complete",

@@ -1457,9 +1457,9 @@ async fn worst_case_startup_with_huge_repository_stays_below_hard_limit() {
         )
         .unwrap();
     }
-    for cmd in ["git add -A", "git commit -m 'seed worst-case repo'"] {
+    for cmd in ["git add -A", "git commit -q -m 'seed worst-case repo'"] {
         let (exit_code, stdout, stderr, _) =
-            crate::tool_runtime::helpers::run_command_sync(cmd, root.path(), 30);
+            crate::tool_runtime::helpers::run_command_sync(cmd, root.path(), 5);
         assert_eq!(exit_code, 0, "{stdout}{stderr}");
     }
 
