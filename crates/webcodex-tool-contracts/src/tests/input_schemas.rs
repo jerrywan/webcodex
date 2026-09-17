@@ -1036,3 +1036,64 @@ fn agent_continuation_bind_requires_canonical_view_fence_without_model_exposure(
         .iter()
         .any(|spec| spec.name == bind.name));
 }
+
+#[test]
+fn skill_runtime_and_management_schemas_preserve_typed_bounds() {
+    let list = input_schema_for_tool("skill_list");
+    assert_eq!(list["properties"]["project"]["minLength"], 1);
+    assert_eq!(list["properties"]["query"]["maxLength"], 200);
+    assert_eq!(list["properties"]["limit"]["maximum"], 64);
+    assert_eq!(
+        list["properties"]["expected_catalog_revision"]["pattern"],
+        "^wc_skillcat_[A-Za-z0-9_-]{43}$"
+    );
+
+    let read = input_schema_for_tool("skill_read_file");
+    assert_eq!(read["properties"]["project"]["minLength"], 1);
+    assert_eq!(
+        read["properties"]["skill_id"]["pattern"],
+        "^wc_skill_[A-Za-z0-9_-]{21}[AQgw]$"
+    );
+    assert_eq!(read["properties"]["path"]["maxLength"], 512);
+    assert_eq!(read["properties"]["start_line"]["minimum"], 1);
+    assert_eq!(read["properties"]["limit"]["maximum"], 400);
+    assert_eq!(
+        read["properties"]["expected_definition_revision"]["pattern"],
+        "^[0-9a-f]{64}$"
+    );
+
+    let versions = input_schema_for_tool("skill_versions");
+    assert_eq!(versions["properties"]["skill_key"]["maxLength"], 96);
+    assert_eq!(
+        versions["properties"]["skill_key"]["pattern"],
+        "^[A-Za-z0-9._-]+$"
+    );
+    assert_eq!(versions["properties"]["limit"]["maximum"], 64);
+
+    let install = input_schema_for_tool("skill_install");
+    assert_eq!(install["properties"]["artifact_path"]["maxLength"], 1024);
+    assert_eq!(
+        install["properties"]["expected_artifact_sha256"]["pattern"],
+        "^[0-9a-f]{64}$"
+    );
+    assert_eq!(install["properties"]["idempotency_key"]["maxLength"], 128);
+    assert_eq!(install["properties"]["activate"]["default"], false);
+
+    for name in ["skill_activate", "skill_remove_revision"] {
+        let schema = input_schema_for_tool(name);
+        assert_eq!(schema["properties"]["skill_key"]["maxLength"], 96, "{name}");
+        assert_eq!(
+            schema["properties"]["package_revision"]["pattern"], "^wc_skillpkg_[A-Za-z0-9_-]{43}$",
+            "{name}"
+        );
+        assert_eq!(
+            schema["properties"]["expected_state_revision"]["pattern"],
+            "^wc_skillstate_[A-Za-z0-9_-]{43}$",
+            "{name}"
+        );
+        assert_eq!(
+            schema["properties"]["idempotency_key"]["maxLength"], 128,
+            "{name}"
+        );
+    }
+}

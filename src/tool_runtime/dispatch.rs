@@ -2247,7 +2247,12 @@ impl ToolRuntime {
                 lifecycle,
                 offset,
                 limit,
-            } => self.list_goals(auth, lifecycle, offset, limit),
+            } => self.list_goals(
+                auth,
+                lifecycle.map(|value| value.as_str().to_string()),
+                offset,
+                limit,
+            ),
 
             ToolCall::UpdateGoal {
                 goal_id,
@@ -2263,7 +2268,7 @@ impl ToolRuntime {
                 expected_revision,
                 title,
                 objective,
-                lifecycle,
+                lifecycle.map(|value| value.as_str().to_string()),
                 terminal_reason,
                 idempotency_key,
             ),

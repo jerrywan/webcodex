@@ -30,6 +30,41 @@ impl StartupDetail {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkOnProjectMode {
+    #[default]
+    Checkout,
+    Worktree,
+}
+
+impl WorkOnProjectMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Checkout => "checkout",
+            Self::Worktree => "worktree",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalLifecycleInput {
+    Active,
+    Completed,
+    Cancelled,
+}
+
+impl GoalLifecycleInput {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 #[cfg(feature = "workspace-checkpoints")]
 pub use webcodex_core::runtime_contract::{
     CHECKPOINT_KIND_VALUES, CHECKPOINT_VALIDATION_STATUS_VALUES,

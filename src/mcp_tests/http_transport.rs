@@ -1900,7 +1900,7 @@ async fn http_mcp_2026_collaboration_completion_preserves_explicit_recorder_prov
         .unwrap()
         .assignment_fence;
 
-    let completion_arguments = with_mcp_recording_session(
+    let forged_completion_arguments = with_mcp_recording_session(
         json!({
             "session_id": coordinator_id,
             "message_id": todo_id,
@@ -1908,6 +1908,31 @@ async fn http_mcp_2026_collaboration_completion_preserves_explicit_recorder_prov
             "completion_key": "stateless-recorder-v1",
             "expected_assignment_fence": assignment_fence.clone(),
             "author_session_id": "wc_sess_forged_should_not_win"
+        }),
+        &worker_id,
+    );
+    let (status, forged_body) = stateless_2026_tool_call(
+        &service,
+        "secret",
+        2340,
+        "complete_session_message",
+        forged_completion_arguments,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{forged_body}");
+    assert_eq!(forged_body["error"]["code"], -32602);
+    assert!(forged_body["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("unknown field `author_session_id`")));
+
+    let completion_arguments = with_mcp_recording_session(
+        json!({
+            "session_id": coordinator_id,
+            "message_id": todo_id,
+            "answer": "Reviewed and completed under the explicit worker recorder.",
+            "completion_key": "stateless-recorder-v1",
+            "expected_assignment_fence": assignment_fence.clone(),
         }),
         &worker_id,
     );

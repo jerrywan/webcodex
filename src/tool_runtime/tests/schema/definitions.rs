@@ -28,9 +28,12 @@ fn git_diff_hunks_rejects_unknown_legacy_fields_compactly() {
         }),
     )
     .unwrap_err();
-    assert!(error.contains("unknown field(s)"), "{error}");
-    assert!(error.contains("mode"), "{error}");
-    assert!(error.contains("max_lines_per_hunk"), "{error}");
+    assert!(error.contains("unknown field"), "{error}");
+    assert!(
+        error.contains("mode") || error.contains("max_lines_per_hunk"),
+        "{error}"
+    );
+    assert!(error.contains("max_hunk_lines"), "{error}");
     assert!(
         !error.contains("properties"),
         "must not dump JSON Schema: {error}"

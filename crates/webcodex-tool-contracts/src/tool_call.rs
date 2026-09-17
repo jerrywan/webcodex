@@ -7,7 +7,8 @@
 #[cfg(feature = "workspace-checkpoints")]
 use super::tool_inputs::CheckpointValidationInput;
 use super::tool_inputs::{
-    default_true, ApplyFileChangeInput, ExecutionPurpose, ExecutionShell, SessionMode,
+    default_true, ApplyFileChangeInput, ExecutionPurpose, ExecutionShell, GoalLifecycleInput,
+    SessionMode, WorkOnProjectMode,
 };
 use crate::{lookup_tool_definition, model_visible_tool_names_csv};
 use schemars::JsonSchema;
@@ -39,12 +40,34 @@ pub const TOOL_CALL_TOOL_FIELD: &str = "tool";
 pub const TOOL_CALL_PARAMS_FIELD: &str = "params";
 pub const TOOL_CALL_WRAPPER_FIELDS: &[&str] = &[TOOL_CALL_TOOL_FIELD, TOOL_CALL_PARAMS_FIELD];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginToolAction {
+    List,
+    Check,
+    Reload,
+    Describe,
+    Call,
+}
+
+impl PluginToolAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Check => "check",
+            Self::Reload => "reload",
+            Self::Describe => "describe",
+            Self::Call => "call",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PluginToolCall {
     /// Gateway operation. Discovery starts from an exact caller-visible Runner; call uses only an
     /// opaque binding from describe.
-    pub action: String,
+    pub action: PluginToolAction,
     /// Exact caller-visible Runner client_id. Required for check/reload/describe and for Runner-scoped
     /// list operations.
     #[schemars(length(min = 1, max = 128))]
@@ -109,8 +132,8 @@ impl PluginToolCall {
                 .map_err(|_| "arguments exceed Plugin bounds".to_string())?;
         }
 
-        match self.action.as_str() {
-            "list" => {
+        match self.action {
+            PluginToolAction::List => {
                 if self.tool.is_some() || self.binding.is_some() || self.arguments.is_some() {
                     return Err("action=list accepts only optional runner and plugin".to_string());
                 }
@@ -118,7 +141,7 @@ impl PluginToolCall {
                     return Err("action=list requires runner when plugin is provided".to_string());
                 }
             }
-            "check" => {
+            PluginToolAction::Check => {
                 if self.runner.is_none()
                     || self.plugin.is_none()
                     || self.tool.is_some()
@@ -128,7 +151,7 @@ impl PluginToolCall {
                     return Err("action=check requires only runner and plugin".to_string());
                 }
             }
-            "reload" => {
+            PluginToolAction::Reload => {
                 if self.runner.is_none()
                     || self.plugin.is_some()
                     || self.tool.is_some()
@@ -138,7 +161,7 @@ impl PluginToolCall {
                     return Err("action=reload requires only runner".to_string());
                 }
             }
-            "describe" => {
+            PluginToolAction::Describe => {
                 if self.runner.is_none()
                     || self.plugin.is_none()
                     || self.tool.is_none()
@@ -150,7 +173,7 @@ impl PluginToolCall {
                     );
                 }
             }
-            "call" => {
+            PluginToolAction::Call => {
                 if self.binding.is_none()
                     || self.arguments.is_none()
                     || self.runner.is_some()
@@ -159,11 +182,6 @@ impl PluginToolCall {
                 {
                     return Err("action=call requires only binding and arguments".to_string());
                 }
-            }
-            _ => {
-                return Err(
-                    "action must be one of list, check, reload, describe, or call".to_string(),
-                )
             }
         }
         Ok(())
@@ -882,6 +900,7 @@ pub enum ToolCall {
         #[serde(default)]
         path: Option<String>,
         #[schemars(extend("default" = "checkout"))]
+        #[schemars(with = "Option<WorkOnProjectMode>")]
         /// Optional bootstrap mode. Omitted or checkout preserves existing behavior exactly. worktree is
         /// supported only with client_id + path and asks the Runner to create/recover an isolated managed
         /// detached worktree, register it as an ordinary Project, then start the Workflow Session.
@@ -2222,13 +2241,21 @@ pub enum ToolCall {
     /// model-hidden globally and exposed only by capable Stateless MCP Full
     /// Operator surfaces.
     SkillList {
+        /// Required authorized runtime Project id.
+        #[schemars(length(min = 1))]
         project: String,
+        /// Optional bounded case-insensitive substring filter over Skill name and description only.
+        #[schemars(length(max = 200))]
         #[serde(default)]
         query: Option<String>,
+        #[schemars(range(min = 0))]
         #[serde(default)]
         offset: Option<usize>,
+        #[schemars(range(min = 1, max = 64))]
         #[serde(default)]
         limit: Option<usize>,
+        /// Optional catalog revision guard. If current discovery differs, fail instead of continuing an old offset.
+        #[schemars(regex(pattern = "^wc_skillcat_[A-Za-z0-9_-]{43}$"))]
         #[serde(default)]
         expected_catalog_revision: Option<String>,
         #[serde(default)]
@@ -2237,16 +2264,23 @@ pub enum ToolCall {
 
     /// Read one bounded UTF-8 text resource from a selected Skill package.
     SkillReadFile {
+        #[schemars(length(min = 1))]
         project: String,
+        #[schemars(regex(pattern = "^wc_skill_[A-Za-z0-9_-]{21}[AQgw]$"))]
         skill_id: String,
+        #[schemars(length(min = 1, max = 512))]
         #[serde(default)]
         path: Option<String>,
+        #[schemars(range(min = 1))]
         #[serde(default)]
         start_line: Option<usize>,
+        #[schemars(range(min = 1, max = 400))]
         #[serde(default)]
         limit: Option<usize>,
+        #[schemars(regex(pattern = "^[0-9a-f]{64}$"))]
         #[serde(default)]
         expected_definition_revision: Option<String>,
+        #[schemars(regex(pattern = "^wc_skillpkg_[A-Za-z0-9_-]{43}$"))]
         #[serde(default)]
         expected_package_revision: Option<String>,
         #[serde(default)]
@@ -2254,10 +2288,15 @@ pub enum ToolCall {
     },
 
     SkillVersions {
+        #[schemars(length(min = 1))]
         project: String,
+        #[schemars(length(min = 1, max = 96))]
+        #[schemars(regex(pattern = "^[A-Za-z0-9._-]+$"))]
         skill_key: String,
+        #[schemars(range(min = 0))]
         #[serde(default)]
         offset: Option<usize>,
+        #[schemars(range(min = 1, max = 64))]
         #[serde(default)]
         limit: Option<usize>,
         #[serde(default)]
@@ -2265,13 +2304,21 @@ pub enum ToolCall {
     },
 
     SkillInstall {
+        #[schemars(length(min = 1))]
         project: String,
+        #[schemars(length(min = 1, max = 96))]
+        #[schemars(regex(pattern = "^[A-Za-z0-9._-]+$"))]
         skill_key: String,
+        #[schemars(length(min = 1, max = 1024))]
         artifact_path: String,
+        #[schemars(regex(pattern = "^[0-9a-f]{64}$"))]
         expected_artifact_sha256: String,
+        #[schemars(length(min = 1, max = 128))]
         idempotency_key: String,
+        #[schemars(extend("default" = false))]
         #[serde(default)]
         activate: Option<bool>,
+        #[schemars(regex(pattern = "^wc_skillstate_[A-Za-z0-9_-]{43}$"))]
         #[serde(default)]
         expected_state_revision: Option<String>,
         #[serde(default)]
@@ -2279,20 +2326,32 @@ pub enum ToolCall {
     },
 
     SkillActivate {
+        #[schemars(length(min = 1))]
         project: String,
+        #[schemars(length(min = 1, max = 96))]
+        #[schemars(regex(pattern = "^[A-Za-z0-9._-]+$"))]
         skill_key: String,
+        #[schemars(regex(pattern = "^wc_skillpkg_[A-Za-z0-9_-]{43}$"))]
         package_revision: String,
+        #[schemars(regex(pattern = "^wc_skillstate_[A-Za-z0-9_-]{43}$"))]
         expected_state_revision: String,
+        #[schemars(length(min = 1, max = 128))]
         idempotency_key: String,
         #[serde(default)]
         session_id: Option<String>,
     },
 
     SkillRemoveRevision {
+        #[schemars(length(min = 1))]
         project: String,
+        #[schemars(length(min = 1, max = 96))]
+        #[schemars(regex(pattern = "^[A-Za-z0-9._-]+$"))]
         skill_key: String,
+        #[schemars(regex(pattern = "^wc_skillpkg_[A-Za-z0-9_-]{43}$"))]
         package_revision: String,
+        #[schemars(regex(pattern = "^wc_skillstate_[A-Za-z0-9_-]{43}$"))]
         expected_state_revision: String,
+        #[schemars(length(min = 1, max = 128))]
         idempotency_key: String,
         #[serde(default)]
         session_id: Option<String>,
@@ -2337,7 +2396,7 @@ pub enum ToolCall {
         /// Closed authoritative Goal lifecycle. Execution/presentation states such as implementing,
         /// blocked, or waiting_validation are not Goal lifecycle values.
         #[serde(default)]
-        lifecycle: Option<String>,
+        lifecycle: Option<GoalLifecycleInput>,
         #[schemars(extend("default" = 0))]
         /// Bounded SQLite-compatible page offset.
         #[schemars(range(min = 0, max = 9223372036854775807i64))]
@@ -2370,7 +2429,7 @@ pub enum ToolCall {
         /// Closed authoritative Goal lifecycle. Execution/presentation states such as implementing,
         /// blocked, or waiting_validation are not Goal lifecycle values.
         #[serde(default)]
-        lifecycle: Option<String>,
+        lifecycle: Option<GoalLifecycleInput>,
         /// Optional bounded terminal reason; valid only with an explicit completed or cancelled transition.
         #[schemars(length(min = 1, max = 4096))]
         #[serde(default)]
@@ -3634,6 +3693,7 @@ pub enum ToolCall {
         #[schemars(regex(pattern = "^[0-9a-f]{64}$"))]
         #[serde(default)]
         expected_sha256: Option<String>,
+        #[schemars(skip)]
         #[serde(default)]
         as_image: Option<bool>,
     },
@@ -4097,6 +4157,7 @@ pub enum ToolCall {
         /// Bounded exact Runner client_ids. Mutually exclusive with client_id; duplicates are rejected.
         #[schemars(length(min = 1, max = 8))]
         #[schemars(inner(length(min = 1, max = 128)))]
+        #[schemars(extend("uniqueItems" = true))]
         #[serde(default)]
         client_ids: Option<Vec<String>>,
         /// When false, omit Project bodies while retaining each Runner project count. Defaults to true for
