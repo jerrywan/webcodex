@@ -336,6 +336,17 @@ fn instruction_agents_alias_resolution(root_listing: &str) -> InstructionAgentsA
     }
 }
 
+const PROJECT_INSTRUCTION_RUNNER_WAIT_TIMEOUT_SECS: u64 = 6;
+
+#[cfg(not(test))]
+const PROJECT_INSTRUCTION_RESPONSE_DEADLINE: Duration =
+    Duration::from_secs(PROJECT_INSTRUCTION_RUNNER_WAIT_TIMEOUT_SECS + 2);
+// Unit-test Runners are in-process fakes. Tests that exercise instruction loading
+// actively complete these requests, while unrelated Session tests must not spend
+// five production-sized best-effort deadlines waiting on an intentionally idle fake.
+#[cfg(test)]
+const PROJECT_INSTRUCTION_RESPONSE_DEADLINE: Duration = Duration::from_millis(250);
+
 enum InstructionCandidateRead {
     Found(super::project_instructions::LoadedInstructionCandidate),
     Missing,
@@ -780,7 +791,6 @@ impl ToolRuntime {
         &self,
         config: &ProjectConfig,
     ) -> Option<InstructionAgentsAliasResolution> {
-        const WAIT_TIMEOUT: u64 = 6;
         let client_id = config.client_id.as_str();
         let (request_id, rx) = self
             .runner_registry
@@ -800,13 +810,13 @@ impl ToolRuntime {
                     end_line: None,
                     line: None,
                     create_dirs: false,
-                    wait_timeout_secs: WAIT_TIMEOUT,
+                    wait_timeout_secs: PROJECT_INSTRUCTION_RUNNER_WAIT_TIMEOUT_SECS,
                 },
                 "project_instructions".to_string(),
             )
             .await
             .ok()?;
-        match tokio::time::timeout(Duration::from_secs(WAIT_TIMEOUT + 2), rx).await {
+        match tokio::time::timeout(PROJECT_INSTRUCTION_RESPONSE_DEADLINE, rx).await {
             Ok(Ok(resp)) if resp.exit_code == Some(0) && resp.error.is_none() => Some(
                 instruction_agents_alias_resolution(resp.stdout.as_deref().unwrap_or_default()),
             ),
@@ -831,8 +841,6 @@ impl ToolRuntime {
         // Request one extra line so canonical envelope total/selection metadata
         // reliably signals truncation beyond the per-file cap.
         let read_limit = MAX_LINES_PER_FILE + 1;
-        const WAIT_TIMEOUT: u64 = 6;
-
         let client_id = config.client_id.as_str();
         let (request_id, rx) = match self
             .runner_registry
@@ -852,7 +860,7 @@ impl ToolRuntime {
                     end_line: Some(read_limit),
                     line: None,
                     create_dirs: false,
-                    wait_timeout_secs: WAIT_TIMEOUT,
+                    wait_timeout_secs: PROJECT_INSTRUCTION_RUNNER_WAIT_TIMEOUT_SECS,
                 },
                 "project_instructions".to_string(),
             )
@@ -861,7 +869,7 @@ impl ToolRuntime {
             Ok(enqueued) => enqueued,
             Err(_) => return InstructionCandidateRead::Unavailable,
         };
-        match tokio::time::timeout(Duration::from_secs(WAIT_TIMEOUT + 2), rx).await {
+        match tokio::time::timeout(PROJECT_INSTRUCTION_RESPONSE_DEADLINE, rx).await {
             Ok(Ok(resp)) if resp.exit_code == Some(0) && resp.error.is_none() => {
                 match parse_instruction_runner_stdout(resp.stdout.unwrap_or_default()) {
                     Ok(Some((content, total_lines, full_sha256))) => {
