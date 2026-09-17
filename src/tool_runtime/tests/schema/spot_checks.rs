@@ -113,25 +113,29 @@ fn tool_specs_structured_validation_schema_and_output() {
         cargo_test_input["min_tests"]["maximum"],
         crate::runner_protocol::CARGO_TEST_MIN_TESTS_MAX
     );
+    // Cross-field execution-proof policy is canonical Runtime validation rather
+    // than Host-sensitive JSON-Schema conditionals. The structural schema admits
+    // these parseable shapes; pre-execution validation still rejects no_run with
+    // a positive test-count requirement before any Job is created.
     for valid in [
         serde_json::json!({"project": "agent:demo:repo"}),
         serde_json::json!({"project": "agent:demo:repo", "no_run": true}),
         serde_json::json!({"project": "agent:demo:repo", "require_tests": true}),
         serde_json::json!({"project": "agent:demo:repo", "require_tests": false, "min_tests": 6}),
+        serde_json::json!({"project": "agent:demo:repo", "no_run": true, "require_tests": true}),
+        serde_json::json!({"project": "agent:demo:repo", "no_run": true, "min_tests": 1}),
     ] {
         crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
             &valid,
             &cargo_test.input_schema,
         )
-        .unwrap_or_else(|error| panic!("valid cargo_test input rejected: {valid}: {error}"));
+        .unwrap_or_else(|error| panic!("valid structural cargo_test input rejected: {valid}: {error}"));
     }
     for invalid in [
         serde_json::json!({"project": "agent:demo:repo", "min_tests": 0}),
         serde_json::json!({"project": "agent:demo:repo", "min_tests": -1}),
         serde_json::json!({"project": "agent:demo:repo", "min_tests": 1.5}),
         serde_json::json!({"project": "agent:demo:repo", "min_tests": crate::runner_protocol::CARGO_TEST_MIN_TESTS_MAX + 1}),
-        serde_json::json!({"project": "agent:demo:repo", "no_run": true, "require_tests": true}),
-        serde_json::json!({"project": "agent:demo:repo", "no_run": true, "min_tests": 1}),
     ] {
         assert!(
             crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
@@ -139,7 +143,7 @@ fn tool_specs_structured_validation_schema_and_output() {
                 &cargo_test.input_schema
             )
             .is_err(),
-            "invalid cargo_test input passed schema: {invalid}"
+            "structurally invalid cargo_test input passed schema: {invalid}"
         );
     }
     let cargo_test_output = cargo_test.output_schema["properties"]["output"]["properties"]

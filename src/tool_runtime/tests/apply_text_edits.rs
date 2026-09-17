@@ -21,35 +21,38 @@ fn scoped_text_edit(
 fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
     let specs = registered_tool_specs();
     let spec = spec_named(&specs, "apply_text_edits");
-    let edit_variants = spec.input_schema["properties"]["changes"]["items"]["oneOf"][0]
-        ["properties"]["edits"]["items"]["oneOf"]
+    let change_variants = spec.input_schema["properties"]["changes"]["items"]["anyOf"]
         .as_array()
-        .unwrap();
-    assert_eq!(edit_variants.len(), 4);
-    for variant in edit_variants {
-        assert_eq!(variant["properties"]["occurrence"]["type"], "integer");
-        assert_eq!(variant["properties"]["occurrence"]["minimum"], 1);
-        let line_scope = &variant["properties"]["line_scope"];
-        assert_eq!(line_scope["type"], "object");
-        assert_eq!(line_scope["additionalProperties"], false);
-        assert_eq!(
-            line_scope["required"],
-            serde_json::json!(["start_line", "end_line"])
-        );
-        assert_eq!(line_scope["properties"]["start_line"]["minimum"], 1);
-        assert_eq!(line_scope["properties"]["end_line"]["minimum"], 1);
-        assert!(!variant["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("occurrence")));
-    }
-    for variant in &edit_variants[2..] {
-        assert!(variant["properties"]["new_text"].get("minLength").is_none());
-        assert!(variant["properties"]["new_text"]["description"]
-            .as_str()
-            .unwrap()
-            .contains("no-op"));
-    }
+        .expect("apply_text_edits change wire union");
+    let canonical = change_variants
+        .iter()
+        .find(|variant| variant["properties"].get("kind").is_some())
+        .expect("canonical apply-file-change wire variant");
+    let edit = &canonical["properties"]["edits"]["items"];
+    assert_eq!(
+        edit["properties"]["kind"]["enum"],
+        serde_json::json!([
+            "replace_exact",
+            "insert_after",
+            "insert_before",
+            "delete_exact"
+        ])
+    );
+    assert_eq!(edit["properties"]["occurrence"]["type"], "integer");
+    assert_eq!(edit["properties"]["occurrence"]["minimum"], 1);
+    let line_scope = &edit["properties"]["line_scope"];
+    assert_eq!(line_scope["type"], "object");
+    assert_eq!(line_scope["additionalProperties"], false);
+    assert_eq!(
+        line_scope["required"],
+        serde_json::json!(["start_line", "end_line"])
+    );
+    assert_eq!(line_scope["properties"]["start_line"]["minimum"], 1);
+    assert_eq!(line_scope["properties"]["end_line"]["minimum"], 1);
+    assert!(!edit["required"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("occurrence")));
     let output_properties = &spec.output_schema["properties"]["output"]["properties"];
     for removed in [
         "conflict_recovery",
@@ -125,15 +128,17 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
     let openapi = crate::openapi::build_openapi_spec();
     let action = &openapi["paths"]["/api/actions/apply_text_edits"]["post"];
     assert_eq!(action["operationId"], "apply_text_edits");
-    let action_edit_variants = action["requestBody"]["content"]["application/json"]["schema"]
-        ["properties"]["changes"]["items"]["oneOf"][0]["properties"]["edits"]["items"]["oneOf"]
+    let action_change_variants = action["requestBody"]["content"]["application/json"]["schema"]
+        ["properties"]["changes"]["items"]["anyOf"]
         .as_array()
-        .expect("Action apply_text_edits edit variants");
-    assert_eq!(action_edit_variants.len(), 4);
-    for variant in action_edit_variants {
-        assert_eq!(variant["properties"]["occurrence"]["type"], "integer");
-        assert_eq!(variant["properties"]["occurrence"]["minimum"], 1);
-    }
+        .expect("Action apply_text_edits change wire union");
+    let action_canonical = action_change_variants
+        .iter()
+        .find(|variant| variant["properties"].get("kind").is_some())
+        .expect("Action canonical apply-file-change wire variant");
+    let action_edit = &action_canonical["properties"]["edits"]["items"];
+    assert_eq!(action_edit["properties"]["occurrence"]["type"], "integer");
+    assert_eq!(action_edit["properties"]["occurrence"]["minimum"], 1);
     assert!(spec.description.contains("occurrence"));
     assert!(spec.description.contains("line_scope"));
     assert!(spec.description.contains("global source order"));
