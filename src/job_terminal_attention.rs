@@ -14,6 +14,7 @@ use webcodex_store::{
 
 pub(crate) const JOB_TERMINAL_ATTENTION_METRIC: &str = "job_terminal_attention_total";
 const JOB_TERMINAL_APP_BINDING_ID_PREFIX: &str = "wc_host_binding_";
+const MAX_RETIRED_APP_BINDINGS_PER_WAIT: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct JobTerminalDeliveryEnvelope {
@@ -52,6 +53,14 @@ struct JobTerminalAppBinding {
     principal: JobTerminalWaitPrincipal,
     client_window_key: String,
     binding_id: String,
+    expires_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RetiredJobTerminalAppBindings {
+    expires_at: i64,
+    binding_ids: HashSet<String>,
+    sealed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +93,7 @@ pub(crate) struct JobTerminalContinuationController {
     db: Arc<Database>,
     adapter: Arc<RwLock<Option<Arc<dyn JobTerminalContinuationAdapter>>>>,
     app_bindings: Arc<Mutex<HashMap<String, JobTerminalAppBinding>>>,
-    retired_app_bindings: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    retired_app_bindings: Arc<Mutex<HashMap<String, RetiredJobTerminalAppBindings>>>,
     app_binding_transitions: Arc<Mutex<()>>,
 }
 
@@ -118,12 +127,24 @@ impl JobTerminalContinuationController {
             .is_some_and(|adapter| adapter.production_auto_resume_available())
     }
 
+    fn prune_expired_app_bindings(&self, now: i64) {
+        self.app_bindings
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|_, binding| binding.expires_at > now);
+        self.retired_app_bindings
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|_, retired| retired.expires_at > now);
+    }
+
     pub(crate) fn automatic_resume_available_for_wait(
         &self,
         principal: &JobTerminalWaitPrincipal,
         wait_id: &str,
         now: i64,
     ) -> bool {
+        self.prune_expired_app_bindings(now);
         let Ok(wait) = self.db.read_job_terminal_wait(principal, wait_id, now) else {
             return false;
         };
@@ -166,6 +187,7 @@ impl JobTerminalContinuationController {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         validate_app_binding_id(&binding_id)?;
+        self.prune_expired_app_bindings(now);
         let client_window_key = client_window_key.ok_or_else(missing_client_window)?;
         let mut wait = self.db.read_job_terminal_wait(principal, wait_id, now)?;
         if self.is_retired_app_binding(wait_id, &binding_id) {
@@ -187,8 +209,9 @@ impl JobTerminalContinuationController {
                     state_changed: false,
                 });
             }
+            self.ensure_retirement_capacity(wait_id, &current.binding_id)?;
             wait = self.reconcile_prepared_as_unknown(principal, wait, now)?;
-            self.retire_app_binding(wait_id, &current.binding_id);
+            self.retire_app_binding(wait_id, &current.binding_id, wait.expires_at, false);
         } else if wait.delivery_state == JobTerminalDeliveryState::Prepared {
             wait = self.reconcile_prepared_as_unknown(principal, wait, now)?;
         }
@@ -201,6 +224,7 @@ impl JobTerminalContinuationController {
                     principal: principal.clone(),
                     client_window_key: client_window_key.to_string(),
                     binding_id,
+                    expires_at: wait.expires_at,
                 },
             );
         Ok(JobTerminalAppBindResult {
@@ -330,7 +354,7 @@ impl JobTerminalContinuationController {
         let wait =
             self.verify_mcp_app_binding(principal, wait_id, binding_id, client_window_key, now)?;
         let wait = self.reconcile_prepared_as_unknown(principal, wait, now)?;
-        self.retire_app_binding(wait_id, binding_id);
+        self.retire_app_binding(wait_id, binding_id, wait.expires_at, true);
         let removed = self
             .app_bindings
             .lock()
@@ -348,16 +372,60 @@ impl JobTerminalContinuationController {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(wait_id)
-            .is_some_and(|retired| retired.contains(binding_id))
+            .is_some_and(|retired| retired.sealed || retired.binding_ids.contains(binding_id))
     }
 
-    fn retire_app_binding(&self, wait_id: &str, binding_id: &str) {
-        self.retired_app_bindings
+    fn ensure_retirement_capacity(
+        &self,
+        wait_id: &str,
+        binding_id: &str,
+    ) -> Result<(), JobTerminalWaitStoreError> {
+        let retired = self
+            .retired_app_bindings
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .entry(wait_id.to_string())
-            .or_default()
-            .insert(binding_id.to_string());
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if retired.get(wait_id).is_some_and(|retired| {
+            retired.sealed
+                || (!retired.binding_ids.contains(binding_id)
+                    && retired.binding_ids.len() >= MAX_RETIRED_APP_BINDINGS_PER_WAIT)
+        }) {
+            return Err(app_error(
+                "job_terminal_host_binding_capacity_reached",
+                "Job terminal Host binding replacement history is exhausted",
+            ));
+        }
+        Ok(())
+    }
+
+    fn retire_app_binding(
+        &self,
+        wait_id: &str,
+        binding_id: &str,
+        expires_at: i64,
+        seal_if_full: bool,
+    ) {
+        let mut retired = self
+            .retired_app_bindings
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entry =
+            retired
+                .entry(wait_id.to_string())
+                .or_insert_with(|| RetiredJobTerminalAppBindings {
+                    expires_at,
+                    binding_ids: HashSet::new(),
+                    sealed: false,
+                });
+        entry.expires_at = entry.expires_at.max(expires_at);
+        if entry.sealed {
+            return;
+        }
+        if seal_if_full && entry.binding_ids.len() >= MAX_RETIRED_APP_BINDINGS_PER_WAIT {
+            entry.sealed = true;
+            entry.binding_ids.clear();
+        } else {
+            entry.binding_ids.insert(binding_id.to_string());
+        }
     }
 
     fn verify_mcp_app_binding(
@@ -369,6 +437,7 @@ impl JobTerminalContinuationController {
         now: i64,
     ) -> Result<JobTerminalWaitRecord, JobTerminalWaitStoreError> {
         validate_app_binding_id(binding_id)?;
+        self.prune_expired_app_bindings(now);
         let client_window_key = client_window_key.ok_or_else(missing_client_window)?;
         let wait = self.db.read_job_terminal_wait(principal, wait_id, now)?;
         let bindings = self
@@ -1016,6 +1085,80 @@ mod tests {
                 .code,
             "job_terminal_host_binding_stale"
         );
+    }
+
+    #[test]
+    fn app_binding_replacement_history_is_bounded_and_expired_state_is_pruned() {
+        let temp = tempdir().unwrap();
+        let db = Arc::new(Database::open(&temp.path().join("app-binding-bounds.db")).unwrap());
+        let controller = JobTerminalContinuationController::new(db.clone());
+        let wait_id = create_waiting(&db, "job-app-bounds", "app-bounds", 4_000);
+        let window = Some("window-bounds");
+
+        controller
+            .bind_mcp_app(&principal(), &wait_id, binding(1), window, 4_001)
+            .unwrap();
+        for byte in 2..=(MAX_RETIRED_APP_BINDINGS_PER_WAIT as u8 + 1) {
+            controller
+                .bind_mcp_app(&principal(), &wait_id, binding(byte), window, 4_001)
+                .unwrap();
+        }
+        let current = binding(MAX_RETIRED_APP_BINDINGS_PER_WAIT as u8 + 1);
+        assert_eq!(
+            controller
+                .bind_mcp_app(
+                    &principal(),
+                    &wait_id,
+                    binding(MAX_RETIRED_APP_BINDINGS_PER_WAIT as u8 + 2),
+                    window,
+                    4_001,
+                )
+                .unwrap_err()
+                .code,
+            "job_terminal_host_binding_capacity_reached"
+        );
+        assert!(controller
+            .mcp_app_state(&principal(), &wait_id, &current, window, 4_001)
+            .is_ok());
+        assert_eq!(
+            controller
+                .bind_mcp_app(&principal(), &wait_id, binding(1), window, 4_001)
+                .unwrap_err()
+                .code,
+            "job_terminal_host_binding_stale"
+        );
+        assert_eq!(
+            controller
+                .retired_app_bindings
+                .lock()
+                .unwrap()
+                .get(&wait_id)
+                .unwrap()
+                .binding_ids
+                .len(),
+            MAX_RETIRED_APP_BINDINGS_PER_WAIT
+        );
+
+        let unbound = controller
+            .unbind_mcp_app(&principal(), &wait_id, &current, window, 4_002)
+            .unwrap();
+        assert!(unbound.state_changed);
+        let retired = controller.retired_app_bindings.lock().unwrap();
+        let sealed = retired.get(&wait_id).unwrap();
+        assert!(sealed.sealed);
+        assert!(sealed.binding_ids.is_empty());
+        drop(retired);
+        assert_eq!(
+            controller
+                .bind_mcp_app(&principal(), &wait_id, binding(90), window, 4_003)
+                .unwrap_err()
+                .code,
+            "job_terminal_host_binding_stale"
+        );
+
+        assert!(!controller.automatic_resume_available_for_wait(&principal(), &wait_id, 4_901));
+        assert!(controller.app_bindings.lock().unwrap().is_empty());
+        assert!(controller.retired_app_bindings.lock().unwrap().is_empty());
     }
 
     #[test]
