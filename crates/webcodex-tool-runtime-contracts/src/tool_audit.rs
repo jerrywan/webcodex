@@ -1,15 +1,17 @@
 //! Audit-safe argument summaries for runtime tool calls.
 
-#[cfg(test)]
-use super::tool_call::ComputerSnapshotRegion;
-use super::tool_call::{ComputerControlToolCall, ComputerObserveToolCall, ToolCall};
-#[cfg(feature = "workspace-checkpoints")]
-use super::tool_inputs::{is_checkpoint_kind, is_checkpoint_validation_status};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use webcodex_core::audit_preview::{command_preview, process_preview};
 use webcodex_core::runner_protocol::{normalize_cargo_value, normalize_rust_test_filter};
 use webcodex_core::workflow_session_contract::is_validation_like_execution_purpose;
+#[cfg(test)]
+use webcodex_tool_contracts::tool_call::ComputerSnapshotRegion;
+use webcodex_tool_contracts::tool_call::{
+    ComputerControlToolCall, ComputerObserveToolCall, ToolCall,
+};
+#[cfg(feature = "workspace-checkpoints")]
+use webcodex_tool_contracts::tool_inputs::{is_checkpoint_kind, is_checkpoint_validation_status};
 use webcodex_workflow_session::SessionExecutionContext;
 
 pub fn session_log_arguments_for_tool_request(tool_name: &str, arguments: &Value) -> Value {

@@ -28,7 +28,6 @@ pub(crate) mod conversation_import;
 mod discovery_tools;
 mod dispatch;
 mod edit_tool_telemetry;
-mod file_listing;
 mod file_tools;
 pub(crate) mod files;
 mod git;
@@ -53,7 +52,6 @@ pub(crate) mod kernel;
 mod lsp_tools;
 pub(crate) use lsp_tools::runner_local_project_id;
 pub(crate) mod memory;
-pub(crate) mod metadata;
 pub(crate) mod model_ergonomics_telemetry;
 pub(crate) mod observations;
 mod observe_jobs;
@@ -61,14 +59,12 @@ mod patch;
 mod patch_tools;
 pub(crate) mod permissions;
 mod process;
-pub(crate) mod project_instructions;
 mod project_resolution;
 pub(crate) use project_resolution::ResolvedProject;
 mod project_tools;
 mod projects;
 mod read_files;
 mod read_revisions;
-mod registry;
 mod runtime;
 mod runtime_info;
 pub(crate) mod runtime_metrics;
@@ -91,19 +87,19 @@ pub(crate) mod specialized;
 pub(crate) mod startup_brief;
 mod structured_execution;
 mod surface;
-mod tool_audit;
 pub(crate) use tool_audit::session_log_result_for_tool as audit_safe_result_for_tool;
-mod tool_call;
-mod tool_catalog;
-pub(crate) mod tool_definition;
-mod tool_inputs;
-mod tool_policy;
-mod tool_result;
-mod tool_spec;
 mod validation_events;
-pub(crate) mod validation_parser;
 pub(crate) mod validation_profile;
 pub(crate) mod window_activity;
+pub(crate) use webcodex_core::{
+    project_instructions, project_listing as file_listing, validation_evidence as validation_parser,
+};
+pub(crate) use webcodex_tool_contracts::{
+    metadata, registry, tool_call, tool_catalog, tool_definition, tool_inputs,
+};
+#[cfg(test)]
+pub(crate) use webcodex_tool_runtime_contracts::recorder_metadata::parse_tool_call_with_recorder_metadata;
+pub(crate) use webcodex_tool_runtime_contracts::{tool_audit, tool_result};
 mod work_result;
 pub(crate) use window_activity::{ActiveWindowRequest, MAX_ACTIVE_REQUESTS_PER_WINDOW};
 
@@ -129,14 +125,6 @@ pub use runtime_info::RuntimeInfo;
 pub(crate) use session_context::workflow_session_authority_fingerprint;
 #[cfg(test)]
 pub(crate) use sessions::{SessionCreateOptions, SessionGuards, SessionSummary};
-pub use tool_call::{
-    AgentWaitEventSelectorCall, HostFileImportProvenance, ObserveJobsItem, ObserveJobsWakeOn,
-    PluginToolCall, ProjectArtifactAction, ReadFilesItem, SearchPatternMode,
-    SearchProjectTextsQuery, SearchResultMode, SshResourceToolCall, ToolCall,
-};
-pub(crate) use tool_call::{
-    TOOL_CALL_PARAMS_FIELD, TOOL_CALL_TOOL_FIELD, TOOL_CALL_WRAPPER_FIELDS,
-};
 #[cfg(test)]
 pub use tool_definition::is_known_tool_name;
 #[cfg(test)]
@@ -144,21 +132,31 @@ pub(crate) use tool_definition::{
     known_tool_names, model_hidden_tool_names, runtime_tool_category as tool_manifest_category,
     RunnerCapabilityRequirement,
 };
+pub use webcodex_tool_contracts::tool_call::{
+    AgentWaitEventSelectorCall, HostFileImportProvenance, ObserveJobsItem, ObserveJobsWakeOn,
+    PluginToolCall, ProjectArtifactAction, ReadFilesItem, SearchPatternMode,
+    SearchProjectTextsQuery, SearchResultMode, SshResourceToolCall, ToolCall,
+};
+pub(crate) use webcodex_tool_contracts::tool_call::{
+    TOOL_CALL_PARAMS_FIELD, TOOL_CALL_TOOL_FIELD, TOOL_CALL_WRAPPER_FIELDS,
+};
 #[cfg(test)]
-pub use tool_inputs::ApplyFileChangeInput;
+pub use webcodex_tool_contracts::tool_inputs::ApplyFileChangeInput;
 #[cfg(all(test, feature = "workspace-checkpoints"))]
-pub use tool_inputs::CheckpointValidationInput;
-pub use tool_inputs::{default_true, ExecutionPurpose, ExecutionShell, ListToolsOptions};
+pub use webcodex_tool_contracts::tool_inputs::CheckpointValidationInput;
+pub use webcodex_tool_contracts::tool_inputs::{
+    default_true, ExecutionPurpose, ExecutionShell, ListToolsOptions,
+};
 #[cfg(test)]
-pub use tool_inputs::{
+pub use webcodex_tool_contracts::tool_inputs::{
     ApplyFileChangeKind, ApplyTextEditInput, ApplyTextEditKind, SessionMode, StartupDetail,
 };
-pub use tool_result::ToolResult;
-pub(crate) use tool_result::{
+pub use webcodex_tool_contracts::ToolSpec;
+pub use webcodex_tool_runtime_contracts::tool_result::ToolResult;
+pub(crate) use webcodex_tool_runtime_contracts::tool_result::{
     ContinuationCarrier, ContinuationKind, ContinuationSemantics, RecoveryKind, SuggestedToolCall,
     RECOVERY_KIND_VALUES,
 };
-pub use tool_spec::ToolSpec;
 
 #[cfg(test)]
 pub(crate) use project_resolution::ProjectResolverErrorKind;

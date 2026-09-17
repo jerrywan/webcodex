@@ -1,6 +1,15 @@
 use super::*;
 
 #[test]
+fn tool_definition_source_has_no_module_wide_dead_code_allowance() {
+    let source = include_str!("../tool_definition.rs");
+    assert!(
+        !source.contains("#![allow(dead_code)]"),
+        "tool_definition.rs must not use a module-wide dead_code allowance"
+    );
+}
+
+#[test]
 fn tool_definitions_cover_known_names_and_public_specs() {
     let definition_names = tool_definitions()
         .map(|definition| definition.name)

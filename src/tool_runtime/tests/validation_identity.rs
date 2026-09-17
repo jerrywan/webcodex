@@ -37,11 +37,9 @@ fn record_run_process(
     success: bool,
 ) {
     let request = run_process_request(project, purpose, command_variant, assertion_name);
-    let (call, metadata) = crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
-        "run_process",
-        request,
-    )
-    .expect("model-facing run_process input");
+    let (call, metadata) =
+        crate::tool_runtime::parse_tool_call_with_recorder_metadata("run_process", request)
+            .expect("model-facing run_process input");
     let ledger_arguments = call.session_log_arguments();
     let start = store.record_tool_call_started_with_metadata(
         Some(session_id),
@@ -94,21 +92,20 @@ async fn promoted_run_shell_preserves_assertion_identity_in_terminal_validation_
     let assertion_name = "promoted shell validation";
     let expected_identity =
         crate::tool_runtime::tool_audit::assertion_validation_identity(assertion_name);
-    let (call, recorder_metadata) =
-        crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
-            "run_shell",
-            json!({
-                "project": project,
-                "command": "printf validation-shell; sleep 30",
-                "session_id": session_id,
-                "timeout_secs": 120,
-                "cwd": ".",
-                "purpose": "test",
-                "shell": "bash",
-                "assertion_name": assertion_name,
-            }),
-        )
-        .unwrap();
+    let (call, recorder_metadata) = crate::tool_runtime::parse_tool_call_with_recorder_metadata(
+        "run_shell",
+        json!({
+            "project": project,
+            "command": "printf validation-shell; sleep 30",
+            "session_id": session_id,
+            "timeout_secs": 120,
+            "cwd": ".",
+            "purpose": "test",
+            "shell": "bash",
+            "assertion_name": assertion_name,
+        }),
+    )
+    .unwrap();
     let task = tokio::spawn({
         let runtime = runtime.clone();
         let auth = auth.clone();
@@ -212,10 +209,9 @@ fn model_facing_generic_execution_accepts_bounded_assertion_name_and_rejects_mal
     for tool_name in ["run_process", "run_script", "run_shell", "run_job"] {
         let mut arguments = sample_tool_args(tool_name);
         arguments["assertion_name"] = json!("websocket reconnect regression");
-        let (_, metadata) = crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
-            tool_name, arguments,
-        )
-        .unwrap_or_else(|error| panic!("{tool_name}: {error}"));
+        let (_, metadata) =
+            crate::tool_runtime::parse_tool_call_with_recorder_metadata(tool_name, arguments)
+                .unwrap_or_else(|error| panic!("{tool_name}: {error}"));
         assert_eq!(
             metadata.expectation.assertion_name.as_deref(),
             Some("websocket reconnect regression"),
@@ -232,11 +228,9 @@ fn model_facing_generic_execution_accepts_bounded_assertion_name_and_rejects_mal
     ] {
         let mut arguments = sample_tool_args("run_process");
         arguments["assertion_name"] = invalid;
-        let error = crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
-            "run_process",
-            arguments,
-        )
-        .expect_err("invalid assertion_name must fail closed");
+        let error =
+            crate::tool_runtime::parse_tool_call_with_recorder_metadata("run_process", arguments)
+                .expect_err("invalid assertion_name must fail closed");
         assert!(error.contains("assertion_name"), "{error}");
     }
 }
@@ -455,11 +449,9 @@ fn generic_assertion_success_cannot_resolve_structured_failure_with_hidden_asser
     // but it must not turn a structured validation failure into a generic
     // assertion-equivalence member that a later run_process success can resolve.
     arguments["assertion_name"] = json!(assertion);
-    let (call, metadata) = crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
-        "cargo_test",
-        arguments,
-    )
-    .expect("hidden cargo_test assertion metadata");
+    let (call, metadata) =
+        crate::tool_runtime::parse_tool_call_with_recorder_metadata("cargo_test", arguments)
+            .expect("hidden cargo_test assertion metadata");
     let start = store.record_tool_call_started_with_metadata(
         Some(&session.session_id),
         SessionTransport::Mcp,

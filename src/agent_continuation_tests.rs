@@ -634,7 +634,7 @@ fn offline_restart_and_replacement_dispatch_the_same_logical_wake() {
     drop(runtime);
     drop(db);
     let reopened = Arc::new(Database::open(&path).unwrap());
-    let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+    let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
     reopened
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();
@@ -877,7 +877,7 @@ fn mcp_app_restart_recovery_fingerprint_fences_replaced_and_unbound_views() {
     drop(runtime);
     drop(db);
     let reopened = Arc::new(Database::open(&path).unwrap());
-    let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+    let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
     reopened
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();
@@ -954,7 +954,7 @@ fn mcp_app_restart_recovery_fingerprint_fences_replaced_and_unbound_views() {
     drop(reopened);
 
     let reopened = Arc::new(Database::open(&path).unwrap());
-    let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+    let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
     reopened
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();
@@ -1058,7 +1058,7 @@ fn mcp_app_restart_refresh_recovers_only_same_client_window_without_attachment_s
     drop(runtime);
     drop(db);
     let reopened = Arc::new(Database::open(&path).unwrap());
-    let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+    let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
     reopened
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();
@@ -1586,7 +1586,7 @@ fn mcp_app_expired_endpoint_replacement_replays_across_server_restart_without_ex
     // the dedicated recovery operation, but it grants no ordinary Host binding.
     let reopened = Arc::new(Database::open(&path).unwrap());
     {
-        let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+        let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
         reopened
             .recover_agent_wakes_for_server_takeover(
                 &ownership,
@@ -1622,7 +1622,7 @@ fn mcp_app_expired_endpoint_replacement_replays_across_server_restart_without_ex
     // same E2/g2, never E3/g3, and the same Window may then bind E2 normally.
     let reopened = Arc::new(Database::open(&path).unwrap());
     {
-        let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+        let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
         reopened
             .recover_agent_wakes_for_server_takeover(
                 &ownership,
@@ -1728,7 +1728,7 @@ fn push_replacement_clears_mcp_app_restart_recovery_provenance() {
     drop(runtime);
     drop(db);
     let reopened = Arc::new(Database::open(&path).unwrap());
-    let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+    let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
     reopened
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();
@@ -1866,7 +1866,7 @@ fn mcp_app_restart_recovery_preserves_prepared_delivery_unknown_without_redispat
     drop(runtime);
     drop(db);
     let reopened = Arc::new(Database::open(&path).unwrap());
-    let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+    let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
     reopened
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();

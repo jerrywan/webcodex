@@ -162,10 +162,8 @@ fn dispatch_recorded(
     tokio::spawn(async move {
         let auth = auth_context(None, true);
         let (call, metadata) =
-            crate::tool_runtime::tool_call::parse_tool_call_with_recorder_metadata(
-                tool_name, arguments,
-            )
-            .unwrap();
+            crate::tool_runtime::parse_tool_call_with_recorder_metadata(tool_name, arguments)
+                .unwrap();
         runtime
             .dispatch_with_auth_transport_options_and_metadata(
                 call,

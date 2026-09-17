@@ -887,7 +887,7 @@ fn restart_recovery_survives_published_projection_output_schema() {
     drop(runtime);
     drop(db);
     let reopened = Arc::new(crate::db::Database::open(&path).unwrap());
-    let ownership = crate::server_instance::ServerInstanceGuard::acquire(&reopened).unwrap();
+    let ownership = crate::ServerInstanceGuard::acquire(&reopened).unwrap();
     reopened
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();

@@ -14,14 +14,12 @@ use webcodex_tool_contracts::{
     runtime_tool_accepts_context_ack, runtime_tool_advances_context_checkpoint,
     runtime_tool_is_change_summary_like, runtime_tool_is_git_like, runtime_tool_is_read_like,
     runtime_tool_is_shell_like, runtime_tool_is_write_like, runtime_tool_metadata,
-    runtime_tool_session_risk_class, ToolPathHint, ToolRisk, ToolValidationIdentityKind,
+    runtime_tool_session_risk_class, SessionMode, ToolPathHint, ToolRisk,
+    ToolValidationIdentityKind,
 };
-use webcodex_tool_runtime_contracts::{
-    tool_audit::{
-        assertion_validation_identity, session_log_arguments_for_tool_request,
-        structured_validation_target_identity,
-    },
-    SessionMode,
+use webcodex_tool_runtime_contracts::tool_audit::{
+    assertion_validation_identity, session_log_arguments_for_tool_request,
+    structured_validation_target_identity,
 };
 use webcodex_workflow_session as sessions;
 use webcodex_workflow_session::root_test_support::MAX_VALIDATION_EXCERPT_CHARS;

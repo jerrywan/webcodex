@@ -23,7 +23,7 @@ mod client_window;
 mod config;
 mod console_web;
 mod db;
-mod job_observation;
+pub(crate) use webcodex_core::job_observation;
 mod job_receipts;
 mod job_terminal_attention;
 mod json_digest;
@@ -31,7 +31,7 @@ mod json_measurement;
 mod mcp;
 mod mcp_gateway;
 mod model_surface;
-mod models;
+pub(crate) use webcodex_store::models;
 mod oauth_http;
 mod openapi;
 mod pairing_http;
@@ -46,7 +46,7 @@ mod runner_tokens_http;
 mod runner_ws;
 mod runtime_console_http;
 mod runtime_http;
-mod server_instance;
+pub(crate) use webcodex_store::ServerInstanceGuard;
 mod server_listener;
 mod server_shutdown;
 mod ssh_resource_gateway;
@@ -76,7 +76,6 @@ pub(crate) use config::parse_env_file_line;
 pub use config::Config;
 pub use config::OAuth2Config;
 pub use db::{Database, RotateResult};
-pub use models::{ActionEventRecord, ActionSessionRecord};
 pub(crate) use openapi::openapi_json;
 pub(crate) use runner_http::{
     runner_job_update, runner_offline, runner_persistent_shell_result, runner_poll,
@@ -87,6 +86,7 @@ pub use startup::{
     is_project_command, run_project_command, run_regular_server_tunnel, CliCommandOutput,
     RegularServerTunnelOptions,
 };
+pub use webcodex_store::models::{ActionEventRecord, ActionSessionRecord};
 
 // ============================================================================
 // Main
@@ -241,7 +241,7 @@ only for local/trusted-network demos."
     }
     std::fs::create_dir_all(&config.data_dir)?;
     let db = Database::open(&config.db_path())?;
-    let server_instance_guard = server_instance::ServerInstanceGuard::acquire(&db)?;
+    let server_instance_guard = ServerInstanceGuard::acquire(&db)?;
     db.recover_agent_wakes_for_server_takeover(
         &server_instance_guard,
         chrono::Utc::now().timestamp_millis(),

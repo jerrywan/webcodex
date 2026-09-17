@@ -233,15 +233,6 @@ fn current_session_tools_are_absent_from_all_discovery_surfaces() {
     }
 }
 
-#[test]
-fn tool_definition_dead_code_residue_is_narrow_and_documented() {
-    let source = include_str!("../../tool_definition.rs");
-    assert!(
-        !source.contains("#![allow(dead_code)]"),
-        "tool_definition.rs must not use a module-wide dead_code allowance"
-    );
-}
-
 fn assert_model_facing_surfaces_do_not_list_name(name: &str) {
     let specs = registered_tool_specs();
     let spec_names = specs

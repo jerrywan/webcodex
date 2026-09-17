@@ -8,12 +8,12 @@ use webcodex_core::validation_evidence::{
     PARSER_KIND, PARSER_VERSION,
 };
 use webcodex_core::workflow_session_contract::{ExecutionPurpose, EXECUTION_PURPOSE_VALUES};
-use webcodex_tool_contracts::{is_known_tool_name, registered_tool_specs};
+use webcodex_tool_contracts::{is_known_tool_name, registered_tool_specs, ToolCall};
 use webcodex_tool_runtime_contracts::{
     tool_audit::{
         is_structured_validation_target_identity, session_log_arguments_for_tool_request,
     },
-    ToolCall, ToolCallAuditProjection,
+    ToolCallAuditProjection,
 };
 
 #[test]

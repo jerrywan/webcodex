@@ -1,5 +1,5 @@
+use crate::{registered_tool_specs, ToolSpec};
 use serde_json::{json, Value};
-use webcodex_tool_contracts::{registered_tool_specs, ToolSpec};
 
 const SAMPLE_PROJECT: &str = "agent:oe:private-drop";
 const UNIT_TOOL_FIXTURES: &[&str] = &[

@@ -1,13 +1,12 @@
-//! Runtime compatibility facade for canonical typed tool requests.
-
-pub use webcodex_tool_contracts::tool_call::*;
+//! Recorder-only metadata extraction around canonical tool request parsing.
 
 use serde_json::Value;
+use webcodex_tool_contracts::ToolCall;
 use webcodex_workflow_session::ToolCallRecorderMetadata;
 
 /// Parse one public/model request while retaining recorder-only expectation metadata.
-/// Business arguments are parsed by the canonical ToolCall contract in
-/// webcodex-tool-contracts; wrapper metadata never becomes business input.
+/// Business arguments are parsed by the canonical ToolCall contract; wrapper metadata never becomes
+/// business input or part of the generated request schema.
 pub fn parse_tool_call_with_recorder_metadata(
     name: &str,
     arguments: Value,
