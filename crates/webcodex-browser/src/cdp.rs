@@ -34,6 +34,24 @@ pub(crate) trait BrowserBackend: Send {
         backend_node_id: i64,
         text: &str,
     ) -> BrowserResult<()>;
+    fn select_option(
+        &mut self,
+        target_id: &str,
+        backend_node_id: i64,
+        option: &str,
+    ) -> BrowserResult<()>;
+    fn set_value(
+        &mut self,
+        target_id: &str,
+        backend_node_id: i64,
+        value: &str,
+    ) -> BrowserResult<()>;
+    fn upload_file(
+        &mut self,
+        target_id: &str,
+        backend_node_id: i64,
+        path: &Path,
+    ) -> BrowserResult<()>;
     fn key(&mut self, target_id: &str, key: BrowserKey) -> BrowserResult<()>;
     fn close_page(&mut self, target_id: &str) -> BrowserResult<()>;
     fn shutdown(&mut self, timeout: Duration) -> BrowserResult<()>;
@@ -368,6 +386,111 @@ impl CdpBackend {
         }
         Ok(pages)
     }
+
+    fn call_element_function_until(
+        &mut self,
+        target_id: &str,
+        backend_node_id: i64,
+        function_declaration: &'static str,
+        argument: &str,
+        deadline: Instant,
+    ) -> BrowserResult<()> {
+        let resolved = self
+            .page_call_until(
+                target_id,
+                "DOM.resolveNode",
+                json!({ "backendNodeId": backend_node_id }),
+                false,
+                deadline,
+            )
+            .map_err(pre_dispatch_error)?;
+        let object_id = resolved
+            .pointer("/object/objectId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                BrowserError::not_started(
+                    "element_not_actionable",
+                    "CDP could not resolve the current form control",
+                )
+            })?;
+        let result = self.page_call_until(
+            target_id,
+            "Runtime.callFunctionOn",
+            json!({
+                "objectId": object_id,
+                "functionDeclaration": function_declaration,
+                "arguments": [{ "value": argument }],
+                "returnByValue": true,
+                "userGesture": true,
+            }),
+            true,
+            deadline,
+        )?;
+        if result.get("exceptionDetails").is_some() {
+            return Err(BrowserError::uncertain(
+                "form_control_script_failed",
+                "form-control effect raised after dispatch",
+                "snapshot",
+            ));
+        }
+        let outcome = result.pointer("/result/value").ok_or_else(|| {
+            BrowserError::uncertain(
+                "form_control_result_invalid",
+                "form-control effect returned no bounded result",
+                "snapshot",
+            )
+        })?;
+        if outcome.get("ok").and_then(Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+        if outcome.get("mutated").and_then(Value::as_bool) == Some(true) {
+            return Err(BrowserError::uncertain(
+                "form_control_outcome_unknown",
+                "form-control state changed before its postcondition failed",
+                "snapshot",
+            ));
+        }
+        let kind = outcome
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("form_control_rejected");
+        let (kind, message) = match kind {
+            "element_not_select" => (
+                "element_not_select",
+                "target element is not a native select control",
+            ),
+            "option_not_found" => (
+                "option_not_found",
+                "no native option matched the exact value or visible label",
+            ),
+            "option_ambiguous" => (
+                "option_ambiguous",
+                "more than one native option matched the requested visible label",
+            ),
+            "option_disabled" => ("option_disabled", "the requested native option is disabled"),
+            "control_disabled" => (
+                "control_disabled",
+                "target native form control is disabled or read-only",
+            ),
+            "element_not_value_control" => (
+                "element_not_value_control",
+                "target element does not support exact Browser value assignment",
+            ),
+            "unsupported_value_control" => (
+                "unsupported_value_control",
+                "target input type is not supported by exact structured value assignment",
+            ),
+            "invalid_control_value" => (
+                "invalid_control_value",
+                "Browser rejected or normalized the requested native control value",
+            ),
+            _ => (
+                "form_control_rejected",
+                "Browser rejected the requested form-control effect before mutation",
+            ),
+        };
+        Err(BrowserError::not_started(kind, message))
+    }
 }
 
 impl BrowserBackend for CdpBackend {
@@ -603,6 +726,125 @@ impl BrowserBackend for CdpBackend {
         .map_err(|error| post_effect_error(error, "snapshot"))
     }
 
+    fn select_option(
+        &mut self,
+        target_id: &str,
+        backend_node_id: i64,
+        option: &str,
+    ) -> BrowserResult<()> {
+        const SELECT_OPTION: &str = r#"function(requested) {
+            if (!(this instanceof HTMLSelectElement)) {
+                return { ok: false, kind: "element_not_select" };
+            }
+            if (this.disabled) {
+                return { ok: false, kind: "control_disabled" };
+            }
+            const options = Array.from(this.options);
+            let matches = options.filter((item) => item.value === requested);
+            if (matches.length === 0) {
+                matches = options.filter((item) => item.text.trim() === requested);
+            }
+            if (matches.length === 0) {
+                return { ok: false, kind: "option_not_found" };
+            }
+            if (matches.length !== 1) {
+                return { ok: false, kind: "option_ambiguous" };
+            }
+            if (matches[0].disabled) {
+                return { ok: false, kind: "option_disabled" };
+            }
+            const selectedValue = matches[0].value;
+            this.value = selectedValue;
+            this.dispatchEvent(new Event("input", { bubbles: true }));
+            this.dispatchEvent(new Event("change", { bubbles: true }));
+            if (this.value !== selectedValue) {
+                return { ok: false, kind: "select_postcondition_failed", mutated: true };
+            }
+            return { ok: true };
+        }"#;
+        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        self.call_element_function_until(
+            target_id,
+            backend_node_id,
+            SELECT_OPTION,
+            option,
+            deadline,
+        )
+    }
+
+    fn set_value(
+        &mut self,
+        target_id: &str,
+        backend_node_id: i64,
+        value: &str,
+    ) -> BrowserResult<()> {
+        const SET_VALUE: &str = r#"function(requested) {
+            if (!(this instanceof HTMLInputElement)) {
+                return { ok: false, kind: "element_not_value_control" };
+            }
+            if (this.disabled || this.readOnly) {
+                return { ok: false, kind: "control_disabled" };
+            }
+            const type = (this.type || "text").toLowerCase();
+            const structuredTypes = new Set([
+                "date", "datetime-local", "month", "week", "time", "number", "range", "color"
+            ]);
+            if (!structuredTypes.has(type)) {
+                return { ok: false, kind: "unsupported_value_control" };
+            }
+            const probe = document.createElement("input");
+            probe.type = type;
+            for (const attribute of ["min", "max", "step"]) {
+                if (this.hasAttribute(attribute)) {
+                    probe.setAttribute(attribute, this.getAttribute(attribute));
+                }
+            }
+            probe.value = requested;
+            if (probe.value !== requested) {
+                return { ok: false, kind: "invalid_control_value" };
+            }
+            this.value = requested;
+            if (this.value !== requested) {
+                return { ok: false, kind: "value_postcondition_failed", mutated: true };
+            }
+            this.dispatchEvent(new Event("input", { bubbles: true }));
+            this.dispatchEvent(new Event("change", { bubbles: true }));
+            if (this.value !== requested) {
+                return { ok: false, kind: "value_postcondition_failed", mutated: true };
+            }
+            return { ok: true };
+        }"#;
+        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        self.call_element_function_until(target_id, backend_node_id, SET_VALUE, value, deadline)
+    }
+
+    fn upload_file(
+        &mut self,
+        target_id: &str,
+        backend_node_id: i64,
+        path: &Path,
+    ) -> BrowserResult<()> {
+        let upload_path = path.to_str().ok_or_else(|| {
+            BrowserError::not_started(
+                "upload_path_unrepresentable",
+                "Browser upload path is not representable as a CDP UTF-8 path",
+            )
+        })?;
+        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        self.page_call_until(
+            target_id,
+            "DOM.setFileInputFiles",
+            json!({
+                "files": [upload_path],
+                "backendNodeId": backend_node_id,
+            }),
+            true,
+            deadline,
+        )
+        .map(|_| ())
+        .map_err(|error| post_effect_error(error, "snapshot"))
+    }
+
     fn key(&mut self, target_id: &str, key: BrowserKey) -> BrowserResult<()> {
         let deadline = Instant::now() + REQUEST_TIMEOUT;
         let (key_name, code, text) = key.cdp();
@@ -713,6 +955,7 @@ fn is_actionable(role: &str) -> bool {
             | "link"
             | "textbox"
             | "searchbox"
+            | "DateTime"
             | "combobox"
             | "checkbox"
             | "radio"
@@ -985,6 +1228,16 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
     use tungstenite::{accept, Message};
+
+    #[test]
+    fn form_control_roles_needed_for_structured_fill_are_actionable() {
+        for role in ["textbox", "combobox", "option", "DateTime"] {
+            assert!(
+                is_actionable(role),
+                "{role} should project an element identity"
+            );
+        }
+    }
 
     fn fake_cdp_server(reply: Option<Value>) -> (Url, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

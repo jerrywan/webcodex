@@ -2323,10 +2323,16 @@ impl RunnerRegistry {
             | "browser_snapshot"
             | "browser_screenshot" => RunnerFeature::BrowserObserve,
             "browser_launch" => RunnerFeature::BrowserLaunch,
-            "browser_new_page" | "browser_navigate" | "browser_click" | "browser_input_text"
-            | "browser_key" | "browser_close_page" | "browser_close" => {
-                RunnerFeature::BrowserControl
-            }
+            "browser_new_page"
+            | "browser_navigate"
+            | "browser_click"
+            | "browser_input_text"
+            | "browser_select_option"
+            | "browser_set_value"
+            | "browser_upload_file"
+            | "browser_key"
+            | "browser_close_page"
+            | "browser_close" => RunnerFeature::BrowserControl,
             _ => return Err("invalid browser request kind".to_string()),
         };
         const MAX_BROWSER_REQUEST_PAYLOAD_BYTES: usize = 32 * 1024;

@@ -694,6 +694,57 @@ pub enum BrowserActToolCall {
         #[schemars(length(min = 1, max = 4096))]
         text: String,
     },
+    SelectOption {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^element_[A-Za-z0-9_-]{16,64}$"))]
+        element_id: String,
+        /// Exact native option value or trimmed visible option text.
+        #[schemars(length(min = 1, max = 4096))]
+        option: String,
+    },
+    SetValue {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^element_[A-Za-z0-9_-]{16,64}$"))]
+        element_id: String,
+        /// Exact native form-control value, for example 2027-06 for input[type=month].
+        #[schemars(length(min = 1, max = 4096))]
+        value: String,
+    },
+    UploadFile {
+        #[schemars(length(min = 1, max = 128))]
+        client_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^browser_[A-Za-z0-9_-]{16,64}$"))]
+        browser_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^page_[A-Za-z0-9_-]{16,64}$"))]
+        page_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        #[schemars(regex(pattern = "^element_[A-Za-z0-9_-]{16,64}$"))]
+        element_id: String,
+        /// Authorized Runner project containing the file to upload.
+        #[schemars(length(min = 1, max = 512))]
+        project: String,
+        /// Project-relative path to one existing regular file.
+        #[schemars(length(min = 1, max = 4096))]
+        path: String,
+    },
     Key {
         #[schemars(length(min = 1, max = 128))]
         client_id: String,
@@ -732,6 +783,9 @@ impl BrowserActToolCall {
             Self::Navigate { .. } => "navigate",
             Self::Click { .. } => "click",
             Self::InputText { .. } => "input_text",
+            Self::SelectOption { .. } => "select_option",
+            Self::SetValue { .. } => "set_value",
+            Self::UploadFile { .. } => "upload_file",
             Self::Key { .. } => "key",
             Self::ClosePage { .. } => "close_page",
             Self::CloseBrowser { .. } => "close_browser",

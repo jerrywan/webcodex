@@ -4,7 +4,10 @@ use super::specialized::{
 };
 use super::tool_call::{BrowserActToolCall, BrowserObserveToolCall};
 use super::{SuggestedToolCall, ToolCall, ToolResult, ToolRuntime};
-use crate::auth::{AuthContext, SCOPE_BROWSER_CONTROL, SCOPE_BROWSER_LAUNCH, SCOPE_BROWSER_READ};
+use crate::auth::{
+    AuthContext, SCOPE_BROWSER_CONTROL, SCOPE_BROWSER_LAUNCH, SCOPE_BROWSER_READ,
+    SCOPE_PROJECT_READ,
+};
 use crate::runner_http::RunnerFeature;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -22,17 +25,26 @@ fn browser_observe_policy(call: &BrowserObserveToolCall) -> SpecializedOperation
 }
 
 fn browser_act_policy(call: &BrowserActToolCall) -> SpecializedOperationPolicy {
-    let scope = if matches!(call, BrowserActToolCall::Launch { .. }) {
-        SCOPE_BROWSER_LAUNCH
-    } else {
-        SCOPE_BROWSER_CONTROL
-    };
-    SpecializedOperationPolicy::consequential(
-        SpecializedSource::Browser,
-        call.action_name(),
-        scope,
-        "browser_control",
-    )
+    match call {
+        BrowserActToolCall::Launch { .. } => SpecializedOperationPolicy::consequential(
+            SpecializedSource::Browser,
+            call.action_name(),
+            SCOPE_BROWSER_LAUNCH,
+            "browser_control",
+        ),
+        BrowserActToolCall::UploadFile { .. } => SpecializedOperationPolicy::consequential_all(
+            SpecializedSource::Browser,
+            call.action_name(),
+            &[SCOPE_BROWSER_CONTROL, SCOPE_PROJECT_READ],
+            "browser_file_upload",
+        ),
+        _ => SpecializedOperationPolicy::consequential(
+            SpecializedSource::Browser,
+            call.action_name(),
+            SCOPE_BROWSER_CONTROL,
+            "browser_control",
+        ),
+    }
 }
 
 fn browser_specialized_terminal(result: &ToolResult) -> (&str, Option<&str>) {
@@ -269,6 +281,95 @@ impl ToolRuntime {
                 )
                 .await
             }
+            ToolCall::BrowserAct(BrowserActToolCall::SelectOption {
+                client_id,
+                browser_id,
+                page_id,
+                element_id,
+                option,
+            }) => {
+                self.dispatch_browser_request(
+                    &client_id,
+                    "browser_select_option",
+                    json!({
+                        "browser_id": browser_id,
+                        "page_id": page_id,
+                        "element_id": element_id,
+                        "option": option
+                    }),
+                    auth,
+                    true,
+                    BrowserRecoveryContext::snapshot(&client_id, &browser_id, &page_id),
+                )
+                .await
+            }
+            ToolCall::BrowserAct(BrowserActToolCall::SetValue {
+                client_id,
+                browser_id,
+                page_id,
+                element_id,
+                value,
+            }) => {
+                self.dispatch_browser_request(
+                    &client_id,
+                    "browser_set_value",
+                    json!({
+                        "browser_id": browser_id,
+                        "page_id": page_id,
+                        "element_id": element_id,
+                        "value": value
+                    }),
+                    auth,
+                    true,
+                    BrowserRecoveryContext::snapshot(&client_id, &browser_id, &page_id),
+                )
+                .await
+            }
+            ToolCall::BrowserAct(BrowserActToolCall::UploadFile {
+                client_id,
+                browser_id,
+                page_id,
+                element_id,
+                project,
+                path,
+            }) => {
+                let resolved = match self.resolve_project_for_auth(&project, auth).await {
+                    Ok(resolved) => resolved,
+                    Err(_) => {
+                        return browser_error(
+                            "project_access_denied",
+                            "caller cannot access the upload source project",
+                            "not_started",
+                            false,
+                            None,
+                        )
+                    }
+                };
+                if resolved.client_id != client_id {
+                    return browser_error(
+                        "project_runner_mismatch",
+                        "upload source project does not belong to the target Browser Runner",
+                        "not_started",
+                        false,
+                        None,
+                    );
+                }
+                self.dispatch_browser_request(
+                    &client_id,
+                    "browser_upload_file",
+                    json!({
+                        "browser_id": browser_id,
+                        "page_id": page_id,
+                        "element_id": element_id,
+                        "project_root": resolved.path,
+                        "path": path
+                    }),
+                    auth,
+                    true,
+                    BrowserRecoveryContext::snapshot(&client_id, &browser_id, &page_id),
+                )
+                .await
+            }
             ToolCall::BrowserAct(BrowserActToolCall::Key {
                 client_id,
                 browser_id,
@@ -395,10 +496,16 @@ impl ToolRuntime {
             | "browser_snapshot"
             | "browser_screenshot" => RunnerFeature::BrowserObserve,
             "browser_launch" => RunnerFeature::BrowserLaunch,
-            "browser_new_page" | "browser_navigate" | "browser_click" | "browser_input_text"
-            | "browser_key" | "browser_close_page" | "browser_close" => {
-                RunnerFeature::BrowserControl
-            }
+            "browser_new_page"
+            | "browser_navigate"
+            | "browser_click"
+            | "browser_input_text"
+            | "browser_select_option"
+            | "browser_set_value"
+            | "browser_upload_file"
+            | "browser_key"
+            | "browser_close_page"
+            | "browser_close" => RunnerFeature::BrowserControl,
             _ => {
                 return browser_error(
                     "invalid_request",
@@ -835,6 +942,22 @@ mod tests {
         assert_eq!(navigate.effect, SpecializedEffect::Management);
         assert!(navigate.write_like);
         assert!(!navigate.shell_like);
+
+        let upload = browser_act_policy(&BrowserActToolCall::UploadFile {
+            client_id: "msi".to_string(),
+            browser_id: "browser_abcdefghijklmnop".to_string(),
+            page_id: "page_abcdefghijklmnop".to_string(),
+            element_id: "element_abcdefghijklmnop".to_string(),
+            project: "agent:msi:resume".to_string(),
+            path: "resume.pdf".to_string(),
+        });
+        assert_eq!(
+            upload.authority,
+            SpecializedAuthorityRequirement::All(&[SCOPE_BROWSER_CONTROL, SCOPE_PROJECT_READ])
+        );
+        assert_eq!(upload.risk, "browser_file_upload");
+        assert!(upload.write_like);
+        assert!(!upload.shell_like);
     }
 
     #[test]

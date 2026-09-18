@@ -112,6 +112,53 @@ fn browser_act_audit_projection(call: &BrowserActToolCall) -> Value {
             "text_present": true,
             "text_bytes": text.len(),
         }),
+        BrowserActToolCall::SelectOption {
+            client_id,
+            browser_id,
+            page_id,
+            element_id,
+            option,
+        } => serde_json::json!({
+            "action": "select_option",
+            "client_id": client_id,
+            "browser_id": browser_id,
+            "page_id": page_id,
+            "element_id": element_id,
+            "option_present": true,
+            "option_bytes": option.len(),
+        }),
+        BrowserActToolCall::SetValue {
+            client_id,
+            browser_id,
+            page_id,
+            element_id,
+            value,
+        } => serde_json::json!({
+            "action": "set_value",
+            "client_id": client_id,
+            "browser_id": browser_id,
+            "page_id": page_id,
+            "element_id": element_id,
+            "value_present": true,
+            "value_bytes": value.len(),
+        }),
+        BrowserActToolCall::UploadFile {
+            client_id,
+            browser_id,
+            page_id,
+            element_id,
+            project,
+            path,
+        } => serde_json::json!({
+            "action": "upload_file",
+            "client_id": client_id,
+            "browser_id": browser_id,
+            "page_id": page_id,
+            "element_id": element_id,
+            "project": project,
+            "path_present": true,
+            "path_bytes": path.len(),
+        }),
         BrowserActToolCall::Key {
             client_id,
             browser_id,
@@ -3576,6 +3623,65 @@ mod browser_privacy_tests {
         let serialized = serde_json::to_string(&text).unwrap();
         assert!(!serialized.contains(text_secret));
         assert!(text.get("text").is_none());
+
+        let option_secret = "PRIVATE_OPTION_SECRET";
+        let option = session_log_arguments_for_tool_request(
+            "browser_act",
+            &json!({
+                "action":"select_option",
+                "client_id":"msi",
+                "browser_id":"browser_abcdefghijklmnop",
+                "page_id":"page_abcdefghijklmnop",
+                "element_id":"element_abcdefghijklmnop",
+                "option":option_secret
+            }),
+        );
+        assert_eq!(option["option_present"], true);
+        assert_eq!(option["option_bytes"], option_secret.len());
+        assert!(!serde_json::to_string(&option)
+            .unwrap()
+            .contains(option_secret));
+        assert!(option.get("option").is_none());
+
+        let value_secret = "PRIVATE_VALUE_SECRET";
+        let value = session_log_arguments_for_tool_request(
+            "browser_act",
+            &json!({
+                "action":"set_value",
+                "client_id":"msi",
+                "browser_id":"browser_abcdefghijklmnop",
+                "page_id":"page_abcdefghijklmnop",
+                "element_id":"element_abcdefghijklmnop",
+                "value":value_secret
+            }),
+        );
+        assert_eq!(value["value_present"], true);
+        assert_eq!(value["value_bytes"], value_secret.len());
+        assert!(!serde_json::to_string(&value)
+            .unwrap()
+            .contains(value_secret));
+        assert!(value.get("value").is_none());
+
+        let private_path = "private/resume-SECRET.pdf";
+        let upload = session_log_arguments_for_tool_request(
+            "browser_act",
+            &json!({
+                "action":"upload_file",
+                "client_id":"msi",
+                "browser_id":"browser_abcdefghijklmnop",
+                "page_id":"page_abcdefghijklmnop",
+                "element_id":"element_abcdefghijklmnop",
+                "project":"agent:msi:resume",
+                "path":private_path
+            }),
+        );
+        assert_eq!(upload["path_present"], true);
+        assert_eq!(upload["path_bytes"], private_path.len());
+        assert_eq!(upload["project"], "agent:msi:resume");
+        assert!(!serde_json::to_string(&upload)
+            .unwrap()
+            .contains(private_path));
+        assert!(upload.get("path").is_none());
 
         let private_url = "https://example.test/path?token=URL_QUERY_SECRET";
         let navigate = session_log_arguments_for_tool_request(

@@ -93,7 +93,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     false,
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
-                "Effectful Browser action gateway with the closed actions launch, new_page, navigate, click, input_text, key, close_page, and close_browser. Exact action authority is resolved by canonical specialized governance before dispatch: launch requires browser:launch and the remaining effects require browser:control. Effects preserve not_started/completed/outcome_unknown certainty and never blindly retry an uncertain action. Element effects revalidate Browser, Page, document, and snapshot identity before dispatch. No arbitrary protocol, executable, profile, remote endpoint, or script input is accepted.",
+                "Effectful Browser action gateway with the closed actions launch, new_page, navigate, click, input_text, select_option, set_value, upload_file, key, close_page, and close_browser. Exact action authority is resolved by canonical specialized governance before dispatch: launch requires browser:launch, upload_file requires browser:control plus project:read, and the remaining effects require browser:control. Uploads accept only one project-relative regular file from the same Runner and are Runner-policy bounded. Effects preserve not_started/completed/outcome_unknown certainty and never blindly retry an uncertain action. Element effects revalidate Browser, Page, document, and snapshot identity before dispatch. No arbitrary protocol, executable, profile, remote endpoint, or script input is accepted.",
             ),
             PERMISSION_RISK_BROWSER_CONTROL,
         ),

@@ -324,6 +324,57 @@ impl BrowserSupervisor {
         })
     }
 
+    pub fn select_option(
+        &self,
+        browser_id: &str,
+        page_id: &str,
+        element_id: &str,
+        option: &str,
+    ) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        if option.is_empty() || option.contains('\0') || option.len() > MAX_INPUT_TEXT_BYTES {
+            return Err(BrowserError::not_started(
+                "invalid_option",
+                "select option must be non-empty, NUL-free, and within the Browser UTF-8 byte bound",
+            ));
+        }
+        self.element_effect(browser_id, page_id, element_id, |backend, target, node| {
+            backend.select_option(target, node, option)
+        })
+    }
+
+    pub fn set_value(
+        &self,
+        browser_id: &str,
+        page_id: &str,
+        element_id: &str,
+        value: &str,
+    ) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        if value.is_empty() || value.contains('\0') || value.len() > MAX_INPUT_TEXT_BYTES {
+            return Err(BrowserError::not_started(
+                "invalid_value",
+                "form value must be non-empty, NUL-free, and within the Browser UTF-8 byte bound",
+            ));
+        }
+        self.element_effect(browser_id, page_id, element_id, |backend, target, node| {
+            backend.set_value(target, node, value)
+        })
+    }
+
+    pub fn upload_file(
+        &self,
+        browser_id: &str,
+        page_id: &str,
+        element_id: &str,
+        path: &std::path::Path,
+    ) -> BrowserResult<()> {
+        self.touch_current(browser_id)?;
+        self.element_effect(browser_id, page_id, element_id, |backend, target, node| {
+            backend.upload_file(target, node, path)
+        })
+    }
+
     pub fn key(&self, browser_id: &str, page_id: &str, key: BrowserKey) -> BrowserResult<()> {
         self.touch_current(browser_id)?;
         let mut state = self.operation_state()?;
@@ -848,6 +899,30 @@ mod tests {
         ) -> BrowserResult<()> {
             Ok(())
         }
+        fn select_option(
+            &mut self,
+            _target_id: &str,
+            _backend_node_id: i64,
+            _option: &str,
+        ) -> BrowserResult<()> {
+            Ok(())
+        }
+        fn set_value(
+            &mut self,
+            _target_id: &str,
+            _backend_node_id: i64,
+            _value: &str,
+        ) -> BrowserResult<()> {
+            Ok(())
+        }
+        fn upload_file(
+            &mut self,
+            _target_id: &str,
+            _backend_node_id: i64,
+            _path: &std::path::Path,
+        ) -> BrowserResult<()> {
+            Ok(())
+        }
         fn key(&mut self, _target_id: &str, _key: BrowserKey) -> BrowserResult<()> {
             Ok(())
         }
@@ -1062,6 +1137,58 @@ mod tests {
             assert_eq!(error.kind, "invalid_text");
             assert_eq!(error.execution_state, ExecutionState::NotStarted);
         }
+    }
+
+    #[test]
+    fn form_value_bounds_fail_before_effect_dispatch() {
+        let supervisor = fixture();
+        let browser = supervisor.launch().unwrap();
+        let page = supervisor.pages(&browser.browser_id, 8).unwrap().remove(0);
+        let element = supervisor
+            .snapshot(&browser.browser_id, &page.page_id)
+            .unwrap()
+            .nodes[0]
+            .element_id
+            .clone()
+            .unwrap();
+
+        for invalid in ["", "nul\0value"] {
+            let option_error = supervisor
+                .select_option(&browser.browser_id, &page.page_id, &element, invalid)
+                .unwrap_err();
+            assert_eq!(option_error.kind, "invalid_option");
+            assert_eq!(option_error.execution_state, ExecutionState::NotStarted);
+
+            let value_error = supervisor
+                .set_value(&browser.browser_id, &page.page_id, &element, invalid)
+                .unwrap_err();
+            assert_eq!(value_error.kind, "invalid_value");
+            assert_eq!(value_error.execution_state, ExecutionState::NotStarted);
+        }
+        assert_eq!(
+            supervisor
+                .select_option(
+                    &browser.browser_id,
+                    &page.page_id,
+                    &element,
+                    &"x".repeat(MAX_INPUT_TEXT_BYTES + 1),
+                )
+                .unwrap_err()
+                .kind,
+            "invalid_option"
+        );
+        assert_eq!(
+            supervisor
+                .set_value(
+                    &browser.browser_id,
+                    &page.page_id,
+                    &element,
+                    &"x".repeat(MAX_INPUT_TEXT_BYTES + 1),
+                )
+                .unwrap_err()
+                .kind,
+            "invalid_value"
+        );
     }
 
     #[test]

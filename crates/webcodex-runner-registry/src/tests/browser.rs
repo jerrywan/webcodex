@@ -48,6 +48,21 @@ async fn browser_capability_is_checked_before_dispatch_and_never_falls_back() {
             r#"{"browser_id":"browser_test","page_id":"page_test","url":"https://example.test/"}"#,
             "browser_control",
         ),
+        (
+            "browser_select_option",
+            r#"{"browser_id":"browser_test","page_id":"page_test","element_id":"element_test","option":"Engineering"}"#,
+            "browser_control",
+        ),
+        (
+            "browser_set_value",
+            r#"{"browser_id":"browser_test","page_id":"page_test","element_id":"element_test","value":"2027-06"}"#,
+            "browser_control",
+        ),
+        (
+            "browser_upload_file",
+            r#"{"browser_id":"browser_test","page_id":"page_test","element_id":"element_test","project_root":"C:\\fixture","path":"resume.pdf"}"#,
+            "browser_control",
+        ),
     ] {
         let error = registry
             .enqueue_browser(

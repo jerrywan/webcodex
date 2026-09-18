@@ -509,7 +509,7 @@ pub(crate) fn dispatch_request_with_outcome(
                 .map(|_| true)
         }
         RunnerOperation::Browser(operation) => {
-            let result = handle_browser_operation(browser, &operation);
+            let result = handle_browser_operation(browser, policy, &operation);
             sink.submit_result_with_metadata(request_id, result, config, runtime)
                 .map(|_| true)
         }
