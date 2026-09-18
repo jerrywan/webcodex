@@ -910,16 +910,14 @@ fn json_to_v8<'s>(
         JsonValue::Number(value) => Some(v8::Number::new(scope, value.as_f64()?).into()),
         JsonValue::String(value) => Some(v8::String::new(scope, value)?.into()),
         JsonValue::Array(values) => {
-            let length = i32::try_from(values.len()).ok()?;
-            let array = v8::Array::new(scope, length);
-            for (index, value) in values.iter().enumerate() {
-                let key = v8::String::new(scope, &index.to_string())?;
-                let value = json_to_v8(scope, value)?;
-                if array.create_data_property(scope, key.into(), value) != Some(true) {
-                    return None;
-                }
-            }
-            Some(array.into())
+            i32::try_from(values.len()).ok()?;
+            let elements = values
+                .iter()
+                .map(|value| json_to_v8(scope, value))
+                .collect::<Option<Vec<_>>>()?;
+            // Build dense own elements without allocating a string key per index.
+            // Unlike indexed assignment, construction cannot invoke inherited setters.
+            Some(v8::Array::new_with_elements(scope, &elements).into())
         }
         JsonValue::Object(values) => {
             let object = v8::Object::new(scope);

@@ -2,6 +2,9 @@
 
 > This is an experiment, not a stable compatibility surface.
 
+For measured runtime costs, the current implementation inventory, and the next
+performance-focused development steps, see [Code Mode performance](code-mode-performance.md).
+
 ## Purpose
 
 E1 tests one hypothesis: WebCodex can move bounded read-only orchestration below the model round-trip boundary while keeping every real Project operation inside the existing canonical `ToolRuntime`.
