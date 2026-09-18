@@ -575,6 +575,75 @@ async fn oauth_client_create_accepts_explicit_clipboard_scopes() {
 }
 
 #[tokio::test]
+async fn oauth_client_redirect_uri_management_preserves_client_secret_and_tokens() {
+    let config = test_config(oauth2_enabled());
+    let (_tmp, db) = test_db();
+    let user = seed_user(&db, "alice");
+    let token = seed_user_token(&db, &user);
+    let client = seed_client_with_redirects_and_scopes(
+        &db,
+        &user,
+        "https://example.com/callback",
+        "runtime:read",
+    );
+    let (_access_record, access_token) = seed_access_token(&db, &client, &user, "runtime:read");
+    let service = Service::new(build_router(config, db.clone()));
+
+    let mut add = authorized_post_json(
+        "http://localhost/api/oauth/clients/add_redirect_uri",
+        serde_json::json!({
+            "client_id": client.client_id,
+            "redirect_uri": "https://example.com/new-callback"
+        })
+        .to_string(),
+        &token,
+    )
+    .send(&service)
+    .await;
+    assert_eq!(add.status_code, Some(StatusCode::OK));
+    let add_body: serde_json::Value = add.take_json().await.unwrap();
+    assert_eq!(add_body["changed"], true);
+    assert_eq!(add_body["tokens_revoked"], false);
+
+    let stored = db.get_oauth_client_by_client_id(&client.client_id).unwrap().unwrap();
+    assert_eq!(stored.client_secret_hash, client.client_secret_hash);
+    assert_eq!(stored.redirect_uris_vec(), vec![
+        "https://example.com/callback",
+        "https://example.com/new-callback",
+    ]);
+    let access = db
+        .get_oauth_access_token_by_hash(&hash_token(&access_token))
+        .unwrap()
+        .unwrap();
+    assert_eq!(access.revoked_at, None);
+
+    let mut remove = authorized_post_json(
+        "http://localhost/api/oauth/clients/remove_redirect_uri",
+        serde_json::json!({
+            "client_id": client.client_id,
+            "redirect_uri": "https://example.com/new-callback"
+        })
+        .to_string(),
+        &token,
+    )
+    .send(&service)
+    .await;
+    assert_eq!(remove.status_code, Some(StatusCode::OK));
+    let remove_body: serde_json::Value = remove.take_json().await.unwrap();
+    assert_eq!(remove_body["changed"], true);
+    assert_eq!(remove_body["tokens_revoked"], false);
+
+    let stored = db.get_oauth_client_by_client_id(&client.client_id).unwrap().unwrap();
+    assert_eq!(stored.client_secret_hash, client.client_secret_hash);
+    assert_eq!(stored.redirect_uris_vec(), vec!["https://example.com/callback"]);
+    let access = db
+        .get_oauth_access_token_by_hash(&hash_token(&access_token))
+        .unwrap()
+        .unwrap();
+    assert_eq!(access.revoked_at, None);
+}
+
+#[tokio::test]
 async fn oauth_client_update_scopes_adds_control_and_revokes_prior_grants() {
     let config = test_config(oauth2_enabled());
     let (_tmp, db) = test_db();

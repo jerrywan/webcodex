@@ -218,6 +218,24 @@ impl Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Replace the redirect URI set for one active OAuth client without touching
+    /// client secrets, access tokens, refresh tokens, or authorization codes.
+    /// The expected value is a compare-and-swap guard for concurrent management.
+    pub fn update_oauth_client_redirect_uris(
+        &self,
+        client_id: &str,
+        expected_redirect_uris: &str,
+        redirect_uris: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = self.lock_connection(crate::StoreDomain::OAuth);
+        let updated = conn.execute(
+            "UPDATE oauth_clients SET redirect_uris = ?3
+             WHERE client_id = ?1 AND redirect_uris = ?2 AND revoked_at IS NULL",
+            params![client_id, expected_redirect_uris, redirect_uris],
+        )?;
+        Ok(updated == 1)
+    }
+
     /// Replace one active OAuth client's explicit permission allow-list and
     /// revoke every still-active grant issued under the previous allow-list in
     /// the same transaction. `expected_allowed_scopes` is a compare-and-swap
