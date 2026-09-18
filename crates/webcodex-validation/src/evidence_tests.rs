@@ -2923,7 +2923,7 @@ fn unknown_job_handoff_reconciles_only_authoritative_same_execution() {
         if same_execution {
             assert_eq!(result["status"], "passed");
             assert_eq!(result["current_evidence"]["status"], "passed");
-            for mismatch in ["project", "session", "tool"] {
+            for mismatch in ["project", "session", "tool", "target"] {
                 let mut mismatched = reconciled.clone();
                 let terminal = mismatched
                     .events
@@ -2937,6 +2937,14 @@ fn unknown_job_handoff_reconciles_only_authoritative_same_execution() {
                     }
                     "session" => terminal.session_id = "other-session".into(),
                     "tool" => terminal.tool_name = "cargo_test".into(),
+                    "target" => {
+                        let input = terminal
+                            .input_summary
+                            .as_mut()
+                            .expect("terminal validation input summary");
+                        input["execution_identity"] = json!("target:bbbbbbbbbbbbbbbbbbbbbbbb");
+                        input["validation_target_id"] = json!("target:bbbbbbbbbbbbbbbbbbbbbbbb");
+                    }
                     _ => unreachable!(),
                 }
                 assert_eq!(
