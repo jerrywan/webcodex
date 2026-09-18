@@ -373,3 +373,5 @@ mod skills;
 mod ssh_resource;
 #[path = "tests/structured_file_delete.rs"]
 mod structured_file_delete;
+#[path = "tests/throughput_telemetry.rs"]
+mod throughput_telemetry;

@@ -4,6 +4,7 @@ use crate::RunnerAccessGroup;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{oneshot, watch, Notify};
 use webcodex_core::coding_agent::{
     CodingAgentProvider, CodingAgentResponse, CodingAgentRunInventory,
@@ -247,6 +248,12 @@ pub(super) struct PendingShellRequest {
     /// Runner-global Skill request. Revalidated at dequeue so a replacement
     /// process using the same client_id cannot inherit authority.
     pub(super) skill_fence: Option<SkillDispatchFence>,
+    /// Server-process monotonic enqueue instant for queue-wait and request
+    /// round-trip observability. It is never serialized or exposed on the wire.
+    pub(super) enqueued_at: Instant,
+    /// Transport that authoritatively dequeued this request. Captured at
+    /// dispatch so a later same-instance reconnect cannot relabel its result.
+    pub(super) dispatched_transport: Option<RunnerTransport>,
     pub(super) dispatched: bool,
 }
 

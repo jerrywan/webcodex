@@ -28,7 +28,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Notify};
 
 /// The rustls crypto provider used for the QUIC transport. The dependency tree
@@ -365,9 +365,23 @@ async fn handle_quic_connection(
         mpsc::channel::<RunnerEnvelope>(crate::runner_session::OUTGOING_CHANNEL_CAPACITY);
     let writer_task = tokio::spawn(async move {
         while let Some(env) = out_rx.recv().await {
+            let envelope_kind = env.kind();
+            let send_started = Instant::now();
             if write_quic_frame(&mut send, &env).await.is_err() {
+                crate::runner_http::observe_server_stream_writer_send(
+                    RunnerTransport::Quic,
+                    envelope_kind,
+                    None,
+                    crate::runner_http::RunnerStreamMetricOutcome::TransportError,
+                );
                 return crate::runner_session::WriterExit::TransportFailed;
             }
+            crate::runner_http::observe_server_stream_writer_send(
+                RunnerTransport::Quic,
+                envelope_kind,
+                Some(send_started.elapsed()),
+                crate::runner_http::RunnerStreamMetricOutcome::Success,
+            );
         }
         if send.finish().is_err() {
             crate::runner_session::WriterExit::TransportFailed
@@ -388,7 +402,7 @@ async fn handle_quic_connection(
             connection_id: &connection_id,
             notify,
             cancel,
-            transport_label: "quic",
+            transport: RunnerTransport::Quic,
         },
         out_tx,
         reader,

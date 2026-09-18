@@ -241,7 +241,11 @@ pub(super) fn try_queue_project_inventory_page(
         .map(|state| (state.total_reported(), state.current_page()));
     match next {
         Some((_, Ok(Some(page)))) => {
-            let _ = out_tx.try_send(RunnerEnvelope::ProjectInventoryPage { page });
+            let _ = super::try_send_runner_stream_control(
+                transport,
+                out_tx,
+                RunnerEnvelope::ProjectInventoryPage { page },
+            );
         }
         Some((_, Ok(None))) => {
             *sync = None;

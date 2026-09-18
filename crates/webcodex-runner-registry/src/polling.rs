@@ -599,18 +599,29 @@ impl RunnerRegistry {
                 inner.persistent_waiters.remove(&request_id);
                 continue;
             }
-            let Some((request, operation, job_id)) =
+            let Some(dispatch_transport) = inner
+                .runners
+                .get(&body.client_id)
+                .map(|runner| runner.transport)
+            else {
+                return Err(format!("unknown shell client: {}", body.client_id));
+            };
+            let Some((request, operation, job_id, queue_wait)) =
                 inner.pending_by_id.get_mut(&request_id).map(|pending| {
                     pending.dispatched = true;
+                    pending.dispatched_transport = Some(dispatch_transport);
                     (
                         pending.request.clone(),
                         pending.operation.clone(),
                         pending.job_id.clone(),
+                        pending.enqueued_at.elapsed(),
                     )
                 })
             else {
                 continue;
             };
+            self.telemetry
+                .runner_request_dequeued(&request_id, dispatch_transport, queue_wait);
             if matches!(
                 &operation,
                 RunnerOperation::Job(RunnerJobOperation::Stop { .. })
@@ -711,8 +722,17 @@ impl RunnerRegistry {
         {
             return Err("unexpected Plugin gateway result for non-Plugin request".to_string());
         }
+        let request_round_trip = pending.enqueued_at.elapsed();
+        let dispatched_transport = pending.dispatched_transport;
         self.telemetry
             .runner_result_accepted(&body.request_id, &payload);
+        if let Some(transport) = dispatched_transport {
+            self.telemetry.runner_request_round_trip(
+                &body.request_id,
+                transport,
+                request_round_trip,
+            );
+        }
         let trace_request_id = body.request_id.clone();
         let RunnerResultPayload {
             result: body,

@@ -24,7 +24,7 @@ use salvo::prelude::*;
 use salvo::websocket::{Message, WebSocket, WebSocketUpgrade};
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Notify};
 
 /// Maximum WebSocket text message size. Runner requests/results carry shell
@@ -180,12 +180,32 @@ async fn handle_runner_ws(
         let mut sink = sink;
         let mut out_rx = out_rx;
         while let Some(env) = out_rx.recv().await {
+            let envelope_kind = env.kind();
+            let send_started = Instant::now();
             let Ok(json) = env.to_json() else {
+                crate::runner_http::observe_server_stream_writer_send(
+                    RunnerTransport::WebSocket,
+                    envelope_kind,
+                    None,
+                    crate::runner_http::RunnerStreamMetricOutcome::TransportError,
+                );
                 return crate::runner_session::WriterExit::TransportFailed;
             };
             if sink.send(Message::text(json)).await.is_err() {
+                crate::runner_http::observe_server_stream_writer_send(
+                    RunnerTransport::WebSocket,
+                    envelope_kind,
+                    None,
+                    crate::runner_http::RunnerStreamMetricOutcome::TransportError,
+                );
                 return crate::runner_session::WriterExit::TransportFailed;
             }
+            crate::runner_http::observe_server_stream_writer_send(
+                RunnerTransport::WebSocket,
+                envelope_kind,
+                Some(send_started.elapsed()),
+                crate::runner_http::RunnerStreamMetricOutcome::Success,
+            );
         }
         if sink.close().await.is_err() {
             crate::runner_session::WriterExit::TransportFailed
@@ -206,7 +226,7 @@ async fn handle_runner_ws(
             connection_id: &connection_id,
             notify,
             cancel,
-            transport_label: "websocket",
+            transport: RunnerTransport::WebSocket,
         },
         out_tx,
         reader,

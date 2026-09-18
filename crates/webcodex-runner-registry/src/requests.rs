@@ -15,6 +15,7 @@ use super::validation::{
 };
 use super::{now_ts, RunnerFeature, RunnerRegistry, RUNNER_ONLINE_WINDOW_SECS};
 use std::fmt;
+use std::time::Instant;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 use webcodex_core::coding_agent::{
@@ -222,6 +223,7 @@ pub(super) fn enqueue_pending_request_locked(
             .and_then(|record| record.build.as_ref())
             .and_then(|build| build.git_commit.as_deref()),
     );
+    let enqueued_at = Instant::now();
     inner
         .queues_by_runner
         .entry(client_id.to_string())
@@ -244,6 +246,8 @@ pub(super) fn enqueue_pending_request_locked(
             expected_ssh_resource_runner_instance_id: None,
             expected_runner_config_runner_instance_id: None,
             skill_fence: None,
+            enqueued_at,
+            dispatched_transport: None,
             dispatched: false,
         },
     );
