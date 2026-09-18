@@ -976,13 +976,18 @@ impl ToolRuntime {
     /// the owner boundary and capability requirements through
     /// `authorize_runner_tool`; local-executor tools are unaffected. Wrappers
     /// stay thin: they only forward the depot `AuthContext` here.
-    pub async fn dispatch_with_auth(
-        &self,
+    pub fn dispatch_with_auth<'a>(
+        &'a self,
         call: ToolCall,
-        auth: Option<&AuthContext>,
-    ) -> ToolResult {
-        self.dispatch_with_auth_transport(call, auth, sessions::SessionTransport::Api)
-            .await
+        auth: Option<&'a AuthContext>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + 'a>> {
+        // The canonical dispatcher has grown into a large multi-specialist future. Keep that
+        // state on the heap at the public dispatch boundary so direct callers do not need a
+        // multi-megabyte stack frame merely to enter ToolRuntime.
+        Box::pin(async move {
+            self.dispatch_with_auth_transport(call, auth, sessions::SessionTransport::Api)
+                .await
+        })
     }
 
     pub(crate) async fn dispatch_with_auth_transport(

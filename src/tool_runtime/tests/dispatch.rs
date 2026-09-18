@@ -7,6 +7,24 @@ use crate::runner_protocol::{RunnerCapabilities, RunnerResultRequest};
 use serde_json::json;
 
 #[test]
+fn public_dispatch_future_stays_heap_bounded() {
+    let runtime = test_runtime();
+    let future = runtime.dispatch_with_auth(
+        ToolCall::RuntimeStatus {
+            compact: true,
+            summary_only: false,
+            client_id: None,
+        },
+        None,
+    );
+    assert!(
+        std::mem::size_of_val(&future) <= 32,
+        "public dispatch should expose only a small boxed future, got {} bytes",
+        std::mem::size_of_val(&future)
+    );
+}
+
+#[test]
 fn structured_validation_tools_are_known_and_parse() {
     for name in ["cargo_fmt", "cargo_check", "cargo_test", "go_test"] {
         assert!(is_known_tool_name(name), "{name} missing");
@@ -198,7 +216,20 @@ async fn cargo_check_failure_includes_stderr_tail_or_guidance() {
     let runtime_for_task = runtime.clone();
     let task = tokio::spawn(async move {
         runtime_for_task
-            .cargo_check(project, None, None, None, None, None, None, Some(60))
+            .cargo_check_with_context(
+                project,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(60),
+                Some(60),
+                None,
+                None,
+                None,
+            )
             .await
     });
     let req = wait_for_patch_agent_request(&runtime, "cargo-checker").await;
@@ -247,7 +278,7 @@ async fn cargo_test_failure_includes_stderr_tail_or_guidance() {
     let runtime_for_task = runtime.clone();
     let task = tokio::spawn(async move {
         runtime_for_task
-            .cargo_test(
+            .cargo_test_with_context(
                 project,
                 None,
                 Some("failing".to_string()),
@@ -257,7 +288,14 @@ async fn cargo_test_failure_includes_stderr_tail_or_guidance() {
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
                 Some(60),
+                Some(60),
+                None,
+                None,
+                None,
             )
             .await
     });
@@ -300,7 +338,7 @@ async fn cargo_test_output_includes_bounded_failed_test_diagnostics() {
     let runtime_for_task = runtime.clone();
     let task = tokio::spawn(async move {
         runtime_for_task
-            .cargo_test(
+            .cargo_test_with_context(
                 project,
                 None,
                 Some("multi_fail".to_string()),
@@ -310,7 +348,14 @@ async fn cargo_test_output_includes_bounded_failed_test_diagnostics() {
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
                 Some(60),
+                Some(60),
+                None,
+                None,
+                None,
             )
             .await
     });
@@ -518,7 +563,7 @@ async fn cargo_test_agent_timeout_is_not_validation_failed() {
     let runtime_for_task = runtime.clone();
     let task = tokio::spawn(async move {
         runtime_for_task
-            .cargo_test(
+            .cargo_test_with_context(
                 project,
                 None,
                 Some("slow".to_string()),
@@ -528,7 +573,14 @@ async fn cargo_test_agent_timeout_is_not_validation_failed() {
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
                 Some(60),
+                Some(60),
+                None,
+                None,
+                None,
             )
             .await
     });
@@ -571,7 +623,16 @@ async fn cargo_fmt_failure_includes_stderr_tail_or_guidance() {
     let runtime_for_task = runtime.clone();
     let task = tokio::spawn(async move {
         runtime_for_task
-            .cargo_fmt(project, None, Some(true), Some(60))
+            .cargo_fmt_with_context(
+                project,
+                None,
+                Some(true),
+                Some(60),
+                Some(60),
+                None,
+                None,
+                None,
+            )
             .await
     });
     let req = wait_for_patch_agent_request(&runtime, "cargo-formatter").await;

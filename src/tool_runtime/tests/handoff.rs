@@ -1000,6 +1000,7 @@ async fn real_cargo_nonzero_failures_match_validation_failed_expectations() {
                 "session_id": &sid,
                 "filter": "failing",
                 "timeout_secs": 60,
+                "sync_wait_secs": 60,
                 "expected_failure": true,
                 "expected_failure_kind": "validation_failed",
                 "assertion_name": "cargo_test expected validation failure"
@@ -1017,6 +1018,7 @@ async fn real_cargo_nonzero_failures_match_validation_failed_expectations() {
                 "session_id": &sid,
                 "check": true,
                 "timeout_secs": 60,
+                "sync_wait_secs": 60,
                 "expected_failure": true,
                 "expected_failure_kind": "validation_failed",
                 "assertion_name": "cargo_fmt expected validation failure"
@@ -1033,6 +1035,7 @@ async fn real_cargo_nonzero_failures_match_validation_failed_expectations() {
                 "project": &project,
                 "session_id": &sid,
                 "timeout_secs": 60,
+                "sync_wait_secs": 60,
                 "expected_failure": true,
                 "expected_failure_kind": "validation_failed",
                 "assertion_name": "cargo_check expected validation failure"
@@ -1164,6 +1167,7 @@ async fn public_failure_expectation_preserves_raw_cargo_failure_as_expected_vali
                     "session_id": sid,
                     "filter": "failing",
                     "timeout_secs": 60,
+                    "sync_wait_secs": 60,
                     "result_expectation": "failure",
                     "assertion_name": assertion_name
                 }),
@@ -1369,6 +1373,7 @@ async fn cargo_test_zero_tests_success_is_detected_and_warns_in_handoff() {
                     "session_id": sid,
                     "filter": "missing_filter",
                     "timeout_secs": 60,
+                    "sync_wait_secs": 60,
                     "expected_failure": true,
                     "expected_failure_kind": "validation_failed",
                     "assertion_name": "cargo_test expected failure but ran zero tests"
