@@ -61,11 +61,13 @@ const finishResult = deliveryState => toolResult({
   state_changed: true,
 });
 
-async function initializedView() {
+async function initializedView({ initialProjection = waiting, yieldCurrentTurn = true } = {}) {
   const view = app("mcp_job_terminal_continuation_app.html");
   view.toolInput(input);
   await view.initialize();
+  view.toolResult({ job_terminal_continuation: initialProjection });
   await flush();
+  if (yieldCurrentTurn) view.advanceTime(10000);
   assert.equal(calls(view, "job_terminal_continuation_bind").length, 1);
   assert.match(bindingId(view), /^wc_host_binding_[A-Za-z0-9_-]{21}[AQgw]$/);
   assert.deepEqual(plain(calls(view, "job_terminal_continuation_bind")[0].params.arguments), {
@@ -75,13 +77,40 @@ async function initializedView() {
   return view;
 }
 
-async function boundWaitingView() {
-  const view = await initializedView();
+async function boundWaitingView(options) {
+  const view = await initializedView(options);
   await view.reply(calls(view, "job_terminal_continuation_bind")[0], bindResult(waiting));
   assert.equal(calls(view, "job_terminal_continuation_state").length, 1);
   await view.reply(calls(view, "job_terminal_continuation_state")[0], stateResult(waiting));
   return view;
 }
+
+test("terminal discovered before the invoking turn yield grace cannot dispatch early", async () => {
+  const view = await boundWaitingView({ yieldCurrentTurn: false });
+  await view.fireTimers(3000);
+  let terminalState = calls(view, "job_terminal_continuation_state").at(-1);
+  await view.reply(terminalState, stateResult(pending));
+
+  assert.equal(calls(view, "job_terminal_continuation_prepare").length, 0);
+  assert.equal(hostMessages(view).length, 0);
+  assert.ok([...view.timers.values()].some(timer => timer.delay === 7000));
+
+  await view.fireTimers(7000);
+  terminalState = calls(view, "job_terminal_continuation_state").at(-1);
+  await view.reply(terminalState, stateResult(pending));
+  const prepare = calls(view, "job_terminal_continuation_prepare").at(-1);
+  assert.ok(prepare, "dispatch becomes eligible only after the bounded turn-yield grace");
+  await view.reply(prepare, prepareResult());
+  assert.equal(hostMessages(view).length, 1);
+});
+
+test("already-triggered presentation result suppresses redundant automatic follow-up", async () => {
+  const view = await initializedView({ initialProjection: pending, yieldCurrentTurn: false });
+  await view.reply(calls(view, "job_terminal_continuation_bind")[0], bindResult(pending));
+  assert.equal(calls(view, "job_terminal_continuation_prepare").length, 0);
+  assert.equal(hostMessages(view).length, 0);
+  assert.equal(view.timers.size, 0);
+});
 
 test("Job terminal App binds before terminal, discovers completion without observe_jobs, and dispatches once", async () => {
   const view = await boundWaitingView();

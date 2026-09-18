@@ -13,6 +13,10 @@ export function app(filename, { deliverToolMeta = true, deliverToolStructuredCon
   const timers = new Map();
   const sent = [];
   let nextTimer = 1;
+  let nowMs = 2_000_000_000_000;
+  const HostDate = class extends Date {
+    static now() { return nowMs; }
+  };
   const parent = { postMessage(message) { sent.push(message); } };
   function element(tagName = "div") {
     const attributes = new Map();
@@ -44,7 +48,7 @@ export function app(filename, { deliverToolMeta = true, deliverToolStructuredCon
     return id;
   }
   runInNewContext(script, {
-    document, parent, addEventListener, TextEncoder, crypto, btoa,
+    document, parent, addEventListener, TextEncoder, crypto, btoa, Date: HostDate,
     setTimeout: setTimer,
     clearTimeout: id => timers.delete(id),
     setInterval: (callback, delay) => setTimer(callback, delay, true),
@@ -89,12 +93,16 @@ export function app(filename, { deliverToolMeta = true, deliverToolStructuredCon
       }
     },
     async fireTimers(delay) {
+      nowMs += delay;
       for (const [id, timer] of [...timers]) {
         if (timer.delay !== delay) continue;
         if (!timer.interval) timers.delete(id);
         timer.callback();
       }
       await flush();
+    },
+    advanceTime(ms) {
+      nowMs += ms;
     },
     async visibility(hidden) {
       document.hidden = hidden;

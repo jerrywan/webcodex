@@ -395,7 +395,7 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolActivityPresentation::Transport,
                 super::ToolActivityInteraction::Meaningful,
             ),
-            "Arm one caller-owned bounded one-shot terminal attention for one exact existing public job_id. Exact keyed replay returns the same wait. This operation never starts, retries, stops, or replaces the Job; job_id remains execution identity and observation tokens are unrelated cursors. Terminal delivery contains only sparse identity/status/outcome facts, never logs. automatic_resume_available is true only when a real current Host carrier exists. Do not poll this wait; use observe_jobs only when explicit logs/details or recovery are needed.",
+            "Arm one caller-owned bounded one-shot terminal attention for one exact existing public job_id. Exact keyed replay returns the same wait. This operation never starts, retries, stops, or replaces the Job; job_id remains execution identity and observation tokens are unrelated cursors. Terminal delivery contains only sparse identity/status/outcome facts, never logs. automatic_resume_available is true only when a real current Host carrier exists. If an MCP result supplies resume_setup, use it only while the wait is still waiting, only when no independent work remains, and yield/end the current model turn immediately after carrier setup; an already-triggered wait already belongs to the current turn and needs no follow-up carrier. Do not poll this wait; use observe_jobs only when explicit logs/details or recovery are needed.",
         ).with_gpt_action_description("Arm durable one-shot attention for an existing Job terminal transition. It never changes Job execution. Do not poll the wait; observe_jobs remains the explicit logs/details recovery tool."),
         79,
     ),
@@ -463,7 +463,7 @@ pub(super) const LISTING_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Present one exact caller-owned Job terminal wait as a bounded MCP App continuation card. Requires explicit wait_id, independently re-authorizes the wait and underlying Job visibility, never infers identity from Project, Session, ClientWindow, peer identity, credential, or recent activity, and never changes Job execution or terminal truth.",
+            "Present one exact caller-owned still-waiting Job terminal wait as a bounded MCP App continuation card. Use this only as the final meaningful action when progress is blocked on that terminal transition; after successful presentation, yield/end the current model turn promptly so a later Host follow-up can create a fresh turn. An already-triggered wait should be handled in the current turn instead. Requires explicit wait_id, independently re-authorizes the wait and underlying Job visibility, never infers identity from Project, Session, ClientWindow, peer identity, credential, or recent activity, and never changes Job execution or terminal truth.",
         )
         .with_gpt_action_unsupported(),
         78,

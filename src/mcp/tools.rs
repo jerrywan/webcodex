@@ -769,7 +769,7 @@ fn attach_job_terminal_resume_setup_schema(tool_name: &str, app_enabled: bool, v
         "resume_setup".to_string(),
         json!({
             "type": "object",
-            "description": "Host-specific parser-ready setup for the current MCP App continuation carrier. Present only when this Host can create that carrier.",
+            "description": "Host-specific parser-ready setup for the current MCP App continuation carrier. Present only for a still-waiting Job when this Host can create that carrier; use it only when no independent work remains and the current model turn can yield immediately after setup.",
             "additionalProperties": false,
             "properties": {
                 "tool": {"type": "string", "const": "present_job_terminal_continuation"},
@@ -801,10 +801,8 @@ pub(super) fn project_job_terminal_resume_setup(carrier_available: bool, result:
         .get("automatic_resume_available")
         .and_then(Value::as_bool)
         != Some(false)
-        || matches!(
-            output.get("delivery_state").and_then(Value::as_str),
-            Some("delivered" | "delivery_unknown")
-        )
+        || output.get("state").and_then(Value::as_str) != Some("waiting")
+        || output.get("delivery_state").and_then(Value::as_str) != Some("not_ready")
     {
         return;
     }

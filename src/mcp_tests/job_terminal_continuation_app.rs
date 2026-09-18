@@ -91,6 +91,20 @@ fn job_terminal_wait_resume_setup_is_host_specific_and_parser_ready() {
     super::super::tools::project_job_terminal_resume_setup(true, &mut already_bound);
     assert!(already_bound.output.get("resume_setup").is_none());
 
+    let mut triggered = ToolResult::ok({
+        let mut value = base.clone();
+        value["state"] = json!("triggered");
+        value["delivery_state"] = json!("pending");
+        value["terminal_status"] = json!("completed");
+        value["terminal_outcome"] = json!("succeeded");
+        value
+    });
+    super::super::tools::project_job_terminal_resume_setup(true, &mut triggered);
+    assert!(
+        triggered.output.get("resume_setup").is_none(),
+        "already-triggered terminal truth belongs to the current model turn"
+    );
+
     let mut unknown = ToolResult::ok({
         let mut value = base;
         value["delivery_state"] = json!("delivery_unknown");
@@ -319,6 +333,7 @@ fn job_terminal_continuation_app_source_encodes_bounded_pull_and_single_dispatch
         "HIDDEN_LATE_POLL_MS = 300000",
         "HIDDEN_EARLY_POLLS = 20",
         "HIDDEN_MEDIUM_POLLS = 25",
+        "AUTO_RESUME_TURN_YIELD_GRACE_MS = 10000",
     ] {
         assert!(
             MCP_JOB_TERMINAL_CONTINUATION_APP_HTML.contains(required),

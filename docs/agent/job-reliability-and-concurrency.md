@@ -31,6 +31,21 @@ automatic model resumption. Do not poll the wait registration or repeatedly use
 short `observe_jobs` waits just to keep a Job visible. Explicit `observe_jobs`
 remains the fallback for details and recovery.
 
+For MCP Apps, a parser-ready `resume_setup` is projected only while the exact
+wait is still `waiting/not_ready`. Use it only when no independent work remains:
+present the continuation card as the final meaningful action, then yield/end the
+current model turn promptly. If registration already returns terminal truth, handle
+that result in the current turn instead of arming a redundant follow-up.
+
+The current MCP App Host contract does not expose an authoritative "this model
+turn is now idle/terminal" acknowledgement. The Job continuation App therefore
+waits a bounded 10-second yield grace after the initial presentation tool result
+before it may dispatch `ui/message`. This mitigates dispatch racing the invoking
+turn; it is not a fabricated turn-generation fence. A successful `ui/message`
+RPC proves only that the Host accepted the follow-up request, not that a fresh
+model turn consumed it. Exactly-once delivery therefore still forbids blind
+redispatch after an accepted or uncertain send.
+
 A handoff failure after execution admission is `outcome_unknown`, not proof of
 pre-start rejection. Recovery reuses the same canonical, atomic promotion:
 caller authorization, cleanup ownership, terminal status, and an observation
@@ -228,6 +243,12 @@ programs should write checkpoints and complete logs to project files;
 `observe_jobs` is a bounded tail and the 64 KiB Job snapshot tail is not a
 training-log store. Secret/environment configuration should remain
 Runner-owned rather than expanding model-authored inputs.
+
+Detached running-output tails are durably checkpointed at a 5-second cadence,
+rather than at the live Job update cadence, so multi-day chatty workloads do not
+turn bounded presentation state into continuous fsync pressure. Stop/control
+polling remains independent and fast, and terminalization performs a bounded
+final drain and durable commit of the final retained tails.
 
 ## 4. Runner Job capacity is shared across windows and projects
 

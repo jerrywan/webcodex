@@ -81,7 +81,10 @@ pub(crate) const DETACHED_ENV_FIELD_MAX_BYTES: usize = 8 * 1024;
 pub(crate) const DETACHED_ENV_TOTAL_MAX_BYTES: usize = 64 * 1024;
 pub(crate) const DETACHED_LAUNCH_MAX_BYTES: usize = 192 * 1024;
 pub(crate) const DETACHED_HANDOFF_TIMEOUT: Duration = Duration::from_secs(5);
-pub(crate) const DETACHED_CHECKPOINT_INTERVAL: Duration = Duration::from_millis(250);
+// Detached payloads may run for days. Output tails are recovery/presentation data,
+// not process-liveness authority, so do not fsync+rename durable state at the live
+// Job update cadence. Terminalization still drains and commits the final tails.
+pub(crate) const DETACHED_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
 const DETACHED_CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const DETACHED_OUTPUT_CHANNEL_CAPACITY: usize = 64;
 const DETACHED_OUTPUT_READ_CHUNK: usize = 8 * 1024;
