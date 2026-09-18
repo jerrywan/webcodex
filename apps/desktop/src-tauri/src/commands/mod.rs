@@ -318,3 +318,11 @@ pub async fn add_runner_plugin(
 ) -> Result<DesktopStateSnapshot, DesktopError> {
     project_state_result(&app, state.add_runner_plugin(request).await)
 }
+
+#[tauri::command]
+pub async fn workspace_query(
+    state: State<'_, AppState>,
+    request: crate::workspace::WorkspaceRequest,
+) -> Result<serde_json::Value, DesktopError> {
+    state.workspace_query(request).await
+}

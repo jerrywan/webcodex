@@ -29,7 +29,6 @@ export function useDesktopWorkspace() {
   const hasLoadedState = Boolean(state);
   const shouldObserveChatgptActivity = Boolean(
     state?.readiness.runtime_ready
-      && !state.chatgpt_activity?.observed
       && !hasCurrentOperation
       && !refreshing
       && windowFocused,

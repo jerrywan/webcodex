@@ -1,77 +1,124 @@
-import { PluginRegistrationForm } from "./PluginRegistrationForm";
 import { useEffect, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { PluginRegistrationForm } from "./PluginRegistrationForm";
+import { ExtensionPathsEditor } from "./ExtensionPathsEditor";
 import { desktopApi } from "../../lib/desktop-api";
 import type { DesktopState, RunnerSettings } from "../../models/topology";
+import type { ExtensionsSnapshot, InstructionSummary } from "../../models/workspace";
 import { useLocale } from "../../i18n/locale";
+import { useProduct } from "../../i18n/product";
+import { projectName, useWorkspace, workspaceQuery } from "../workspace/WorkspaceContext";
+import { WorkspaceDialog } from "../workspace/WorkspaceDialog";
 
+type ExtensionTab = "instructions" | "skills" | "plugins";
+const TABS: ExtensionTab[] = ["instructions", "skills", "plugins"];
 export function ExtensionsPanel({ state, onState }: { state: DesktopState; onState: (state: DesktopState) => void }) {
-  const { t } = useLocale();
-  const alive = useRef(true);
+  const { t } = useLocale(); const p = useProduct(); const workspace = useWorkspace();
+  const [tab, setTab] = useState<ExtensionTab>("instructions");
+  const [project, setProject] = useState(state.project?.runtime_project_id || "");
+  const [catalog, setCatalog] = useState<ExtensionsSnapshot | null>(null);
   const [settings, setSettings] = useState<RunnerSettings | null>(null);
-  const [instructions, setInstructions] = useState("");
-  const [skills, setSkills] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const load = async () => {
-    setFailed(false);
-    try {
-      const next = await desktopApi.runnerSettings();
-      if (!alive.current) return;
-      setSettings(next); setInstructions(next.paths.instruction_files.join("\n")); setSkills(next.paths.skill_roots.join("\n"));
-    } catch { setFailed(true); }
+  const [busy, setBusy] = useState(false);
+  const [pendingRestart, setPendingRestart] = useState(false);
+  const [manage, setManage] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [document, setDocument] = useState<InstructionSummary | null>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { setProject(state.project?.runtime_project_id || ""); }, [state.project?.runtime_project_id]);
+  useEffect(() => {
+    let cancelled = false;
+    setCatalog(null); setSettings(null); setFailed(false); setLoading(true); setDocument(null);
+    void Promise.allSettled([
+      project ? workspaceQuery<ExtensionsSnapshot>({ kind: "extensions", project }) : Promise.resolve(null),
+      desktopApi.runnerSettings(),
+    ]).then(([catalogResult, settingsResult]) => {
+      if (cancelled) return;
+      if (catalogResult.status === "fulfilled") setCatalog(catalogResult.value); else setFailed(true);
+      if (settingsResult.status === "fulfilled") setSettings(settingsResult.value);
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [project, revision]);
+  const disabled = busy || Boolean(state.current_operation);
+  const refresh = () => setRevision(value => value + 1);
+  const updatePaths = async (paths: RunnerSettings["paths"]) => {
+    if (!settings || disabled) return false;
+    setBusy(true); setFailed(false);
+    try { onState(await desktopApi.updateRunnerSettings(settings.target, settings.paths, paths)); if (alive.current) { setPendingRestart(true); refresh(); } return true; }
+    catch { if (alive.current) setFailed(true); return false; }
+    finally { if (alive.current) setBusy(false); }
   };
-  useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, []);
-  const save = async () => {
-    if (!settings || busy || state.current_operation) return;
-    setBusy(true); setFailed(false); setSaved(false);
-    const lines = (value: string) => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const addFile = async (kind: "instructions" | "skills") => {
+    if (!settings || disabled) return;
     try {
-      onState(await desktopApi.updateRunnerSettings(settings.target, settings.paths, { instruction_files: lines(instructions), skill_roots: lines(skills) }));
-      await load(); setSaved(true);
-    } catch { setFailed(true); }
-    finally { setBusy(false); }
+      const target = await open({ title: p(kind === "instructions" ? "addInstructions" : "addSkill"), directory: kind === "skills", multiple: false });
+      if (!target || typeof target !== "string" || !alive.current) return;
+      const key = kind === "instructions" ? "instruction_files" : "skill_roots";
+      if (settings.paths[key].includes(target)) return;
+      await updatePaths({ ...settings.paths, [key]: [...settings.paths[key], target] });
+    } catch { if (alive.current) setFailed(true); }
   };
   const restart = async () => {
+    if (!settings?.can_restart || disabled) return;
     setBusy(true); setFailed(false);
-    try { onState(await desktopApi.restartOwnedRunner(settings!.target)); setSaved(false); await load(); }
-    catch { setFailed(true); }
-    finally { setBusy(false); }
+    try { onState(await desktopApi.restartOwnedRunner(settings.target)); if (alive.current) { setPendingRestart(false); refresh(); } }
+    catch { if (alive.current) setFailed(true); }
+    finally { if (alive.current) setBusy(false); }
   };
-  return <section className="page-section" aria-labelledby="extensions-title" data-webcodex-page="extensions">
-    <h1 id="extensions-title">{t("extensions.title")}</h1>
-    <p className="lede">{t("extensions.description")}</p>
-    {failed && <div role="alert" className="error-card"><p>{t("extensions.error")}</p><button className="secondary-button" disabled={busy} onClick={() => void load()}>{t("common.retry")}</button></div>}
-    {!settings ? <p role="status">{failed ? t("extensions.error") : t("common.checking")}</p> : <>
-      <article className="detail-card extension-editor">
-        <h2>{t("extensions.instructions")}</h2>
-        <p>{t("extensions.agentsHelp")}</p>
-        {state.project && <code className="path-value">{state.project.path.replace(/[\\/]$/, "")}/AGENTS.md</code>}
-        <label htmlFor="instruction-files">{t("extensions.instructionFiles")}</label>
-        <textarea id="instruction-files" value={instructions} onChange={e => { setInstructions(e.target.value); setSaved(false); }} rows={4} spellCheck={false} disabled={busy} aria-describedby="runner-path-help" />
-        <label htmlFor="skill-roots">{t("extensions.skillRoots")}</label>
-        <textarea id="skill-roots" value={skills} onChange={e => { setSkills(e.target.value); setSaved(false); }} rows={4} spellCheck={false} disabled={busy} aria-describedby="runner-path-help" />
-        <p id="runner-path-help" className="field-help">{t("extensions.pathHelp")}</p>
-        <button className="primary-button" data-webcodex-action="save-runner-settings" disabled={busy || Boolean(state.current_operation)} onClick={() => void save()}>{t("extensions.save")}</button>
-        {saved && <p role="status">{t("extensions.saved")}</p>}
-        <p className="field-help">{t("extensions.restartHelp")}</p>
-        <button className="secondary-button" data-webcodex-action="restart-owned-runner" disabled={busy || Boolean(state.current_operation) || !settings.can_restart} onClick={() => void restart()}>{t("extensions.restart")}</button>
-      </article>
-      <article className="detail-card">
-        <h2>{t("extensions.plugins")}</h2>
-        <p>{t("extensions.pluginHelp")}</p>
-        {settings.plugin_ids.length ? <ul>{settings.plugin_ids.map(id => <li key={id}><code>{id}</code></li>)}</ul> : <p>{t("extensions.noPlugins")}</p>}
-        <code className="path-value">{settings.target.config_path}</code>
-        <PluginRegistrationForm disabled={busy || Boolean(state.current_operation)} onAdd={async provider => {
-          if (busy || state.current_operation) return false;
-          setBusy(true); setFailed(false); setSaved(false);
-          try {
-            onState(await desktopApi.addRunnerPlugin(settings.target, provider));
-            await load(); setSaved(true); return true;
-          } catch { setFailed(true); return false; }
-          finally { setBusy(false); }
-        }} />
-      </article>
-    </>}
+  const plugins = catalog?.plugins.catalog?.plugins || catalog?.plugins.catalog?.providers || [];
+  const skills = catalog?.skills.catalog?.skills || [];
+  return <section className="page-section workspace-page" aria-labelledby="extensions-title" data-webcodex-page="extensions">
+    <header className="page-heading-row"><h1 id="extensions-title">{t("extensions.title")}</h1><button className="secondary-button" onClick={refresh} disabled={disabled || loading}>{p("refresh")}</button></header>
+    <div className="activity-project-filter"><label htmlFor="extensions-project">{p("projects")}</label><select id="extensions-project" value={project} onChange={event => setProject(event.target.value)} disabled={disabled}>{workspace.projects.filter(row => row.id).map(row => <option key={row.id} value={row.id}>{projectName(row)}</option>)}</select></div>
+    <div className="workspace-tabs" role="tablist" aria-label={t("extensions.title")}>
+      {TABS.map(value => <button type="button" role="tab" key={value} id={`extension-tab-${value}`} aria-controls={`extension-view-${value}`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} onClick={() => setTab(value)} onKeyDown={event => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault(); const next = TABS[(TABS.indexOf(value) + (event.key === "ArrowRight" ? 1 : 2)) % 3]; setTab(next); window.document.getElementById(`extension-tab-${next}`)?.focus();
+      }}>{value === "instructions" ? p("instructions") : value === "skills" ? "Skills" : "Plugins"}</button>)}
+    </div>
+    {failed && <p role="alert" className="workspace-notice">{p("loadError")}</p>}
+    {pendingRestart && <div className="extension-apply-bar" role="status"><span>{p("needsRestart")}</span>{settings?.can_restart && <button className="secondary-button" onClick={() => void restart()} disabled={disabled}>{p("restartRunner")}</button>}</div>}
+    {loading && <p role="status">{p("loading")}</p>}
+    {!loading && <section role="tabpanel" id={`extension-view-${tab}`} aria-labelledby={`extension-tab-${tab}`}>
+      {tab === "instructions" && <>
+        <div className="extension-toolbar"><button type="button" className="secondary-button" disabled={!settings || disabled} onClick={() => void addFile("instructions")}>{p("addInstructions")}</button></div>
+        {catalog?.instructions.files.map(file => <article className="extension-row" key={`${file.source_scope}:${file.path}`}><div><strong>{file.source_scope === "runner" ? p("globalInstructions") : file.path.split(/[\\/]/).pop()}</strong><span>{file.source_scope === "runner" ? "Runner" : projectName(workspace.projects.find(row => row.id === project) || { id: project })} · {p("available")}</span><details><summary>{p("details")}</summary><code>{file.path}</code></details></div><button className="secondary-button" onClick={() => setDocument(file)} aria-label={`${p("open")} ${file.path.split(/[\\/]/).pop()}`}>{p("open")}</button></article>)}
+        {catalog?.instructions.scan_complete && !catalog.instructions.files.length && <p className="workspace-empty">{p("noInstructions")}</p>}
+        {catalog && !catalog.instructions.scan_complete && <p className="workspace-notice">{p("unavailable")}</p>}
+      </>}
+      {tab === "skills" && <>
+        <div className="extension-toolbar"><button type="button" className="secondary-button" onClick={() => void addFile("skills")} disabled={!settings || disabled}>{p("addSkill")}</button></div>
+        {skills.map(skill => <article className="extension-row" key={skill.skill_id}><div><strong>{skill.name}</strong><p>{skill.description}</p><span>{skill.source_scope === "project" ? projectName(workspace.projects.find(row => row.id === project) || { id: project }) : "Runner"} · {p("available")}</span></div><details><summary>{p("details")}</summary><code>{skill.trust}</code></details></article>)}
+        {catalog?.skills.available && !skills.length && <p className="workspace-empty">{p("noExtensions")}</p>}
+        {catalog && !catalog.skills.available && <p className="workspace-notice">{p("unavailable")}</p>}
+        {catalog?.skills.catalog?.truncated && <p>{p("partial")}</p>}
+      </>}
+      {tab === "plugins" && <>
+        {plugins.map(plugin => <article className="extension-row" key={plugin.id || plugin.plugin}><div><strong>{plugin.name || plugin.id || plugin.plugin}</strong><span>{plugin.status === "error" ? p("unavailable") : plugin.status === "ready" || plugin.status === "available" ? p("available") : p("registered")} · {plugin.tool_count ?? plugin.tools?.length ?? "—"} {p("tools")}</span></div>
+          {catalog?.can_reload_plugins && <button className="secondary-button" disabled={disabled} onClick={async () => {
+            const id = plugin.id || plugin.plugin; if (!id || disabled) return; setBusy(true); setFailed(false);
+            try { await workspaceQuery({ kind: "plugin_reload", project, plugin: id }); if (alive.current) refresh(); }
+            catch { if (alive.current) setFailed(true); } finally { if (alive.current) setBusy(false); }
+          }}>{p("reload")}</button>}
+        </article>)}
+        {catalog?.plugins.available && !plugins.length && <p className="workspace-empty">{p("noExtensions")}</p>}
+        {catalog && !catalog.plugins.available && <p className="workspace-notice">{p("unavailable")}</p>}
+        {settings && <PluginRegistrationForm disabled={disabled} onAdd={async provider => {
+          if (disabled) return false; setBusy(true); setFailed(false);
+          try { onState(await desktopApi.addRunnerPlugin(settings.target, provider)); if (alive.current) { setPendingRestart(true); refresh(); } return true; }
+          catch { if (alive.current) setFailed(true); return false; } finally { if (alive.current) setBusy(false); }
+        }} />}
+      </>}
+      {settings && tab !== "plugins" && <div className="workspace-technical"><button className="text-button" onClick={() => setManage(value => !value)} aria-expanded={manage}>{p("manage")}</button>{manage && <ExtensionPathsEditor settings={settings} disabled={disabled} onSave={updatePaths} />}</div>}
+    </section>}
+    {document && <InstructionDocument key={document.fingerprint} project={project} file={document} onClose={() => setDocument(null)} />}
   </section>;
+}
+function InstructionDocument({ project, file, onClose }: { project: string; file: InstructionSummary; onClose: () => void }) {
+  const p = useProduct(); const [content, setContent] = useState<string | null>(null); const [failed, setFailed] = useState(false);
+  useEffect(() => { let cancelled = false; void workspaceQuery<{ content: string }>({ kind: "instruction", project, source_scope: file.source_scope, path: file.path, fingerprint: file.fingerprint }).then(value => { if (!cancelled) setContent(value.content); }).catch(() => { if (!cancelled) setFailed(true); }); return () => { cancelled = true; }; }, [project, file]);
+  return <WorkspaceDialog title={file.source_scope === "runner" ? p("globalInstructions") : file.path} onClose={onClose}>{failed ? <p role="alert">{p("loadError")}</p> : content === null ? <p role="status">{p("loading")}</p> : <pre className="instruction-content">{content}</pre>}{file.truncated && <p>{p("partial")}</p>}</WorkspaceDialog>;
 }

@@ -21,6 +21,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 mod communication;
+mod workspace;
 
 use communication::{
     communication_agent_create, communication_agent_update, communication_agents,
@@ -61,6 +62,22 @@ pub(crate) fn routes() -> Router {
         .push(Router::with_path(api_path(RouteId::RuntimeConsoleWindows)).post(windows))
         .push(Router::with_path(api_path(RouteId::RuntimeConsoleWindow)).post(window))
         .push(Router::with_path(api_path(RouteId::RuntimeConsoleProjects)).post(projects))
+        .push(
+            Router::with_path(api_path(RouteId::RuntimeConsoleExtensions))
+                .post(workspace::extensions),
+        )
+        .push(
+            Router::with_path(api_path(RouteId::RuntimeConsoleInstruction))
+                .post(workspace::instruction),
+        )
+        .push(
+            Router::with_path(api_path(RouteId::RuntimeConsoleProjectGit))
+                .post(workspace::project_git),
+        )
+        .push(
+            Router::with_path(api_path(RouteId::RuntimeConsolePluginReload))
+                .post(workspace::plugin_reload),
+        )
         .push(
             Router::with_path(api_path(RouteId::RuntimeConsoleWorkflowSessions))
                 .post(workflow_sessions),
@@ -304,6 +321,8 @@ struct RuntimeConsoleWindows {
 #[derive(Debug, Clone, Serialize)]
 struct RuntimeConsoleWindowSummary {
     client_window_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_project: Option<String>,
     source: String,
     last_seen_at_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -562,6 +581,7 @@ struct RuntimeConsoleRunner {
     projects_returned: usize,
     projects_truncated: bool,
     projects: Vec<RuntimeConsoleRunnerProject>,
+    recent_sessions: RuntimeConsoleRecentSessions,
 }
 
 #[derive(Debug, Serialize)]
@@ -1716,6 +1736,8 @@ async fn visible_window_summary_for_auth(
     let mut last_tool_call_at_ms = None;
     let mut last_meaningful_activity_at_ms = None;
     let mut recorder_gap_count = 0usize;
+    let mut last_project = None;
+    let mut project_observed_at = i64::MIN;
     for event in events {
         if !window_event_visible_cached(runtime, auth, visibility_cache, &event).await
             || project_filter.is_some_and(|project| event.project.as_deref() != Some(project))
@@ -1730,6 +1752,10 @@ async fn visible_window_summary_for_auth(
                     .unwrap_or(i64::MIN)
                     .max(event.ended_at_ms),
             );
+        }
+        if event.meaningful && event.project.is_some() && event.ended_at_ms > project_observed_at {
+            last_project = event.project.clone();
+            project_observed_at = event.ended_at_ms;
         }
         if event.meaningful {
             last_meaningful_activity_at_ms = Some(
@@ -1778,6 +1804,10 @@ async fn visible_window_summary_for_auth(
                 .unwrap_or(i64::MIN)
                 .max(request.started_at_ms),
         );
+        if request.project.is_some() && request.started_at_ms > project_observed_at {
+            last_project = request.project.clone();
+            project_observed_at = request.started_at_ms;
+        }
         active_count = active_count.saturating_add(1);
     }
 
@@ -1786,6 +1816,7 @@ async fn visible_window_summary_for_auth(
     };
     Ok(Some(RuntimeConsoleWindowSummary {
         client_window_key: window_key.to_string(),
+        last_project,
         source: source.unwrap_or_default(),
         last_seen_at_ms,
         last_tool_call_at_ms,
@@ -1831,6 +1862,7 @@ async fn windows_for_auth(
                 summary.client_window_key.clone(),
                 RuntimeConsoleWindowSummary {
                     client_window_key: summary.client_window_key,
+                    last_project: None,
                     source: summary.client_window_source,
                     last_seen_at_ms: summary.last_seen_at_ms,
                     last_tool_call_at_ms: summary.last_tool_call_at_ms,
@@ -1856,6 +1888,7 @@ async fn windows_for_auth(
                     live.client_window_key.clone(),
                     RuntimeConsoleWindowSummary {
                         client_window_key: live.client_window_key,
+                        last_project: None,
                         source: live.client_window_source,
                         last_seen_at_ms: summary.last_seen_at_ms.max(live.last_started_at_ms),
                         last_tool_call_at_ms: summary.last_tool_call_at_ms,
@@ -1871,6 +1904,7 @@ async fn windows_for_auth(
                     live.client_window_key.clone(),
                     RuntimeConsoleWindowSummary {
                         client_window_key: live.client_window_key,
+                        last_project: None,
                         source: live.client_window_source,
                         last_seen_at_ms: live.last_started_at_ms,
                         last_tool_call_at_ms: None,
@@ -1930,6 +1964,23 @@ async fn windows_for_auth(
             .then_with(|| left.client_window_key.cmp(&right.client_window_key))
     });
     window_rows.truncate(limit);
+    if auth.is_admin_caller() && project_filter.is_none() {
+        let mut visibility_cache = HashMap::new();
+        for row in &mut window_rows {
+            if let Some(observed) = visible_window_summary_for_auth(
+                runtime,
+                auth,
+                principal_ref,
+                &row.client_window_key,
+                &mut visibility_cache,
+                None,
+            )
+            .await?
+            {
+                row.last_project = observed.last_project;
+            }
+        }
+    }
     let visibility = RuntimeConsoleWindowVisibility {
         scope: if auth.is_admin_caller() {
             RuntimeConsoleWindowVisibilityScope::Global
@@ -2412,6 +2463,8 @@ async fn runner_for_auth(
         .is_some_and(|visible| visible.truncated);
     let running_jobs = running_jobs_for_auth(runtime, auth, None).await?;
     let mut project_summaries = Vec::new();
+    let mut recent_sessions = Vec::new();
+    let mut session_scan_truncated = false;
     for project in visible_projects
         .map(|visible| visible.projects)
         .unwrap_or_default()
@@ -2421,6 +2474,15 @@ async fn runner_for_auth(
         let mut list = runtime
             .workflow_sessions_console_list(&project.id, Some(CONSOLE_AGGREGATE_SESSION_LIMIT));
         apply_running_jobs_to_list(&mut list, &project.id, &running_jobs);
+        session_scan_truncated |= list.truncated;
+        recent_sessions.extend(list.sessions.iter().cloned().map(|session| {
+            RuntimeConsoleRecentSession {
+                client_id: client_id.to_string(),
+                project_id: project.id.clone(),
+                project_name: project.name.clone(),
+                session,
+            }
+        }));
         project_summaries.push(RuntimeConsoleRunnerProject {
             id: project.id,
             name: project.name,
@@ -2431,6 +2493,18 @@ async fn runner_for_auth(
         });
     }
     let projects_returned = project_summaries.len();
+    recent_sessions.sort_by(|a, b| b.session.updated_at.cmp(&a.session.updated_at));
+    let candidate_count = recent_sessions.len();
+    recent_sessions.truncate(50);
+    let recent_sessions = RuntimeConsoleRecentSessions {
+        returned: recent_sessions.len(),
+        candidate_count,
+        truncated: candidate_count > recent_sessions.len(),
+        scan_truncated: session_scan_truncated
+            || visible_projects_truncated
+            || projects_returned < visible_project_count,
+        sessions: recent_sessions,
+    };
     Ok(RuntimeConsoleRunner {
         client_id: client_id.to_string(),
         connected: runner_value
@@ -2456,6 +2530,7 @@ async fn runner_for_auth(
         projects_returned,
         projects_truncated: visible_projects_truncated || projects_returned < visible_project_count,
         projects: project_summaries,
+        recent_sessions,
     })
 }
 
@@ -3889,6 +3964,15 @@ mod tests {
         assert_eq!(home.workflow_sessions.projects_scanned, 2);
         assert!(!home.projects_truncated);
         assert!(!home.recent_sessions.scan_truncated);
+        let runner_view = runner_for_auth(&runtime, &auth, "runner-a", Some(20))
+            .await
+            .unwrap();
+        assert_eq!(runner_view.recent_sessions.sessions.len(), 1);
+        assert_eq!(
+            runner_view.recent_sessions.sessions[0].project_id,
+            "agent:runner-a:proj-a"
+        );
+        assert!(!runner_view.recent_sessions.scan_truncated);
     }
 
     #[tokio::test]
@@ -3972,6 +4056,31 @@ mod tests {
             .send(&service)
             .await;
         assert_eq!(invalid_query.status_code, Some(StatusCode::BAD_REQUEST));
+    }
+
+    #[tokio::test]
+    async fn product_routes_reject_unknown_effect_selectors_and_invisible_projects() {
+        let (_tmp, service) = hosted_service(test_runtime());
+        for route in ["extensions", "project-git"] {
+            let invalid = TestClient::post(format!("http://localhost/api/runtime-console/{route}"))
+                .json(&serde_json::json!({"project":"agent:missing:project","tool":"run_shell"}))
+                .send(&service)
+                .await;
+            assert_eq!(invalid.status_code, Some(StatusCode::BAD_REQUEST));
+            let hidden = TestClient::post(format!("http://localhost/api/runtime-console/{route}"))
+                .json(&serde_json::json!({"project":"agent:missing:project"}))
+                .send(&service)
+                .await;
+            assert_eq!(hidden.status_code, Some(StatusCode::NOT_FOUND));
+        }
+        let instruction = TestClient::post("http://localhost/api/runtime-console/instruction")
+            .json(&serde_json::json!({"project":"agent:missing:project","source_scope":"runner","path":"/private/secret","fingerprint":"old"}))
+            .send(&service).await;
+        assert_eq!(instruction.status_code, Some(StatusCode::NOT_FOUND));
+        let retarget = TestClient::post("http://localhost/api/runtime-console/plugin-reload")
+            .json(&serde_json::json!({"project":"agent:missing:project","plugin":"provider","runner":"other-runner"}))
+            .send(&service).await;
+        assert_eq!(retarget.status_code, Some(StatusCode::BAD_REQUEST));
     }
 
     #[tokio::test]
@@ -4363,6 +4472,11 @@ mod tests {
         assert_eq!(filtered.total, 1);
         assert_eq!(filtered.returned, 1);
         assert_eq!(filtered.windows[0].client_window_key, window_a);
+        assert_eq!(filtered.windows[0].last_project.as_deref(), Some(project_a));
+        assert!(all
+            .windows
+            .iter()
+            .any(|row| row.last_project.as_deref() == Some(project_b)));
         assert_eq!(
             filtered.windows[0].last_meaningful_activity_at_ms,
             Some(1_001)

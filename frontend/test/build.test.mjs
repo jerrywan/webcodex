@@ -35,6 +35,9 @@ const requiredAssets = [
   "runtime_operations.js",
   "runtime_navigation.js",
   "runtime_collaboration.js",
+  "runtime_product_view.js",
+  "runtime_product.js",
+  "runtime_extensions.js",
   "runtime_workspace.js",
   "runtime.html",
   "runtime.js",
@@ -69,7 +72,7 @@ async function assertRequiredAssets(outputDirectory) {
     assert.equal((await stat(resolve(outputDirectory, asset))).isFile(), true);
   }
   const runtimeHtml = await readFile(resolve(outputDirectory, "runtime.html"), "utf8");
-  assert.match(runtimeHtml, /WebCodex Runtime Console/);
+  assert.match(runtimeHtml, /WebCodex — Workspace/);
   assert.match(runtimeHtml, /runtime-device-select/);
   assert.match(runtimeHtml, /runtime-project-list/);
   assert.equal(runtimeHtml.includes("runtime-project-" + "select"), false);
@@ -251,6 +254,9 @@ async function copySources(sourceDirectory) {
     "runtime_operations.ts",
     "runtime_navigation.ts",
     "runtime_collaboration.ts",
+    "runtime_product_view.ts",
+    "runtime_product.ts",
+    "runtime_extensions.ts",
     "runtime_workspace.ts",
     "runtime.css",
     "runtime.html",

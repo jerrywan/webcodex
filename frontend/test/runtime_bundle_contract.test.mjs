@@ -30,6 +30,9 @@ const EXPECTED_RUNTIME_INLINE_MODULES = [
   "runtime_icons.ts",
   "runtime_navigation.ts",
   "runtime_collaboration.ts",
+  "runtime_product_view.ts",
+  "runtime_product.ts",
+  "runtime_extensions.ts",
   "runtime_workspace.ts",
   "runtime.ts",
 ];

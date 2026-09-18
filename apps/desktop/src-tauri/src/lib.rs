@@ -11,6 +11,7 @@ mod state;
 mod tray;
 mod tunnel_config;
 mod webcodex;
+mod workspace;
 
 use state::AppState;
 use tauri::Manager;
@@ -46,6 +47,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_state,
+            commands::workspace_query,
             commands::get_computer_permissions,
             commands::request_computer_permission,
             commands::get_runner_settings,

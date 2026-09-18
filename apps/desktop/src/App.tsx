@@ -1,3 +1,4 @@
+import { WorkspaceProvider } from "./features/workspace/WorkspaceContext";
 import brandIcon from "./assets/brand.png";
 import { ExtensionsPanel } from "./features/extensions/ExtensionsPanel";
 import { ComputerPermissions } from "./features/settings/ComputerPermissions";
@@ -48,7 +49,7 @@ export default function App() {
   const needsSetup = !state.topology || showSetup;
 
   return (
-    <div className="app-shell">
+    <WorkspaceProvider state={state}><div className="app-shell">
       <Sidebar state={state} navigation={navigation} setNavigation={setNavigation} />
 
       <main className="main-content" ref={mainRef} tabIndex={-1}>
@@ -109,6 +110,7 @@ export default function App() {
             onResumeRuntime={() => void resumeRuntime()}
             onConnectChatGpt={() => void runStateOperation(desktopApi.startRegularTunnel)}
             onChooseProject={() => void chooseLocalProject()}
+            onOpenProject={(path) => void runStateOperation(() => desktopApi.activateLocalProject(path))}
             onChangeSetup={openSetup}
             onNavigate={setNavigation}
             onStopQuickShare={() => void runStateOperation(desktopApi.stopQuickShare)}
@@ -121,9 +123,9 @@ export default function App() {
         {navigation === "connection" && <ConnectionPanel state={state} onState={commitState} />}
         {navigation === "activity" && <ActivityPanel activity={activity} />}
         {navigation === "extensions" && <ExtensionsPanel state={state} onState={commitState} />}
-        {navigation === "settings" && <SettingsPanel state={state} onState={commitState} />}
+        {navigation === "settings" && <SettingsPanel state={state} onState={commitState} onChangeSetup={openSetup} onStopRuntime={() => void runStateOperation(desktopApi.stopLocalRuntime)} />}
       </main>
-    </div>
+    </div></WorkspaceProvider>
   );
 }
 

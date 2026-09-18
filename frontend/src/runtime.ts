@@ -1,3 +1,6 @@
+import { productNode, productName, productTime, productActivity } from "./runtime_product_view.js";
+import { ProductWorkspace, type ProductServices } from "./runtime_product.js";
+import { ProductExtensions } from "./runtime_extensions.js";
 import { renderWorkspaceOverview, renderWorkspaceHome, renderWorkspaceEvidence, renderWorkspaceSessionList, installWorkspaceCommands } from "./runtime_workspace.js";
 import {
   workflowSessionOverviewPresentation,
@@ -302,6 +305,22 @@ let pendingConversationCreate: { fingerprint: string; key: string } | null = nul
 let pendingConversationMessage: { fingerprint: string; key: string } | null = null;
 const pageAttachmentId = "runtime-console-" + operationKey("page");
 
+const productProjectApi = new RuntimeApiClient("/api/projects/");
+const productServices: ProductServices = {
+  context: () => ({ language: runtimeLanguage, projects: homeProjectRows, runners: runnerRows,
+    sessions: recentSessionRows, windows: windowRows.length ? windowRows : projectWindowRows,
+    selectedProject: state.selectedProject || "", available: Boolean(runtimeOverviewSnapshot),
+  }),
+  post: (path, payload, signal) => api(path, payload, signal),
+  registerProject: (payload, signal) => { productProjectApi.setToken(token); return productProjectApi.post("resolve-or-register", payload, signal); },
+  onProject: (runner, project) => { switchProject(runner, project); applyWorkspaceView("sessions"); },
+  onSession: session => selectRecentSession(session), onWindow: openWindowInspector,
+  refresh: () => { void refreshAll(); }, unauthorized: () => lock(tr("Your access key is no longer valid. Connect again.")),
+};
+const productWorkspace = new ProductWorkspace(productServices);
+const productExtensions = new ProductExtensions(productServices);
+
+
 function el(id: string): HTMLElement | null {
   return document.getElementById(id);
 }
@@ -366,6 +385,7 @@ function renderLanguageSensitiveUi(): void {
   renderCommunicationSurface();
   syncCollaborationComposer();
   renderWorkspaceHeading();
+  renderHome();
   setRuntimeConnectionState(token ? "connected" : "disconnected");
 }
 
@@ -373,7 +393,7 @@ function applyLanguage(language: RuntimeLanguage, persist = true, rerender = tru
   runtimeLanguage = languagePreference(language);
   document.documentElement.lang = runtimeLanguage;
   document.documentElement.dataset.language = runtimeLanguage;
-  document.title = tr("WebCodex — Runtime Console");
+  document.title = tr("WebCodex — Workspace");
   for (const source of staticTextSources) source.node.nodeValue = translatedStaticNodeValue(source.source);
   for (const source of staticAttributeSources) source.node.setAttribute(source.name, tr(source.source));
   const nextLanguageLabel = runtimeLanguage === "zh-CN" ? "EN" : "中";
@@ -434,15 +454,19 @@ function readStoredWorkspaceView(): RuntimeWorkspaceView {
 
 function renderHome(): void {
   renderWorkspaceHome(el("runtime-home-content"), {
-    language: runtimeLanguage, projects: projectRows, project: selectedProjectRow(),
-    sessions: state.selectedProject ? sessionRows : recentSessionRows,
-    sessionsAvailable: state.selectedProject ? sessionAvailability === "available" : !!runtimeOverviewSnapshot,
-    sessionsStatus: state.selectedProject ? (sessionAvailability !== "available" ? tr(sessionAvailability === "stale" ? "Session refresh unavailable. Refresh to try again." : "Loading work Sessions…") : "") || (sessionListMetaSnapshot.truncated ? tr("Loaded evidence only; counts may be bounded.") : tr("Work Sessions in this Project")) : (el("runtime-recent-status")?.textContent || ""),
+    language: runtimeLanguage, projects: homeProjectRows, project: selectedProjectRow(),
+    sessions: recentSessionRows, sessionsAvailable: Boolean(runtimeOverviewSnapshot),
+    sessionsStatus: runtimeOverviewSnapshot ? "" : tr("Activity unavailable. Refresh to try again."),
     windows: projectWindowRows, windowAvailability: projectWindowAvailability, windowScope: windowVisibilityScope,
-    windowStatus: projectWindowAvailability === "available" ? formatProjectWindowStatusText(projectWindowRows.length, projectWindowTotal, projectWindowTruncated, runtimeLanguage) : "",
-    onProject: switchProject, onSession: session => state.selectedProject ? selectSession(String(session.session_id)) : selectRecentSession(session),
-    onWindow: openWindowInspector, onWindows: () => applyWorkspaceView("windows"), onSearch: focusProjectNavigation,
+    windowStatus: "", overview: runtimeOverviewSnapshot,
+    onProject: productServices.onProject, onSession: productServices.onSession,
+    onWindow: openWindowInspector, onWindows: () => applyWorkspaceView("windows"),
+    onSearch: () => applyWorkspaceView("projects"), onAddProject: () => productWorkspace.addProject(),
+    git: (project, target) => productWorkspace.attachGit(project, target),
   });
+  if (workspaceView === "projects") productWorkspace.renderProjects();
+  if (workspaceView === "activity") productWorkspace.renderActivity();
+  if (workspaceView === "extensions") productExtensions.open();
 }
 
 function renderWorkspaceHeading(): void {
@@ -462,7 +486,8 @@ function renderWorkspaceHeading(): void {
     return;
   }
   renderWorkspaceBreadcrumb();
-  if (workspaceView === "home") { setText("runtime-session-title", tr("Project overview")); return; }
+  const productHeading = { home: "Home", projects: "Projects", activity: "Activity", extensions: "Extensions" }[workspaceView as "home" | "projects" | "activity" | "extensions"];
+  if (productHeading) { setText("runtime-session-title", tr(productHeading)); return; }
   const snapshot = state.workflow?.snapshot;
   setText("runtime-session-title", snapshot?.title ? String(snapshot.title) : tr("Select a Session"));
 }
@@ -476,7 +501,8 @@ function applyWorkspaceView(view: RuntimeWorkspaceView, persist = true): void {
   if (shell) shell.dataset.workspaceView = workspaceView;
   document.body.classList.toggle("runtime-operations-view", operations);
   document.body.classList.toggle("runtime-windows-view", windows);
-  show("runtime-navigation-sessions", sessions || workspaceView === "home");
+  show("runtime-navigation-sessions", sessions);
+  for (const view of ["projects", "activity", "extensions"]) show(`runtime-${view}-stage`, workspaceView === view);
   show("runtime-home-stage", workspaceView === "home");
   renderHome();
   show("runtime-navigation-operations", operations);
@@ -841,7 +867,7 @@ function renderWindowList(): void {
     "runtime-window-list-status",
     formatWindowListStatusText(windowAvailability, windowRows.length, windowVisibilityScope, runtimeLanguage),
   );
-  renderWindowCards(node, windowRows, selectedWindowKey, (key) => void selectWindow(key), Date.now(), runtimeLanguage);
+  renderWindowCards(node, windowRows.map(row => ({ ...row, last_project_name: productName(homeProjectRows.find(project => project.id === row.last_project) || { id: row.last_project }) })), selectedWindowKey, (key) => void selectWindow(key), Date.now(), runtimeLanguage);
 }
 
 function renderWindowDetail(detail: any | null): void {
@@ -876,6 +902,19 @@ function renderWindowDetail(detail: any | null): void {
     runtimeLanguage,
   );
   renderWindowActivities(el("runtime-window-activity"), Array.isArray(detail.activity) ? detail.activity : []);
+  const observed = [...(detail.active_requests || []).map((row: any) => ({ ...row, at: row.started_at_ms })), ...(detail.activity || []).filter((row: any) => row.meaningful).map((row: any) => ({ ...row, at: row.ended_at_ms }))].sort((a: any, b: any) => Number(b.at) - Number(a.at));
+  const project = observed.find((row: any) => row.project)?.project;
+  setText("runtime-window-project", productName(homeProjectRows.find(row => row.id === project) || { id: project }));
+  setText("runtime-window-product-state", tr(Number(detail.active_count) > 0 ? "In progress" : "Observed"));
+  const timeline = el("runtime-window-product-activity"); timeline?.replaceChildren();
+  for (const entry of observed.slice(0, 20)) {
+    const row = productNode("article"); const text = productNode("div");
+    text.appendChild(productNode("strong", productActivity(entry, runtimeLanguage)));
+    text.appendChild(productNode("span", productName(homeProjectRows.find(project => project.id === entry.project) || { id: entry.project }), "muted small"));
+    row.append(text, productNode("time", productTime(entry.at, runtimeLanguage))); timeline?.appendChild(row);
+  }
+  if (!observed.length) timeline?.appendChild(productNode("p", tr("No activity observed yet"), "muted"));
+
   renderWorkspaceHeading();
 }
 
@@ -1140,6 +1179,7 @@ function clearSessionSurface(): void {
 }
 
 function lock(message = "", clearRemembered = true): void {
+  productWorkspace.reset(); productExtensions.reset(); productProjectApi.clearToken();
   (el("runtime-command-dialog") as HTMLDialogElement | null)?.close(); el("runtime-command-results")?.replaceChildren();
   setMobileNavigationOpen(false, false);
   closeRuntimeInspector(false, true);
@@ -3026,6 +3066,8 @@ function setRefreshBusy(active: boolean): void {
 }
 
 async function refreshAll(): Promise<void> {
+  productWorkspace.invalidateGit();
+  if (workspaceView === "extensions") void productExtensions.refresh();
   if (!token || refreshInFlight) return;
   setRefreshBusy(true);
   setText("runtime-refresh-status", tr("Refreshing…"));
@@ -3087,6 +3129,7 @@ function stopWindowAuto(): void {
 }
 
 function connectRuntimeCredential(nextToken: string, rememberForTab: boolean): void {
+  productWorkspace.reset(); productExtensions.reset(); productProjectApi.clearToken();
   rememberCredentialForTab = rememberForTab;
   token = nextToken;
   setRuntimeConnectionState("connecting");
@@ -3107,7 +3150,7 @@ el("runtime-token-form")?.addEventListener("submit", (event) => {
   const input = el("runtime-token-input") as HTMLInputElement | null;
   const remember = el("runtime-token-remember") as HTMLInputElement | null;
   const nextToken = input ? input.value.trim() : ""; if (input) input.value = "";
-  if (!nextToken) { setText("runtime-token-error", tr("Enter a runtime Bearer credential.")); return; }
+  if (!nextToken) { setText("runtime-token-error", tr("Enter your access key.")); return; }
   connectRuntimeCredential(nextToken, remember?.checked !== false);
 });
 

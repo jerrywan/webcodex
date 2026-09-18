@@ -36,6 +36,9 @@ export const RUNTIME_INLINE_MODULES = Object.freeze([
   "runtime_icons.ts",
   "runtime_navigation.ts",
   "runtime_collaboration.ts",
+  "runtime_product_view.ts",
+  "runtime_product.ts",
+  "runtime_extensions.ts",
   "runtime_workspace.ts",
   "runtime.ts",
 ]);
@@ -522,11 +525,18 @@ export function createOutputs(
         ""
       )
   );
+  const runtimeProductViewModule = buildJs(transpileTypeScript(sourceDirectory, "runtime_product_view.ts"));
+  const runtimeProductViewClassic = stripModuleExports(runtimeProductViewModule.replace(/^import\s*\{[^}]*\}\s*from\s*["'][^"']+["'];?\s*\n/gm, ""));
+  const runtimeProductModule = buildJs(transpileTypeScript(sourceDirectory, "runtime_product.ts"));
+  const runtimeProductClassic = stripModuleExports(runtimeProductModule.replace(/^import\s*\{[^}]*\}\s*from\s*["'][^"']+["'];?\s*\n/gm, ""));
+  const runtimeExtensionsModule = buildJs(transpileTypeScript(sourceDirectory, "runtime_extensions.ts"));
+  const runtimeExtensionsClassic = stripModuleExports(runtimeExtensionsModule.replace(/^import\s*\{[^}]*\}\s*from\s*["'][^"']+["'];?\s*\n/gm, ""));
   const runtimeWorkspaceModule = buildJs(transpileTypeScript(sourceDirectory, "runtime_workspace.ts"));
   const runtimeWorkspaceClassic = stripModuleExports(runtimeWorkspaceModule.replace(/^import\s*\{[^}]*\}\s*from\s*["'][^"']+["'];?\s*\n/gm, ""));
   const runtimeModule = transpileTypeScript(sourceDirectory, "runtime.ts");
   const runtimeScript = stripModuleExports(
     runtimeModule
+      .replace(/^import\s*\{[^}]*\}\s*from\s*["']\.\/runtime_(?:product|product_view|extensions)\.js["'];?\s*\n/gm, "")
       .replace(/^import\s*\{[^}]*\}\s*from\s*["']\.\/runtime_workspace\.js["'];?\s*\n/m, "")
       .replace(
         /^import\s*\{[\s\S]*?\}\s*from\s*["']\.\/workflow_session_state(?:\.js)?["'];?\s*\n/m,
@@ -615,6 +625,9 @@ export function createOutputs(
     ["runtime_icons.ts", runtimeIconsClassic],
     ["runtime_navigation.ts", runtimeNavigationClassic],
     ["runtime_collaboration.ts", runtimeCollaborationClassic],
+    ["runtime_product_view.ts", runtimeProductViewClassic],
+    ["runtime_product.ts", runtimeProductClassic],
+    ["runtime_extensions.ts", runtimeExtensionsClassic],
     ["runtime_workspace.ts", runtimeWorkspaceClassic],
     ["runtime.ts", runtimeScript],
   ]);
@@ -694,6 +707,9 @@ export function createOutputs(
     ["runtime_icons.js", runtimeIconsModule],
     ["runtime_navigation.js", runtimeNavigationModule],
     ["runtime_collaboration.js", runtimeCollaborationModule],
+    ["runtime_product_view.js", runtimeProductViewModule],
+    ["runtime_product.js", runtimeProductModule],
+    ["runtime_extensions.js", runtimeExtensionsModule],
     ["runtime_workspace.js", runtimeWorkspaceModule],
     ["admin_controller.js", adminControllerModule],
     ["admin_mutation_controller.js", adminMutationControllerModule],

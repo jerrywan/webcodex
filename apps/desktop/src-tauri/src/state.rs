@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod reconfiguration_tests;
+mod workspace;
 mod workspace_settings;
 use crate::activity::{ActivityEventKind, ActivityLevel, ActivityLog};
 use crate::deadline::Deadline;
@@ -667,13 +668,7 @@ impl DesktopCore {
     }
 
     fn chatgpt_activity_probe(&self) -> Option<ChatGptActivityProbe> {
-        if !self.snapshot.readiness.runtime_ready
-            || self
-                .snapshot
-                .chatgpt_activity
-                .as_ref()
-                .is_some_and(|activity| activity.observed)
-        {
+        if !self.snapshot.readiness.runtime_ready {
             return None;
         }
         let identity = identity_from_config(&self.config)?;
@@ -688,14 +683,15 @@ impl DesktopCore {
     ) -> DesktopResult<DesktopStateSnapshot> {
         if !self.snapshot.readiness.runtime_ready
             || identity_from_config(&self.config).as_ref() != Some(expected_identity)
-            || self
-                .snapshot
-                .chatgpt_activity
-                .as_ref()
-                .is_some_and(|activity| activity.observed)
         {
             return Ok(self.publish_snapshot());
         }
+        let last_meaningful_activity_at_ms = last_meaningful_activity_at_ms.max(
+            self.snapshot
+                .chatgpt_activity
+                .as_ref()
+                .and_then(|activity| activity.last_meaningful_activity_at_ms),
+        );
         self.snapshot.chatgpt_activity = Some(ChatGptActivitySnapshot {
             observed: last_meaningful_activity_at_ms.is_some(),
             last_meaningful_activity_at_ms,

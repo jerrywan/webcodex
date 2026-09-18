@@ -2,11 +2,13 @@ import { NavigationIcon } from "./NavigationIcon";
 import brandIcon from "../assets/brand.png";
 import type { DesktopState } from "../models/topology";
 import { LANGUAGES, useLocale } from "../i18n/locale";
-import { runtimeLabel } from "../i18n/presentation";
+import { useProduct } from "../i18n/product";
+import { statusKey } from "../features/workspace/WorkspaceStatus";
 export type Navigation = "home" | "projects" | "connection" | "extensions" | "activity" | "settings";
-export const NAVIGATION: Navigation[] = ["home", "projects", "connection", "extensions", "activity", "settings"];
+export const NAVIGATION: Navigation[] = ["home", "projects", "activity", "connection", "extensions", "settings"];
 export function Sidebar({ state, navigation, setNavigation }: { state: DesktopState; navigation: Navigation; setNavigation: (page: Navigation) => void }) {
   const { locale, setLocale, t } = useLocale();
+  const p = useProduct();
   return (
       <aside className="sidebar">
         <div className="brand"><img className="brand-mark" src={brandIcon} alt="" /><div><strong>WebCodex</strong><span>Desktop</span></div></div>
@@ -41,18 +43,8 @@ export function Sidebar({ state, navigation, setNavigation }: { state: DesktopSt
         </div>
         <div className="sidebar-status">
           <i className={`status-dot ${state.readiness.runtime_ready ? "ready" : "unknown"}`} aria-hidden="true" />
-          <div><strong>{runtimeLabel(state, t)}</strong><span>{sidebarConnectionLabel(state, t)}</span></div>
+          <div><strong>Runner · {p(statusKey(state.readiness.runner))}</strong><span>Tunnel · {p(statusKey(state.regular_tunnel?.status))}</span></div>
         </div>
       </aside>
   );
-}
-
-function sidebarConnectionLabel(state: DesktopState, t: ReturnType<typeof useLocale>["t"]) {
-  if (!state.readiness.runtime_ready) return t("workspace.afterStart");
-  if (state.regular_tunnel?.status !== "error" && state.readiness.runtime_ready && state.chatgpt_activity?.observed) {
-    return t("sidebar.chatgptObserved");
-  }
-  if (state.readiness.ready_for_chatgpt) return t("sidebar.chatgptReady");
-  if (state.regular_tunnel?.status === "ready" && state.regular_tunnel.ready_for_chatgpt) return t("sidebar.tunnelWaiting");
-  return t("sidebar.connectionIncomplete");
 }

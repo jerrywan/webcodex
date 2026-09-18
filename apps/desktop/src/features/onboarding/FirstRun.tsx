@@ -150,6 +150,7 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
   const pairingInvalid = error?.code === "pairing_code_invalid";
 
   return (
+    <>
     <form
       className="setup-shell"
       aria-labelledby="setup-title"
@@ -188,13 +189,6 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
       </div>
 
       <PowerShellInstallGuidance state={state} onState={onState} />
-
-      {mode === "local" && (
-        <details className="setup-tunnel-details">
-          <summary>{t("workspace.optionalTunnel")}</summary>
-          <TunnelConfigDiagnostics state={state} onState={onState} />
-        </details>
-      )}
 
       {mode === "remote" && (
         <div className="form-card">
@@ -337,6 +331,11 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
         </span>
       </div>
     </form>
+    {mode === "local" && <details className="setup-tunnel-details">
+      <summary>{t("workspace.optionalTunnel")}</summary>
+      <TunnelConfigDiagnostics state={state} onState={onState} />
+    </details>}
+    </>
   );
 }
 

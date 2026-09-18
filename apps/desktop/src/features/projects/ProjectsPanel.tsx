@@ -1,42 +1,19 @@
+import { useState } from "react";
 import type { DesktopState } from "../../models/topology";
-import { useLocale } from "../../i18n/locale";
-import { projectReadinessLabel } from "../../i18n/presentation";
+import { useProduct } from "../../i18n/product";
+import { projectName, useWorkspace } from "../workspace/WorkspaceContext";
+import { ProjectRows } from "./ProjectRows";
 
 export function ProjectsPanel({ state, onChooseProject, onSelectProject }: { state: DesktopState; onChooseProject: () => void; onSelectProject: (path: string) => void }) {
-  const { t } = useLocale();
-  return (
-    <section className="page-section" aria-labelledby="projects-title" data-webcodex-page="projects">
-      <div className="eyebrow">{t("project.eyebrow")}</div>
-      <h1 id="projects-title">{t("project.title")}</h1>
-      <p className="lede">{t("project.description")}</p>
-      <p className="field-help">{t("project.inventoryHelp")}</p>
-      {(state.saved_projects ?? []).length > 0 && <ul className="project-list" aria-label={t("project.savedRoots")}>
-        {state.saved_projects!.map(project => <li key={project.path}>
-          <div><strong>{project.path.split(/[\\/]/).filter(Boolean).pop()}</strong><span>{project.path}</span></div>
-          <button className="secondary-button" onClick={() => onSelectProject(project.path)} disabled={Boolean(state.current_operation) || !state.readiness.runtime_ready || project.path === state.project?.path}>{t(project.path === state.project?.path ? "project.selected" : "project.select")}</button>
-        </li>)}
-      </ul>}
-      {state.project ? (
-        <article className="detail-card" aria-labelledby="configured-project-title">
-          <h2 id="configured-project-title" className="section-title">{t("project.configured")}</h2>
-          <strong>{state.project.path}</strong>
-          <dl className="detail-list">
-            <div><dt>{t("project.status")}</dt><dd>{projectReadinessLabel(state.readiness.project, t)}</dd></div>
-            <div><dt>{t("project.allowedRoot")}</dt><dd>{state.project.allowed_root}</dd></div>
-            <div><dt>{t("project.git")}</dt><dd>{state.project.is_git_repository ? t("project.gitDetected") : t("project.gitNotRequired")}</dd></div>
-          </dl>
-          <button className="secondary-button" onClick={onChooseProject} disabled={Boolean(state.current_operation)} data-webcodex-action="change-project">
-            {t("project.add")}
-          </button>
-        </article>
-      ) : (
-        <div className="empty-state">
-          <span>{t("project.none")}</span>
-          <button className="primary-button" onClick={onChooseProject} disabled={Boolean(state.current_operation)} data-webcodex-action="add-project">
-            {t("project.add")}
-          </button>
-        </div>
-      )}
-    </section>
-  );
+  const p = useProduct(); const workspace = useWorkspace(); const [query, setQuery] = useState("");
+  const rows = workspace.projects.filter(project => `${projectName(project)} ${project.path || ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  return <section className="page-section workspace-page" aria-labelledby="projects-title" data-webcodex-page="projects">
+    <header className="page-heading-row"><div><span className="eyebrow">Runner · {workspace.runner?.client_id || p("workspace")}</span><h1 id="projects-title">{p("projects")} <span className="heading-count">{workspace.projects.length}</span></h1></div>
+      <button className="primary-button" onClick={onChooseProject} disabled={Boolean(state.current_operation)} data-webcodex-action="add-project">{p("addProject")}</button></header>
+    <div className="workspace-search"><label htmlFor="projects-search">{p("search")}</label><input id="projects-search" type="search" value={query} onChange={event => setQuery(event.target.value)} /></div>
+    {workspace.error && <div className="workspace-notice" role="alert">{p("loadError")} <button className="text-button" onClick={workspace.refresh}>{p("refresh")}</button></div>}
+    <ProjectRows projects={rows} onOpen={onSelectProject} />
+    {!rows.length && <p className="workspace-empty">{p(query ? "noMatches" : "noProjects")}</p>}
+    {workspace.runner?.projects_truncated && <p className="workspace-notice">{p("partial")}</p>}
+  </section>;
 }

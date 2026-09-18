@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { desktopApi } from "../../lib/desktop-api";
 import type { ComputerPermissions as Permissions } from "../../models/topology";
 import { useLocale } from "../../i18n/locale";
+import { useProduct } from "../../i18n/product";
 
 const EXPLAINED_KEY = "desktop-permissions-explained";
 function wasExplained() {
@@ -10,6 +11,7 @@ function wasExplained() {
 
 export function ComputerPermissions({ welcome = false }: { welcome?: boolean }) {
   const { t } = useLocale();
+  const p = useProduct();
   const [permissions, setPermissions] = useState<Permissions | null>(null);
   const [dismissed, setDismissed] = useState(() => welcome && wasExplained());
   const [foreground, setForeground] = useState(false);
@@ -62,27 +64,23 @@ export function ComputerPermissions({ welcome = false }: { welcome?: boolean }) 
   if (welcome && !showWelcome) return null;
   if (!welcome && permissions && !permissions.supported) return null;
   const content = <>
-    <h2 id={welcome ? "permission-welcome-title" : "permission-settings-title"}>{t("permissions.title")}</h2>
-    <p>{t("permissions.owner")}</p>
-    {permissions && <dl className="detail-list">
-      <div><dt>{t("permissions.accessibility")}</dt><dd>{t(permissions.desktop_accessibility ? "permissions.granted" : "permissions.notGranted")}</dd></div>
-      <div><dt>{t("permissions.screen")}</dt><dd>{t(permissions.desktop_screen_recording ? "permissions.granted" : "permissions.notGranted")}</dd></div>
-      <div><dt>Runner</dt><dd>{t("permissions.runnerUnknown")}</dd></div>
-    </dl>}
-    <div className="permission-actions">
-      {permissions?.supported && <>
-        <button type="button" className="primary-button" data-webcodex-action="request-accessibility" disabled={busy || permissions.desktop_accessibility} onClick={() => void request("accessibility")}>{t("permissions.requestAccessibility")}</button>
-        <button type="button" className="secondary-button" data-webcodex-action="request-screen-recording" disabled={busy || permissions.desktop_screen_recording} onClick={() => void request("screen_recording")}>{t("permissions.requestScreen")}</button>
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => void request("open_settings")}>{t("permissions.openSettings")}</button>
-      </>}
-      <button type="button" className="secondary-button" data-webcodex-action="recheck-permissions" disabled={busy} onClick={() => void request()}>{t("permissions.recheck")}</button>
-    </div>
-    <p className="field-help">{t("permissions.restartHelp")}</p>
+    <h2 id={welcome ? "permission-welcome-title" : "permission-settings-title"}>Computer Use</h2>
+    {permissions?.supported && <div className="permission-rows">
+      {([ ["screen_recording", p("screenRecording"), permissions.desktop_screen_recording], ["accessibility", p("accessibility"), permissions.desktop_accessibility] ] as const).map(([action, label, allowed]) => <div className="permission-row" key={action}>
+        <span>{label}</span><strong className={allowed ? "permission-allowed" : "permission-needed"}>{allowed ? `✓ ${p("allowed")}` : p("needed")}</strong>
+        {!allowed && <button type="button" className="secondary-button" aria-label={`${p("grant")} · ${label}`} disabled={busy} onClick={() => void request(action)} data-webcodex-action={`request-${action.replace("_", "-")}`}>{p("grant")}</button>}
+      </div>)}
+    </div>}
     {failed && <p role="alert">{t("permissions.error")}</p>}
     {!permissions && !failed && <p role="status">{t("common.checking")}</p>}
+    <details className="workspace-technical permission-troubleshooting"><summary>{p("troubleshooting")}</summary>
+      <p>{t("permissions.owner")}</p><p>{t("permissions.restartHelp")}</p>
+      <div className="permission-actions"><button type="button" className="secondary-button" data-webcodex-action="recheck-permissions" disabled={busy} onClick={() => void request()}>{t("permissions.recheck")}</button>
+      {permissions?.supported && <button type="button" className="secondary-button" disabled={busy} onClick={() => void request("open_settings")}>{t("permissions.openSettings")}</button>}</div>
+    </details>
     {welcome && <button type="button" className="secondary-button permission-continue" data-webcodex-action="dismiss-permission-welcome" onClick={dismiss}>{t("permissions.later")}</button>}
   </>;
   return welcome
     ? <dialog ref={dialogRef} className="permission-dialog" aria-labelledby="permission-welcome-title" onCancel={event => { event.preventDefault(); dismiss(); }}>{content}</dialog>
-    : <section className="detail-card permission-panel" aria-labelledby="permission-settings-title">{content}</section>;
+    : <section className="settings-section permission-panel" aria-labelledby="permission-settings-title">{content}</section>;
 }

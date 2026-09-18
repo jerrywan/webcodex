@@ -145,6 +145,10 @@ export function createWindowCard(
   head.appendChild(title);
   head.appendChild(active);
   button.appendChild(head);
+  if (row.last_project_name && row.last_project_name !== "—") {
+    const project = document.createElement("p"); project.className = "window-project-label";
+    project.textContent = String(row.last_project_name); button.appendChild(project);
+  }
   const call = document.createElement("span");
   call.className = "muted small";
   call.textContent = row?.last_tool_call_at_ms
