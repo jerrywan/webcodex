@@ -434,7 +434,6 @@ fn tool_definitions_drive_session_and_permission_policy() {
         vec![
             "finish_coding_task",
             "present_work_result",
-            "present_changes",
             "session_summary",
             "update_session_context",
             "close_session",

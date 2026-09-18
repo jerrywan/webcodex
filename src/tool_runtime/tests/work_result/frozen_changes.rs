@@ -1,4 +1,4 @@
-use super::support::*;
+use super::super::support::*;
 use crate::tool_runtime::sessions::{CodingSessionRequest, SessionGuards, SessionTransport};
 use crate::tool_runtime::{SessionMode, ToolResult, ToolRuntime};
 use serde_json::{json, Value};
@@ -136,7 +136,29 @@ async fn present(
         let auth = auth.clone();
         async move {
             runtime
-                .present_changes(project, session_id, Some(&auth))
+                .present_work_result(project, session_id, Some(&auth))
+                .await
+        }
+    });
+    service_agent_task(runtime, client_id, &task).await;
+    task.await.unwrap()
+}
+
+async fn refresh(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    project: &str,
+    session_id: &str,
+    auth: &crate::auth::AuthContext,
+) -> ToolResult {
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let project = project.to_string();
+        let session_id = session_id.to_string();
+        let auth = auth.clone();
+        async move {
+            runtime
+                .work_result_state(project, session_id, Some(&auth))
                 .await
         }
     });
@@ -171,7 +193,7 @@ async fn file_diff(
 }
 
 fn file_by_path<'a>(result: &'a Value, path: &str) -> &'a Value {
-    result["changes"]["files"]
+    result["work_result"]["final_changes"]["files"]
         .as_array()
         .unwrap()
         .iter()
@@ -223,11 +245,36 @@ async fn final_changes_uses_startup_tree_whole_final_workspace_and_frozen_lazy_d
     )
     .unwrap();
 
+    fs::write(
+        tmp.path().join("unicode-long.txt"),
+        format!("{}\n", "汉".repeat(50_000)),
+    )
+    .unwrap();
+
     let current = runtime.sessions.summary(&session.session_id, None).unwrap();
     assert!(presentation_needed(&runtime, client_id, &project, current).await);
 
+    let before = runtime.sessions.summary(&session.session_id, None).unwrap();
     let result = present(&runtime, client_id, &project, &session.session_id, &auth).await;
     assert!(result.success, "{:?}", result.error);
+    assert_eq!(result.output["work_result"]["project"], project);
+    assert_eq!(
+        result.output["work_result"]["session_id"],
+        session.session_id
+    );
+    assert!(result.output["work_result"]["final_changes"]
+        .get("project")
+        .is_none());
+    assert!(result.output["work_result"]["final_changes"]
+        .get("session_id")
+        .is_none());
+    let live = refresh(&runtime, client_id, &project, &session.session_id, &auth).await;
+    assert!(live.success, "{:?}", live.error);
+    assert!(live.output["work_result"].get("final_changes").is_none());
+    assert_eq!(
+        live.output["work_result"]["state_version"],
+        result.output["work_result"]["state_version"]
+    );
     assert_eq!(
         file_by_path(&result.output, "README.md")["kind"],
         "modified"
@@ -244,14 +291,30 @@ async fn final_changes_uses_startup_tree_whole_final_workspace_and_frozen_lazy_d
     assert_eq!(renamed["kind"], "renamed");
     assert_eq!(renamed["previous_path"], "rename_me.rs");
     assert_eq!(file_by_path(&result.output, "blob.bin")["binary"], true);
-    assert!(result.output["changes"]["files_changed"].as_u64().unwrap() >= 6);
-    assert_eq!(result.output["changes"]["files_truncated"], false);
+    assert!(
+        result.output["work_result"]["final_changes"]["files_changed"]
+            .as_u64()
+            .unwrap()
+            >= 6
+    );
+    assert_eq!(
+        result.output["work_result"]["final_changes"]["files_truncated"],
+        false
+    );
 
-    let snapshot_id = result.output["changes"]["snapshot_id"]
+    let snapshot_id = result.output["work_result"]["final_changes"]["snapshot_id"]
         .as_str()
         .unwrap()
         .to_string();
     fs::write(tmp.path().join("generated.rs"), "after-snapshot\n").unwrap();
+    fs::write(tmp.path().join("after-snapshot.txt"), "live-only\n").unwrap();
+    let live = refresh(&runtime, client_id, &project, &session.session_id, &auth).await;
+    assert!(live.success, "{:?}", live.error);
+    assert!(live.output["work_result"].get("final_changes").is_none());
+    assert_ne!(
+        live.output["work_result"]["state_version"],
+        result.output["work_result"]["state_version"]
+    );
 
     let frozen = file_diff(
         &runtime,
@@ -287,6 +350,25 @@ async fn final_changes_uses_startup_tree_whole_final_workspace_and_frozen_lazy_d
             > oversized.output["changes_file_diff"]["bytes_returned"]
                 .as_u64()
                 .unwrap()
+    );
+
+    let unicode = file_diff(
+        &runtime,
+        client_id,
+        &project,
+        &session.session_id,
+        &snapshot_id,
+        "unicode-long.txt",
+        &auth,
+    )
+    .await;
+    assert!(unicode.success, "{:?}", unicode.error);
+    let unicode_diff = &unicode.output["changes_file_diff"];
+    assert_eq!(unicode_diff["truncated"], true);
+    assert!(unicode_diff["diff"].as_str().unwrap().len() <= 48 * 1024);
+    assert_eq!(
+        unicode_diff["bytes_returned"].as_u64().unwrap() as usize,
+        unicode_diff["diff"].as_str().unwrap().len()
     );
 
     let wrong_path = runtime
@@ -328,8 +410,8 @@ async fn final_changes_uses_startup_tree_whole_final_workspace_and_frozen_lazy_d
 
     let wrong_snapshot = runtime
         .changes_file_diff(
-            project,
-            session.session_id,
+            project.clone(),
+            session.session_id.clone(),
             format!("wc_changes_snapshot_{}", "f".repeat(32)),
             "generated.rs".to_string(),
             Some(&auth),
@@ -340,6 +422,130 @@ async fn final_changes_uses_startup_tree_whole_final_workspace_and_frozen_lazy_d
         wrong_snapshot.output["error_kind"],
         "changes_snapshot_unavailable"
     );
+
+    let other_root = tempfile::tempdir().unwrap();
+    init_git_repo(other_root.path());
+    commit_file(other_root.path(), "README.md", "other\n", "other");
+    let other_project = register_runner_project_at_path_with_auth(
+        &runtime,
+        "changes-other",
+        "other",
+        other_root.path(),
+        &auth,
+    )
+    .await;
+    let wrong_project = runtime
+        .changes_file_diff(
+            other_project,
+            session.session_id.clone(),
+            snapshot_id.clone(),
+            "generated.rs".to_string(),
+            Some(&auth),
+        )
+        .await;
+    assert!(!wrong_project.success);
+    assert_eq!(
+        wrong_project.output["error_kind"],
+        "session_project_mismatch"
+    );
+    let foreign = shared_key_auth_context("frozen-other-caller");
+    let denied = runtime
+        .changes_file_diff(
+            project.clone(),
+            session.session_id.clone(),
+            snapshot_id.clone(),
+            "generated.rs".to_string(),
+            Some(&foreign),
+        )
+        .await;
+    assert!(!denied.success);
+    assert!(denied.output.get("changes_file_diff").is_none());
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
+
+    let renamed = file_diff(
+        &runtime,
+        client_id,
+        &project,
+        &session.session_id,
+        &snapshot_id,
+        "renamed.rs",
+        &auth,
+    )
+    .await;
+    assert!(renamed.success, "{:?}", renamed.error);
+    assert_eq!(
+        renamed.output["changes_file_diff"]["previous_path"],
+        "rename_me.rs"
+    );
+    assert_eq!(renamed.output["changes_file_diff"]["kind"], "renamed");
+    let binary = file_diff(
+        &runtime,
+        client_id,
+        &project,
+        &session.session_id,
+        &snapshot_id,
+        "blob.bin",
+        &auth,
+    )
+    .await;
+    assert!(binary.success, "{:?}", binary.error);
+    assert_eq!(binary.output["changes_file_diff"]["binary"], true);
+
+    for index in 0..30 {
+        fs::write(
+            tmp.path().join(format!("extra-{index:02}.txt")),
+            "bounded\n",
+        )
+        .unwrap();
+    }
+    fs::write(tmp.path().join("zzz-not-advertised.txt"), "bounded\n").unwrap();
+    let second = present(&runtime, client_id, &project, &session.session_id, &auth).await;
+    assert!(second.success, "{:?}", second.error);
+    let changes = &second.output["work_result"]["final_changes"];
+    assert_eq!(changes["files_returned"], 24);
+    assert_eq!(changes["files_truncated"], true);
+    assert!(changes["files_total"].as_u64().unwrap() > 24);
+    let second_id = changes["snapshot_id"].as_str().unwrap();
+    assert_ne!(second_id, snapshot_id);
+    assert!(!changes["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|file| file["path"] == "zzz-not-advertised.txt"));
+    let unadvertised = runtime
+        .changes_file_diff(
+            project.clone(),
+            session.session_id.clone(),
+            second_id.to_string(),
+            "zzz-not-advertised.txt".to_string(),
+            Some(&auth),
+        )
+        .await;
+    assert!(!unadvertised.success);
+    assert_eq!(
+        unadvertised.output["error_kind"],
+        "changes_snapshot_path_not_allowed"
+    );
+    let original = file_diff(
+        &runtime,
+        client_id,
+        &project,
+        &session.session_id,
+        &snapshot_id,
+        "generated.rs",
+        &auth,
+    )
+    .await;
+    assert!(original.success, "{:?}", original.error);
+    assert_eq!(
+        original.output["changes_file_diff"]["diff"],
+        frozen.output["changes_file_diff"]["diff"]
+    );
+    let after = runtime.sessions.summary(&session.session_id, None).unwrap();
+    assert_eq!(after.events_total, before.events_total);
+    assert_eq!(after.updated_at, before.updated_at);
 }
 
 #[tokio::test]
@@ -436,7 +642,10 @@ async fn committed_final_tree_is_presentable_even_when_worktree_is_clean() {
     assert!(presentation_needed(&runtime, client_id, &project, summary).await);
     let result = present(&runtime, client_id, &project, &session.session_id, &auth).await;
     assert!(result.success, "{:?}", result.error);
-    assert_eq!(result.output["changes"]["files_changed"], 1);
+    assert_eq!(
+        result.output["work_result"]["final_changes"]["files_changed"],
+        1
+    );
     assert_eq!(
         file_by_path(&result.output, "README.md")["kind"],
         "modified"
@@ -467,12 +676,9 @@ async fn shell_only_is_ineligible_and_reverted_first_class_edit_has_no_presentat
         .final_changes_presentation_needed(&project, &summary)
         .await
         .unwrap());
-    let denied = present(&runtime, client_id, &project, &shell_only.session_id, &auth).await;
-    assert!(!denied.success);
-    assert_eq!(
-        denied.output["reason"],
-        "session_has_no_first_class_repository_edit"
-    );
+    let work = present(&runtime, client_id, &project, &shell_only.session_id, &auth).await;
+    assert!(work.success, "{:?}", work.error);
+    assert!(work.output["work_result"].get("final_changes").is_none());
 
     fs::remove_file(tmp.path().join("shell-only.rs")).unwrap();
     let reverted = start_changes_session(&runtime, &auth, &project, baseline);
@@ -485,4 +691,7 @@ async fn shell_only_is_ineligible_and_reverted_first_class_edit_has_no_presentat
         .unwrap();
     assert!(summary.repository_edit_observed);
     assert!(!presentation_needed(&runtime, client_id, &project, summary).await);
+    let work = present(&runtime, client_id, &project, &reverted.session_id, &auth).await;
+    assert!(work.success, "{:?}", work.error);
+    assert!(work.output["work_result"].get("final_changes").is_none());
 }

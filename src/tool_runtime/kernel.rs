@@ -77,12 +77,10 @@ pub(crate) struct ToolProtocolCapabilities {
     /// Protocol-surface support for the ModelHidden Goal Plan App polling read.
     /// This never replaces canonical communication/Goal authorization.
     pub(crate) goal_plan_app: bool,
-    /// Protocol-surface support for the ModelHidden Work Result App explicit
-    /// refresh read. Exact Project + Session authority is still checked per call.
+    /// Protocol-surface support for Work Result App live refresh and frozen
+    /// lazy diff reads. Exact Project + Session authority is checked per call;
+    /// lazy reads additionally fence caller, snapshot, and advertised path.
     pub(crate) work_result_app: bool,
-    /// Protocol-surface support for the ModelHidden Final Changes lazy frozen-diff
-    /// read. Exact Project + Session + snapshot + path authority is rechecked.
-    pub(crate) changes_app: bool,
     /// Protocol-surface support for ModelHidden MCP App Host-continuation
     /// coordination. Canonical communication authorization and exact
     /// process-local Host binding validation remain mandatory in the runtime.
@@ -265,7 +263,6 @@ impl ToolRuntime {
                 trace_diagnostics: false,
                 goal_plan_app: false,
                 work_result_app: false,
-                changes_app: false,
                 agent_continuation_app: false,
             },
         )
@@ -362,12 +359,12 @@ impl ToolRuntime {
                 correlation: Default::default(),
             };
         }
-        if request.tool_name == "changes_file_diff" && !capabilities.changes_app {
+        if request.tool_name == "changes_file_diff" && !capabilities.work_result_app {
             return ToolCallOutcome {
                 success: false,
                 result: None,
                 error_status: Some(ToolCallErrorStatus::InvalidArguments {
-                    message: "Final Changes App lazy diff is available only on Stateless MCP 2026 requests with Changes App capability"
+                    message: "Work Result App lazy diff is available only on Stateless MCP 2026 requests with Work Result App capability"
                         .to_string(),
                 }),
                 project: None,

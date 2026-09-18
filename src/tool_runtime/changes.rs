@@ -71,6 +71,14 @@ struct ChangesSnapshot {
     expires_at: Instant,
 }
 
+impl ChangesSnapshot {
+    fn matches_identity(&self, caller_fingerprint: &str, project: &str, session_id: &str) -> bool {
+        self.caller_fingerprint == caller_fingerprint
+            && self.project == project
+            && self.session_id == session_id
+    }
+}
+
 #[derive(Default)]
 struct ChangesSnapshotRegistry {
     snapshots: VecDeque<ChangesSnapshot>,
@@ -133,7 +141,7 @@ struct ChangesTotals {
 /// The command-scope overlay preserves ordinary Git config (autocrlf, sparse
 /// checkout, ignores, etc.) while replacing only execution-bearing filters with
 /// identity/no-op behavior for this observation.
-const CHANGES_GIT_SAFE_CONFIG_SETUP: &str = r#"changes_git_overlay=$(mktemp "${TMPDIR:-/tmp}/webcodex-changes-config.XXXXXX")
+pub(super) const CHANGES_GIT_SAFE_CONFIG_SETUP: &str = r#"changes_git_overlay=$(mktemp "${TMPDIR:-/tmp}/webcodex-changes-config.XXXXXX")
 changes_git_filter_keys=$(mktemp "${TMPDIR:-/tmp}/webcodex-changes-filter-keys.XXXXXX")
 changes_git_tmp_index=
 changes_git_untracked_tmp=
@@ -225,55 +233,43 @@ exit 0
         }
     }
 
-    pub(crate) async fn present_changes(
+    /// The frozen domain of an initial Work Result. The caller has independently
+    /// authorized this exact Project and Session; neither a card nor a snapshot
+    /// is authority. Live refresh must never call this helper.
+    pub(super) async fn freeze_work_result_changes(
         &self,
-        project: String,
-        session_id: String,
+        project: &str,
+        summary: &super::sessions::SessionSummary,
         auth: Option<&AuthContext>,
-    ) -> ToolResult {
-        let (resolved_project, summary, caller_fingerprint) = match self
-            .authorize_exact_changes_context(&project, &session_id, "present_changes", auth)
-            .await
-        {
-            Ok(context) => context,
-            Err(result) => return result,
-        };
-
+    ) -> Result<Option<Value>, ToolResult> {
         let Some(baseline_tree) = summary.git_baseline_tree.as_deref() else {
-            return changes_unavailable("session_has_no_git_baseline");
+            return Ok(None);
         };
         if !summary.repository_edit_observed {
-            return changes_unavailable("session_has_no_first_class_repository_edit");
+            return Ok(None);
         }
         if !valid_git_object_id(baseline_tree) {
-            return changes_unavailable("session_git_baseline_invalid");
+            return Err(changes_unavailable("session_git_baseline_invalid"));
         }
-
-        let final_tree = match self.freeze_final_workspace_tree(&resolved_project).await {
-            Ok(tree) => tree,
-            Err(result) => return result,
-        };
+        let caller_fingerprint = workflow_session_authority_fingerprint(auth)
+            .map_err(|_| changes_identity_error("session_authority_denied"))?;
+        let final_tree = self.freeze_final_workspace_tree(project).await?;
         if final_tree == baseline_tree {
-            return changes_unavailable("final_workspace_matches_baseline");
+            return Ok(None);
         }
-
-        let (totals, files, files_truncated) = match self
-            .changes_metadata(&resolved_project, baseline_tree, &final_tree)
-            .await
-        {
-            Ok(metadata) => metadata,
-            Err(result) => return result,
-        };
+        let (totals, files, files_truncated) = self
+            .changes_metadata(project, baseline_tree, &final_tree)
+            .await?;
         if totals.files == 0 {
-            return changes_unavailable("final_workspace_matches_baseline");
+            return Ok(None);
         }
 
         let snapshot_id = format!("wc_changes_snapshot_{}", uuid::Uuid::new_v4().simple());
         let snapshot = ChangesSnapshot {
             snapshot_id: snapshot_id.clone(),
             caller_fingerprint,
-            project: resolved_project.clone(),
-            session_id: session_id.clone(),
+            project: project.to_string(),
+            session_id: summary.session_id.clone(),
             baseline_tree: baseline_tree.to_string(),
             final_tree,
             files: files.clone(),
@@ -284,21 +280,16 @@ exit 0
             .expect("Changes snapshot registry mutex poisoned")
             .insert(snapshot);
 
-        ToolResult::ok(json!({
-            "changes": {
-                "version": 3,
-                "project": resolved_project,
-                "session_id": session_id,
-                "snapshot_id": snapshot_id,
-                "files_changed": totals.files,
-                "additions": totals.additions,
-                "deletions": totals.deletions,
-                "files_total": totals.files,
-                "files_returned": files.len(),
-                "files_truncated": files_truncated,
-                "files": files.iter().map(ChangesFileMetadata::to_value).collect::<Vec<_>>(),
-            }
-        }))
+        Ok(Some(json!({
+            "snapshot_id": snapshot_id,
+            "files_changed": totals.files,
+            "additions": totals.additions,
+            "deletions": totals.deletions,
+            "files_total": totals.files,
+            "files_returned": files.len(),
+            "files_truncated": files_truncated,
+            "files": files.iter().map(ChangesFileMetadata::to_value).collect::<Vec<_>>(),
+        })))
     }
 
     pub(crate) async fn changes_file_diff(
@@ -327,10 +318,7 @@ exit 0
         let Some(snapshot) = snapshot else {
             return changes_identity_error("changes_snapshot_unavailable");
         };
-        if snapshot.caller_fingerprint != caller_fingerprint
-            || snapshot.project != resolved_project
-            || snapshot.session_id != session_id
-        {
+        if !snapshot.matches_identity(&caller_fingerprint, &resolved_project, &session_id) {
             return changes_identity_error("changes_snapshot_identity_mismatch");
         }
         let Some(file) = snapshot.files.iter().find(|file| file.path == path) else {
@@ -587,16 +575,33 @@ head -n {CHANGES_DIFF_MAX_LINES} "$tmp" | dd bs=1 count={CHANGES_DIFF_MAX_BYTES}
             marker_u64(&output.stderr, DIFF_BYTES_MARKER).unwrap_or(output.stdout.len() as u64);
         let lines_total = marker_u64(&output.stderr, DIFF_LINES_MARKER)
             .unwrap_or(output.stdout.lines().count() as u64);
+        // Runner text decoding may expand a clipped multibyte sequence. Bound
+        // the returned UTF-8 representation too, not only the source Git bytes.
+        let mut text = output.stdout;
+        let text_bounded = bound_frozen_diff_text(&mut text);
         let truncated = output.stdout_truncated
-            || bytes_total > output.stdout.len() as u64
-            || lines_total > output.stdout.lines().count() as u64;
+            || text_bounded
+            || bytes_total > text.len() as u64
+            || lines_total > text.lines().count() as u64;
         Ok(FrozenFileDiff {
-            text: output.stdout,
+            text,
             bytes_total,
             lines_total,
             truncated,
         })
     }
+}
+
+fn bound_frozen_diff_text(text: &mut String) -> bool {
+    if text.len() <= CHANGES_DIFF_MAX_BYTES {
+        return false;
+    }
+    let mut end = CHANGES_DIFF_MAX_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    true
 }
 
 #[derive(Debug)]
@@ -775,6 +780,78 @@ fn shell_single_quote(value: &str) -> String {
 mod tests {
     use super::*;
 
+    fn snapshot_fixture(id: &str, caller: &str) -> ChangesSnapshot {
+        ChangesSnapshot {
+            snapshot_id: id.to_string(),
+            caller_fingerprint: caller.to_string(),
+            project: "agent:runner:project".to_string(),
+            session_id: "session".to_string(),
+            baseline_tree: "a".repeat(40),
+            final_tree: "b".repeat(40),
+            files: Vec::new(),
+            expires_at: Instant::now() + CHANGES_SNAPSHOT_TTL,
+        }
+    }
+
+    #[test]
+    fn frozen_changes_snapshot_possession_does_not_replace_caller_project_or_session_authority() {
+        let snapshot = snapshot_fixture("known-snapshot", "caller");
+        assert!(snapshot.matches_identity("caller", "agent:runner:project", "session"));
+        assert!(!snapshot.matches_identity("other", "agent:runner:project", "session"));
+        assert!(!snapshot.matches_identity("caller", "agent:runner:other", "session"));
+        assert!(!snapshot.matches_identity("caller", "agent:runner:project", "other"));
+    }
+
+    #[test]
+    fn frozen_changes_registry_expires_without_refresh_extending_its_lifetime() {
+        let mut registry = ChangesSnapshotRegistry::default();
+        let current = snapshot_fixture("current", "caller");
+        let expires_at = current.expires_at;
+        registry.insert(current);
+        assert_eq!(registry.get("current").unwrap().expires_at, expires_at);
+        assert!(registry.get("missing").is_none());
+        let mut expired = snapshot_fixture("expired", "caller");
+        expired.expires_at = Instant::now() - Duration::from_secs(1);
+        registry.insert(expired);
+        assert!(registry.get("expired").is_none());
+        registry.prune(expires_at);
+        assert!(registry.get("current").is_none());
+        assert!(registry.snapshots.is_empty());
+    }
+
+    #[test]
+    fn frozen_changes_registry_keeps_per_caller_and_process_bounds() {
+        let mut registry = ChangesSnapshotRegistry::default();
+        for index in 0..=MAX_CHANGES_SNAPSHOTS_PER_CALLER {
+            registry.insert(snapshot_fixture(&format!("same-{index}"), "caller"));
+        }
+        assert_eq!(registry.snapshots.len(), MAX_CHANGES_SNAPSHOTS_PER_CALLER);
+        assert!(registry.get("same-0").is_none());
+        assert!(registry.get("same-1").is_some());
+        for index in 0..=MAX_CHANGES_SNAPSHOTS {
+            registry.insert(snapshot_fixture(
+                &format!("other-{index}"),
+                &format!("caller-{index}"),
+            ));
+        }
+        assert_eq!(registry.snapshots.len(), MAX_CHANGES_SNAPSHOTS);
+        assert!(registry.get("other-0").is_none());
+        assert!(registry.get("other-1").is_some());
+        assert!(registry.get("same-1").is_none());
+    }
+
+    #[test]
+    fn frozen_changes_diff_budget_bounds_returned_utf8_not_only_source_bytes() {
+        let mut text = format!("{}汉", "a".repeat(CHANGES_DIFF_MAX_BYTES - 1));
+        assert!(bound_frozen_diff_text(&mut text));
+        assert_eq!(text.len(), CHANGES_DIFF_MAX_BYTES - 1);
+        assert!(text.is_char_boundary(text.len()));
+        assert!(!bound_frozen_diff_text(&mut text));
+        let mut exact = "a".repeat(CHANGES_DIFF_MAX_BYTES);
+        assert!(!bound_frozen_diff_text(&mut exact));
+        assert_eq!(exact.len(), CHANGES_DIFF_MAX_BYTES);
+    }
+
     #[test]
     fn nul_metadata_parsers_ignore_incomplete_bounded_tail() {
         let files = parse_name_status_z("M\0src/a.rs\0A\0src/partial");
@@ -836,7 +913,7 @@ mod tests {
 
 fn changes_unavailable(reason: &'static str) -> ToolResult {
     ToolResult::err_with_output(
-        "Changes presentation is not available for this Workflow Session",
+        "Frozen final changes are not available for this Workflow Session",
         json!({
             "error_kind": "changes_not_available",
             "reason": reason,

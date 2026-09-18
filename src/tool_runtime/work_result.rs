@@ -42,9 +42,9 @@ impl ToolRuntime {
             .await
     }
 
-    /// Read one exact project-scoped coding Session without creating work or
-    /// writing presentation state. The only live Project observation is the
-    /// bounded, no-diff show_changes producer used for current worktree facts.
+    /// Project/Session authority is shared by initial presentation and explicit
+    /// live refresh. Only initial presentation may allocate a process-local
+    /// frozen snapshot; neither path writes the target Session.
     async fn exact_work_result(
         &self,
         project: String,
@@ -97,14 +97,7 @@ impl ToolRuntime {
         // read, not Session evidence, and an explicit App refresh must never
         // append to the target Session merely because the card requested it.
         let workspace_result = self
-            .show_changes(
-                resolved.resolved_id.clone(),
-                None,
-                Some(false),
-                None,
-                None,
-                None,
-            )
+            .show_changes_for_presentation(resolved.resolved_id.clone())
             .await;
         let validation =
             validation_summary_from_events(&summary.events, WORK_RESULT_VALIDATION_LIMIT);
@@ -123,7 +116,19 @@ impl ToolRuntime {
             &review,
             history_partial,
         );
+        // This version covers live domains only. The card keeps the initial
+        // frozen identity locally; refresh neither replaces nor re-creates it.
         projection["state_version"] = json!(work_result_state_version(&projection));
+        if tool_name == "present_work_result" {
+            match self
+                .freeze_work_result_changes(&resolved.resolved_id, &summary, auth)
+                .await
+            {
+                Ok(Some(changes)) => projection["final_changes"] = changes,
+                Ok(None) => {}
+                Err(result) => return result,
+            }
+        }
         ToolResult::ok(json!({"work_result": projection}))
     }
 }

@@ -95,38 +95,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolAuditResultField::pointer("project", "/work_result/project"),
                     super::ToolAuditResultField::pointer("session_id", "/work_result/session_id"),
                     super::ToolAuditResultField::pointer("state_version", "/work_result/state_version"),
-                    super::ToolAuditResultField::value("error_kind"),
-                ]),
-                ModelVisible,
-                "workflow",
-                Some(GitOrShell),
-                TOOL_PROVIDER_CONTROL,
-                super::ToolSemanticContract {
-                    effect: super::ToolEffect::Observe,
-                    risk: Read,
-                    approval: super::ToolApprovalPolicy::None,
-                    idempotency: super::ToolIdempotency::PureRead,
-                },
-                Some(PROJECT_READ),
-                true,
-                NoPath,
-                false,
-                false,
-                super::ToolSessionEvidencePolicy::NONE,
-            ),
-            "Optionally present one exact coding Workflow Session as a persistent read-only Work Result MCP App card when a user-visible work summary is genuinely useful. Requires explicit project + session_id, creates no work, runs no validation/review, changes no Session lifecycle, and grants no authority. The returned Work Result is the card's initial authoritative snapshot; do not call merely to acknowledge a clean worktree and do not call repeatedly to refresh. Later refresh is user-driven inside the existing card through one exact app-only state read per click. Presentation is UX only, never a correctness requirement; repeated explicit presentation may create another Host card.",
-        ))
-        .with_gpt_action_unsupported(),
-        155,
-    ),
-    adaptive_runtime_direct(
-        requires_explicit_business_session(model_spec(
-            def(
-                "present_changes",
-                super::ToolAuditPolicy::typed_fields(&[
-                    super::ToolAuditResultField::pointer("project", "/changes/project"),
-                    super::ToolAuditResultField::pointer("session_id", "/changes/session_id"),
-                    super::ToolAuditResultField::pointer("snapshot_id", "/changes/snapshot_id"),
+                    super::ToolAuditResultField::pointer("snapshot_id", "/work_result/final_changes/snapshot_id"),
                     super::ToolAuditResultField::value("error_kind"),
                 ]),
                 ModelVisible,
@@ -150,10 +119,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolActivityPresentation::Transport,
                 super::ToolActivityInteraction::NonMeaningful,
             ),
-            "Create one final frozen Changes MCP App presentation for the exact coding Workflow Session only when finish_coding_task returned this parser-ready follow-up. Requires exact project + session_id, re-authorizes both independently, creates no work or validation, changes no Session lifecycle, and grants no authority. Repeated explicit calls can create another Host card, so do not call it more than once for the same closeout.",
+            "Optionally present one exact coding Workflow Session as a persistent read-only Work Result MCP App card when a user-visible work summary is genuinely useful. Requires explicit project + session_id, creates no work, runs no validation/review, changes no Session lifecycle, and grants no authority. The initial Work Result includes eligible frozen final changes for lazy in-card diff reads; do not call merely to acknowledge a clean worktree and do not call repeatedly to refresh. User-driven app-only refresh updates live workspace, validation, and review without replacing the card's frozen snapshot. Presentation is UX only, never a correctness requirement; repeated explicit presentation may create another Host card.",
         ))
         .with_gpt_action_unsupported(),
-        156,
+        155,
     ),
     def(
         "work_result_state",

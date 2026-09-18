@@ -255,7 +255,7 @@ fn experimental_code_mode_is_absent_without_feature() {
 
 #[test]
 fn final_changes_requires_the_typed_internal_posix_runner_capability() {
-    for name in ["present_changes", "changes_file_diff"] {
+    for name in ["present_work_result", "changes_file_diff"] {
         let requirement = runtime_tool_runner_capability(name)
             .unwrap_or_else(|| panic!("{name} must require its real Runner execution capability"));
         assert_eq!(
@@ -717,7 +717,6 @@ fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
         "present_goal_plan",
         "present_agent_continuation",
         "present_work_result",
-        "present_changes",
         "export_project_artifact",
         "rotate_agent_continuation_endpoint",
     ] {

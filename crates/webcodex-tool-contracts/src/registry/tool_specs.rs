@@ -37,23 +37,19 @@ pub fn goal_plan_app_tool_specs() -> Vec<ToolSpec> {
     )]
 }
 
-/// Fixed read-only Work Result explicit-refresh contract for MCP App Views. The
-/// canonical ToolDefinition remains globally ModelHidden and deliberately
-/// outside the generic Adaptive gateway; only the MCP Apps adapter projects it.
+/// Read-only Work Result App primitives. Canonical definitions stay ModelHidden;
+/// only the MCP Apps adapter projects live refresh and frozen lazy diff reads.
 pub fn work_result_app_tool_specs() -> Vec<ToolSpec> {
-    vec![tool_spec(
-        "work_result_state",
-        "App-only exact read used only for explicit user-driven Work Result refresh. Requires explicit project + session_id, independently re-authorizes both on every call, grants no authority, runs no validation/review, and never records the refresh into the target Workflow Session ledger.",
-    )]
-}
-
-/// Fixed lazy frozen-diff contract for the Final Changes MCP App. The canonical
-/// ToolDefinition is ModelHidden and only a UI-capable MCP adapter may expose it.
-pub fn changes_app_tool_specs() -> Vec<ToolSpec> {
-    vec![tool_spec(
-        "changes_file_diff",
-        "App-only bounded lazy read of one path from an exact frozen Final Changes snapshot. Re-authorizes exact project + session, validates caller/snapshot/path binding, grants no authority, and never records the user click into the target Workflow Session ledger.",
-    )]
+    vec![
+        tool_spec(
+            "work_result_state",
+            "App-only exact live Work Result refresh, driven by an explicit user click. Re-authorizes project + session_id, never records into the target Session, and never creates or replaces the card's frozen final-changes snapshot.",
+        ),
+        tool_spec(
+            "changes_file_diff",
+            "Work Result App-only bounded lazy read of one advertised path from the card's initial frozen snapshot. Re-authorizes exact project + session, validates caller/snapshot/path binding, grants no authority, and never records the click into the target Session.",
+        ),
+    ]
 }
 
 /// Fixed MCP App Host-continuation coordination contract. Definitions remain

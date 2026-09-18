@@ -487,6 +487,16 @@ async fn work_result_state_fails_closed_for_foreign_session_authority() {
 
 #[test]
 fn work_result_tool_contract_requires_exact_project_and_session() {
+    assert!(
+        ToolCall::from_tool_name(
+            "present_changes",
+            json!({
+                "project": "agent:x:y", "session_id": format!("wc_sess_{}", "1".repeat(32))
+            })
+        )
+        .is_err(),
+        "the retired presentation must not parse as a compatibility alias"
+    );
     for name in ["present_work_result", "work_result_state"] {
         assert!(ToolCall::from_tool_name(name, json!({"project": "agent:x:y"})).is_err());
         assert!(ToolCall::from_tool_name(
@@ -505,3 +515,6 @@ fn work_result_tool_contract_requires_exact_project_and_session() {
         assert_eq!(call.tool_name(), name);
     }
 }
+
+#[path = "work_result/frozen_changes.rs"]
+mod frozen_changes;

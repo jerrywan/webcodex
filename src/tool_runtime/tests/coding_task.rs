@@ -1513,7 +1513,7 @@ async fn finish_coding_task_emits_one_parser_ready_changes_presentation_in_full_
         assert_eq!(
             result.output["presentation"]["suggested_call"],
             json!({
-                "tool": "present_changes",
+                "tool": "present_work_result",
                 "arguments": {
                     "project": project,
                     "session_id": session_id,
@@ -1527,7 +1527,7 @@ async fn finish_coding_task_emits_one_parser_ready_changes_presentation_in_full_
             .all(|action| !action
                 .as_str()
                 .unwrap_or_default()
-                .contains("present_changes")));
+                .contains("present_work_result")));
     }
 
     let restore = std::process::Command::new("git")

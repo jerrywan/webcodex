@@ -2477,6 +2477,38 @@ impl ToolRuntime {
         max_hunk_lines: Option<usize>,
         session_event_limit: Option<usize>,
     ) -> ToolResult {
+        self.show_changes_observation(
+            project,
+            session_id,
+            include_diff,
+            max_hunks,
+            max_hunk_lines,
+            session_event_limit,
+            false,
+        )
+        .await
+    }
+
+    /// Presentation must not execute repository-configured filters or hooks.
+    /// Reuse the ordinary bounded producer/parser without recording a Session.
+    pub(in crate::tool_runtime) async fn show_changes_for_presentation(
+        &self,
+        project: String,
+    ) -> ToolResult {
+        self.show_changes_observation(project, None, Some(false), None, None, None, true)
+            .await
+    }
+
+    async fn show_changes_observation(
+        &self,
+        project: String,
+        session_id: Option<String>,
+        include_diff: Option<bool>,
+        max_hunks: Option<usize>,
+        max_hunk_lines: Option<usize>,
+        session_event_limit: Option<usize>,
+        read_only_presentation: bool,
+    ) -> ToolResult {
         let include_diff = include_diff.unwrap_or(false);
         let max_hunks = max_hunks
             .filter(|n| *n > 0)
@@ -2492,7 +2524,26 @@ impl ToolRuntime {
         let session_summary_limit = recent_events_limit
             .max(SHOW_CHANGES_SESSION_SIGNAL_EVENT_LIMIT)
             .min(SHOW_CHANGES_MAX_SESSION_EVENT_LIMIT);
-        let command = show_changes_command(include_diff, max_hunks, max_hunk_lines);
+        let mut command = show_changes_command(include_diff, max_hunks, max_hunk_lines);
+        if read_only_presentation {
+            command = format!(
+                r#"set -eu
+umask 077
+GIT_OPTIONAL_LOCKS=0; export GIT_OPTIONAL_LOCKS
+{safe_config}
+git() {{
+  if [ "$1" = diff ]; then
+    shift
+    command git -c include.path="$changes_git_overlay" -c core.fsmonitor=false diff --no-ext-diff --no-textconv "$@"
+  else
+    command git -c include.path="$changes_git_overlay" -c core.fsmonitor=false "$@"
+  fi
+}}
+set +e
+{command}"#,
+                safe_config = super::super::changes::CHANGES_GIT_SAFE_CONFIG_SETUP,
+            );
+        }
         let output = match self
             .run_project_internal_posix_script_capture(&project, command, 30, None)
             .await

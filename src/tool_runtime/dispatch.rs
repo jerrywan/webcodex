@@ -1880,11 +1880,6 @@ impl ToolRuntime {
                 session_id,
             } => self.work_result_state(project, session_id, auth).await,
 
-            ToolCall::PresentChanges {
-                project,
-                session_id,
-            } => self.present_changes(project, session_id, auth).await,
-
             ToolCall::ChangesFileDiff {
                 project,
                 session_id,

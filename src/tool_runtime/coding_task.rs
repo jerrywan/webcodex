@@ -1670,13 +1670,13 @@ impl ToolRuntime {
             .sessions
             .summary(&session_id, Some(FINISH_SESSION_EVENT_LIMIT))
             .unwrap_or(closeout_pre_validation_summary);
-        let changes_presentation = match self
+        let work_result_presentation = match self
             .final_changes_presentation_needed(&resolved.resolved_id, &closeout_session_summary)
             .await
         {
             Ok(true) => Some(json!({
                 "suggested_call": {
-                    "tool": "present_changes",
+                    "tool": "present_work_result",
                     "arguments": {
                         "project": resolved.resolved_id.clone(),
                         "session_id": session_id.clone(),
@@ -1686,7 +1686,7 @@ impl ToolRuntime {
             Ok(false) => None,
             Err(message) => {
                 final_warnings.push(json!({
-                    "kind": "changes_presentation_probe_failed",
+                    "kind": "work_result_presentation_probe_failed",
                     "message": message,
                 }));
                 None
@@ -1767,7 +1767,7 @@ impl ToolRuntime {
             "llm_summary": false,
             "final_warnings": final_warnings,
         });
-        if let Some(presentation) = changes_presentation {
+        if let Some(presentation) = work_result_presentation {
             output["presentation"] = presentation;
         }
         output["suggested_next_actions"] = json!(finish_suggested_next_actions(&output));

@@ -5469,10 +5469,6 @@ impl ToolCallAuditProjection for ToolCall {
             | Self::WorkResultState {
                 project,
                 session_id,
-            }
-            | Self::PresentChanges {
-                project,
-                session_id,
             } => serde_json::json!({
                 "project": project,
                 "session_id": session_id,

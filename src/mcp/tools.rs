@@ -329,7 +329,6 @@ pub(super) fn mcp_tools_list_payload_with_features_for_auth(
             crate::tool_runtime::goal_plan_app_tool_specs()
                 .into_iter()
                 .chain(crate::tool_runtime::work_result_app_tool_specs())
-                .chain(crate::tool_runtime::changes_app_tool_specs())
                 .chain(crate::tool_runtime::agent_continuation_app_tool_specs())
                 .chain(crate::tool_runtime::job_terminal_continuation_app_tool_specs())
                 .collect(),
@@ -824,9 +823,6 @@ fn mcp_tool_spec_json(mut spec: ToolSpec, compact: bool, app_enabled: bool) -> V
     }
     if app_enabled && presentation::tool_supports_work_result_app(&tool_name) {
         attach_app_metadata(&mut value, resources::MCP_WORK_RESULT_UI_RESOURCE_URI);
-    }
-    if app_enabled && presentation::tool_supports_changes_app(&tool_name) {
-        attach_app_metadata(&mut value, resources::MCP_CHANGES_UI_RESOURCE_URI);
     }
     if app_enabled && presentation::tool_supports_goal_plan_app(&tool_name) {
         attach_app_metadata(&mut value, resources::MCP_GOAL_PLAN_UI_RESOURCE_URI);
@@ -1827,12 +1823,11 @@ pub(super) async fn handle_call(
     // their independent server/protocol admission.
     let goal_plan_app_admitted = server_mcp_apps_enabled && stateless_2026;
     let work_result_app_admitted = server_mcp_apps_enabled && stateless_2026;
-    let changes_app_admitted = server_mcp_apps_enabled && stateless_2026;
     let agent_continuation_app_admitted = server_mcp_apps_enabled && stateless_2026;
     let job_terminal_continuation_app_admitted = server_mcp_apps_enabled && stateless_2026;
     let app_only_goal_plan_state = goal_plan_app_admitted && params.name == "goal_plan_state";
     let app_only_work_result_state = work_result_app_admitted && params.name == "work_result_state";
-    let app_only_changes_file_diff = changes_app_admitted && params.name == "changes_file_diff";
+    let app_only_changes_file_diff = work_result_app_admitted && params.name == "changes_file_diff";
     let app_only_agent_continuation =
         agent_continuation_app_admitted && is_agent_continuation_app_tool_name(&params.name);
     let app_only_job_terminal_continuation = job_terminal_continuation_app_admitted
@@ -1968,7 +1963,6 @@ pub(super) async fn handle_call(
     let trace_diagnostics_capable = stateless_2026;
     let goal_plan_app_capable = goal_plan_app_admitted;
     let work_result_app_capable = work_result_app_admitted;
-    let changes_app_capable = changes_app_admitted;
     let agent_continuation_app_capable = agent_continuation_app_admitted;
     let context_request = if context_sidecar_capable {
         match strip_stateless_context_request(&mut params.arguments) {
@@ -2024,7 +2018,6 @@ pub(super) async fn handle_call(
                 trace_diagnostics: trace_diagnostics_capable,
                 goal_plan_app: goal_plan_app_capable,
                 work_result_app: work_result_app_capable,
-                changes_app: changes_app_capable,
                 agent_continuation_app: agent_continuation_app_capable,
             },
         )

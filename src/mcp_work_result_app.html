@@ -22,6 +22,13 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
 .primary { font-weight: 600; overflow-wrap: anywhere; }
 .secondary, .status { font-size: 11px; color: color-mix(in srgb, CanvasText 62%, transparent); overflow-wrap: anywhere; }
 .files { margin: 1px 0 0; max-height: 13em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.frozen-file { margin-top: 5px; }
+.file-toggle { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; padding: 5px; color: CanvasText; background: color-mix(in srgb, CanvasText 5%, Canvas); font: 12px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; cursor: pointer; }
+.diff { max-height: 22em; overflow: auto; margin: 4px 0; font: 11px/1.5 ui-monospace, monospace; }
+.diff-line { display: block; white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.5em; }
+.diff-line.added { background: color-mix(in srgb, #238636 16%, Canvas); }
+.diff-line.deleted { background: color-mix(in srgb, #da3633 16%, Canvas); }
+.diff-line.hunk { color: light-dark(#0969da, #79c0ff); }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -29,7 +36,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
 <main class="card" aria-live="polite">
   <div class="header"><h1>WebCodex Work</h1><div class="actions"><button id="refresh" class="refresh" type="button" disabled>Refresh</button><span id="badge" class="badge">Loading</span></div></div>
   <section class="section">
-    <div class="section-head"><h2>Changes</h2><span id="changesStats" class="secondary"></span></div>
+    <div class="section-head"><h2>Workspace</h2><span id="changesStats" class="secondary"></span></div>
     <div id="changesTitle" class="primary">Waiting for Work state…</div>
     <pre id="files" class="files" hidden></pre>
   </section>
@@ -40,6 +47,13 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
   <section class="section">
     <div class="section-head"><h2>Review</h2><span id="reviewMeta" class="secondary"></span></div>
     <div id="reviewStatus" class="primary">No recorded review evidence</div>
+  </section>
+  <section id="finalChanges" class="section" hidden>
+    <div class="section-head"><h2>Frozen final changes</h2><span id="frozenStats" class="secondary"></span></div>
+    <div id="frozenSummary" class="primary"></div>
+    <div id="frozenFiles"></div>
+    <button id="frozenMore" class="refresh" type="button" hidden></button>
+    <div id="frozenFooter" class="secondary"></div>
   </section>
   <div id="status" class="status">App active · initializing Host</div>
 </main>
@@ -54,6 +68,15 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
   const MAX_PATH = 512;
   const MAX_FILES = 8;
   const MAX_TOOLS = 12;
+  const SNAPSHOT_ID = /^wc_changes_snapshot_[0-9a-f]{32}$/;
+  const MAX_FROZEN_FILES = 24;
+  const INITIAL_FROZEN_FILES = 5;
+  let snapshot = null;
+  let initialFrozenKey = null;
+  let visibleCount = 0;
+  let hasRefreshed = false;
+  const diffCache = new Map();
+  const diffInFlight = new Set();
   const VALIDATION = new Set(["not_run", "passed", "failed", "mixed", "expected", "inconclusive", "stale", "unknown"]);
   let nextId = 1;
   let identity = null;
@@ -97,6 +120,9 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
     teardown();
     el("badge").textContent = "Unavailable";
     el("status").textContent = message;
+    el("finalChanges").hidden = true;
+    el("frozenFiles").replaceChildren();
+    diffCache.clear();
   }
 
   function acceptIdentity(candidate) {
@@ -115,8 +141,8 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
     return Number.isSafeInteger(value) && value >= 0 && value <= 1000000000;
   }
 
-  function validPath(value) {
-    if (typeof value !== "string" || value.length < 1 || Array.from(value).length > MAX_PATH || /[\u0000-\u001f\u007f]/.test(value)) return false;
+  function validPath(value, maxPath = MAX_PATH) {
+    if (typeof value !== "string" || value.length < 1 || Array.from(value).length > maxPath || /[\u0000-\u001f\u007f]/.test(value)) return false;
     if (value.startsWith("/") || value.startsWith("\\") || /^[A-Za-z]:/.test(value)) return false;
     return !value.split(/[\\/]/).includes("..");
   }
@@ -162,6 +188,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
     const candidate = pair(value.project, value.session_id);
     if (!candidate || typeof value.state_version !== "string" || !STATE_VERSION.test(value.state_version)) return null;
     if (!validWorkspace(value.workspace) || !validValidation(value.validation) || !validReview(value.review)) return null;
+    if (value.final_changes !== undefined && !validFrozen(value.final_changes)) return null;
     return value;
   }
 
@@ -176,6 +203,141 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
     const structured = result && (result.structuredContent || result.structured_content || result);
     const output = structured && (structured.output || structured);
     return validState(output && output.work_result);
+  }
+
+  function validFrozenFile(file) {
+    if (!file || typeof file !== "object" || Array.isArray(file) || !validPath(file.path, 1024) || file.path === ".") return false;
+    if (!["added", "modified", "deleted", "renamed"].includes(file.kind)) return false;
+    if (file.kind === "renamed") {
+      if (!validPath(file.previous_path, 1024) || file.previous_path === "." || file.previous_path === file.path) return false;
+    } else if (file.previous_path != null) return false;
+    if (![file.additions, file.deletions].every(value => value === null || safeCount(value))) return false;
+    return (file.binary === undefined || typeof file.binary === "boolean")
+      && (file.binary !== true || (file.additions === null && file.deletions === null));
+  }
+
+  function validFrozen(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.snapshot_id !== "string" || !SNAPSHOT_ID.test(value.snapshot_id)) return false;
+    // Work Result, not its frozen domain, owns the Project/Session identity.
+    if (value.project !== undefined || value.session_id !== undefined || value.version !== undefined) return false;
+    for (const key of ["files_changed", "files_total", "files_returned", "additions", "deletions"]) if (!safeCount(value[key])) return false;
+    if (!Array.isArray(value.files) || value.files.length > MAX_FROZEN_FILES || !value.files.every(validFrozenFile)) return false;
+    return value.files_changed > 0 && value.files_changed === value.files_total
+      && value.files_returned === value.files.length && value.files_returned <= value.files_total
+      && typeof value.files_truncated === "boolean" && (value.files_returned === value.files_total || value.files_truncated)
+      && new Set(value.files.map(file => file.path)).size === value.files.length;
+  }
+
+  function frozenKey(value) {
+    return JSON.stringify([value.snapshot_id, value.files_changed, value.files_total, value.files_returned,
+      value.additions, value.deletions, value.files_truncated,
+      value.files.map(file => [file.path, file.previous_path ?? null, file.kind, file.additions, file.deletions, file.binary ?? null])]);
+  }
+
+  function acceptInitialFrozen(value) {
+    const key = value === undefined ? "" : frozenKey(value);
+    if (initialFrozenKey !== null) {
+      if (key !== initialFrozenKey) { failClosed("Conflicting frozen Work identity"); return false; }
+      return true;
+    }
+    initialFrozenKey = key;
+    if (value === undefined) return true;
+    snapshot = {
+      snapshot_id: value.snapshot_id, files_total: value.files_total, files_truncated: value.files_truncated,
+      files: value.files.map(file => ({ path: file.path, previous_path: file.previous_path, kind: file.kind,
+        additions: file.additions, deletions: file.deletions, binary: file.binary })),
+    };
+    el("finalChanges").hidden = false;
+    el("frozenSummary").textContent = `Changed ${value.files_changed} ${value.files_changed === 1 ? "file" : "files"}`;
+    el("frozenStats").textContent = `+${value.additions} −${value.deletions}`;
+    appendFrozenFiles(INITIAL_FROZEN_FILES);
+    return true;
+  }
+
+  function extractFrozenDiff(result, file) {
+    const structured = result && (result.structuredContent || result.structured_content || result);
+    const value = structured && (structured.output || structured).changes_file_diff;
+    if (!value || value.version !== 1 || value.project !== identity.project || value.session_id !== identity.session_id
+      || value.snapshot_id !== snapshot.snapshot_id || value.path !== file.path || value.kind !== file.kind
+      || (value.previous_path ?? null) !== (file.previous_path ?? null)) return null;
+    if (value.binary !== null && typeof value.binary !== "boolean") return null;
+    if (file.binary !== undefined && value.binary !== file.binary) return null;
+    if (typeof value.diff !== "string" || typeof value.truncated !== "boolean") return null;
+    for (const key of ["bytes_total", "bytes_returned", "lines_total", "lines_returned"]) if (!safeCount(value[key])) return null;
+    const bytes = new TextEncoder().encode(value.diff).length;
+    const lines = value.diff === "" ? 0 : value.diff.split("\n").length - Number(value.diff.endsWith("\n"));
+    if (bytes > 48 * 1024 || lines > 1200 || value.bytes_returned !== bytes || value.lines_returned !== lines
+      || value.bytes_total < bytes || value.lines_total < lines) return null;
+    if (!value.truncated && (value.bytes_total !== bytes || value.lines_total !== lines)) return null;
+    return value;
+  }
+
+  function renderFrozenDiff(state, pre, diff) {
+    state.textContent = `${diff.binary ? "Binary file · frozen metadata" : "Frozen diff"}${diff.truncated
+      ? ` · truncated (${diff.bytes_returned}/${diff.bytes_total} bytes, ${diff.lines_returned}/${diff.lines_total} lines)` : ""}`;
+    pre.replaceChildren();
+    for (const text of diff.diff.split("\n")) {
+      const line = document.createElement("span");
+      const kind = text.startsWith("@@") ? "hunk" : text.startsWith("+") && !text.startsWith("+++") ? "added"
+        : text.startsWith("-") && !text.startsWith("---") ? "deleted" : "";
+      line.className = `diff-line ${kind}`;
+      line.textContent = text;
+      pre.appendChild(line);
+    }
+  }
+
+  async function loadFrozenDiff(file, state, pre) {
+    if (tornDown || !hostInitialized || !snapshot) return;
+    if (diffCache.has(file.path)) { renderFrozenDiff(state, pre, diffCache.get(file.path)); return; }
+    if (diffInFlight.has(file.path)) return;
+    diffInFlight.add(file.path);
+    state.textContent = "Loading frozen diff…";
+    try {
+      const response = await send("tools/call", { name: "changes_file_diff", arguments: {
+        project: identity.project, session_id: identity.session_id, snapshot_id: snapshot.snapshot_id, path: file.path,
+      } });
+      if (tornDown) return;
+      if (toolSuccess(response) === false) { state.textContent = "Frozen diff unavailable · snapshot may have expired"; return; }
+      const diff = extractFrozenDiff(response, file);
+      if (!diff) { failClosed("Invalid frozen diff identity or bounded content"); return; }
+      diffCache.set(file.path, diff);
+      renderFrozenDiff(state, pre, diff);
+    } catch (_) {
+      if (!tornDown) state.textContent = "Frozen diff unavailable · collapse and expand to retry";
+    } finally {
+      diffInFlight.delete(file.path);
+    }
+  }
+
+  function frozenFileNode(file) {
+    const root = document.createElement("div"); root.className = "frozen-file";
+    const button = document.createElement("button"); button.className = "file-toggle"; button.type = "button";
+    const path = file.previous_path ? `${file.previous_path} → ${file.path}` : file.path;
+    const stats = file.binary ? "binary" : file.additions === null || file.deletions === null ? "line stats unavailable" : `+${file.additions} −${file.deletions}`;
+    button.textContent = `${({added: "A", modified: "M", deleted: "D", renamed: "R"})[file.kind]} ${path} · ${stats}`;
+    button.setAttribute("aria-expanded", "false");
+    const wrap = document.createElement("div"); wrap.hidden = true;
+    const state = document.createElement("div"); state.className = "secondary";
+    const pre = document.createElement("pre"); pre.className = "diff";
+    wrap.append(state, pre); root.append(button, wrap);
+    button.onclick = () => {
+      if (tornDown || !hostInitialized) return;
+      wrap.hidden = !wrap.hidden;
+      button.setAttribute("aria-expanded", String(!wrap.hidden));
+      if (!wrap.hidden) void loadFrozenDiff(file, state, pre);
+    };
+    return root;
+  }
+
+  function appendFrozenFiles(limit) {
+    if (tornDown || !snapshot) return;
+    // Append only: refresh/Show more cannot detach an in-flight diff's nodes.
+    const end = Math.min(limit, snapshot.files.length);
+    while (visibleCount < end) el("frozenFiles").appendChild(frozenFileNode(snapshot.files[visibleCount++]));
+    el("frozenMore").hidden = visibleCount >= snapshot.files.length;
+    el("frozenMore").textContent = `Show ${snapshot.files.length - visibleCount} more files`;
+    el("frozenFooter").textContent = `Frozen at presentation · live Refresh does not change these files${snapshot.files_truncated
+      ? ` · metadata truncated (${snapshot.files.length}/${snapshot.files_total} files advertised)` : ""}`;
   }
 
   function changeCode(file) {
@@ -291,10 +453,11 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
         return;
       }
       const state = extractState(response);
-      if (!state || !acceptIdentity(pair(state.project, state.session_id))) {
+      if (!state || state.final_changes !== undefined || !acceptIdentity(pair(state.project, state.session_id))) {
         if (!tornDown) failClosed("Invalid authoritative Work state");
         return;
       }
+      hasRefreshed = true;
       if (state.state_version !== lastStateVersion) {
         lastStateVersion = state.state_version;
         render(state);
@@ -318,11 +481,12 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
   function acceptToolResult(result) {
     if (tornDown) return;
     const state = extractState(result);
-    if (!state || !acceptIdentity(pair(state.project, state.session_id))) {
+    if (toolSuccess(result) === false || !state || !acceptIdentity(pair(state.project, state.session_id))) {
       if (!tornDown) failClosed("Invalid Work Result state");
       return;
     }
-    if (state.state_version !== lastStateVersion) {
+    if (!acceptInitialFrozen(state.final_changes)) return;
+    if (!hasRefreshed && state.state_version !== lastStateVersion) {
       lastStateVersion = state.state_version;
       render(state);
     }
@@ -369,6 +533,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
   });
 
   el("refresh").onclick = () => { void refresh(); };
+  el("frozenMore").onclick = () => { if (snapshot) appendFrozenFiles(snapshot.files.length); };
   updateRefreshControl();
   addEventListener("pagehide", teardown, { once: true });
   addEventListener("beforeunload", teardown, { once: true });

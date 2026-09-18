@@ -1127,7 +1127,7 @@ async fn e2b_nested_edit_drives_real_final_changes_baseline_to_full_final_worksp
     assert!(finish.success, "{:?}", finish.error);
     assert_eq!(
         finish.output["presentation"]["suggested_call"]["tool"],
-        "present_changes"
+        "present_work_result"
     );
 
     let present = tokio::spawn({
@@ -1137,14 +1137,14 @@ async fn e2b_nested_edit_drives_real_final_changes_baseline_to_full_final_worksp
         let auth = auth.clone();
         async move {
             runtime
-                .present_changes(project, session_id, Some(&auth))
+                .present_work_result(project, session_id, Some(&auth))
                 .await
         }
     });
     service_tool_task(&runtime, client_id, &present).await;
     let present = present.await.unwrap();
     assert!(present.success, "{:?}", present.error);
-    let files = present.output["changes"]["files"]
+    let files = present.output["work_result"]["final_changes"]["files"]
         .as_array()
         .expect("Final Changes files");
     for expected in ["README.md", "other.txt"] {
@@ -1154,7 +1154,10 @@ async fn e2b_nested_edit_drives_real_final_changes_baseline_to_full_final_worksp
             present.output
         );
     }
-    assert_eq!(present.output["changes"]["files_changed"], 2);
+    assert_eq!(
+        present.output["work_result"]["final_changes"]["files_changed"],
+        2
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

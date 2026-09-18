@@ -276,3 +276,225 @@ test("invalid Work input never refreshes", async () => {
     assert.equal(view.timers.size, 0);
   }
 });
+
+// Frozen final changes are a domain of the same Work Result, not a second App.
+const snapshot_id = `wc_changes_snapshot_${"2".repeat(32)}`;
+function frozenFile(index, overrides = {}) {
+  return { path: `src/file_${index}.rs`, kind: "modified", additions: index + 1, deletions: index, binary: false, ...overrides };
+}
+const finalChanges = {
+  snapshot_id, files_changed: 7, additions: 35, deletions: 21,
+  files_total: 7, files_returned: 7, files_truncated: false,
+  files: [
+    frozenFile(0),
+    frozenFile(1, { path: "src/new.rs", kind: "added", additions: 8, deletions: 0 }),
+    frozenFile(2, { path: "src/removed.rs", kind: "deleted", additions: 0, deletions: 9 }),
+    frozenFile(3, { path: "src/new_name.rs", previous_path: "src/old_name.rs", kind: "renamed", additions: 2, deletions: 1 }),
+    frozenFile(4, { path: "assets/blob.bin", binary: true, additions: null, deletions: null }),
+    frozenFile(5), frozenFile(6),
+  ],
+};
+const frozenWork = (overrides = {}) => ({ ...baseState, final_changes: { ...finalChanges, ...overrides } });
+function frozenNodes(view, index = 0) {
+  const root = view.nodes.frozenFiles.children[index];
+  const button = root.children[0], wrap = root.children[1];
+  return { root, button, wrap, state: wrap.children[0], pre: wrap.children[1] };
+}
+function frozenDiff(overrides = {}) {
+  const diff = overrides.diff ?? "diff --git a/src/file_0.rs b/src/file_0.rs\n@@ -1 +1 @@\n-old\n+new\n";
+  const bytes = Buffer.byteLength(diff);
+  const lines = diff === "" ? 0 : diff.split("\n").length - Number(diff.endsWith("\n"));
+  return toolResult({ changes_file_diff: {
+    version: 1, project, session_id, snapshot_id, path: "src/file_0.rs", previous_path: null,
+    kind: "modified", binary: false, diff, bytes_total: bytes, bytes_returned: bytes,
+    lines_total: lines, lines_returned: lines, truncated: false, ...overrides,
+  } });
+}
+async function frozenView(first = "input", state = frozenWork()) {
+  const view = app("mcp_work_result_app.html");
+  if (first === "input") view.toolInput(input);
+  else view.toolResult({ work_result: state });
+  await view.initialize();
+  if (first === "input") view.toolResult({ work_result: state });
+  else view.toolInput(input);
+  await flush();
+  return view;
+}
+
+for (const first of ["input", "result"]) {
+  test(`Work Result frozen ${first}-first bootstrap renders bounded metadata without any lazy read`, async () => {
+    const view = await frozenView(first);
+    assert.equal(view.calls("changes_file_diff").length, 0);
+    assert.equal(view.calls("work_result_state").length, 0);
+    assert.equal(view.nodes.finalChanges.hidden, false);
+    assert.equal(view.nodes.frozenSummary.textContent, "Changed 7 files");
+    assert.equal(view.nodes.frozenFiles.children.length, 5);
+    assert.equal(view.nodes.frozenMore.textContent, "Show 2 more files");
+    assert.match(frozenNodes(view, 3).button.textContent, /src\/old_name.rs → src\/new_name.rs/);
+    assert.match(frozenNodes(view, 4).button.textContent, /binary/);
+    assert.equal(view.timers.size, 0);
+  });
+}
+
+test("frozen expansion reads the exact four-part identity once and re-expansion uses the local cache", async () => {
+  const view = await frozenView();
+  const nodes = frozenNodes(view);
+  nodes.button.onclick(); nodes.button.onclick(); nodes.button.onclick();
+  await flush();
+  assert.equal(view.calls("changes_file_diff").length, 1);
+  assert.deepEqual({ ...view.calls("changes_file_diff")[0].params.arguments }, { project, session_id, snapshot_id, path: "src/file_0.rs" });
+  await view.reply(view.calls("changes_file_diff")[0], frozenDiff());
+  assert.equal(nodes.state.textContent, "Frozen diff");
+  assert.equal(nodes.pre.children.some(line => line.textContent === "+new" && line.className.includes("added")), true);
+  assert.equal(nodes.pre.children.some(line => line.textContent === "-old" && line.className.includes("deleted")), true);
+  nodes.button.onclick(); nodes.button.onclick();
+  await flush();
+  assert.equal(view.calls("changes_file_diff").length, 1);
+});
+
+test("Show more and live Refresh preserve pending frozen nodes, initial identity, and cached diffs", async () => {
+  const view = await frozenView();
+  const nodes = frozenNodes(view);
+  nodes.button.onclick();
+  await flush();
+  view.nodes.frozenMore.onclick();
+  assert.equal(view.nodes.frozenFiles.children.length, 7);
+  assert.equal(view.nodes.frozenMore.hidden, true);
+  assert.equal(frozenNodes(view).root, nodes.root);
+  view.nodes.refresh.onclick();
+  await flush();
+  await view.reply(view.calls("work_result_state")[0], toolResult({ work_result: nextState }));
+  assert.equal(view.nodes.changesTitle.textContent, "Clean");
+  assert.equal(view.nodes.frozenSummary.textContent, "Changed 7 files");
+  assert.equal(frozenNodes(view).root, nodes.root);
+  await view.reply(view.calls("changes_file_diff")[0], frozenDiff());
+  assert.equal(nodes.state.textContent, "Frozen diff");
+  nodes.button.onclick(); nodes.button.onclick();
+  assert.equal(view.calls("changes_file_diff").length, 1);
+  assert.equal(view.calls("changes_file_diff")[0].params.arguments.snapshot_id, snapshot_id);
+});
+
+test("initial snapshot is idempotent and its late arrival cannot roll back an explicit live refresh", async () => {
+  const view = app("mcp_work_result_app.html");
+  view.toolInput(input); await view.initialize();
+  view.nodes.refresh.onclick(); await flush();
+  await view.reply(view.calls("work_result_state")[0], toolResult({ work_result: nextState }));
+  view.toolResult({ work_result: frozenWork() });
+  const root = frozenNodes(view).root;
+  view.toolResult({ work_result: frozenWork() });
+  assert.equal(frozenNodes(view).root, root);
+  assert.equal(view.nodes.changesTitle.textContent, "Clean");
+  assert.equal(view.nodes.frozenSummary.textContent, "Changed 7 files");
+});
+
+test("metadata and lazy diff truncation remain truthful within bounded initial rows", async () => {
+  const view = await frozenView("result", frozenWork({ files_changed: 30, files_total: 30, files_truncated: true }));
+  assert.match(view.nodes.frozenFooter.textContent, /metadata truncated \(7\/30 files advertised\)/);
+  frozenNodes(view).button.onclick(); await flush();
+  await view.reply(view.calls("changes_file_diff")[0], frozenDiff({ truncated: true, bytes_total: 50000, lines_total: 2000 }));
+  assert.match(frozenNodes(view).state.textContent, /truncated \(\d+\/50000 bytes, \d+\/2000 lines\)/);
+});
+
+test("renamed and binary files retain their metadata in lazy frozen responses", async () => {
+  const view = await frozenView();
+  frozenNodes(view, 3).button.onclick(); await flush();
+  assert.equal(view.calls("changes_file_diff")[0].params.arguments.path, "src/new_name.rs");
+  await view.reply(view.calls("changes_file_diff")[0], frozenDiff({ path: "src/new_name.rs", previous_path: "src/old_name.rs", kind: "renamed" }));
+  assert.equal(frozenNodes(view, 3).state.textContent, "Frozen diff");
+  frozenNodes(view, 4).button.onclick(); await flush();
+  await view.reply(view.calls("changes_file_diff")[1], frozenDiff({ path: "assets/blob.bin", binary: true, diff: "Binary files differ\n" }));
+  assert.match(frozenNodes(view, 4).state.textContent, /Binary file/);
+});
+
+for (const change of [
+  { project: "agent:special:other" }, { session_id: `wc_sess_${"9".repeat(32)}` },
+  { snapshot_id: `wc_changes_snapshot_${"9".repeat(32)}` }, { path: "src/not_advertised.rs" },
+  { previous_path: "src/other.rs" }, { kind: "added" }, { binary: true },
+  { diff: "x".repeat(48 * 1024 + 1) }, { diff: "x\n".repeat(1201) },
+  { bytes_returned: 1 }, { lines_returned: 1 }, { bytes_total: 0 },
+]) {
+  test(`frozen lazy response fails closed for ${Object.keys(change).join(",")}`, async () => {
+    const view = await frozenView();
+    frozenNodes(view).button.onclick(); await flush();
+    await view.reply(view.calls("changes_file_diff")[0], frozenDiff(change));
+    assert.match(view.nodes.status.textContent, /Invalid frozen diff/);
+    assert.equal(view.nodes.finalChanges.hidden, true);
+    assert.equal(view.nodes.frozenFiles.children.length, 0);
+    assert.equal(view.nodes.refresh.disabled, true);
+    assert.equal(view.timers.size, 0);
+  });
+}
+
+for (const change of [
+  { snapshot_id: "bad" }, { snapshot_id: [snapshot_id] }, { files_total: 6 },
+  { files_changed: 8 }, { files_returned: 6 }, { files_total: 8, files_changed: 8 },
+  { files: Array.from({ length: 25 }, (_, index) => frozenFile(index)), files_total: 25, files_changed: 25, files_returned: 25 },
+  { files: [frozenFile(0), frozenFile(0)], files_total: 2, files_changed: 2, files_returned: 2 },
+  ...[frozenFile(0, { path: "../outside" }), frozenFile(0, { kind: "renamed" }), frozenFile(0, { binary: true })]
+    .map(file => ({ files: [file], files_total: 1, files_changed: 1, files_returned: 1 })),
+  { project: "agent:special:other" },
+]) {
+  test(`invalid initial frozen metadata is never an identity or file capability: ${JSON.stringify(change).slice(0, 70)}`, async () => {
+    const view = await frozenView("input", frozenWork(change));
+    assert.equal(view.calls("changes_file_diff").length, 0);
+    assert.equal(view.nodes.refresh.disabled, true);
+    assert.match(view.nodes.status.textContent, /Invalid Work Result/);
+  });
+}
+
+test("expired/unavailable snapshots never fall back to live diff or automatically retry", async () => {
+  const view = await frozenView();
+  frozenNodes(view).button.onclick(); await flush();
+  await view.reply(view.calls("changes_file_diff")[0], { structuredContent: { success: false, output: { error_kind: "changes_snapshot_unavailable" } } });
+  assert.match(frozenNodes(view).state.textContent, /snapshot may have expired/);
+  await view.fireTimers(10000); await view.visibility(false);
+  assert.equal(view.calls("changes_file_diff").length, 1);
+  assert.equal(view.calls("work_result_state").length, 0);
+  assert.equal(view.timers.size, 0);
+});
+
+for (const via of ["initial", "refresh"]) {
+  test(`${via} cannot replace an existing frozen snapshot`, async () => {
+    const view = await frozenView();
+    const replacement = frozenWork({ snapshot_id: `wc_changes_snapshot_${"3".repeat(32)}` });
+    if (via === "initial") view.toolResult({ work_result: replacement });
+    else {
+      view.nodes.refresh.onclick(); await flush();
+      await view.reply(view.calls("work_result_state")[0], toolResult({ work_result: replacement }));
+    }
+    assert.equal(view.nodes.finalChanges.hidden, true);
+    assert.equal(view.nodes.refresh.disabled, true);
+    assert.equal(view.calls("changes_file_diff").length, 0);
+  });
+}
+
+test("same snapshot id cannot smuggle a changed advertised path list", async () => {
+  const view = await frozenView();
+  view.toolResult({ work_result: frozenWork({ files: finalChanges.files.map((file, index) => index ? file : { ...file, path: "src/other.rs" }) }) });
+  assert.match(view.nodes.status.textContent, /Conflicting frozen Work identity/);
+  assert.equal(view.nodes.finalChanges.hidden, true);
+});
+
+test("cached legacy Changes resource payload is not promoted into authoritative Work Result state", async () => {
+  const view = app("mcp_work_result_app.html");
+  view.toolInput(input); await view.initialize();
+  view.toolResult({ changes: { version: 3, project, session_id, ...finalChanges } });
+  assert.match(view.nodes.status.textContent, /Invalid Work Result state/);
+  assert.equal(view.calls("work_result_state").length, 0);
+  assert.equal(view.calls("changes_file_diff").length, 0);
+});
+
+for (const method of ["ui/resource-teardown", "pagehide", "beforeunload"]) {
+  test(`${method} ignores late frozen diff content and prevents re-expansion reads`, async () => {
+    const view = await frozenView();
+    const nodes = frozenNodes(view);
+    nodes.button.onclick(); await flush();
+    const request = view.calls("changes_file_diff")[0];
+    await view.teardown(method);
+    await view.reply(request, frozenDiff({ diff: "+late\n" }));
+    nodes.button.onclick(); nodes.button.onclick();
+    assert.equal(nodes.pre.children.length, 0);
+    assert.equal(view.calls("changes_file_diff").length, 1);
+    assert.equal(view.timers.size, 0);
+  });
+}
