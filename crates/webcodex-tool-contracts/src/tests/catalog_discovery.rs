@@ -374,7 +374,9 @@ fn tool_categories_and_recommended_flows_are_well_formed() {
         "review: small bounded git observations may use native git",
         "git_review_summary to map broad or unknown committed ranges",
         "git_diff_hunks for fenced, paged, or continued review",
-        "handoff: use session_summary / session_handoff_summary",
+        "handoff/recovery only",
+        "session_handoff_summary only for missing task context",
+        "never routine progress polling",
     ] {
         assert!(
             joined_flows.contains(phrase),

@@ -119,6 +119,9 @@ fn assert_builtin_workflow(output: &Value) {
     assert!(recovery.contains("session_handoff_summary"));
     assert!(recovery.contains("exact session_id"));
     assert!(recovery.contains("basis completeness"));
+    assert!(recovery.contains("only when task context is actually missing"));
+    assert!(recovery.contains("Do not call it routinely"));
+    assert!(recovery.contains("direct current-state observations"));
     assert!(workflow["model_protocol"]
         .get("session_context_ack")
         .is_none());

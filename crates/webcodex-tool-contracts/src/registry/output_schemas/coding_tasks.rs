@@ -513,7 +513,7 @@ fn startup_workflow_schema() -> Value {
                 "type": "object",
                 "description": "Shared model-invocation guidance. It is not Session state, authority, or execution policy.",
                 "properties": {
-                    "session_context_ack": {"type": "string", "maxLength": 640},
+                    "handoff_recovery": {"type": "string", "maxLength": 720},
                     "session_recording": {"type": "string", "maxLength": 720},
                     "session_message_ack": {"type": "string", "maxLength": 720},
                     "session_message_resolution": {"type": "string", "maxLength": 480},
@@ -523,7 +523,7 @@ fn startup_workflow_schema() -> Value {
                     "normal_closeout": {"type": "string", "maxLength": 480}
                 },
                 "required": [
-                    "session_context_ack",
+                    "handoff_recovery",
                     "session_recording",
                     "session_message_ack",
                     "session_message_resolution",

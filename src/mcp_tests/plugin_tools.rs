@@ -772,12 +772,6 @@ async fn plugin_tool_accepts_collaboration_ack_but_rejects_other_stateless_wrapp
 
     for (id, arguments) in [
         (
-            695,
-            json!({
-                "action":"list",
-            }),
-        ),
-        (
             696,
             json!({
                 "action":"list",
