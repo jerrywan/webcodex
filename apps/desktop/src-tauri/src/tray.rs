@@ -86,9 +86,10 @@ impl TrayProjection {
         } else {
             RuntimeStatus::NeedsAttention
         };
-        let tunnel_error = snapshot.regular_tunnel.as_ref().is_some_and(|tunnel| {
-            tunnel.status == crate::models::RegularTunnelStatus::Error
-        });
+        let tunnel_error = snapshot
+            .regular_tunnel
+            .as_ref()
+            .is_some_and(|tunnel| tunnel.status == crate::models::RegularTunnelStatus::Error);
         let observed_use = snapshot.readiness.runtime_ready
             && snapshot
                 .chatgpt_activity
@@ -526,7 +527,10 @@ mod tests {
         });
         let projection = TrayProjection::from_snapshot(&snapshot, Some(false));
         assert_eq!(projection.connection_status, ConnectionStatus::ObservedUse);
-        assert_eq!(projection.connection_action, Some(ConnectionAction::Disconnect));
+        assert_eq!(
+            projection.connection_action,
+            Some(ConnectionAction::Disconnect)
+        );
     }
 
     #[test]

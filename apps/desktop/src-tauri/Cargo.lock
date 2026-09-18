@@ -4198,6 +4198,7 @@ dependencies = [
  "indexmap 2.14.1",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 
@@ -4703,7 +4704,9 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
  "tokio",
+ "toml_edit 0.25.13+spec-1.1.0",
  "url",
+ "webcodex-core",
  "webcodex-process",
  "webcodex-runner-config",
  "windows-sys 0.61.2",

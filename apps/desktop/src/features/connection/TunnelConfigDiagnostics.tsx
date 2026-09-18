@@ -16,12 +16,12 @@ export function TunnelConfigDiagnostics({
   const [error, setError] = useState<DesktopError | null>(null);
   const config = state.openai_tunnel_config;
   const inputId = useId();
-  const [tunnelId, setTunnelId] = useState(config.saved_tunnel_id ?? "");
+  const [tunnelId, setTunnelId] = useState(config.effective_tunnel_id ?? config.saved_tunnel_id ?? "");
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const busy = saving || rechecking || Boolean(state.current_operation);
-  useEffect(() => { setTunnelId(config.saved_tunnel_id ?? ""); }, [config.saved_tunnel_id]);
+  useEffect(() => { setTunnelId(config.effective_tunnel_id ?? config.saved_tunnel_id ?? ""); }, [config.saved_tunnel_id, config.effective_tunnel_id]);
   const save = async (useEnvironment = false) => {
     if (busy) return;
     const request = useEnvironment
@@ -36,6 +36,9 @@ export function TunnelConfigDiagnostics({
       setSaved(true);
     } catch (value) {
       setError(normalizeDesktopError(value));
+      // Saving may have succeeded even when replacing the owned tunnel failed.
+      // Reconcile only the non-secret snapshot; never replay the mutation.
+      try { onState(await desktopApi.getState()); } catch { /* Original error stays visible. */ }
     } finally { setSaving(false); }
   };
   const configured = config.tunnel_id_present && config.api_key_present;
@@ -59,15 +62,15 @@ export function TunnelConfigDiagnostics({
       <p className="tunnel-config-guidance">{t("tunnelConfig.fileFirst")}</p>
       <div className="field-group">
         <label htmlFor={`${inputId}-id`}>{t("tunnelConfig.tunnelId")}</label>
-        <input id={`${inputId}-id`} value={tunnelId} onChange={(event) => { setTunnelId(event.target.value); setSaved(false); }} placeholder="tunnel_…" maxLength={256} autoComplete="off" spellCheck={false} disabled={busy} />
+        <input id={`${inputId}-id`} data-webcodex-control="tunnel-id" value={tunnelId} onChange={(event) => { setTunnelId(event.target.value); setSaved(false); }} placeholder="tunnel_…" maxLength={256} autoComplete="off" spellCheck={false} disabled={busy} />
       </div>
       <div className="field-group">
         <label htmlFor={`${inputId}-key`}>{t("tunnelConfig.apiKey")}</label>
-        <input id={`${inputId}-key`} type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setSaved(false); }} placeholder={config.source === "file" ? t("tunnelConfig.keepKey") : t("tunnelConfig.enterKey")} maxLength={8192} autoComplete="new-password" spellCheck={false} disabled={busy} aria-describedby={`${inputId}-key-help`} />
+        <input id={`${inputId}-key`} data-webcodex-control="tunnel-api-key" type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setSaved(false); }} placeholder={config.source === "file" ? t("tunnelConfig.keepKey") : t("tunnelConfig.enterKey")} maxLength={8192} autoComplete="new-password" spellCheck={false} disabled={busy} aria-describedby={`${inputId}-key-help`} />
         <span className="field-help" id={`${inputId}-key-help`}>{t("tunnelConfig.storage")}</span>
       </div>
       <div className="tunnel-config-actions">
-        <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || !tunnelId.trim() || (config.source !== "file" && !apiKey.trim())}>{saving ? t("common.checking") : t("tunnelConfig.save")}</button>
+        <button type="button" className="primary-button" data-webcodex-action="save-tunnel-config" onClick={() => void save()} disabled={busy || !tunnelId.trim() || (config.source !== "file" && !apiKey.trim())}>{saving ? t("common.checking") : t("tunnelConfig.save")}</button>
         {config.source !== "environment" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void save(true)}>{t("tunnelConfig.useEnvironment")}</button>}
       </div>
       {saved && <p className="tunnel-config-guidance" role="status">{t("tunnelConfig.saved")}</p>}

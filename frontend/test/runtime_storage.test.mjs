@@ -95,10 +95,10 @@ test("workspaceViewPreference validates input and loads from localStorage", () =
   assert.equal(workspaceViewPreference("sessions"), "sessions");
   assert.equal(workspaceViewPreference("operations"), "operations");
   assert.equal(workspaceViewPreference("windows"), "windows");
-  assert.equal(workspaceViewPreference("invalid"), "sessions");
+  assert.equal(workspaceViewPreference("invalid"), "home");
 
   withMockStorage(({ localStorage }) => {
-    assert.equal(loadWorkspaceViewPreference(), "sessions");
+    assert.equal(loadWorkspaceViewPreference(), "home");
     persistWorkspaceViewPreference("operations");
     assert.equal(localStorage.getItem(WORKSPACE_VIEW_STORAGE_KEY), "operations");
     assert.equal(loadWorkspaceViewPreference(), "operations");

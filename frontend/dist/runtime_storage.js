@@ -29,14 +29,14 @@ export function resolvedAppearance(preference, prefersLight) {
     return prefersLight ? "light" : "dark";
 }
 export function workspaceViewPreference(value) {
-    return value === "operations" || value === "windows" ? value : "sessions";
+    return value === "sessions" || value === "operations" || value === "windows" ? value : "home";
 }
 export function loadWorkspaceViewPreference() {
     try {
         return workspaceViewPreference(window.localStorage.getItem(WORKSPACE_VIEW_STORAGE_KEY));
     }
     catch {
-        return "sessions";
+        return "home";
     }
 }
 export function persistWorkspaceViewPreference(view) {

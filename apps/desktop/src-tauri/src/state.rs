@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod reconfiguration_tests;
+mod workspace_settings;
 use crate::activity::{ActivityEventKind, ActivityLevel, ActivityLog};
 use crate::deadline::Deadline;
 use crate::error::{DesktopError, DesktopResult};
@@ -145,10 +148,8 @@ impl AppState {
         if self.operations.current().is_some() {
             return Ok(self.get_state());
         }
-        let cancellation = CancellationContext::new(
-            CancellationSignal::new(),
-            self.shutdown_signal.clone(),
-        );
+        let cancellation =
+            CancellationContext::new(CancellationSignal::new(), self.shutdown_signal.clone());
         let probe = {
             let slot = self.core.lock().await;
             let Some(core) = slot.as_ref() else {
@@ -211,6 +212,41 @@ impl AppState {
                     "Check the saved configuration before retrying.",
                 )
             })??;
+            // Only replace a tunnel for which this Desktop holds a live process lease.
+            // Saving credentials never adopts or stops an independently running stack.
+            if core
+                .process_snapshot(ProcessKind::RegularTunnel)
+                .await
+                .is_some_and(|p| {
+                    p.owned_by_desktop
+                        && matches!(p.phase, ProcessPhase::Starting | ProcessPhase::Running)
+                })
+            {
+                apply_openai_tunnel_configuration(&mut core.snapshot, &core.tunnel_config);
+                core.publish_snapshot();
+                core.supervisor
+                    .lock()
+                    .await
+                    .stop_checked(ProcessKind::RegularTunnel)
+                    .await
+                    .map_err(tunnel_apply_error)?;
+                core.snapshot.regular_tunnel = None;
+                core.snapshot.chatgpt_activity = None;
+                core.snapshot.topology = core.config.topology.clone();
+                core.snapshot.readiness = aggregate_readiness(
+                    core.snapshot.readiness.server.clone(),
+                    core.snapshot.readiness.runner.clone(),
+                    exposure_readiness(core.config.topology.as_ref()),
+                    core.snapshot.readiness.project.clone(),
+                );
+                core.publish_snapshot();
+                if core.tunnel_config.snapshot().is_configured() {
+                    return core
+                        .start_regular_tunnel(&cancellation)
+                        .await
+                        .map_err(tunnel_apply_error);
+                }
+            }
             core.get_state().await
         }
         .await;
@@ -760,19 +796,18 @@ impl DesktopCore {
             Err(_) => ProjectReadiness::Unknown,
         };
         cancellation.check()?;
-        self.snapshot.chatgpt_activity = if server == ServerReadiness::Ready
-            && project == ProjectReadiness::Ready
-        {
-            match self.adapter.chatgpt_activity(&identity, cancellation).await {
-                Ok(last_meaningful_activity_at_ms) => Some(ChatGptActivitySnapshot {
-                    observed: last_meaningful_activity_at_ms.is_some(),
-                    last_meaningful_activity_at_ms,
-                }),
-                Err(_) => None,
-            }
-        } else {
-            None
-        };
+        self.snapshot.chatgpt_activity =
+            if server == ServerReadiness::Ready && project == ProjectReadiness::Ready {
+                match self.adapter.chatgpt_activity(&identity, cancellation).await {
+                    Ok(last_meaningful_activity_at_ms) => Some(ChatGptActivitySnapshot {
+                        observed: last_meaningful_activity_at_ms.is_some(),
+                        last_meaningful_activity_at_ms,
+                    }),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
         cancellation.check()?;
         let tunnel_active = self
             .process_snapshot(ProcessKind::RegularTunnel)
@@ -1812,7 +1847,6 @@ impl DesktopCore {
                 return Err(machine_event_overflow_error(&overflow));
             }
             Ok(Ok(None)) | Err(_) => {
-                let logs = self.process_logs(ProcessKind::QuickShare).await;
                 self.stop_process_until(
                     ProcessKind::QuickShare,
                     Deadline::at(deadline.cleanup_deadline(READINESS_CLEANUP_SLACK)),
@@ -1825,7 +1859,6 @@ impl DesktopCore {
                 )
                 .with_details(serde_json::json!({
                     "category": "readiness_timeout",
-                    "diagnostic_lines": logs,
                 })));
             }
         };
@@ -2064,7 +2097,6 @@ impl DesktopCore {
                 return Err(machine_event_overflow_error(&overflow));
             }
             Ok(Ok(None)) | Err(_) => {
-                let logs = self.process_logs(ProcessKind::RegularTunnel).await;
                 self.stop_process_until(
                     ProcessKind::RegularTunnel,
                     Deadline::at(deadline.cleanup_deadline(READINESS_CLEANUP_SLACK)),
@@ -2091,7 +2123,6 @@ impl DesktopCore {
                 )
                 .with_details(serde_json::json!({
                     "category": "readiness_timeout",
-                    "diagnostic_lines": logs,
                 })));
             }
         };
@@ -2112,6 +2143,10 @@ impl DesktopCore {
             || event.provider != "openai"
             || event.connection.kind != "openai_tunnel"
             || event.connection.clipboard_contains != "tunnel_id"
+            || !matches!(
+                event.connection.clipboard_state.as_str(),
+                "copied" | "unavailable" | "failed" | "not_copied"
+            )
         {
             self.stop_process(ProcessKind::RegularTunnel).await;
             self.snapshot.regular_tunnel = None;
@@ -2166,7 +2201,11 @@ impl DesktopCore {
         &mut self,
         cancellation: &CancellationContext,
     ) -> DesktopResult<DesktopStateSnapshot> {
-        self.stop_process(ProcessKind::RegularTunnel).await;
+        self.supervisor
+            .lock()
+            .await
+            .stop_checked(ProcessKind::RegularTunnel)
+            .await?;
         self.snapshot.regular_tunnel = None;
         self.snapshot.topology = self.config.topology.clone();
         self.config.preferred_connection = Some(RegularConnectionPreference::NoChatGpt);
@@ -2217,10 +2256,6 @@ impl DesktopCore {
 
     async fn process_snapshot(&self, kind: ProcessKind) -> Option<crate::process::ProcessSnapshot> {
         self.supervisor.lock().await.snapshot(kind)
-    }
-
-    async fn process_logs(&self, kind: ProcessKind) -> Vec<String> {
-        self.supervisor.lock().await.logs(kind)
     }
 
     async fn spawn_owned(
@@ -2447,7 +2482,7 @@ impl DesktopCore {
         self.save_config().await
     }
 
-    async fn save_config(&self) -> DesktopResult<()> {
+    async fn save_config(&mut self) -> DesktopResult<()> {
         tokio::fs::create_dir_all(&self.data_dir)
             .await
             .map_err(|_| {
@@ -2457,6 +2492,35 @@ impl DesktopCore {
                     "Check local filesystem permissions and retry.",
                 )
             })?;
+        if let (Some(project), Some(path)) = (
+            &self.config.project,
+            self.config
+                .runtime
+                .as_ref()
+                .and_then(|r| r.runner_config.as_ref()),
+        ) {
+            if webcodex_runner_config::paths::paths_equal(
+                Path::new(&project.path),
+                Path::new(&project.allowed_root),
+            ) {
+                self.config.saved_projects.retain(|entry| {
+                    !(entry.runner_config == *path
+                        && webcodex_runner_config::paths::paths_equal(
+                            Path::new(&entry.project.path),
+                            Path::new(&project.path),
+                        ))
+                });
+                self.config
+                    .saved_projects
+                    .push(crate::models::SavedProject {
+                        project: project.clone(),
+                        runner_config: path.clone(),
+                    });
+                if self.config.saved_projects.len() > 64 {
+                    self.config.saved_projects.remove(0);
+                }
+            }
+        }
         let encoded = serde_json::to_vec_pretty(&self.config).map_err(|_| {
             DesktopError::new(
                 "desktop_state_invalid",
@@ -2777,7 +2841,11 @@ pub(crate) fn write_atomic_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     write_atomic_file_with_hook(path, bytes, |_| Ok(()))
 }
 
-fn write_atomic_file_with_hook<F>(path: &Path, bytes: &[u8], before_replace: F) -> io::Result<()>
+pub(crate) fn write_atomic_file_with_hook<F>(
+    path: &Path,
+    bytes: &[u8],
+    before_replace: F,
+) -> io::Result<()>
 where
     F: FnOnce(&Path) -> io::Result<()>,
 {
@@ -2907,6 +2975,12 @@ fn reserve_loopback_address() -> DesktopResult<String> {
         )
     })?;
     Ok(address.to_string())
+}
+
+fn tunnel_apply_error(cause: DesktopError) -> DesktopError {
+    DesktopError::new("tunnel_config_apply_failed", "Configuration saved; the secure tunnel needs recovery",
+        "The new credentials are saved. Retry starting the secure tunnel; Server and Runner were not restarted.")
+        .with_details(serde_json::json!({"configuration_saved": true, "cause_code": cause.code}))
 }
 
 fn regular_tunnel_exposure(
@@ -3096,6 +3170,18 @@ fn preferred_connection(config: &StoredDesktopConfig) -> RegularConnectionPrefer
 }
 
 fn apply_config_projection(snapshot: &mut DesktopStateSnapshot, config: &StoredDesktopConfig) {
+    snapshot.saved_projects = config
+        .saved_projects
+        .iter()
+        .filter(|entry| {
+            config
+                .runtime
+                .as_ref()
+                .and_then(|r| r.runner_config.as_ref())
+                == Some(&entry.runner_config)
+        })
+        .map(|entry| entry.project.clone())
+        .collect();
     snapshot.runtime_autostart = runtime_autostart(config);
     snapshot.preferred_connection = preferred_connection(config);
     snapshot.tunnel_proxy = match effective_tunnel_proxy(&config.tunnel_proxy) {
@@ -3201,6 +3287,7 @@ mod tests {
 
     fn test_stored_config(label: &str) -> StoredDesktopConfig {
         StoredDesktopConfig {
+            saved_projects: Vec::new(),
             topology: None,
             project: Some(ProjectSelection {
                 path: format!("/{label}"),
@@ -3243,7 +3330,8 @@ mod tests {
             runtime_project_id: Some("agent:desktop:project-b".to_string()),
         });
 
-        let current_identity = identity_from_config(&core.config).expect("current project identity");
+        let current_identity =
+            identity_from_config(&core.config).expect("current project identity");
         let mut stale_identity = current_identity.clone();
         stale_identity.project_id = "project-a".to_string();
         stale_identity.runtime_project_id = "agent:desktop:project-a".to_string();
@@ -3621,6 +3709,7 @@ mod tests {
     #[test]
     fn invalid_stored_identity_is_not_advertised_for_reuse() {
         let config = StoredDesktopConfig {
+            saved_projects: Vec::new(),
             topology: Some(RuntimeTopology {
                 experience: Experience::Full,
                 server: ServerTopology::Remote {

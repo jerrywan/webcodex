@@ -284,6 +284,8 @@ pub enum DesktopOperationKind {
     RuntimeResume,
     TunnelProxyUpdate,
     TunnelConfigUpdate,
+    RunnerSettingsUpdate,
+    RunnerRestart,
 }
 
 impl DesktopOperationKind {
@@ -300,6 +302,8 @@ impl DesktopOperationKind {
             Self::RuntimeRefresh => "runtime_refresh",
             Self::RuntimeResume => "runtime_resume",
             Self::TunnelProxyUpdate => "tunnel_proxy_update",
+            Self::RunnerSettingsUpdate => "runner_settings_update",
+            Self::RunnerRestart => "runner_restart",
             Self::TunnelConfigUpdate => "tunnel_config_update",
         }
     }
@@ -397,6 +401,7 @@ pub struct ChatGptActivitySnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DesktopStateSnapshot {
+    pub saved_projects: Vec<ProjectSelection>,
     pub topology: Option<RuntimeTopology>,
     pub readiness: ReadinessSnapshot,
     pub project: Option<ProjectSelection>,
@@ -420,6 +425,7 @@ pub struct DesktopStateSnapshot {
 impl Default for DesktopStateSnapshot {
     fn default() -> Self {
         Self {
+            saved_projects: Vec::new(),
             topology: None,
             readiness: ReadinessSnapshot::default(),
             project: None,
@@ -448,6 +454,8 @@ impl Default for DesktopStateSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct StoredDesktopConfig {
+    #[serde(default)]
+    pub saved_projects: Vec<SavedProject>,
     pub topology: Option<RuntimeTopology>,
     pub project: Option<ProjectSelection>,
     pub runtime: Option<StoredRuntime>,
@@ -457,6 +465,12 @@ pub struct StoredDesktopConfig {
     pub preferred_connection: Option<RegularConnectionPreference>,
     #[serde(default)]
     pub tunnel_proxy: TunnelProxyConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SavedProject {
+    pub project: ProjectSelection,
+    pub runner_config: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

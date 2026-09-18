@@ -264,3 +264,57 @@ pub async fn get_bounded_activity(
 ) -> Result<Vec<ActivityEntry>, DesktopError> {
     Ok(state.activity())
 }
+
+#[tauri::command]
+pub async fn get_runner_settings(
+    state: State<'_, AppState>,
+) -> Result<crate::webcodex::settings::RunnerSettings, DesktopError> {
+    state.runner_settings().await
+}
+#[tauri::command]
+pub async fn update_runner_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: crate::webcodex::settings::SettingsUpdate,
+) -> Result<DesktopStateSnapshot, DesktopError> {
+    project_state_result(&app, state.update_runner_settings(request).await)
+}
+#[tauri::command]
+pub async fn restart_owned_runner(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    target: crate::webcodex::settings::SettingsTarget,
+) -> Result<DesktopStateSnapshot, DesktopError> {
+    project_state_result(&app, state.restart_owned_runner(target).await)
+}
+
+#[tauri::command]
+pub fn get_computer_permissions(
+    app: AppHandle,
+) -> crate::platform::permissions::ComputerPermissions {
+    use tauri::Manager;
+    let mut permissions = crate::platform::permissions::probe();
+    permissions.foreground = app
+        .get_webview_window(crate::desktop_shell::MAIN_WINDOW_LABEL)
+        .is_some_and(|window| {
+            window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false)
+        });
+    permissions
+}
+#[tauri::command]
+pub fn request_computer_permission(
+    app: AppHandle,
+    action: crate::platform::permissions::PermissionAction,
+) -> Result<crate::platform::permissions::ComputerPermissions, DesktopError> {
+    crate::platform::permissions::request(action)?;
+    Ok(get_computer_permissions(app))
+}
+
+#[tauri::command]
+pub async fn add_runner_plugin(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: crate::webcodex::settings::PluginAddRequest,
+) -> Result<DesktopStateSnapshot, DesktopError> {
+    project_state_result(&app, state.add_runner_plugin(request).await)
+}

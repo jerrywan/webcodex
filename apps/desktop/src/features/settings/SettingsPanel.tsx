@@ -3,6 +3,7 @@ import { desktopApi } from "../../lib/desktop-api";
 import type { DesktopError, DesktopState, TunnelProxyMode } from "../../models/topology";
 import { LANGUAGES, useLocale } from "../../i18n/locale";
 import { desktopErrorPresentation, normalizeDesktopError } from "../../i18n/presentation";
+import { ComputerPermissions } from "./ComputerPermissions";
 import { PowerShellInstallGuidance } from "./PowerShellInstallGuidance";
 
 export function SettingsPanel({
@@ -65,6 +66,7 @@ export function SettingsPanel({
       <h1 id="settings-title">{t("settings.title")}</h1>
       <p className="lede">{t("settings.description")}</p>
 
+      <ComputerPermissions />
       <section className="settings-section" aria-labelledby="settings-interface-title">
         <h2 id="settings-interface-title">{t("settings.interface")}</h2>
         <div className="detail-card setting-row">

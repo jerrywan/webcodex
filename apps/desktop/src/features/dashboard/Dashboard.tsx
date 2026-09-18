@@ -17,7 +17,7 @@ interface DashboardProps {
   onConnectChatGpt: () => void;
   onChooseProject: () => void;
   onChangeSetup: () => void;
-  onNavigate: (page: "projects" | "connection" | "activity") => void;
+  onNavigate: (page: "projects" | "connection" | "activity" | "extensions") => void;
   onStopQuickShare: () => void;
   onStopRuntime: () => void;
 }
@@ -112,6 +112,12 @@ export function Dashboard({
           {state.project ? t("project.change") : t("project.add")}
         </button>
       </article>
+
+      <nav className="workspace-shortcuts" aria-label={t("workspace.currentProject")}>
+        <button className="secondary-button" onClick={() => onNavigate("projects")}>{t("project.savedRoots")}</button>
+        <button className="secondary-button" onClick={() => onNavigate("connection")}>{t("workspace.connectionSettings")}</button>
+        <button className="secondary-button" onClick={() => onNavigate("extensions")}>{t("extensions.title")}</button>
+      </nav>
 
       {state.quick_share && (
         <div className="handoff-card">

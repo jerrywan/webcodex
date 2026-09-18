@@ -341,7 +341,7 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   assert.match(css, /\.fleet-row/);
   assert.match(css, /\.device-group/);
   assert.match(css, /@media \(max-width: 900px\)/);
-  assert.match(css, /@media \(min-width: 1280px\)/);
+  assert.match(css, /@media \(min-width: 1600px\)/);
   assert.match(css, /--context-rail-width:\s*clamp\(320px,\s*26vw,\s*420px\)/);
   assert.match(css, /\.runtime-shell\.context-docked\s*\{[^}]*--content-width:\s*760px[^}]*grid-template-columns:\s*var\(--sidebar-width\)\s+minmax\(0,\s*1fr\)\s+var\(--context-rail-width\)/);
   assert.match(css, /translateX\(-102%\)/);
@@ -516,7 +516,7 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   assert.doesNotMatch(collaborationSource, /message-avatar/);
   assert.match(collaborationSource, /createMessageAction\(tr\("Reply"\), "reply"/);
   assert.match(navigationSource, /projectIcon\.appendChild\(runtimeIcon\("folder"\)\)/);
-  assert.match(source, /icon\.appendChild\(runtimeIcon\("message"\)\)/);
+  assert.match(await readFile(new URL("../src/runtime_workspace.ts", import.meta.url), "utf8"), /icon\.appendChild\(runtimeIcon\("message"\)\)/);
   const renderRunnersStart = navigationSource.indexOf("function renderRunnerFleetRows");
   const renderRunnersEnd = navigationSource.indexOf("function renderRecentSessionRows", renderRunnersStart);
   const renderRunners = navigationSource.slice(renderRunnersStart, renderRunnersEnd);

@@ -48,6 +48,12 @@ Surfaces form a stable ladder in both themes:
 
 ## Components
 
+### Daily workspace (issue #470)
+
+The default destination is **Project overview**, with meaningful work and attention ahead of message history. Work Sessions, Window activity, and Diagnostics & Agents remain explicit destinations. Project names always have their own full-width line; activity badges wrap below rather than squeezing away identity. The selected Project's overview summarizes loaded attention, running work, recently closed Sessions, and Window observations. Closed is not successful; no call is not disconnected. The Session work summary describes retained edits, Jobs, and terminal evidence, not a live Git diff.
+
+The `runtime_workspace.ts` module owns the overview, bounded evidence summaries, and command dialog rather than expanding the main controller. `Command/Ctrl+Shift+K` opens commands; Escape restores the trigger focus. Stable semantic buttons and `data-action` hooks serve human keyboard use and Browser/Computer Use without exposing credentials or changing authority.
+
 ### Information hierarchy
 
 The interface has three explicit information levels. The same fact must not compete in more than one region.
@@ -97,7 +103,7 @@ Navigation answers “where am I?”, conversation answers “what was said?”,
 
 ### Runtime and Session context
 
-- The primary navigation exposes two task spaces: **Projects & Sessions** and **Runtime & Agents**. Server metrics, Runner diagnostics, Agent identity, inboxes, and durable conversations live in the second space instead of competing with a Session conversation.
+- The primary navigation exposes **Project overview**, **Work Sessions**, **Window activity**, and **Diagnostics & Agents**. Server metrics, Runner diagnostics, Agent identity, inboxes, and durable conversations live in the second space instead of competing with a Session conversation.
 - The Session context inspector contains only evidence about the selected Session: identity, workspace path, validation, reported progress, and activity. Current work and attention stay near the top while raw evidence is disclosed one level deeper.
 - At `1600 px` and above, the otherwise empty right-side remainder docks a Session context rail by default, but remains user-collapsible. Below that breakpoint context is a non-blocking popover, then a full-width edge sheet on smaller screens.
 - Runtime administration is a scrollable card grid with stable anchors for overview, Runner fleet, and Agent communication. On narrow screens it becomes a single column; it never shares the conversational composer or message canvas.

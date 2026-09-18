@@ -161,6 +161,7 @@ export function renderProjectSelectorTree(deviceSelect, projectList, sessionsPan
                 catch { }
             });
             const row = document.createElement("summary");
+            row.dataset.action = "select-project";
             row.className = "project-row" + (project.id === options.selectedProject ? " selected" : "");
             if (project.id === options.selectedProject)
                 row.setAttribute("aria-current", "true");

@@ -115,6 +115,8 @@ export function ConnectionPanel({
 
       {error && <LocalizedError error={error} />}
 
+      <TunnelConfigDiagnostics state={state} onState={onState} />
+
       {state.regular_tunnel ? (
         <article className="handoff-card" aria-label="OpenAI Secure Tunnel">
           <div>
@@ -167,8 +169,7 @@ export function ConnectionPanel({
       )}
       {tunnelId && (
         <article className="detail-card tunnel-copy">
-          <label htmlFor="active-tunnel-id">Tunnel ID</label>
-          <input id="active-tunnel-id" readOnly value={tunnelId} onFocus={(event) => event.target.select()} />
+          <code className="path-value">{tunnelId}</code>
           <button className="secondary-button" onClick={() => void copyTunnelId()}>{t("connection.copyTunnelId")}</button>
           <span role="status">{copyStatus === "copied" ? t("connection.clipboardReady") : copyStatus === "failed" ? t("connection.copyFailed") : ""}</span>
         </article>
@@ -181,11 +182,7 @@ export function ConnectionPanel({
           <li>{t("workspace.verifyHint")}</li>
         </ol>
       </article>
-      <details className="setup-tunnel-details" open={!state.openai_tunnel_configured}>
-        <summary>{t("workspace.optionalTunnel")}</summary>
-        <p>{t("connection.description")}</p>
-        <TunnelConfigDiagnostics state={state} onState={onState} />
-      </details>
+
     </section>
   );
 }

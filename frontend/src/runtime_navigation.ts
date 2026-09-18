@@ -221,6 +221,7 @@ export function renderProjectSelectorTree(
         try { window.localStorage.setItem(disclosureKey, workspace.open ? "open" : "closed"); } catch {}
       });
       const row = document.createElement("summary");
+      row.dataset.action = "select-project";
       row.className = "project-row" + (project.id === options.selectedProject ? " selected" : "");
       if (project.id === options.selectedProject) row.setAttribute("aria-current", "true");
       const projectName = String(project.name || project.id || "");

@@ -144,7 +144,9 @@ export type DesktopOperationKind =
   | "runtime_refresh"
   | "runtime_resume"
   | "tunnel_proxy_update"
-  | "tunnel_config_update";
+  | "tunnel_config_update"
+  | "runner_settings_update"
+  | "runner_restart";
 
 export type DesktopOperationPhase = "running" | "cancelling";
 
@@ -175,6 +177,7 @@ export interface ChatGptActivitySnapshot {
 }
 
 export interface DesktopState {
+  saved_projects?: ProjectSelection[];
   topology?: RuntimeTopology | null;
   readiness: ReadinessSnapshot;
   project?: ProjectSelection | null;
@@ -231,3 +234,9 @@ export interface ActivityEntry {
   message: string;
 }
 
+
+export interface RunnerPaths { instruction_files: string[]; skill_roots: string[] }
+export interface SettingsTarget { config_path: string; client_id: string; server_url: string }
+export interface RunnerSettings { paths: RunnerPaths; plugin_ids: string[]; target: SettingsTarget; can_restart: boolean }
+export interface PluginRegistration { id: string; name: string; command: string; args: string[]; cwd: string | null }
+export interface ComputerPermissions { supported: boolean; foreground: boolean; desktop_accessibility: boolean; desktop_screen_recording: boolean }

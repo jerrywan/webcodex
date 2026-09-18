@@ -1,6 +1,7 @@
 mod adapter;
 mod cli;
 mod models;
+pub mod settings;
 
 pub use adapter::{
     inspect_project_path, validate_server_url, ProjectRuntimeIdentity, WebCodexAdapter,

@@ -5,6 +5,11 @@ import { LocaleProvider } from "./i18n/locale";
 
 const api = vi.hoisted(() => ({
   getState: vi.fn(),
+  computerPermissions: vi.fn(),
+  requestComputerPermission: vi.fn(),
+  runnerSettings: vi.fn(),
+  updateRunnerSettings: vi.fn(),
+  restartOwnedRunner: vi.fn(),
   updateTunnelConfig: vi.fn(),
   openPowerShellInstallGuide: vi.fn(),
   refresh: vi.fn(),
@@ -203,6 +208,7 @@ describe("semantic Desktop UI", () => {
         };
       },
     );
+    api.computerPermissions.mockResolvedValue({ supported: false, desktop_accessibility: false, desktop_screen_recording: false });
     api.activity.mockResolvedValue([]);
     api.getLaunchAtLogin.mockResolvedValue(false);
     api.openPowerShellInstallGuide.mockResolvedValue(undefined);
@@ -325,7 +331,6 @@ describe("semantic Desktop UI", () => {
     api.updateTunnelConfig.mockResolvedValue(savedState);
     renderApp();
     fireEvent.click(await screen.findByRole("button", { name: "连接" }));
-    fireEvent.click(screen.getByText("可选：检查 ChatGPT 安全隧道配置"));
     fireEvent.change(screen.getByLabelText("Tunnel ID"), { target: { value: "tunnel_saved" } });
     const key = screen.getByLabelText("Tunnel API key");
     expect(key).toHaveAttribute("type", "password");
@@ -373,7 +378,7 @@ describe("semantic Desktop UI", () => {
     await screen.findByRole("button", { name: "活动" });
     const language = screen.getByRole("combobox", { name: "界面语言" });
     language.focus();
-    fireEvent.keyDown(language, { key: "4", metaKey: true });
+    fireEvent.keyDown(language, { key: "5", metaKey: true });
     const search = screen.getByRole("searchbox");
     await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(1));
     fireEvent.click(screen.getByRole("checkbox", { name: "显示进程详情" }));
@@ -422,7 +427,7 @@ describe("semantic Desktop UI", () => {
     fireEvent.click(await screen.findByRole("button", { name: "项目" }));
     expect(screen.getByRole("heading", { level: 1, name: "此电脑上的项目" })).toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "选择其他项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加项目" }));
 
     await waitFor(() => expect(api.activateLocalProject).toHaveBeenCalledWith(projectC.path));
     expect(api.configureLocal).not.toHaveBeenCalled();
@@ -446,7 +451,7 @@ describe("semantic Desktop UI", () => {
     expect(api.configureLocal).not.toHaveBeenCalled();
   });
 
-  it("falls back to bounded local setup for a legacy Runner without restarting Tunnel", async () => {
+  it("reports a legacy Runner restart requirement without implicitly restarting any process", async () => {
     const tunneledState: DesktopState = {
       ...readyState,
       topology: { ...readyState.topology!, exposure: { kind: "open_ai_tunnel" } },
@@ -473,10 +478,11 @@ describe("semantic Desktop UI", () => {
 
     renderApp();
     fireEvent.click(await screen.findByRole("button", { name: "项目" }));
-    fireEvent.click(screen.getByRole("button", { name: "选择其他项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加项目" }));
 
     await waitFor(() => expect(api.activateLocalProject).toHaveBeenCalledWith(projectC.path));
-    await waitFor(() => expect(api.configureLocal).toHaveBeenCalledWith(projectC.path));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(api.configureLocal).not.toHaveBeenCalled();
     expect(api.startRegularTunnel).not.toHaveBeenCalled();
     expect(screen.getByText("Tunnel 已就绪，等待 ChatGPT")).toBeInTheDocument();
   });
@@ -663,7 +669,7 @@ describe("semantic Desktop UI", () => {
     await screen.findByRole("heading", { level: 1, name: "WebCodex" });
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
 
-    const diagnostics = screen.getByText("OpenAI Tunnel 配置检测").closest("article");
+    const diagnostics = screen.getByText("Tunnel 连接配置").closest("article");
     expect(diagnostics).not.toBeNull();
     expect(within(diagnostics!.querySelector("dl")!).getByText("Tunnel ID").parentElement).toHaveTextContent("已检测");
     expect(within(diagnostics!.querySelector("dl")!).getByText("Tunnel API key").parentElement).toHaveTextContent("未检测");
@@ -1026,7 +1032,8 @@ describe("semantic Desktop UI", () => {
         .mockResolvedValue(runningWithNewActivity);
       api.refresh.mockResolvedValue(initial);
       api.resumeSavedRuntime.mockReturnValue(setupResult.promise);
-      api.activity.mockResolvedValue([]);
+      api.computerPermissions.mockResolvedValue({ supported: false, desktop_accessibility: false, desktop_screen_recording: false });
+    api.activity.mockResolvedValue([]);
 
       const view = renderApp();
       await act(async () => {

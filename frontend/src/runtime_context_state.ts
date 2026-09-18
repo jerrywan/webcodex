@@ -5,7 +5,7 @@ export interface RuntimeContextLayoutOptions {
   isWideViewport: boolean;
   isMobileViewport: boolean;
   hasSelectedSession: boolean;
-  workspaceView: "sessions" | "operations" | "windows";
+  workspaceView: "home" | "sessions" | "operations" | "windows";
 }
 
 export interface RuntimeContextResolvedState {

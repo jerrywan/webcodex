@@ -67,10 +67,10 @@
         <h2>Connect to your workspace</h2>
         <p class="muted">Enter an existing runtime Bearer credential. Project and Workflow Session views require their existing scopes; durable Agent Chat separately requires communication:read and communication:manage.</p>
         <div class="field-row">
-          <input id="runtime-token-input" type="password" placeholder="Runtime Bearer credential" aria-label="Runtime Bearer credential" aria-describedby="runtime-token-error" autocomplete="off" spellcheck="false" />
+          <input data-testid="runtime-token-input" id="runtime-token-input" type="password" placeholder="Runtime Bearer credential" aria-label="Runtime Bearer credential" aria-describedby="runtime-token-error" autocomplete="off" spellcheck="false" />
           <button class="btn primary" type="submit">Connect</button>
         </div>
-        <label class="remember-credential"><input id="runtime-token-remember" type="checkbox" checked /> Keep me signed in for this tab (survives refresh, clears on Lock or tab close)</label>
+        <label class="remember-credential"><input data-testid="runtime-token-remember" id="runtime-token-remember" type="checkbox" checked /> Keep me signed in for this tab (survives refresh, clears on Lock or tab close)</label>
         <p id="runtime-token-error" class="error" role="alert"></p>
       </form>
     </section>
@@ -84,26 +84,29 @@
           </div>
           <div class="sidebar-brand-tools">
             <span class="sidebar-runtime-status"><i aria-hidden="true"></i><span>Local</span></span>
-            <button id="runtime-mobile-nav-close" class="mobile-nav-control" type="button" aria-label="Close project navigation">
+            <button data-testid="runtime-mobile-nav-close" id="runtime-mobile-nav-close" class="mobile-nav-control" type="button" aria-label="Close project navigation">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
             </button>
           </div>
         </header>
 
         <nav class="sidebar-view-switch" aria-label="Workspace views">
-          <button id="runtime-view-sessions" class="sidebar-view-item selected" type="button" data-runtime-view="sessions" aria-current="page">
+          <button data-testid="runtime-view-home" id="runtime-view-home" class="sidebar-view-item" type="button" data-runtime-view="home" data-action="navigate-home">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10h-6v-7H9v7H3Z" /></svg><span>Project overview</span>
+          </button>
+          <button data-testid="runtime-view-sessions" id="runtime-view-sessions" class="sidebar-view-item selected" type="button" data-runtime-view="sessions" aria-current="page">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v12H9l-4 3V5Z" /><path d="M12 8v6m-3-3h6" /></svg>
-            <span>Projects &amp; Sessions</span>
+            <span>Work Sessions</span>
             <span class="sidebar-connection"><i aria-hidden="true"></i><span>Connected</span></span>
           </button>
-          <button id="runtime-view-operations" class="sidebar-view-item" type="button" data-runtime-view="operations">
+          <button data-testid="runtime-view-operations" id="runtime-view-operations" class="sidebar-view-item" type="button" data-runtime-view="operations">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8m-4-4v4" /><circle cx="8" cy="10" r="1" /><path d="M11 10h6" /></svg>
-            <span>Runtime &amp; Agents</span>
+            <span>Diagnostics &amp; Agents</span>
             <span id="runtime-navigation-health" class="sidebar-view-meta">Live</span>
           </button>
-          <button id="runtime-view-windows" class="sidebar-view-item" type="button" data-runtime-view="windows">
+          <button data-testid="runtime-view-windows" id="runtime-view-windows" class="sidebar-view-item" type="button" data-runtime-view="windows">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v5" /></svg>
-            <span>Window Activity</span>
+            <span>Window activity</span>
             <span id="runtime-window-navigation-health" class="sidebar-view-meta">Activity</span>
           </button>
         </nav>
@@ -119,13 +122,13 @@
               <label class="runner-filter" for="runtime-device-select">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8m-4-4v4" /></svg>
                 <span class="visually-hidden">Runner</span>
-                <select id="runtime-device-select" aria-label="Runner"><option value="">All Runners</option></select>
+                <select data-testid="runtime-device-select" id="runtime-device-select" aria-label="Runner"><option value="">All Runners</option></select>
               </label>
               <span id="runtime-device-status" class="muted small sidebar-status">—</span>
             </div>
             <div class="sidebar-search">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m16.5 16.5 4 4" /></svg>
-              <input id="runtime-project-search" type="search" maxlength="200" placeholder="Find a project…" aria-label="Filter by Project name, id, Runner, or workspace path" aria-keyshortcuts="Meta+k Control+k" autocomplete="off" spellcheck="false" />
+              <input data-testid="runtime-project-search" id="runtime-project-search" type="search" maxlength="200" placeholder="Find a project…" aria-label="Filter by Project name, id, Runner, or workspace path" aria-keyshortcuts="Meta+k Control+k" autocomplete="off" spellcheck="false" />
             </div>
             <span id="runtime-selected-project" class="selected-project muted small">No project selected</span>
             <div id="runtime-project-list" class="project-list" role="group" aria-label="Projects"></div>
@@ -137,7 +140,7 @@
               <h2>Sessions</h2>
               <span id="runtime-sessions-count" class="count-badge">0</span>
             </div>
-            <label class="runtime-search-field"><span>Search loaded Sessions</span><input id="runtime-session-search" type="search" maxlength="200" placeholder="Title, id, or lifecycle" /></label>
+            <label class="runtime-search-field"><span>Search loaded Sessions</span><input data-testid="runtime-session-search" id="runtime-session-search" type="search" maxlength="200" placeholder="Title, id, or lifecycle" /></label>
             <span id="runtime-session-search-status" class="muted small" role="status"></span>
             <ul id="runtime-session-list" class="session-list" aria-label="Workflow Sessions"></ul>
             <p id="runtime-sessions-empty" class="muted small empty-copy" hidden>No retained Workflow Sessions for this project.</p>
@@ -193,7 +196,7 @@
                 <h2>WebCodex Window activity</h2>
                 <span id="runtime-window-list-count" class="count-badge">0</span>
               </div>
-              <p class="operations-navigation-copy muted small">Host Window liveness and correlation evidence. Window identity never grants execution or Session authority.</p>
+              <p class="operations-navigation-copy muted small">Client calls, separate from work Sessions. Observation does not mean the host is online.</p>
               <span id="runtime-window-list-status" class="muted small" role="status">Window activity has not been loaded yet.</span>
               <div id="runtime-window-list" class="runtime-window-list" role="group" aria-label="WebCodex Window activity"></div>
               <p id="runtime-window-list-empty" class="muted small empty-copy" hidden>No WebCodex activity is available.</p>
@@ -201,17 +204,18 @@
           </div>
         </div>
 
+        <button id="runtime-open-commands" data-testid="runtime-open-commands" data-action="open-commands" class="workspace-action" type="button" aria-keyshortcuts="Meta+Shift+k Control+Shift+k">Commands · ⇧⌘ / Ctrl K</button>
         <footer class="sidebar-footer">
           <span class="local-avatar" aria-hidden="true">W</span>
           <span><strong>Local Runtime</strong><small>Credential stays in this tab only</small></span>
         </footer>
       </aside>
 
-      <button id="runtime-mobile-nav-backdrop" class="mobile-nav-backdrop" type="button" tabindex="-1" aria-label="Close project navigation"></button>
+      <button data-testid="runtime-mobile-nav-backdrop" id="runtime-mobile-nav-backdrop" class="mobile-nav-backdrop" type="button" tabindex="-1" aria-label="Close project navigation"></button>
 
       <section class="workspace-main">
         <header class="workspace-topbar">
-          <button id="runtime-mobile-nav-toggle" class="mobile-nav-control mobile-nav-toggle" type="button" aria-label="Open project navigation" aria-controls="runtime-sidebar" aria-expanded="false">
+          <button data-testid="runtime-mobile-nav-toggle" id="runtime-mobile-nav-toggle" class="mobile-nav-control mobile-nav-toggle" type="button" aria-label="Open project navigation" aria-controls="runtime-sidebar" aria-expanded="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           <div class="workspace-heading">
@@ -252,10 +256,10 @@
                     <button class="theme-option" type="button" data-theme-option="dark" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.1A8.5 8.5 0 0 1 8.9 4a8.5 8.5 0 1 0 11.1 11.1Z" /></svg><span>Dark</span><i aria-hidden="true"></i></button>
                   </div>
                 </details>
-                <button id="runtime-refresh" class="icon-btn" type="button" title="Refresh runtime" aria-label="Refresh runtime">
+                <button data-testid="runtime-refresh" id="runtime-refresh" class="icon-btn" type="button" title="Refresh runtime" aria-label="Refresh runtime">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15" /></svg><span class="topbar-action-label">Refresh</span>
                 </button>
-                <button id="runtime-lock" class="btn subtle lock-button" type="button">
+                <button data-testid="runtime-lock" id="runtime-lock" class="btn subtle lock-button" type="button">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3m-11 0h12a2 2 0 0 1 2 2v7H4v-7a2 2 0 0 1 2-2Z" /></svg>
                   <span>Lock</span>
                 </button>
@@ -266,6 +270,9 @@
 
         <p id="runtime-error" class="banner error" role="alert" hidden></p>
 
+        <section id="runtime-home-stage" class="workspace-home-stage" aria-label="Project overview" hidden>
+          <div id="runtime-home-content" class="workspace-home-content"></div>
+        </section>
         <div id="runtime-conversation-stage" class="conversation-stage">
           <div id="runtime-session-detail-empty" class="conversation-empty">
             <div class="empty-orbit" aria-hidden="true">
@@ -274,14 +281,19 @@
             <p class="eyebrow">Your workspace</p>
             <h2>Pick up where work happens</h2>
             <p>Choose a project and Workflow Session from the sidebar to inspect its context and continue the collaboration.</p>
-            <button id="runtime-find-project" class="btn primary welcome-primary" type="button"><span>Find a project</span><kbd aria-hidden="true">⌘ / Ctrl K</kbd></button>
+            <button data-testid="runtime-find-project" id="runtime-find-project" class="btn primary welcome-primary" type="button"><span>Find a project</span><kbd aria-hidden="true">⌘ / Ctrl K</kbd></button>
             <div class="welcome-destinations">
-              <button id="runtime-welcome-overview" type="button"><strong>Runtime overview</strong><span>Server health and fleet capacity</span><i aria-hidden="true">↗</i></button>
-              <button id="runtime-welcome-agents" type="button"><strong>Durable Agents</strong><span>Agents, inboxes and conversations</span><i aria-hidden="true">↗</i></button>
+              <button data-testid="runtime-welcome-overview" id="runtime-welcome-overview" type="button"><strong>Runtime overview</strong><span>Server health and fleet capacity</span><i aria-hidden="true">↗</i></button>
+              <button data-testid="runtime-welcome-agents" id="runtime-welcome-agents" type="button"><strong>Durable Agents</strong><span>Agents, inboxes and conversations</span><i aria-hidden="true">↗</i></button>
             </div>
           </div>
 
           <article id="runtime-session-detail" class="session-conversation" hidden>
+            <details class="workspace-session-summary" open>
+              <summary>Work summary</summary>
+              <dl id="runtime-work-evidence" class="workspace-evidence"></dl>
+              <p class="muted small">Retained evidence, not a live Git diff. Open Context for activity and linked Windows.</p>
+            </details>
             <section class="session-chat" aria-labelledby="runtime-collaboration-heading">
               <div class="chat-section-head">
                 <strong id="runtime-collaboration-heading" class="visually-hidden">Conversation</strong>
@@ -292,7 +304,7 @@
                 <p class="collaboration-explanation muted small">This board shows retained Session messages. ACK is not a reply or completion. Host chat replies appear here only when explicitly posted to this Session.</p>
                 <details class="message-search-disclosure">
                   <summary><span>Search retained messages</span><span id="runtime-message-search-status" class="muted small" role="status"></span></summary>
-                  <label class="runtime-search-field"><span class="visually-hidden">Search retained messages</span><input id="runtime-message-search" type="search" maxlength="200" placeholder="Message, resolution, or id" /></label>
+                  <label class="runtime-search-field"><span class="visually-hidden">Search retained messages</span><input data-testid="runtime-message-search" id="runtime-message-search" type="search" maxlength="200" placeholder="Message, resolution, or id" /></label>
                 </details>
                 <div id="runtime-collaboration-board" class="collaboration-board" role="log" aria-label="Session conversation"></div>
                 <div id="runtime-collaboration-empty" class="chat-empty" hidden>
@@ -301,7 +313,7 @@
                   <p id="runtime-collaboration-empty-copy" class="muted small">Messages posted here are retained on the Session collaboration board.</p>
                 </div>
               </div>
-              <button id="runtime-new-messages" class="new-messages-button" type="button" hidden>
+              <button data-testid="runtime-new-messages" id="runtime-new-messages" class="new-messages-button" type="button" hidden>
                 <span id="runtime-new-messages-label">New messages</span>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6" /></svg>
               </button>
@@ -312,13 +324,13 @@
             <form id="runtime-collaboration-form" class="collaboration-composer" autocomplete="off">
               <div id="runtime-message-reply" class="reply-target muted small" hidden>
                 <span id="runtime-message-reply-text"></span>
-                <button id="runtime-message-reply-clear" class="text-button" type="button">Clear reply</button>
+                <button data-testid="runtime-message-reply-clear" id="runtime-message-reply-clear" class="text-button" type="button">Clear reply</button>
               </div>
               <div id="runtime-message-edit" class="edit-target muted small" hidden>
                 <span id="runtime-message-edit-text"></span>
-                <button id="runtime-message-edit-clear" class="text-button" type="button">Cancel Edit</button>
+                <button data-testid="runtime-message-edit-clear" id="runtime-message-edit-clear" class="text-button" type="button">Cancel Edit</button>
               </div>
-              <textarea id="runtime-message-body" rows="1" maxlength="4000" enterkeyhint="send" placeholder="Message this Session…" aria-label="Message this Session…"></textarea>
+              <textarea data-testid="runtime-message-body" id="runtime-message-body" rows="1" maxlength="4000" enterkeyhint="send" placeholder="Message this Session…" aria-label="Message this Session…"></textarea>
               <div class="composer-toolbar">
                 <div class="composer-fields">
                   <details id="runtime-message-options" class="composer-options">
@@ -333,7 +345,7 @@
                       </div>
                       <div class="composer-option-fields">
                         <label class="composer-control"><span>Kind</span>
-                          <select id="runtime-message-kind">
+                          <select data-testid="runtime-message-kind" id="runtime-message-kind">
                             <option value="note">Note</option>
                             <option value="guidance">Guidance</option>
                             <option value="question">Question</option>
@@ -341,14 +353,14 @@
                           </select>
                         </label>
                         <label class="composer-control"><span>Priority</span>
-                          <select id="runtime-message-priority">
+                          <select data-testid="runtime-message-priority" id="runtime-message-priority">
                             <option value="low">Low</option>
                             <option value="normal" selected>Normal</option>
                             <option value="high">High</option>
                           </select>
                         </label>
                         <label id="runtime-message-ack-label" class="ack-field composer-check" hidden>
-                          <input id="runtime-message-requires-ack" type="checkbox" /> <span>Require acknowledgement</span>
+                          <input data-testid="runtime-message-requires-ack" id="runtime-message-requires-ack" type="checkbox" /> <span>Require acknowledgement</span>
                         </label>
                       </div>
                     </div>
@@ -356,7 +368,7 @@
                 </div>
                 <div class="composer-actions">
                   <span id="runtime-message-send-status" class="muted small" aria-live="polite"></span>
-                  <button id="runtime-message-send" class="send-btn" type="submit" title="Send message" aria-label="Send message">
+                  <button data-testid="runtime-message-send" id="runtime-message-send" class="send-btn" type="submit" title="Send message" aria-label="Send message">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
                   </button>
                 </div>
@@ -385,7 +397,7 @@
               <section class="operations-card window-overview-card">
                 <div class="operations-card-head">
                   <div><span class="eyebrow">Hashed identity</span><h3 id="runtime-window-title">Window</h3></div>
-                  <button id="runtime-window-copy-key" class="btn subtle" type="button">Copy hashed key</button>
+                  <button data-testid="runtime-window-copy-key" id="runtime-window-copy-key" class="btn subtle" type="button">Copy hashed key</button>
                 </div>
                 <code id="runtime-window-key" class="communication-id">—</code>
                 <div class="metric-grid window-metrics">
@@ -462,12 +474,12 @@
                       <h3>Agents</h3>
                       <form id="runtime-agent-create-form" class="stack-form" autocomplete="off">
                         <div class="compact-field-grid">
-                          <label>Handle<input id="runtime-agent-handle" maxlength="64" pattern="[A-Za-z0-9._-]+" required placeholder="reviewer" /></label>
-                          <label>Display name<input id="runtime-agent-display-name" maxlength="128" required placeholder="Architecture Reviewer" /></label>
+                          <label>Handle<input data-testid="runtime-agent-handle" id="runtime-agent-handle" maxlength="64" pattern="[A-Za-z0-9._-]+" required placeholder="reviewer" /></label>
+                          <label>Display name<input data-testid="runtime-agent-display-name" id="runtime-agent-display-name" maxlength="128" required placeholder="Architecture Reviewer" /></label>
                         </div>
-                        <label>Description<textarea id="runtime-agent-description" rows="2" maxlength="2048" placeholder="What this Agent mainly does"></textarea></label>
-                        <label>Specialty labels<input id="runtime-agent-labels" maxlength="1039" placeholder="rust, architecture, review" /></label>
-                        <div class="form-actions"><span id="runtime-agent-create-status" class="muted small" aria-live="polite"></span><button id="runtime-agent-create" class="btn primary" type="submit">Create Agent</button></div>
+                        <label>Description<textarea data-testid="runtime-agent-description" id="runtime-agent-description" rows="2" maxlength="2048" placeholder="What this Agent mainly does"></textarea></label>
+                        <label>Specialty labels<input data-testid="runtime-agent-labels" id="runtime-agent-labels" maxlength="1039" placeholder="rust, architecture, review" /></label>
+                        <div class="form-actions"><span id="runtime-agent-create-status" class="muted small" aria-live="polite"></span><button data-testid="runtime-agent-create" id="runtime-agent-create" class="btn primary" type="submit">Create Agent</button></div>
                       </form>
                       <div id="runtime-agent-list" class="communication-list" role="group" aria-label="Durable Agents"></div>
                       <p id="runtime-agent-empty" class="muted small" hidden>No durable Agents are owned by this communication principal.</p>
@@ -482,22 +494,22 @@
                       <p id="runtime-agent-wake-status" class="muted small">—</p>
                       <form id="runtime-agent-update-form" class="stack-form card-edit-form" autocomplete="off">
                         <div class="compact-field-grid">
-                          <label>Handle<input id="runtime-agent-update-handle" maxlength="64" pattern="[A-Za-z0-9._-]+" required /></label>
-                          <label>Display name<input id="runtime-agent-update-display-name" maxlength="128" required /></label>
+                          <label>Handle<input data-testid="runtime-agent-update-handle" id="runtime-agent-update-handle" maxlength="64" pattern="[A-Za-z0-9._-]+" required /></label>
+                          <label>Display name<input data-testid="runtime-agent-update-display-name" id="runtime-agent-update-display-name" maxlength="128" required /></label>
                         </div>
-                        <label>Description<textarea id="runtime-agent-update-description" rows="2" maxlength="2048"></textarea></label>
-                        <label>Specialty labels<input id="runtime-agent-update-labels" maxlength="1039" placeholder="rust, architecture, review" /></label>
-                        <div class="form-actions"><span id="runtime-agent-update-status" class="muted small" aria-live="polite"></span><button id="runtime-agent-update" class="btn" type="submit">Update Agent Card</button></div>
+                        <label>Description<textarea data-testid="runtime-agent-update-description" id="runtime-agent-update-description" rows="2" maxlength="2048"></textarea></label>
+                        <label>Specialty labels<input data-testid="runtime-agent-update-labels" id="runtime-agent-update-labels" maxlength="1039" placeholder="rust, architecture, review" /></label>
+                        <div class="form-actions"><span id="runtime-agent-update-status" class="muted small" aria-live="polite"></span><button data-testid="runtime-agent-update" id="runtime-agent-update" class="btn" type="submit">Update Agent Card</button></div>
                       </form>
                       <div class="form-actions">
                         <span id="runtime-agent-endpoint-status" class="muted small">No browser Endpoint attached.</span>
-                        <button id="runtime-agent-attach" class="btn primary" type="button">Continue as this Agent</button>
-                        <button id="runtime-agent-detach" class="btn" type="button" hidden>Detach</button>
+                        <button data-testid="runtime-agent-attach" id="runtime-agent-attach" class="btn primary" type="button">Continue as this Agent</button>
+                        <button data-testid="runtime-agent-detach" id="runtime-agent-detach" class="btn" type="button" hidden>Detach</button>
                       </div>
                     </section>
 
                     <section class="communication-section">
-                      <div class="section-head"><h3>Selected Agent Inbox</h3><button id="runtime-inbox-consume-all" class="text-button" type="button" hidden>Consume visible</button></div>
+                      <div class="section-head"><h3>Selected Agent Inbox</h3><button data-testid="runtime-inbox-consume-all" id="runtime-inbox-consume-all" class="text-button" type="button" hidden>Consume visible</button></div>
                       <p id="runtime-inbox-status" class="muted small">Select and attach an Agent to inspect recipient-specific queued deliveries.</p>
                       <div id="runtime-inbox-list" class="communication-list"></div>
                     </section>
@@ -508,10 +520,10 @@
                       <h3>Conversations</h3>
                       <form id="runtime-conversation-create-form" class="stack-form" autocomplete="off">
                         <div class="compact-field-grid">
-                          <label>Title<input id="runtime-conversation-title" maxlength="200" placeholder="Architecture room" /></label>
-                          <label>Agent IDs<input id="runtime-conversation-agent-ids" maxlength="1200" required placeholder="Select an Agent or enter comma-separated wc_dagent_* ids" spellcheck="false" /></label>
+                          <label>Title<input data-testid="runtime-conversation-title" id="runtime-conversation-title" maxlength="200" placeholder="Architecture room" /></label>
+                          <label>Agent IDs<input data-testid="runtime-conversation-agent-ids" id="runtime-conversation-agent-ids" maxlength="1200" required placeholder="Select an Agent or enter comma-separated wc_dagent_* ids" spellcheck="false" /></label>
                         </div>
-                        <div class="form-actions"><span id="runtime-conversation-create-status" class="muted small" aria-live="polite"></span><button id="runtime-conversation-create" class="btn primary" type="submit">Create Conversation</button></div>
+                        <div class="form-actions"><span id="runtime-conversation-create-status" class="muted small" aria-live="polite"></span><button data-testid="runtime-conversation-create" id="runtime-conversation-create" class="btn primary" type="submit">Create Conversation</button></div>
                       </form>
                       <div id="runtime-conversation-list" class="communication-list conversation-list" role="group" aria-label="Durable Conversations"></div>
                       <p id="runtime-conversation-empty" class="muted small" hidden>No Conversations are visible to this Human principal.</p>
@@ -524,10 +536,10 @@
                       <div id="runtime-conversation-transcript" class="conversation-transcript" role="log" aria-label="Durable Conversation transcript"></div>
                       <p id="runtime-conversation-transcript-empty" class="muted small" hidden>No messages yet.</p>
                       <form id="runtime-conversation-message-form" class="stack-form conversation-composer" autocomplete="off">
-                        <label>Inbox recipients <input id="runtime-conversation-recipients" maxlength="1200" placeholder="Blank = all Agent participants; empty delivery can be sent with [] through the API" spellcheck="false" /></label>
-                        <label class="inline-choice"><input id="runtime-conversation-send-as-agent" type="checkbox" /> Send as the selected Agent through its exact attached Endpoint</label>
-                        <textarea id="runtime-conversation-body" rows="3" maxlength="4096" required placeholder="Send a durable message…"></textarea>
-                        <div class="form-actions"><span id="runtime-conversation-send-status" class="muted small" aria-live="polite"></span><button id="runtime-conversation-send" class="btn primary" type="submit">Send durable message</button></div>
+                        <label>Inbox recipients <input data-testid="runtime-conversation-recipients" id="runtime-conversation-recipients" maxlength="1200" placeholder="Blank = all Agent participants; empty delivery can be sent with [] through the API" spellcheck="false" /></label>
+                        <label class="inline-choice"><input data-testid="runtime-conversation-send-as-agent" id="runtime-conversation-send-as-agent" type="checkbox" /> Send as the selected Agent through its exact attached Endpoint</label>
+                        <textarea data-testid="runtime-conversation-body" id="runtime-conversation-body" rows="3" maxlength="4096" required placeholder="Send a durable message…"></textarea>
+                        <div class="form-actions"><span id="runtime-conversation-send-status" class="muted small" aria-live="polite"></span><button data-testid="runtime-conversation-send" id="runtime-conversation-send" class="btn primary" type="submit">Send durable message</button></div>
                       </form>
                     </section>
                     <p id="runtime-conversation-detail-empty" class="muted">Select or create a Conversation.</p>
@@ -544,7 +556,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="8" cy="6" r="1.5" /><circle cx="16" cy="12" r="1.5" /><circle cx="10" cy="18" r="1.5" /></svg>
           <span>Context</span>
         </summary>
-        <button id="runtime-inspector-backdrop" class="inspector-backdrop" type="button" tabindex="-1" aria-label="Close session context"></button>
+        <button data-testid="runtime-inspector-backdrop" id="runtime-inspector-backdrop" class="inspector-backdrop" type="button" tabindex="-1" aria-label="Close session context"></button>
         <div id="runtime-inspector-panel" class="inspector-popover">
           <header class="inspector-header">
             <div>
@@ -553,7 +565,7 @@
             </div>
             <div class="inspector-header-actions">
               <span class="live-pill"><i aria-hidden="true"></i> Live</span>
-              <button id="runtime-inspector-close" class="inspector-close" type="button" aria-label="Close session context" title="Close session context">
+              <button data-testid="runtime-inspector-close" id="runtime-inspector-close" class="inspector-close" type="button" aria-label="Close session context" title="Close session context">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
@@ -567,6 +579,7 @@
               <button type="button" data-context-target="runtime-context-details" aria-controls="runtime-context-details" aria-pressed="false">Details</button>
             </div>
             <section id="runtime-context-overview" aria-label="Overview">
+              <dl id="runtime-context-evidence" class="workspace-evidence context-evidence"></dl>
               <section class="overview-card"><h4>Latest Agent message</h4><div id="runtime-latest-agent-message"></div></section>
               <div class="overview context-primary-overview" aria-label="Workflow Session overview">
                 <section class="overview-card runtime-fact"><h4>Work</h4><p id="runtime-overview-work">—</p></section>
@@ -579,7 +592,7 @@
             </section>
             <section id="runtime-context-activity" aria-label="Activity" hidden>
               <div class="activity-section" aria-labelledby="runtime-activity-heading">
-                <div class="timeline-controls"><strong id="runtime-activity-heading">Activity</strong><button id="runtime-jump-latest" class="text-button" type="button" hidden>Jump to latest</button></div>
+                <div class="timeline-controls"><strong id="runtime-activity-heading">Activity</strong><button data-testid="runtime-jump-latest" id="runtime-jump-latest" class="text-button" type="button" hidden>Jump to latest</button></div>
                 <ol id="runtime-timeline" class="timeline"></ol>
                 <p id="runtime-timeline-empty" class="muted small" hidden>No bounded activity is available.</p>
               </div>
@@ -626,6 +639,11 @@
       </details>
     </section>
   </main>
+  <dialog id="runtime-command-dialog" class="workspace-command-dialog" aria-label="Commands">
+    <label for="runtime-command-query">Find a destination<input id="runtime-command-query" data-testid="runtime-command-query" type="search" maxlength="200" autocomplete="off" /></label>
+    <div id="runtime-command-results" class="workspace-command-results" aria-label="Destinations"></div>
+    <button id="runtime-command-close" data-action="close-commands" class="workspace-action workspace-command-close" type="button">Close commands</button>
+  </dialog>
   <script src="/runtime/app.js" defer></script>
 </body>
 </html>

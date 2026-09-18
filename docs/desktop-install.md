@@ -52,7 +52,7 @@ In **Settings → Background & startup**, **Launch WebCodex at login** registers
 
 ### Everyday controls
 
-- Use the sidebar to open Home, Projects, Connection, Activity, and Settings. Use **⌘ + 1–5** on macOS or **Ctrl + 1–5** on Windows. Navigation shortcuts also work inside inputs and language selectors; ordinary typing and text-editing shortcuts remain available.
+- Use the sidebar to open Home, Projects, Connection, Extensions, Activity, and Settings. Use **⌘ + 1–6** on macOS or **Ctrl + 1–6** on Windows. Navigation shortcuts also work inside inputs and language selectors; ordinary typing and text-editing shortcuts remain available.
 - Home shows the current project, next action, and three usage steps. Expand **View runtime diagnostics** to inspect all four components.
 - In **Activity**, search messages or sources, or select **Warnings and errors only**. Results are newest first. Filtering changes the view without deleting records.
 - Use Tab to focus main buttons and Enter to activate them. Navigation moves focus into page content.
@@ -74,7 +74,7 @@ Do not commit or share real API keys, WebCodex tokens, or authorization values.
 
 ## 3. Save Tunnel configuration inside Desktop (recommended)
 
-Open **Settings → OpenAI Tunnel network**, or expand **Optional: check ChatGPT tunnel configuration** in **Connection**:
+Open **Connection → Tunnel connection settings**. This editor stays visible while the regular Tunnel is running or stopped:
 
 1. Enter your Tunnel ID in **Tunnel ID**.
 2. Enter an API key authorized for that Tunnel in the **Tunnel API key** password field.
@@ -82,7 +82,7 @@ Open **Settings → OpenAI Tunnel network**, or expand **Optional: check ChatGPT
 
 The same fields are available in the optional Tunnel section during local setup. When a key is already saved, leaving its field blank keeps that key. Desktop never retrieves the secret into the UI; submission clears the input. A failed save retains the Tunnel ID but requires re-entering an unsaved key.
 
-**Priority: complete saved configuration → inherited Desktop process environment.** Desktop never combines a saved Tunnel ID with an environment API key. Saving does not modify system variables or start/stop a connection. New values apply to the next regular OpenAI Tunnel or OpenAI Quick Share start. Stop and start an active connection to apply them.
+**Priority: complete saved configuration → inherited Desktop process environment.** Desktop never combines a saved Tunnel ID with an environment API key. Saving does not modify system variables. An active Desktop-owned regular Tunnel is replaced with the saved configuration, without restarting Server or Runner. A stopped Tunnel remains stopped. OpenAI Quick Share uses the new values on its next start. Save success and connection recovery are distinct: a replacement failure retains the new configuration and asks you to retry the connection.
 
 The file is `secrets/tunnel-config.json` in Desktop's local application data directory:
 
@@ -107,6 +107,8 @@ No additional `OPENAI_ADMIN_KEY` or `OPENAI_API_KEY` is needed. On first OpenAI 
 Windows users can set persistent variables for the current user. On macOS, Finder / Dock launches do not read `~/.zshrc`; launch from a Terminal that has loaded the variables or configure the login session environment. After changing variables through this advanced path, use **Quit WebCodex** in the tray and launch it again. Closing the window only hides it and cannot refresh its process environment. **Recheck configuration** neither executes shell startup scripts nor reloads manually edited configuration files.
 
 ### macOS Computer Use permissions
+
+A first foreground launch with missing Desktop permissions opens an in-app explanation. Explicit request buttons use the native macOS permission APIs; **Continue** leaves permissions unchanged. Background/login launches do not steal focus. **Settings → Computer Use permissions** shows observed Desktop permissions and lets you recheck or open System Settings. It does not infer the actual Runner's authorization from Desktop's state.
 
 For screenshots, window observation, keyboard or pointer control, grant the relevant permissions under **System Settings → Privacy & Security** to the process actually running WebCodex Runner/Desktop. These include **Screen & System Audio Recording**, and **Accessibility** for UI control. Restart the affected process when macOS requires it.
 

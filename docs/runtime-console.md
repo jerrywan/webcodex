@@ -2,24 +2,35 @@
 
 Open `/runtime` and connect with an existing runtime credential.
 
-The workspace start page offers **Find a project**, **Runtime overview**, and
-**Durable Agents**. Press **Command+K** on macOS or **Ctrl+K** on Windows/Linux
+The start page is **Project overview**: choose an authorized project and review
+**Needs attention**, **Working now**, **Recently closed**, and recent work Sessions.
+Counts describe loaded evidence; unavailable or stale data is not an empty healthy
+workspace. Closed does not imply successful. Each Session opens explicitly, with a
+work summary of retained edits, Jobs, and terminal validation before the message board.
+The summary is not a live Git diff or host conversation transcript.
+
+Press **Command+Shift+K** / **Ctrl+Shift+K**, or choose **Commands**, for keyboard
+navigation. Escape closes the command dialog and restores focus. These actions
+never create a Session or submit a message. Press **Command+K** on macOS or **Ctrl+K** on Windows/Linux
 while connected to open Projects & Sessions and focus project search. On narrow
 screens this also opens the navigation drawer. These shortcuts navigate only;
 they do not create Sessions or send messages.
 
-- **Projects & Sessions** is the collaboration workspace. Select a Project and
+- **Work Sessions** is the collaboration workspace. Select a Project and
   Workflow Session in the sidebar. Recent Sessions starts expanded and can be
   collapsed when more room is needed.
 - **Context** opens the selected Session's context. **Overview** shows work,
   attention, validation, and model-reported progress directly. **Activity** shows
   retained events and the existing follow-latest control. **Details** shows
   identity, lifecycle, mode, timestamps, and workspace information.
-- **Runtime & Agents** provides four separate destinations: **Overview**,
-  **Runner fleet**, **Windows**, and **Durable Agents**. Selecting a destination
+- **Diagnostics & Agents** provides three secondary destinations: **Overview**,
+  **Runner fleet**, and **Durable Agents**. Selecting a destination
   shows its full content and updates the navigation highlight. Switching
   destinations keeps existing forms mounted so unsent input is retained.
-- **Windows** is an observability view for ChatGPT/WebCodex call correlation. It
+- **Window activity** is a first-class navigation destination and also appears in
+  Project overview. Adapter `_meta["openai/session"]` is hashed into a `ClientWindow`,
+  separate from explicit `wc_sess_*` Workflow Sessions. This is an observability view
+  for ChatGPT/WebCodex call correlation. It
   lists hashed `ClientWindow` identities, current in-flight WebCodex requests,
   bounded durable call history, linked Workflow Sessions, and explicit recorder
   continuity gaps. It never shows the raw host window value, tool arguments or
@@ -73,7 +84,7 @@ its Runner. Closing it hides that workspace's Sessions without clearing the
 selected Session or composer; its preference survives refresh. Selecting another
 workspace opens its Session list.
 
-At widths of 1280px and above, Context docks beside a narrower conversation, with
+At widths of 1600px and above, Context docks beside a narrower conversation, with
 more room for readable status and progress. Its Overview starts with the latest
 retained Agent-authored message. Resolution text is also visible directly below
 the original message, rather than only in a tooltip.

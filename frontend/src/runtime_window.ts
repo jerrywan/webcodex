@@ -130,6 +130,7 @@ export function createWindowCard(
   if (!key) return null;
   const button = document.createElement("button");
   button.type = "button";
+  button.dataset.action = "open-window";
   button.className = "runtime-window-card" + (key === selectedWindowKey ? " selected" : "");
   if (key === selectedWindowKey) button.setAttribute("aria-current", "true");
   const head = document.createElement("div");
@@ -226,6 +227,7 @@ export function renderWindowLinkedSessions(
   for (const session of linkedSessions) {
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.action = "open-linked-session";
     button.className = "window-session-card";
     const title = document.createElement("strong");
     title.textContent = String(session?.title || session?.workflow_session_id || translate("Workflow Session", language));

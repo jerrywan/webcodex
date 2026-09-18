@@ -142,6 +142,7 @@ const processErrors = new Set([
 ]);
 
 export function desktopErrorPresentation(error: DesktopError, t: Translate): ErrorPresentation {
+  if (error.code === "tunnel_config_apply_failed") return { title: t("error.tunnelTitle"), action: t("tunnelConfig.applyFailed") };
   if (error.code === "tunnel_config_invalid") return { title: t("error.tunnelTitle"), action: t("tunnelConfig.invalidInput") };
   if (error.code === "tunnel_config_save_failed") return { title: t("error.fallbackTitle"), action: t("tunnelConfig.saveFailed") };
   if (binaryErrors.has(error.code)) return { title: t("error.binaryTitle"), action: t("error.binaryAction") };
@@ -211,6 +212,8 @@ const operationKeys: Record<DesktopOperationKind, MessageKey> = {
   local_runtime_stop: "operation.localRuntimeStop",
   runtime_refresh: "operation.runtimeRefresh",
   runtime_resume: "operation.runtimeResume",
+  runner_settings_update: "operation.runnerSettingsUpdate",
+  runner_restart: "operation.runnerRestart",
   tunnel_config_update: "operation.tunnelConfigUpdate",
   tunnel_proxy_update: "operation.tunnelProxyUpdate",
 };

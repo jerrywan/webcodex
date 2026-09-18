@@ -64,7 +64,6 @@ struct ManagedProcess {
     child: ManagedChild,
     phase: ProcessPhase,
     exit_code: Option<i32>,
-    logs: Arc<Mutex<VecDeque<String>>>,
     stdout_task: JoinHandle<()>,
     stderr_task: JoinHandle<()>,
 }
@@ -240,7 +239,7 @@ impl ProcessSupervisor {
             // A terminal direct child may still own live descendants. Keep the
             // exact ManagedChild generation until its whole tree is reclaimed;
             // never retarget cleanup by a remembered numeric PID/PGID.
-            self.stop(kind).await;
+            self.stop_checked(kind).await?;
         }
 
         // stdin is the Desktop parent-liveness lease for every long-lived
@@ -292,11 +291,22 @@ impl ProcessSupervisor {
         };
         let stdout_logs = Arc::clone(&logs);
         let stdout_task = tokio::task::spawn_blocking(move || {
-            drain_stream(stdout, stdout_logs, machine_tx, machine_stdout)
+            drain_stream(
+                stdout,
+                stdout_logs,
+                machine_tx,
+                machine_stdout || kind == ProcessKind::RegularTunnel,
+            )
         });
         let stderr_logs = Arc::clone(&logs);
-        let stderr_task =
-            tokio::task::spawn_blocking(move || drain_stream(stderr, stderr_logs, None, false));
+        let stderr_task = tokio::task::spawn_blocking(move || {
+            drain_stream(
+                stderr,
+                stderr_logs,
+                None,
+                kind == ProcessKind::RegularTunnel,
+            )
+        });
         self.activity.push(
             ActivityEventKind::ProcessStarted,
             kind.source(),
@@ -309,7 +319,6 @@ impl ProcessSupervisor {
                 child,
                 phase: ProcessPhase::Starting,
                 exit_code: None,
-                logs,
                 stdout_task,
                 stderr_task,
             },
@@ -369,24 +378,22 @@ impl ProcessSupervisor {
         })
     }
 
-    pub fn logs(&self, kind: ProcessKind) -> Vec<String> {
-        self.processes
-            .get(&kind)
-            .map(|process| {
-                process
-                    .logs
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .iter()
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
     pub async fn stop(&mut self, kind: ProcessKind) {
         self.stop_until(kind, Deadline::after(GRACEFUL_STOP_TIMEOUT))
             .await;
+    }
+
+    /// Replacement must not overwrite a generation whose cleanup is uncertain.
+    pub async fn stop_checked(&mut self, kind: ProcessKind) -> DesktopResult<()> {
+        self.stop(kind).await;
+        if self.processes.contains_key(&kind) {
+            return Err(DesktopError::new(
+                "process_stop_unconfirmed",
+                "Process cleanup could not be confirmed",
+                "Retry stopping the Desktop-owned process before replacing it.",
+            ));
+        }
+        Ok(())
     }
 
     pub async fn stop_until(&mut self, kind: ProcessKind, deadline: Deadline) {
@@ -437,6 +444,17 @@ impl ProcessSupervisor {
         if !process.child.try_tree_exit().unwrap_or(false) {
             let _ = process.child.terminate_tree();
             let _ = wait_for_tree_exit(&mut process.child, deadline.instant()).await;
+        }
+        if !process.child.try_tree_exit().unwrap_or(false) {
+            process.phase = ProcessPhase::Stopping;
+            self.processes.insert(kind, process);
+            self.activity.push(
+                ActivityEventKind::ProcessObservationFailed,
+                kind.source(),
+                ActivityLevel::Error,
+                "Process cleanup is unconfirmed; Desktop retained ownership for retry",
+            );
+            return;
         }
         finish_drain_task(process.stdout_task, deadline.instant()).await;
         finish_drain_task(process.stderr_task, deadline.instant()).await;

@@ -18,6 +18,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml_edit = "0.25"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-clipboard-manager = "2"
@@ -25,6 +26,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 url = "2"
+webcodex-core = { path = "../../../crates/webcodex-core" }
 webcodex-process = { path = "../../../crates/webcodex-process" }
 webcodex-runner-config = { path = "../../../crates/webcodex-runner-config" }
 
@@ -35,3 +37,8 @@ libc = "0.2"
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 winreg = "0.55"
 
+
+[profile.dogfood]
+inherits = "dev"
+opt-level = 1
+debug = 1

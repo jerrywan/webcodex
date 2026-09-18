@@ -35,6 +35,7 @@ const requiredAssets = [
   "runtime_operations.js",
   "runtime_navigation.js",
   "runtime_collaboration.js",
+  "runtime_workspace.js",
   "runtime.html",
   "runtime.js",
   "runtime.css",
@@ -173,7 +174,7 @@ async function assertRequiredAssets(outputDirectory) {
   await exec(process.execPath, ["--check", resolve(outputDirectory, "runtime.js")]);
   const runtimeStyles = await readFile(resolve(outputDirectory, "runtime.css"), "utf8");
   assert.match(runtimeStyles, /max-width:\s*900px/);
-  assert.match(runtimeStyles, /min-width:\s*1280px/);
+  assert.match(runtimeStyles, /min-width:\s*1600px/);
   assert.match(runtimeStyles, /safe-area-inset-bottom/);
   assert.match(runtimeStyles, /safe-area-inset-top/);
   assert.match(runtimeStyles, /prefers-reduced-motion/);
@@ -250,6 +251,7 @@ async function copySources(sourceDirectory) {
     "runtime_operations.ts",
     "runtime_navigation.ts",
     "runtime_collaboration.ts",
+    "runtime_workspace.ts",
     "runtime.css",
     "runtime.html",
     "admin.ts",

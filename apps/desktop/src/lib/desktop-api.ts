@@ -1,12 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActivityEntry,
+  RunnerPaths,
+  SettingsTarget,
+  PluginRegistration,
+  RunnerSettings,
+  ComputerPermissions,
   DesktopState,
   ProjectSelection,
   TunnelProxyMode,
 } from "../models/topology";
 
 export const desktopApi = {
+  runnerSettings: () => invoke<RunnerSettings>("get_runner_settings"),
+  updateRunnerSettings: (target: SettingsTarget, expected: RunnerPaths, paths: RunnerPaths) => invoke<DesktopState>("update_runner_settings", { request: { target, expected, paths } }),
+  restartOwnedRunner: (target: SettingsTarget) => invoke<DesktopState>("restart_owned_runner", { target }),
+  addRunnerPlugin: (target: SettingsTarget, provider: PluginRegistration) => invoke<DesktopState>("add_runner_plugin", { request: { target, provider } }),
+  computerPermissions: () => invoke<ComputerPermissions>("get_computer_permissions"),
+  requestComputerPermission: (action: "accessibility" | "screen_recording" | "open_settings") => invoke<ComputerPermissions>("request_computer_permission", { action }),
   updateTunnelConfig: (request: { action: "save"; tunnelId: string; apiKey: string | null } | { action: "use_environment" }) =>
     invoke<DesktopState>("update_tunnel_config", { request }),
   getState: () => invoke<DesktopState>("get_desktop_state"),
