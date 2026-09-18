@@ -102,10 +102,13 @@ impl ToolRuntime {
         if stdout.len() > RUNNER_INSTRUCTION_RESPONSE_MAX_BYTES {
             return (Vec::new(), false);
         }
-        let parsed = match serde_json::from_str::<RunnerInstructionSnapshotResponse>(stdout) {
-            Ok(parsed) if parsed.validate().is_ok() => parsed,
-            _ => return (Vec::new(), false),
+        let mut parsed = match serde_json::from_str::<RunnerInstructionSnapshotResponse>(stdout) {
+            Ok(parsed) => parsed,
+            Err(_) => return (Vec::new(), false),
         };
+        if parsed.bind_visible_fingerprints().is_err() {
+            return (Vec::new(), false);
+        }
         (parsed.files, parsed.scan_complete)
     }
 }

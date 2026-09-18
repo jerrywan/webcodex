@@ -198,7 +198,7 @@ backslashes:
 ```toml
 [instructions]
 files = [
-    'C:\\Users\\alice\\.codex\\AGENTS.md',
+    'C:\Users\alice\.codex\AGENTS.md',
 ]
 ```
 

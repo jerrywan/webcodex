@@ -2,6 +2,7 @@ use crate::project_instructions::{
     InstructionSourceScope, ProjectInstructionFile, MAX_LINES_PER_FILE, MAX_TOTAL_CHARS,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 pub const RUNNER_INSTRUCTION_REQUEST_KIND: &str = "runner_instruction";
@@ -78,6 +79,32 @@ impl RunnerInstructionSnapshotResponse {
         }
         Ok(())
     }
+
+    /// Bind the Runner-reported full-source fingerprint to the exact bounded
+    /// source body observed by Control. The upstream fingerprint retains
+    /// sensitivity to content beyond the projection bound, while the second
+    /// domain-separated digest prevents a stale or malformed Runner response
+    /// from reusing an old fingerprint for different visible content.
+    pub fn bind_visible_fingerprints(&mut self) -> Result<(), &'static str> {
+        self.validate()?;
+        for file in &mut self.files {
+            let upstream = file.fingerprint.clone();
+            let mut hasher = Sha256::new();
+            hasher.update(b"webcodex.runner-instruction-visible-binding.v1\0");
+            for value in [
+                file.path.as_bytes(),
+                upstream.as_bytes(),
+                file.content.as_bytes(),
+            ] {
+                hasher.update((value.len() as u64).to_be_bytes());
+                hasher.update(value);
+            }
+            hasher.update((file.total_lines as u64).to_be_bytes());
+            hasher.update([u8::from(file.truncated)]);
+            file.fingerprint = format!("{:x}", hasher.finalize());
+        }
+        Ok(())
+    }
 }
 
 fn valid_runner_logical_source(path: &str) -> bool {
@@ -106,6 +133,34 @@ fn is_lower_hex_sha256(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visible_binding_detects_content_change_with_stale_upstream_fingerprint() {
+        let file = |content: &str| ProjectInstructionFile {
+            source_scope: InstructionSourceScope::Runner,
+            path: "runner/0/AGENTS.md".to_string(),
+            fingerprint: "a".repeat(64),
+            content: content.to_string(),
+            chars: content.chars().count(),
+            total_lines: 1,
+            start_line: 1,
+            limit: MAX_LINES_PER_FILE,
+            truncated: false,
+            read_more: None,
+        };
+        let response = |content: &str| RunnerInstructionSnapshotResponse {
+            format: RUNNER_INSTRUCTION_RESPONSE_FORMAT.to_string(),
+            generation: 7,
+            scan_complete: true,
+            files: vec![file(content)],
+        };
+        let mut first = response("runner global v1");
+        let mut second = response("runner global v2");
+        first.bind_visible_fingerprints().unwrap();
+        second.bind_visible_fingerprints().unwrap();
+        assert_ne!(first.files[0].fingerprint, second.files[0].fingerprint);
+        assert_ne!(first.files[0].fingerprint, "a".repeat(64));
+    }
 
     #[test]
     fn logical_runner_sources_cannot_encode_native_or_traversal_paths() {

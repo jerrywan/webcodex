@@ -93,7 +93,7 @@ roots = []
 files = []
 # files = ["/home/webcodex/.codex/AGENTS.md"]
 # macOS example: files = ["/Users/alice/.codex/AGENTS.md"]
-# Windows TOML literal-string example: files = ['C:\\Users\\alice\\.codex\\AGENTS.md']
+# Windows TOML literal-string example: files = ['C:\Users\alice\.codex\AGENTS.md']
 
 [capabilities]
 file_read = true

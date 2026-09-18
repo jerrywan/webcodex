@@ -3748,9 +3748,14 @@ async fn runner_global_instructions_compose_change_and_repeat_across_projects() 
         .unwrap();
     assert!(suppressed_runner.get("content").is_none());
 
-    // File contents are live independently from config generation: a new snapshot
-    // at the same generation changes continuation fingerprint/content immediately.
-    let global_v2 = runner_instruction_snapshot_stdout("runner global v2", 7);
+    // File contents are live independently from config generation. Even a stale or
+    // malformed Runner response that reuses the prior upstream fingerprint cannot
+    // hide different visible content from Server-side continuation detection.
+    let mut global_v1_wire: serde_json::Value = serde_json::from_str(&global_v1).unwrap();
+    let mut global_v2_wire: serde_json::Value =
+        serde_json::from_str(&runner_instruction_snapshot_stdout("runner global v2", 7)).unwrap();
+    global_v2_wire["files"][0]["fingerprint"] = global_v1_wire["files"][0]["fingerprint"].take();
+    let global_v2 = global_v2_wire.to_string();
     let (changed, changed_requests) = dispatch_recording_startup_requests_with_runner_instructions(
         &runtime,
         "wop-global",

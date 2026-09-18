@@ -586,7 +586,7 @@ fn resolve_regular_package_file(
     Ok(target)
 }
 
-fn metadata_is_link_like(metadata: &fs::Metadata) -> bool {
+pub(super) fn metadata_is_link_like(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return true;
     }

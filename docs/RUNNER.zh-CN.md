@@ -178,7 +178,7 @@ macOS 使用等价的 Runner 本机绝对路径，例如 `/Users/alice/.codex/AG
 ```toml
 [instructions]
 files = [
-    'C:\\Users\\alice\\.codex\\AGENTS.md',
+    'C:\Users\alice\.codex\AGENTS.md',
 ]
 ```
 

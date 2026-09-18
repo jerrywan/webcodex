@@ -1,4 +1,5 @@
 use super::config::InstructionsConfig;
+use super::configured_skills::metadata_is_link_like;
 use super::CommandResult;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -33,6 +34,13 @@ fn snapshot(generation: u64, config: &InstructionsConfig, started: Instant) -> C
     let mut scan_complete = true;
 
     for (index, configured) in config.files.iter().enumerate() {
+        match std::fs::symlink_metadata(configured) {
+            Ok(metadata) if metadata.is_file() && !metadata_is_link_like(&metadata) => {}
+            _ => {
+                scan_complete = false;
+                continue;
+            }
+        }
         let canonical = match std::fs::canonicalize(configured) {
             Ok(path) if path.is_file() => path,
             _ => {
@@ -174,6 +182,26 @@ mod tests {
         assert_eq!(second.generation, 7);
         assert_eq!(second.files[0].content, "second");
         assert_ne!(second.files[0].fingerprint, first_fingerprint);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_rejects_configured_symlink_instead_of_following_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("secret.txt");
+        let link = tmp.path().join("AGENTS.md");
+        std::fs::write(&target, "must not be projected\n").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let config = InstructionsConfig { files: vec![link] };
+
+        let response =
+            handle_runner_instruction_request(1, &config, RunnerInstructionRequest::snapshot());
+        assert_eq!(response.exit_code, Some(0));
+        let stdout = response.stdout.as_deref().unwrap();
+        assert!(!stdout.contains("must not be projected"));
+        let parsed: RunnerInstructionSnapshotResponse = serde_json::from_str(stdout).unwrap();
+        assert!(!parsed.scan_complete);
+        assert!(parsed.files.is_empty());
     }
 
     #[test]
