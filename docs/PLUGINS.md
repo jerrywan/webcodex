@@ -359,9 +359,10 @@ external dependency contract. That prerequisite is now satisfied:
 `@yyjeqhc/webcodex-plugin-sdk@0.1.0` is publicly distributed through npm, and Phase 3
 adds the local scaffold using that exact compatibility pin. A generated project
 therefore works independently of a WebCodex source checkout. Repository first-party
-dogfood such as `plugins/safe-delete` and [`plugins/repo-info`](../plugins/repo-info/README.md)
-intentionally continues to use the local SDK source so it tests the checkout under
-development; external projects created by `plugin init` use the published package.
+dogfood such as `plugins/safe-delete`, [`plugins/repo-info`](../plugins/repo-info/README.md),
+and [`plugins/campus-application`](../plugins/campus-application/README.md) intentionally
+continues to use the local SDK source so it tests the checkout under development;
+external projects created by `plugin init` use the published package.
 
 ## TypeScript Plugin SDK
 
@@ -469,13 +470,16 @@ forms of `additionalProperties`, union `type`, `anyOf`, `oneOf`, `allOf`, `not`,
 or arbitrary draft-specific keywords.
 
 See [`examples/native-tool-plugin.mjs`](../examples/native-tool-plugin.mjs) for
-a minimal no-dependency Node example. The repository also ships two first-party
-SDK dogfood Plugins: [`plugins/safe-delete`](../plugins/safe-delete/README.md) is an
-optional project-root-fenced Plugin that moves one file or directory to the operating
-system Trash/Recycle Bin without adding permanent deletion to WebCodex's built-in
-tool surface; [`plugins/repo-info`](../plugins/repo-info/README.md) is a read-only
-authoring example whose single `git_summary` tool observes only the provider's
-configured repository `cwd`.
+a minimal no-dependency Node example. The repository also ships first-party SDK
+dogfood Plugins: [`plugins/safe-delete`](../plugins/safe-delete/README.md) is an optional
+project-root-fenced Plugin that moves one file or directory to the operating system
+Trash/Recycle Bin without adding permanent deletion to WebCodex's built-in tool
+surface; [`plugins/repo-info`](../plugins/repo-info/README.md) is a read-only authoring
+example whose single `git_summary` tool observes only the provider's configured
+repository `cwd`; and [`plugins/campus-application`](../plugins/campus-application/README.md)
+turns bounded Browser semantic snapshots into structured resume-form plans, supports
+repeated and multi-step application flows, and deliberately stops before final
+submission.
 
 ## Calling and failure semantics
 

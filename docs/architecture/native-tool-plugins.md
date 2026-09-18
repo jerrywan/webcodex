@@ -61,6 +61,10 @@ baseline rather than redesigned by the next authoring work:
 - `plugins/repo-info` is the first read-only authoring-loop dogfood Plugin. Its
   single `git_summary` tool accepts no path and observes only the provider-configured
   `cwd`, keeping repository selection in Runner configuration rather than Plugin input.
+- `plugins/campus-application` is a Browser-oriented planning Plugin. It consumes
+  bounded semantic snapshots, maps them to a Runner-local structured resume profile,
+  and emits bounded fill/section/step plans while leaving Browser authority and final
+  submission outside the Plugin.
 
 This produces one important ownership rule:
 
