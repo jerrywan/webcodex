@@ -5403,6 +5403,7 @@ impl ToolCallAuditProjection for ToolCall {
                 instruction,
                 include_project_instructions,
                 include_workflow_guidance,
+                guidance_profile: _,
                 session_id,
                 include_extension_catalog,
             } => serde_json::json!({

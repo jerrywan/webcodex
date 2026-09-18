@@ -18,7 +18,7 @@ use super::project_instructions::{
 use super::project_resolution::ResolvedProject;
 use super::session_context::canonical_repository_key;
 use super::sessions::SessionSummary;
-use super::tool_inputs::StartupDetail;
+use super::tool_inputs::{CodingGuidanceProfile, StartupDetail};
 
 // Reserve transport-envelope headroom so a ToolResult and the GPT Actions
 // wrapper also remain below the externally documented 32 KiB ceiling.
@@ -56,7 +56,7 @@ pub(crate) use webcodex_core::runtime_contract::{
 /// as Session mode, capability, permission, or execution authority. Ordinary
 /// implementation uses the default guidance; task text may explicitly request
 /// the independent review role, whose name only selects review behavior.
-pub(crate) fn builtin_coding_workflow_projection() -> Value {
+pub(crate) fn builtin_coding_workflow_projection(profile: CodingGuidanceProfile) -> Value {
     json!({
         "contract": BUILTIN_CODING_WORKFLOW_CONTRACT,
         "version": BUILTIN_CODING_WORKFLOW_VERSION,
@@ -67,11 +67,13 @@ pub(crate) fn builtin_coding_workflow_projection() -> Value {
             "Verify Project/branch/HEAD/changes/nested rules. Recovery/compaction/exact Session resume is continuation: reuse still-current Git/read/validation/Job facts; revalidate changed snapshots/HEAD/worktree/instructions.",
             "Preserve unrelated work; push/publish/deploy/restart need explicit action/target. If a user answer/Job/validation/result is not a dependency, continue independent work; wait only on real dependencies.",
             "Ordinary implementation is default: map cross-layer changes end to end; use compiler/schema/exhaustiveness failures for gaps; minimize concepts, avoid speculative redesign.",
-            "Use the simplest sufficient primitive preserving correctness/authority/evidence/durability/recovery/portability. Native commands are first-class. Batch predetermined observations; adaptive follow-ups stay sequential; bounded deterministic Python/run_shell fits coherent transforms.",
-            "Known target: bounded targeted reads and related-range batching. Broad discovery: files/count/small-context search then targeted reads; predictable native rg is first-class.",
             "Validation failure is evidence, not queue cleanliness. Fix blockers before dependent work; otherwise continue. Reuse assertion_name on rerun; mutation stales evidence; outcome_unknown fails closed. Formatting is finalization.",
             "Use one execution/Job, exact continuation; wait_secs=100,wake_on=terminal when blocked, not for visibility. After Rust stabilizes, format once before final diff/closeout; rerun only after later Rust edits. Final source needs sufficient fresh validation."
         ],
+        "tool_strategy": {
+            "profile": profile,
+            "guidance": tool_strategy_guidance(profile),
+        },
         "model_protocol": {
             "handoff_recovery": "Use session_handoff_summary only after task-context loss/compaction/restart, for explicit cross-window/Agent handoff, or user-requested recovery. Never use it for routine progress/baselines. Requires exact session_id; check basis completeness.",
             "session_recording": "When work_on_project creates or resumes, pass recording_session_id for recorder provenance only. business session_id may target another Session; it grants no authority.",
@@ -92,6 +94,27 @@ pub(crate) fn builtin_coding_workflow_projection() -> Value {
             }
         }
     })
+}
+
+fn tool_strategy_guidance(profile: CodingGuidanceProfile) -> &'static [&'static str] {
+    match profile {
+        CodingGuidanceProfile::Direct => &[
+            "Use the simplest sufficient primitive: native commands and structured tools are first-class; bounded deterministic Python/run_shell for coherent edits.",
+            "Simple observation: direct primitive. Batch predetermined independent observations; adaptive follow-ups stay sequential across model calls.",
+            "Known target: bounded targeted reads. Broad discovery: small files/count search then targeted reads. Avoid ritual turns.",
+        ],
+        #[cfg(feature = "experimental-code-mode")]
+        CodingGuidanceProfile::CodeMode => &[
+            "For one simple observation use a direct primitive; do not wrap a single simple call in Code Mode. Native commands and structured tools are first-class: choose the simplest sufficient primitive. Narrow broad discovery before bounded targeted reads; avoid ritual round trips.",
+            "Prefer read-only code_mode_exec for related search/read observations, cross-file/module investigation, or synthesis of independent observations when it reduces outer model round trips. Three or more related observations is a soft heuristic, never a correctness rule.",
+            "Keep adaptive follow-up inside one cell: search, inspect result, dependent read, inspect, further search, compact final projection. Dependent calls remain sequential inside the cell; they need not cross model turns.",
+            "Use Promise.all only for independent observations. Never parallelize calls with data dependencies to reduce wall-clock time.",
+            "Keep raw child ToolResults inside the cell. Filter, extract, cross-reference and synthesize search results, file bodies and diff chunks before text(...). Emit only compact structured evidence needed for the next model decision; no fixed JSON shape is required.",
+            "Avoid raw-result dumping: do not batch calls then text(results). Project large nested results proactively before hitting the bounded outer-output limit; text(value) should contain distilled findings, relevant paths and small evidence, not intermediate material.",
+            "Canonical mutation is the default edit path; structured validation is the default validation path. Consider effectful Code Mode only to reduce outer round trips for multiple related validations; mutating Code Mode only when adaptive read -> one guarded edit benefits.",
+            "This profile grants no capability or nested admission. All children retain canonical Project/Session authority, permission, risk, approval, effects, idempotency, validation evidence, Job continuation, retry and effect-certainty semantics.",
+        ],
+    }
 }
 
 // Model-side caps for the deterministic repository overview projected into the
@@ -277,6 +300,7 @@ pub(crate) fn bounded_extension_description(value: &str) -> String {
 }
 
 pub(crate) struct StartupBriefInput<'a> {
+    pub(crate) guidance_profile: CodingGuidanceProfile,
     pub(crate) detail: StartupDetail,
     pub(crate) requested_project: &'a str,
     pub(crate) project_resolution: &'a Value,
@@ -352,7 +376,7 @@ pub(crate) fn build_startup_brief(input: StartupBriefInput<'_>) -> Value {
         },
         "project_resolution": input.project_resolution,
         "workspace": workspace,
-        "workflow": builtin_coding_workflow_projection(),
+        "workflow": builtin_coding_workflow_projection(input.guidance_profile),
         "instructions": instruction_projection,
         "continuation": continuation,
         "semantic_navigation": semantic_navigation,
@@ -1345,7 +1369,18 @@ fn json_string_payload_len(value: &str) -> usize {
 }
 
 fn enforce_hard_size_limit(brief: &mut Value) {
-    if serialized_len(brief) <= STANDARD_STARTUP_HARD_MAX_BYTES {
+    // Reserve the same workflow allowance for either strategy. Otherwise a
+    // larger guidance projection could trim unrelated instructions/evidence.
+    let workflow_budget = serialized_len(&builtin_coding_workflow_projection(
+        CodingGuidanceProfile::Direct,
+    ));
+    #[cfg(feature = "experimental-code-mode")]
+    let workflow_budget = workflow_budget.max(serialized_len(&builtin_coding_workflow_projection(
+        CodingGuidanceProfile::CodeMode,
+    )));
+    let max_bytes = STANDARD_STARTUP_HARD_MAX_BYTES
+        .saturating_sub(workflow_budget.saturating_sub(serialized_len(&brief["workflow"])));
+    if serialized_len(brief) <= max_bytes {
         return;
     }
 
@@ -1366,7 +1401,7 @@ fn enforce_hard_size_limit(brief: &mut Value) {
         "/repository/roots/ci",
     ];
     loop {
-        if serialized_len(brief) <= STANDARD_STARTUP_HARD_MAX_BYTES {
+        if serialized_len(brief) <= max_bytes {
             return;
         }
         let mut removed = false;
@@ -1419,7 +1454,7 @@ fn enforce_hard_size_limit(brief: &mut Value) {
     // useful floor first, preserving content from every loaded source along
     // with source identity, headings, read_more, and truncation facts.
     loop {
-        if serialized_len(brief) <= STANDARD_STARTUP_HARD_MAX_BYTES {
+        if serialized_len(brief) <= max_bytes {
             return;
         }
         let Some(sources) = brief
@@ -1470,7 +1505,7 @@ fn enforce_hard_size_limit(brief: &mut Value) {
         "/continuation/changed_paths",
     ];
     loop {
-        if serialized_len(brief) <= STANDARD_STARTUP_HARD_MAX_BYTES {
+        if serialized_len(brief) <= max_bytes {
             return;
         }
         let mut removed = false;
@@ -1497,7 +1532,7 @@ fn enforce_hard_size_limit(brief: &mut Value) {
     // Headings are optional navigation metadata; source path/fingerprint and
     // rule content/read_more remain authoritative.
     loop {
-        if serialized_len(brief) <= STANDARD_STARTUP_HARD_MAX_BYTES {
+        if serialized_len(brief) <= max_bytes {
             return;
         }
         let Some(sources) = brief
@@ -1522,7 +1557,7 @@ fn enforce_hard_size_limit(brief: &mut Value) {
     // limit. As a final defensive step, reduce rule excerpts below the useful
     // floor while retaining source metadata and a conservative read_more hint.
     loop {
-        if serialized_len(brief) <= STANDARD_STARTUP_HARD_MAX_BYTES {
+        if serialized_len(brief) <= max_bytes {
             return;
         }
         let Some(sources) = brief
@@ -1559,7 +1594,7 @@ fn enforce_hard_size_limit(brief: &mut Value) {
     }
 
     debug_assert!(
-        serialized_len(brief) <= STANDARD_STARTUP_HARD_MAX_BYTES,
+        serialized_len(brief) <= max_bytes,
         "startup brief base contract exceeded its hard byte budget"
     );
 }
@@ -2132,8 +2167,9 @@ mod tests {
             "resolved_project": "agent:size:demo",
             "registered": false,
         });
-        let build = || {
+        let build = |guidance_profile| {
             build_startup_brief(StartupBriefInput {
+                guidance_profile,
                 detail: StartupDetail::Standard,
                 requested_project: "agent:size:demo",
                 project_resolution: &project_resolution,
@@ -2159,8 +2195,23 @@ mod tests {
                 runtime_status_call_failed: false,
             })
         };
-        let first = build();
-        let second = build();
+        let first = build(CodingGuidanceProfile::Direct);
+        let second = build(CodingGuidanceProfile::Direct);
+        #[cfg(feature = "experimental-code-mode")]
+        {
+            let composed = build(CodingGuidanceProfile::CodeMode);
+            assert_eq!(composed, build(CodingGuidanceProfile::CodeMode));
+            assert!(startup_brief_size(&composed) <= STANDARD_STARTUP_HARD_MAX_BYTES);
+            let mut direct_facts = first.clone();
+            let mut composed_facts = composed.clone();
+            direct_facts.as_object_mut().unwrap().remove("workflow");
+            composed_facts.as_object_mut().unwrap().remove("workflow");
+            assert_eq!(
+                direct_facts, composed_facts,
+                "profile must not change which startup facts fit the byte budget"
+            );
+            assert!(serde_json::to_vec(&json!({"success": true, "output": {"compact": true, "startup_brief": composed}, "error": Value::Null})).unwrap().len() < 32 * 1024);
+        }
         assert_eq!(first, second);
         let bytes = startup_brief_size(&first);
         eprintln!("worst_case_standard_startup_bytes={bytes}");

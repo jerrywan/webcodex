@@ -68,7 +68,12 @@ to be needed, tightly related, and an existing primitive naturally supports the
 batch. Examples include several related `read_files` ranges, independent search
 queries, or a short bounded `run_shell` chain of predetermined observations.
 Result-dependent follow-ups stay sequential so the next call can incorporate the
-new evidence. Do not preload unrelated data or combine permission, mutation,
+new evidence. In direct strategy the model chooses each follow-up across calls;
+with explicitly selected Code Mode guidance, an admitted read-only cell can inspect
+results and perform dependent follow-ups sequentially inside the same cell. Only
+independent observations run concurrently. Keep intermediate child results inside
+the cell and project compact decision evidence before `text(...)`; batching raw
+results into one output does not save model context. Do not preload unrelated data or combine permission, mutation,
 validation, commit, publish, deploy, or restart boundaries merely to reduce call
 count.
 

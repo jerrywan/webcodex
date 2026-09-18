@@ -50,6 +50,35 @@ applicable project rules, authentication, and runtime safety policy still apply.
 Delivery is not proof that a model read, retained, or followed the guidance.
 Keep guidance enabled unless the current model context already retains it.
 
+## Tool strategy guidance
+
+`work_on_project` accepts `guidance_profile`, defaulting to `direct`. Workflow
+contract v14 returns shared `guidance`, `model_protocol` and review `roles`, plus
+only the selected `tool_strategy: {profile, guidance}`. `include_workflow_guidance=false`
+omits the entire workflow, including the strategy. The selection is request-local:
+choose again on exact resume without changing Session identity or business state.
+It is never inferred from a Window, Session or past tool use, and grants no tools,
+admission, authority or execution semantics. Builds without Experimental Code Mode
+reject explicit `code_mode` as an invalid profile, even if guidance is omitted.
+The independent `webcodex.workflow` context sidecar supplies the default `direct`
+projection; it does not remember a startup selection.
+
+- `direct`: use the simplest sufficient primitive; batch predetermined independent
+  observations and let the model inspect results before adaptive follow-up calls.
+- `code_mode`: still use a direct primitive for one simple observation. Prefer
+  read-only orchestration when related search/read work, cross-file investigation
+  or synthesis saves outer model turns. Keep dependent follow-ups sequential inside
+  one cell; parallelize only independent observations. Keep raw child results in
+  the cell, filter and synthesize them, then emit compact decision evidence through
+  `text(...)`. Avoid `text(results)` dumps and project before reaching output limits.
+
+Both strategies retain bounded targeted reads, narrow discovery, first-class native
+commands/structured tools, and the same recovery, authority, review and closeout.
+Canonical edits and structured validators remain the default. Effectful composition
+is useful only when related validations save outer turns; guarded mutation composition
+is useful only when adaptive read -> one guarded edit benefits. Nested canonical
+permissions, effects, validation evidence, Jobs and retry certainty remain unchanged.
+
 ## Inspect before editing
 
 Choose the simplest sufficient inspection primitive. If the symbol, test, or implementation region is already known, prefer bounded targeted ranges and batch several related ranges when they are predetermined. For broad discovery, first request a narrow projection such as files-with-matches, count, or a small bounded match set with little context, then read the relevant ranges. A small predictable known-scope native `rg` via `run_process`/`run_shell` is first-class.

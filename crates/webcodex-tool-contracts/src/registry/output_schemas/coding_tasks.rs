@@ -496,7 +496,7 @@ fn startup_workspace_schema() -> Value {
 fn startup_workflow_schema() -> Value {
     json!({
         "type": "object",
-        "description": "WebCodex-owned workflow defaults and optional named coding/review roles. Separate from project instructions and Session authority.",
+        "description": "WebCodex-owned shared workflow, selected tool strategy and optional review role. Separate from project instructions and Session authority.",
         "properties": {
             "contract": {"type": "string", "const": BUILTIN_CODING_WORKFLOW_CONTRACT},
             "version": {"type": "integer", "const": BUILTIN_CODING_WORKFLOW_VERSION},
@@ -508,6 +508,21 @@ fn startup_workflow_schema() -> Value {
                 "minItems": 1,
                 "maxItems": BUILTIN_CODING_WORKFLOW_MAX_GUIDANCE_ITEMS,
                 "items": {"type": "string", "maxLength": 320}
+            },
+            "tool_strategy": {
+                "type": "object",
+                "description": "Only the selected request-local tool strategy. Model guidance, never tool admission, authority, or durable Session state.",
+                "properties": {
+                    "profile": crate::schema_generation::typed_host_schema::<crate::tool_inputs::CodingGuidanceProfile>(),
+                    "guidance": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": BUILTIN_CODING_WORKFLOW_MAX_GUIDANCE_ITEMS,
+                        "items": {"type": "string", "maxLength": 320}
+                    }
+                },
+                "required": ["profile", "guidance"],
+                "additionalProperties": false
             },
             "model_protocol": {
                 "type": "object",
@@ -536,7 +551,7 @@ fn startup_workflow_schema() -> Value {
             },
             "roles": {
                 "type": "object",
-                "description": "Optional named behavior that changes the default workflow. Ordinary implementation is fully described by guidance.",
+                "description": "Optional named review behavior. Ordinary implementation uses shared guidance and the selected tool strategy.",
                 "properties": {
                     "independent_review": startup_workflow_role_schema()
                 },
@@ -544,7 +559,7 @@ fn startup_workflow_schema() -> Value {
                 "additionalProperties": false
             }
         },
-        "required": ["contract", "version", "authority", "role_selection", "guidance", "model_protocol", "roles"],
+        "required": ["contract", "version", "authority", "role_selection", "guidance", "tool_strategy", "model_protocol", "roles"],
         "additionalProperties": false
     })
 }
@@ -1287,7 +1302,7 @@ fn work_on_project_output_schema() -> Value {
             "workflow",
             {
                 let mut schema = startup_workflow_schema();
-                schema["description"] = json!("Canonical static built-in WebCodex coding-workflow guidance. Included on every work_on_project call with include_workflow_guidance=true and omitted only when the caller explicitly passes false; Workflow Session or transport identity never suppresses it automatically.");
+                schema["description"] = json!("Shared coding workflow plus the selected guidance_profile tool strategy (default direct). Included when include_workflow_guidance=true; false omits the entire workflow. Session or transport identity never selects or suppresses guidance.");
                 schema
             },
         ),

@@ -52,8 +52,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE
                     .review(super::ToolReviewEvidence::ReadOnlyInspection),
             ),
-            "Experimental read-only JavaScript orchestration for related/adaptive inspections. tools.<name>(args) re-enters canonical ToolRuntime under the outer-bound Project/Session; text(value) emits bounded output. Prefer a direct tool for one simple observation. No shell/fs/network/mutation/Jobs.",
-        )),
+            "Read-only Code Mode for related inspections. Prefer a direct tool for one simple observation. Use Promise.all only for independent calls; keep dependent follow-ups sequential inside one cell. Filter child results before text(value); never a raw-result dump. Project before the outer-output limit. Children keep canonical authority; no shell/fs/network/mutation/validation/Jobs.",
+        ).with_gpt_action_description("Read-only orchestration for related inspections. Use direct tools for simple observations; parallelize only independent calls, keep adaptive follow-ups inside the cell. Distill evidence before text(value); avoid raw-result dumps. Canonical Project/Session checks remain.")),
         45,
     ),
     adaptive_runtime_direct(
@@ -78,9 +78,9 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Experimental Code Mode E2a orchestration for E1 reads plus cargo_check/cargo_test. Every child re-enters canonical ToolRuntime with normal Project, Session, scope, permission, Runner, validation, and Job semantics. No source mutation, shell/process, nested Job observation, gateways, or recursive Code Mode.",
-        ).with_gpt_action_description("Experimental E2a orchestration for E1 reads plus cargo_check/cargo_test. Every child re-enters canonical ToolRuntime; no source mutation, shell/process execution, nested Job observation, gateways, or recursive Code Mode.")),
-        46,
+            "Validation Code Mode for E1 reads plus cargo_check/cargo_test. Default to direct validators; use only when related validations save model turns. Distill results before text(value). Children retain canonical Project/Session, permission, validation and Job semantics; no mutation, shell/process, nested Job observation, gateways or recursion.",
+        ).with_gpt_action_description("Validation orchestration for E1 reads plus cargo_check/cargo_test when multiple related validations save model turns. Default to direct validators. Canonical authority/evidence/Jobs remain; no mutation, shell/process, nested Job observation or recursion.")),
+        105,
     ),
     adaptive_runtime_direct(
         permission_risk(
@@ -105,10 +105,10 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     false,
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
-                "Experimental Code Mode E2b guarded structured mutation. Admits E1 reads plus at most one canonical apply_text_edits attempt; validation, shell/process, Jobs, other mutations, gateways, and recursive Code Mode remain denied. The outer ProjectWrite envelope never replaces nested canonical write authority or first-class Edit evidence.",
-            ).with_gpt_action_description("Experimental E2b guarded mutation: E1 reads plus at most one canonical apply_text_edits attempt. No nested validation, shell/process, Jobs, other writes, gateways, or recursive Code Mode.")),
+                "Guarded edit Code Mode for adaptive read -> one canonical apply_text_edits attempt. Default to direct mutation; use only when it saves model turns. Distill results before text(value). Nested canonical write authority and Edit evidence remain authoritative; no validation, shell/process, Jobs, other writes, gateways or recursion.",
+            ).with_gpt_action_description("Guarded edit orchestration for adaptive read -> one canonical apply_text_edits attempt when it saves model turns. Default to direct edits. Canonical authority/effects remain; no nested validation, shell/process, Jobs, other writes or recursion.")),
             PERMISSION_RISK_WRITE,
         ),
-        47,
+        65,
     ),
 ];

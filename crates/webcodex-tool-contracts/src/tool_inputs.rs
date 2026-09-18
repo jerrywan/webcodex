@@ -20,6 +20,16 @@ pub enum StartupDetail {
     Full,
 }
 
+/// Request-local model guidance selection, never execution or Session state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CodingGuidanceProfile {
+    #[default]
+    Direct,
+    #[cfg(feature = "experimental-code-mode")]
+    CodeMode,
+}
+
 impl StartupDetail {
     pub const fn as_str(self) -> &'static str {
         match self {

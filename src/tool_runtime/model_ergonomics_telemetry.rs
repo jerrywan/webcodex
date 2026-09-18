@@ -32,6 +32,14 @@ enum WorkOnProjectMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum WorkOnProjectGuidanceProfile {
+    Direct,
+    CodeMode,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub(crate) struct WorkOnProjectErgonomicsFacts {
     resume_requested: bool,
     source: WorkOnProjectSource,
@@ -42,6 +50,8 @@ pub(crate) struct WorkOnProjectErgonomicsFacts {
     include_project_instructions_explicit: bool,
     include_workflow_guidance: Option<bool>,
     include_workflow_guidance_explicit: bool,
+    guidance_profile: WorkOnProjectGuidanceProfile,
+    guidance_profile_explicit: bool,
     include_extension_catalog: Option<bool>,
     include_extension_catalog_explicit: bool,
 }
@@ -219,7 +229,7 @@ impl ModelErgonomicsCompletion {
         };
         let edit = edit_facts(self.tool_name, success, output);
         ModelErgonomicsRecord {
-            schema_version: 6,
+            schema_version: 7,
             tool_name: self.tool_name,
             tool_category: self.tool_category,
             success,
@@ -273,6 +283,17 @@ fn work_on_project_facts(
         effective_default_true_boolean(object, "include_project_instructions");
     let (include_workflow_guidance, include_workflow_guidance_explicit) =
         effective_default_true_boolean(object, "include_workflow_guidance");
+    let guidance_profile_explicit = object.contains_key("guidance_profile");
+    let guidance_profile = match object.get("guidance_profile") {
+        None => WorkOnProjectGuidanceProfile::Direct,
+        Some(Value::String(profile)) if profile == "direct" => WorkOnProjectGuidanceProfile::Direct,
+        Some(Value::String(profile))
+            if cfg!(feature = "experimental-code-mode") && profile == "code_mode" =>
+        {
+            WorkOnProjectGuidanceProfile::CodeMode
+        }
+        _ => WorkOnProjectGuidanceProfile::Invalid,
+    };
     let (include_extension_catalog, include_extension_catalog_explicit) =
         effective_default_true_boolean(object, "include_extension_catalog");
     Some(WorkOnProjectErgonomicsFacts {
@@ -285,6 +306,8 @@ fn work_on_project_facts(
         include_project_instructions_explicit,
         include_workflow_guidance,
         include_workflow_guidance_explicit,
+        guidance_profile,
+        guidance_profile_explicit,
         include_extension_catalog,
         include_extension_catalog_explicit,
     })
@@ -470,7 +493,7 @@ mod tests {
         let record = completion("tool_manifest", 0)
             .record_for_tool_result(&ToolResult::ok(json!({})))
             .unwrap();
-        assert_eq!(record.schema_version, 6);
+        assert_eq!(record.schema_version, 7);
         assert_eq!(record.work_on_project, None);
         assert!(!serde_json::to_string(&record)
             .unwrap()
@@ -493,6 +516,8 @@ mod tests {
         assert!(!facts.include_project_instructions_explicit);
         assert_eq!(facts.include_workflow_guidance, Some(true));
         assert!(!facts.include_workflow_guidance_explicit);
+        assert_eq!(facts.guidance_profile, WorkOnProjectGuidanceProfile::Direct);
+        assert!(!facts.guidance_profile_explicit);
         assert_eq!(facts.include_extension_catalog, Some(true));
         assert!(!facts.include_extension_catalog_explicit);
     }
@@ -505,6 +530,7 @@ mod tests {
             "session_id": "wc_sess_private",
             "include_project_instructions": false,
             "include_workflow_guidance": false,
+            "guidance_profile": "direct",
             "include_extension_catalog": false
         }));
         let facts = record.work_on_project.expect("work_on_project facts");
@@ -513,8 +539,29 @@ mod tests {
         assert!(facts.include_project_instructions_explicit);
         assert_eq!(facts.include_workflow_guidance, Some(false));
         assert!(facts.include_workflow_guidance_explicit);
+        assert_eq!(facts.guidance_profile, WorkOnProjectGuidanceProfile::Direct);
+        assert!(facts.guidance_profile_explicit);
         assert_eq!(facts.include_extension_catalog, Some(false));
         assert!(facts.include_extension_catalog_explicit);
+    }
+
+    #[test]
+    fn work_on_project_code_mode_profile_telemetry_matches_compiled_availability() {
+        let record = work_on_project_record(json!({
+            "project": "agent:private:project",
+            "instruction": "private instruction",
+            "guidance_profile": "code_mode"
+        }));
+        let facts = record.work_on_project.expect("work_on_project facts");
+        assert_eq!(
+            facts.guidance_profile,
+            if cfg!(feature = "experimental-code-mode") {
+                WorkOnProjectGuidanceProfile::CodeMode
+            } else {
+                WorkOnProjectGuidanceProfile::Invalid
+            }
+        );
+        assert!(facts.guidance_profile_explicit);
     }
 
     #[test]
@@ -543,6 +590,7 @@ mod tests {
             "base_ref": {"private": true},
             "include_project_instructions": "false",
             "include_workflow_guidance": null,
+            "guidance_profile": {"invalid": true},
             "include_extension_catalog": []
         }));
         let facts = record.work_on_project.expect("work_on_project facts");
@@ -555,6 +603,11 @@ mod tests {
         assert!(facts.include_project_instructions_explicit);
         assert_eq!(facts.include_workflow_guidance, None);
         assert!(facts.include_workflow_guidance_explicit);
+        assert_eq!(
+            facts.guidance_profile,
+            WorkOnProjectGuidanceProfile::Invalid
+        );
+        assert!(facts.guidance_profile_explicit);
         assert_eq!(facts.include_extension_catalog, None);
         assert!(facts.include_extension_catalog_explicit);
     }
@@ -750,7 +803,7 @@ mod tests {
             let record = completion("apply_text_edits", 0)
                 .record_for_tool_result(&result)
                 .unwrap();
-            assert_eq!(record.schema_version, 6);
+            assert_eq!(record.schema_version, 7);
             assert_eq!(record.edit_surface.as_deref(), Some("structured_or_patch"));
             assert_eq!(record.edit_outcome.as_deref(), outcome);
             assert_eq!(record.edit_conflict_kind.as_deref(), conflict_kind);
@@ -858,7 +911,7 @@ mod tests {
                     .finish_after(Duration::ZERO)
                     .record_for_tool_result(&ToolResult::ok(json!({"private_body": "do-not-copy"})))
                     .unwrap();
-            assert_eq!(record.schema_version, 6);
+            assert_eq!(record.schema_version, 7);
             assert_eq!(record.finish_summary_only, Some(expected));
             assert!(record.serialized_result_bytes.is_some());
             let serialized = serde_json::to_string(&record).unwrap();

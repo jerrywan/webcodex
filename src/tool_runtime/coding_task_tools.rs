@@ -23,6 +23,7 @@ impl ToolRuntime {
                 instruction,
                 include_project_instructions,
                 include_workflow_guidance,
+                guidance_profile,
                 include_extension_catalog,
                 session_id,
             } => {
@@ -36,6 +37,7 @@ impl ToolRuntime {
                     session_id,
                     include_project_instructions,
                     include_workflow_guidance,
+                    guidance_profile,
                     include_extension_catalog,
                     auth,
                     trusted_recording_session_id,

@@ -1789,3 +1789,69 @@ fn job_terminal_continuation_calls_require_explicit_wait_and_private_view_fence(
         assert!(error.contains("unknown field"), "{error}");
     }
 }
+
+#[test]
+fn guidance_profile_defaults_and_schema_follow_compiled_availability() {
+    use crate::tool_inputs::CodingGuidanceProfile;
+    let base = json!({"project": "agent:profile:demo", "instruction": "inspect the project"});
+    let default = ToolCall::from_tool_name("work_on_project", base.clone()).unwrap();
+    assert!(matches!(
+        default,
+        ToolCall::WorkOnProject {
+            guidance_profile: CodingGuidanceProfile::Direct,
+            ..
+        }
+    ));
+    let schema = crate::request_schema::input_schema_for_tool("work_on_project");
+    let property = &schema["properties"]["guidance_profile"];
+    assert_eq!(property["default"], "direct");
+    assert!(!schema["required"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("guidance_profile")));
+    let mut profiles = vec!["direct"];
+    if cfg!(feature = "experimental-code-mode") {
+        profiles.push("code_mode");
+    }
+    assert_eq!(property["enum"], json!(profiles));
+    let workflow_schema = output_schema_for_tool("work_on_project");
+    assert_eq!(
+        workflow_schema["properties"]["output"]["properties"]["workflow"]["properties"]
+            ["tool_strategy"]["properties"]["profile"]["enum"],
+        property["enum"]
+    );
+    for profile in profiles {
+        let mut args = base.clone();
+        args["guidance_profile"] = json!(profile);
+        let call = ToolCall::from_tool_name("work_on_project", args).unwrap();
+        assert_eq!(call.project(), default.project());
+        assert_eq!(call.session_id(), default.session_id());
+        assert_eq!(call.tool_name(), default.tool_name());
+        assert_eq!(
+            serde_json::to_value(call).unwrap()["params"]["guidance_profile"],
+            profile
+        );
+    }
+    for include in [false, true] {
+        for invalid in [json!("unknown"), json!(""), json!(null), json!(1)] {
+            let mut args = base.clone();
+            args["guidance_profile"] = invalid;
+            args["include_workflow_guidance"] = json!(include);
+            assert!(ToolCall::from_tool_name("work_on_project", args).is_err());
+        }
+    }
+}
+
+#[cfg(not(feature = "experimental-code-mode"))]
+#[test]
+fn guidance_profile_code_mode_fails_closed_even_when_guidance_is_omitted() {
+    for include in [false, true] {
+        let error = ToolCall::from_tool_name("work_on_project", json!({
+            "project": "agent:profile:demo", "instruction": "inspect", "guidance_profile": "code_mode", "include_workflow_guidance": include
+        })).unwrap_err();
+        assert!(
+            error.contains("code_mode") && error.contains("direct"),
+            "{error}"
+        );
+    }
+}

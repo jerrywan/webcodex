@@ -169,6 +169,8 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
             "cargo_check",
             "cargo_test",
             "go_test",
+            #[cfg(feature = "experimental-code-mode")]
+            "code_mode_exec_effectful",
             "validation_summary",
         ],
     },
@@ -184,6 +186,8 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
             "apply_unified_diff",
             "write_project_file",
             "save_project_artifact",
+            #[cfg(feature = "experimental-code-mode")]
+            "code_mode_exec_mutating",
             "read_project_artifact_metadata",
             "read_project_artifact",
             "import_conversation_files_to_project",
@@ -501,10 +505,6 @@ pub const CODING_INTENT_TOOL_NAMES: &[&str] = &[
     "project_artifact",
     #[cfg(feature = "experimental-code-mode")]
     "code_mode_exec",
-    #[cfg(feature = "experimental-code-mode")]
-    "code_mode_exec_effectful",
-    #[cfg(feature = "experimental-code-mode")]
-    "code_mode_exec_mutating",
     // Distinct semantic navigation capabilities remain useful even though they
     // are long-tail Adaptive gateway targets.
     "document_symbols",
@@ -517,6 +517,8 @@ pub const CODING_INTENT_TOOL_NAMES: &[&str] = &[
     // Canonical edit plus contextual/multi-hunk specialist.
     "apply_text_edits",
     "apply_patch",
+    #[cfg(feature = "experimental-code-mode")]
+    "code_mode_exec_mutating",
     // Ordinary execution plus program-like multi-stage specialist.
     "run_process",
     "run_script",
@@ -527,6 +529,8 @@ pub const CODING_INTENT_TOOL_NAMES: &[&str] = &[
     "cargo_check",
     "cargo_test",
     "go_test",
+    #[cfg(feature = "experimental-code-mode")]
+    "code_mode_exec_effectful",
     // Worktree and committed-range review.
     "git_review_summary",
     "git_diff_hunks",

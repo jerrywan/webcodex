@@ -178,7 +178,7 @@ async fn context_projection_is_explicit_deduped_open_ended_and_nonfatal() {
     assert_eq!(materials[0]["key"], "webcodex.workflow");
     assert_eq!(
         materials[0]["projection"],
-        crate::tool_runtime::startup_brief::builtin_coding_workflow_projection(),
+        crate::tool_runtime::startup_brief::builtin_coding_workflow_projection(Default::default()),
         "context recovery must return the same guidance as coding startup"
     );
     assert_eq!(materials[0]["status"], "available");

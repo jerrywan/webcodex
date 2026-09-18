@@ -252,7 +252,7 @@ impl ToolRuntime {
                         "webcodex.workflow" => json!({
                             "key": key,
                             "status": "available",
-                            "projection": builtin_coding_workflow_projection(),
+                            "projection": builtin_coding_workflow_projection(Default::default()),
                         }),
                         _ => unreachable!("context material registry/provider match drifted"),
                     }

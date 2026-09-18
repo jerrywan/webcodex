@@ -45,7 +45,7 @@ async fn api_model_ergonomics_success_is_exact_and_queryable() {
     assert_eq!(body["success"], true);
 
     let telemetry = single_model_ergonomics(&db, "ergonomics-success", "tool_manifest");
-    assert_eq!(telemetry["schema_version"], 6);
+    assert_eq!(telemetry["schema_version"], 7);
     assert_eq!(telemetry["tool_name"], "tool_manifest");
     assert_eq!(telemetry["tool_category"], "runtime");
     assert_eq!(telemetry["success"], true);
@@ -210,7 +210,7 @@ async fn api_work_on_project_preferences_persist_as_privacy_bounded_action_audit
     assert_eq!(body["success"], true, "{body}");
 
     let telemetry = single_model_ergonomics(&db, "ergonomics-work-on-project", "work_on_project");
-    assert_eq!(telemetry["schema_version"], 6);
+    assert_eq!(telemetry["schema_version"], 7);
     let facts = &telemetry["work_on_project"];
     assert_eq!(facts["resume_requested"], false);
     assert_eq!(facts["source"], "project");
@@ -221,6 +221,8 @@ async fn api_work_on_project_preferences_persist_as_privacy_bounded_action_audit
     assert_eq!(facts["include_project_instructions_explicit"], true);
     assert_eq!(facts["include_workflow_guidance"], false);
     assert_eq!(facts["include_workflow_guidance_explicit"], true);
+    assert_eq!(facts["guidance_profile"], "direct");
+    assert_eq!(facts["guidance_profile_explicit"], false);
     assert_eq!(facts["include_extension_catalog"], false);
     assert_eq!(facts["include_extension_catalog_explicit"], true);
     let serialized = serde_json::to_string(&telemetry).unwrap();

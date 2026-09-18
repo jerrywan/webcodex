@@ -20,6 +20,32 @@ work_on_project
 `work_on_project` 是普通 coding/review 的 canonical bootstrap。把当前任务 instruction 交给它，然后遵循连接到的 Server 返回的 project instructions 与 tool surface。
 默认情况下，它还会返回一个很小且有界的 `extensions` selection catalog：Skill metadata 来自 canonical 的 project / Runner-configured `skills.roots` / Runner-managed Skill Store 三类来源；Plugin metadata 只包含 configured working directory 与当前 Project root 匹配、且已 ready/committed 的 provider。该 metadata 不授予任何 authority，也不会自动读取 Skill body 或创建 Plugin binding；模型选择后使用 `skill_read_file` 读取 Skill 文本，`run_skill_resource` 只执行可信 Runner-configured live `scripts/` resource（由 `expected_definition_revision` fence definition）或 Runner-installed managed resource（另由 `expected_package_revision` fence package），Plugin 则走 `plugin_tool describe -> call`。Configured resource bytes 会一直保持 live 到实际执行时，并不会预先被 package revision 固定。只有当前模型上下文仍明确保留这些 discovery metadata 时，才应设置 `include_extension_catalog=false`。
 
+## 工具策略 guidance
+
+`work_on_project` 的 `guidance_profile` 默认是 `direct`。Workflow contract v14
+保持共享的 `guidance`、`model_protocol` 和 review `roles`，只在
+`tool_strategy: {profile, guidance}` 中返回当前选中的策略。
+`include_workflow_guidance=false` 仍省略整个 workflow，包括策略。
+
+- `direct`：简单 observation 直接调用最合适的 primitive；预先确定且独立的
+  observations 可以批量执行，模型根据结果顺序决定 adaptive follow-up。
+- `code_mode`：简单单步 observation 仍直接调用；相关 search/read、跨文件定位或
+  综合调查能减少外层模型往返时，优先 read-only Code Mode。在同一个 cell 内顺序
+  完成依赖结果的 follow-up，只并发独立 observations。Raw child results 留在 cell
+  内，先筛选、提取、交叉引用和归纳，再用 `text(...)` 输出下一步决策需要的紧凑证据；
+  避免 `text(results)` 原样倾倒，并在触及 outer-output limit 前主动 projection。
+
+这只是本次请求的 presentation 选择，不增加 admission、权限或 execution semantics，
+不写入 Session。Exact resume 可以重新选择，也不会根据 Window、Session 或历史调用
+猜测。未编译 Experimental Code Mode 时，显式 `code_mode` 被拒绝为无效输入，即使
+省略 guidance 也不会回退。独立的 `webcodex.workflow` context sidecar 返回默认
+`direct`，不会记住 startup 的选择。
+
+两者共用 scope、recovery、validation truth、Job continuation、review 和 closeout。
+默认仍走 canonical edit 和 structured validation；只有多个相关 validation 或
+adaptive read → one guarded edit 确实减少外层往返时，才考虑相应的 effectful/mutating
+Code Mode。Nested canonical authority、effects、evidence 和 retry certainty 不变。
+
 ## 开始或继续任务
 
 新任务和显式 continuation 都使用 `work_on_project`。WebCodex 会保留有界 Workflow Session evidence，让 validation、review 与 handoff 可以指向同一轮工作，但 Workflow Session 不是认证凭据，也不会扩大 project authority。

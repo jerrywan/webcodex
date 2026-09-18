@@ -348,6 +348,7 @@ async fn finish_coding_task_validation_available_when_ledger_has_validation_even
                 session_id: None,
                 include_project_instructions: true,
                 include_workflow_guidance: true,
+                guidance_profile: Default::default(),
                 include_extension_catalog: false,
             },
             Some(&auth),

@@ -108,7 +108,7 @@ fn instruction_source<'a>(output: &'a Value, path: &str) -> &'a Value {
 fn assert_builtin_workflow(output: &Value) {
     let workflow = &output["workflow"];
     assert_eq!(workflow["contract"], "webcodex.coding_workflow");
-    assert_eq!(workflow["version"], 13);
+    assert_eq!(workflow["version"], 14);
     assert_eq!(workflow["authority"], "model_guidance_only");
     assert!(workflow["role_selection"]
         .as_str()
@@ -165,6 +165,7 @@ fn assert_builtin_workflow(output: &Value) {
     assert!(runner_targeting_guidance.contains("runtime_status(client_id=...)"));
     assert!(runner_targeting_guidance.contains("list_projects(client_id=...)"));
     assert!(runner_targeting_guidance.contains("before treating it as absent"));
+    assert_eq!(workflow["tool_strategy"]["profile"], "direct");
     let defaults = workflow["guidance"]
         .as_array()
         .expect("default workflow guidance")
@@ -180,13 +181,6 @@ fn assert_builtin_workflow(output: &Value) {
         "Ordinary implementation is default",
         "map cross-layer changes end to end",
         "compiler/schema/exhaustiveness failures",
-        "simplest sufficient primitive",
-        "Native commands are first-class",
-        "bounded deterministic Python/run_shell",
-        "Batch predetermined observations",
-        "adaptive follow-ups stay sequential",
-        "bounded targeted reads",
-        "files/count/small-context search",
         "Validation failure is evidence, not queue cleanliness",
         "Reuse assertion_name",
         "outcome_unknown fails closed",

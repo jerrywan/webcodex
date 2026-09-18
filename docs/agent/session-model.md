@@ -425,6 +425,16 @@ conversations. Its `include_workflow_guidance`, `include_project_instructions`, 
 `include_extension_catalog` flags are caller-explicit model-facing projection
 preferences only: their defaults are true, and false is appropriate only when
 the caller's current model context already retains the corresponding content.
+`guidance_profile` is a separate request-local presentation enum: `direct` by
+default, or `code_mode` only in Experimental Code Mode builds. It selects only
+`workflow.tool_strategy` in workflow contract v14. Exact resume may choose either
+without a Session transition; omission always selects `direct`, never a remembered
+choice. It is not persisted in Session state or event arguments and changes no
+admission, authority, effects, validation or Job semantics. An unavailable profile
+fails parsing even with `include_workflow_guidance=false`; that flag still omits
+the whole workflow. The independent `webcodex.workflow` context sidecar continues
+to project the explicit default, with no Session inference.
+
 Repository instruction files are still re-observed and Session metadata/delta
 status still update when instruction bodies are suppressed. The default bounded
 extension catalog contains selection metadata only: Skills are drawn from the

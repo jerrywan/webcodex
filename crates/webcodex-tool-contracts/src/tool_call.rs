@@ -7,8 +7,8 @@
 #[cfg(feature = "workspace-checkpoints")]
 use super::tool_inputs::CheckpointValidationInput;
 use super::tool_inputs::{
-    default_true, ApplyFileChangeInput, ExecutionPurpose, ExecutionShell, GoalLifecycleInput,
-    SessionMode, WorkOnProjectMode,
+    default_true, ApplyFileChangeInput, CodingGuidanceProfile, ExecutionPurpose, ExecutionShell,
+    GoalLifecycleInput, SessionMode, WorkOnProjectMode,
 };
 use crate::{lookup_tool_definition, model_visible_tool_names_csv};
 use schemars::JsonSchema;
@@ -1122,7 +1122,7 @@ pub enum ToolCall {
         #[serde(default = "default_true")]
         include_project_instructions: bool,
         #[schemars(extend("default" = true))]
-        /// Whether this bootstrap response should include the static built-in WebCodex coding-workflow
+        /// Whether this bootstrap response should include the built-in WebCodex coding-workflow and selected tool-strategy
         /// guidance. Defaults to true. A fresh Workflow Session does not imply a fresh model context:
         /// explicitly set false even for a new Session when the current model context already retains this
         /// guidance; keep true for a fresh or uncertain model context. WebCodex never infers retention from
@@ -1131,6 +1131,12 @@ pub enum ToolCall {
         /// selection, or execution semantics.
         #[serde(default = "default_true")]
         include_workflow_guidance: bool,
+        /// Model guidance only: direct (default) or code_mode for read-only orchestration strategy.
+        /// No tool admission, authority, effects, or Session state changes; explicit resume may choose
+        /// again. code_mode is invalid when Experimental Code Mode is not compiled. Guidance remains
+        /// omitted when include_workflow_guidance=false.
+        #[serde(default)]
+        guidance_profile: CodingGuidanceProfile,
         #[schemars(extend("default" = true))]
         /// Whether startup should include a small bounded Skills/Plugins selection catalog. Defaults to
         /// true. Set false only when the caller's current model context already retains the relevant
@@ -1566,7 +1572,7 @@ pub enum ToolCall {
         /// Required exact Workflow Session. Nested JavaScript tool calls remain bound to this Session and record canonical evidence there.
         #[schemars(regex(pattern = "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"))]
         session_id: String,
-        /// Bounded JavaScript orchestration source. tools.<name>(args) returns a Promise for admitted read-only tools; use Promise.all only for independent observations, keep result-dependent/adaptive calls sequential, and call text(value) for final bounded output. Project/Session are outer-bound. No shell, filesystem, network, Node, Deno, WebAssembly, mutation, validation, Jobs, plugins, or MCP are exposed.
+        /// Bounded JavaScript orchestration source. tools.<name>(args) returns a Promise for admitted read-only tools; use direct primitives for simple one-step observations, Promise.all only for independent observations, and sequential adaptive follow-ups inside the cell. Filter and synthesize raw child results before text(value); emit distilled evidence, not raw-result dumps, before reaching the outer-output limit. Project/Session are outer-bound. No shell, filesystem, network, Node, Deno, WebAssembly, mutation, validation, Jobs, plugins, or MCP are exposed.
         #[schemars(length(max = 65536))]
         source: String,
         /// Optional wall-clock budget in milliseconds. Defaults to 5000 and is server-clamped to 1..30000.

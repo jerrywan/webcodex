@@ -29,6 +29,18 @@ The root `experimental-code-mode` feature enables:
 
 Without that feature, `code_mode_exec`, `code_mode_exec_effectful`, and `code_mode_exec_mutating` are absent from the canonical `ToolDefinition`, `ToolSpec`, `ToolCall`, discovery, Adaptive Runtime, OpenAPI, and MCP surfaces. The default `webcodex-code-mode` crate contains only lightweight transport-neutral contracts and does not compile or link V8.
 
+## Workflow guidance selection
+
+Select `work_on_project(guidance_profile="code_mode", ...)` for orchestration
+strategy guidance. The default `direct` strategy does not teach Code Mode.
+[The shared coding workflow](../CODING_WORKFLOW.md#tool-strategy-guidance) remains
+one workflow; the request-local selection is not authority or durable Session state.
+Read-only inspection has higher default selection value than effectful or mutating
+composition: catalog intent/rank puts the latter beside validation and guarded edit
+capabilities, after their ordinary canonical primitives. All three retain their
+existing availability, admission and canonical metadata. No new recommended flow
+is injected into ordinary direct startup.
+
 ## Architecture
 
 Dependency direction is intentionally narrow:
@@ -91,7 +103,10 @@ Native Tool Plugins remain capability providers. A future reusable TypeScript co
 
 ## JavaScript API
 
-The global API is deliberately small:
+The global API is deliberately small. In this schematic example,
+`shouldReadMore` and `compactEvidence` are task-specific JavaScript helpers defined
+inside the cell, not host APIs. `compactEvidence` selects relevant paths, small
+supporting excerpts and unresolved failures; it does not return raw child results:
 
 ```javascript
 const status = await tools.git_status({});
@@ -114,9 +129,9 @@ if (hits.success && shouldReadMore(hits.output)) {
   const detail = await tools.read_files({
     items: [{ path: "src/tool_runtime/kernel.rs", start_line: 1, limit: 80 }]
   });
-  text({ status: status.output, detail: detail.output });
+  text(compactEvidence({ status, files, hits, detail }));
 } else {
-  text({ status: status.output, files: files.output, hits: hits.output });
+  text(compactEvidence({ status, files, hits }));
 }
 ```
 
