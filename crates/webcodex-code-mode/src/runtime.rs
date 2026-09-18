@@ -4,11 +4,11 @@
 // microtask checkpoint, and isolate-termination ideas needed for E1.
 
 use crate::{
-    normalized_max_concurrent_executions, normalized_timeout_ms, CodeModeError, CodeModeErrorKind,
-    CodeModeExecuteRequest, CodeModeExecution, CodeModeHost, CodeModeStats,
-    CodeModeTerminationMode, CodeModeToolRequest, CodeModeToolResponse,
-    MAX_CONCURRENT_EXECUTIONS_ENV, MAX_CONCURRENT_TOOL_CALLS, MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS,
-    MAX_SOURCE_BYTES, MAX_TOOL_CALLS,
+    normalized_max_concurrent_executions, normalized_timeout_ms, CodeModeChildFailure,
+    CodeModeError, CodeModeErrorKind, CodeModeExecuteRequest, CodeModeExecution, CodeModeHost,
+    CodeModeLimit, CodeModeStats, CodeModeTerminationMode, CodeModeToolRequest,
+    CodeModeToolResponse, MAX_CONCURRENT_EXECUTIONS_ENV, MAX_CONCURRENT_TOOL_CALLS,
+    MAX_OUTPUT_BYTES, MAX_OUTPUT_ITEMS, MAX_SOURCE_BYTES, MAX_TOOL_CALLS,
 };
 use serde_json::{json, Value as JsonValue};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -52,14 +52,21 @@ fn ensure_v8_initialized() -> Result<(), String> {
 
 #[derive(Debug)]
 enum RuntimeCommand {
-    ToolResponse { id: String, result: JsonValue },
-    ToolError { id: String, error: String },
+    ToolResponse {
+        id: String,
+        result: JsonValue,
+    },
+    ToolError {
+        id: String,
+        failure: CodeModeChildFailure,
+    },
     Terminate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RuntimeFailureKind {
     Runtime,
+    ChildCallFailed,
     ToolCallBudgetExceeded,
     OutputLimitExceeded,
 }
@@ -68,12 +75,15 @@ enum RuntimeFailureKind {
 struct RuntimeFailure {
     kind: RuntimeFailureKind,
     message: String,
+    child_failure: Option<CodeModeChildFailure>,
+    limit: Option<CodeModeLimit>,
 }
 
 #[derive(Debug)]
 enum RuntimeEvent {
     ToolCall {
         id: String,
+        ordinal: usize,
         tool_name: String,
         arguments: JsonValue,
     },
@@ -121,6 +131,8 @@ pub async fn execute_with_termination_mode(
         kind: CodeModeErrorKind::InvalidRequest,
         message,
         stats: CodeModeStats::default(),
+        child_failure: None,
+        limit: None,
     })?;
     let timeout_ms = normalized_timeout_ms(request.timeout_ms);
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
@@ -133,6 +145,8 @@ pub async fn execute_with_termination_mode(
                 slot_wait_ms: elapsed_ms(slot_wait_started_at),
                 ..CodeModeStats::default()
             },
+            child_failure: None,
+            limit: None,
         })?,
         _ = tokio::time::sleep_until(deadline) => {
             if termination_mode.drains_started_children() {
@@ -145,6 +159,8 @@ pub async fn execute_with_termination_mode(
                     slot_wait_ms: elapsed_ms(slot_wait_started_at),
                     ..CodeModeStats::default()
                 },
+                child_failure: None,
+                limit: None,
             });
         }
     };
@@ -158,6 +174,8 @@ pub async fn execute_with_termination_mode(
                 slot_wait_ms,
                 ..CodeModeStats::default()
             },
+            child_failure: None,
+            limit: None,
         })?;
 
     let mut deadline_sleep = Box::pin(tokio::time::sleep_until(deadline));
@@ -166,8 +184,9 @@ pub async fn execute_with_termination_mode(
     let mut tool_calls = 0usize;
     let mut in_flight_count = 0usize;
     let mut max_in_flight = 0usize;
-    let mut pending_calls = VecDeque::new();
+    let mut pending_calls: VecDeque<(String, CodeModeToolRequest)> = VecDeque::new();
     let mut in_flight = tokio::task::JoinSet::new();
+    let mut in_flight_identity = HashMap::new();
     let mut runtime_finished: Option<Option<RuntimeFailure>> = None;
 
     loop {
@@ -176,13 +195,23 @@ pub async fn execute_with_termination_mode(
                 break;
             };
             let host = Arc::clone(&host);
-            in_flight.spawn(async move {
-                let result = host
-                    .invoke_tool(request)
-                    .await
-                    .map_err(|error| error.to_string());
+            let ordinal = request.ordinal;
+            let tool = request.tool_name.clone();
+            let failure_tool = tool.clone();
+            let promise_id = id.clone();
+            let abort_handle = in_flight.spawn(async move {
+                let result =
+                    host.invoke_tool(request)
+                        .await
+                        .map_err(|error| CodeModeChildFailure {
+                            ordinal,
+                            tool: failure_tool,
+                            failure_kind: error.failure_kind().to_string(),
+                            message: bounded_child_failure_message(error.message()),
+                        });
                 (id, result)
             });
+            in_flight_identity.insert(abort_handle.id(), (promise_id, ordinal, tool));
             in_flight_count += 1;
             max_in_flight = max_in_flight.max(in_flight_count);
         }
@@ -209,6 +238,7 @@ pub async fn execute_with_termination_mode(
                 if let Some(max_drain_ms) = termination_mode.drain_timeout_ms() {
                     let _ = drain_in_flight(
                         &mut in_flight,
+                        &mut in_flight_identity,
                         &mut in_flight_count,
                         Duration::from_millis(max_drain_ms),
                     )
@@ -219,13 +249,15 @@ pub async fn execute_with_termination_mode(
                     kind: CodeModeErrorKind::Timeout,
                     message: format!("code mode execution exceeded {timeout_ms} ms"),
                     stats,
+                    child_failure: None,
+                    limit: None,
                 });
             }
             event = runtime.event_rx.recv(), if runtime_finished.is_none() => {
                 match event {
-                    Some(RuntimeEvent::ToolCall { id, tool_name, arguments }) => {
+                    Some(RuntimeEvent::ToolCall { id, ordinal, tool_name, arguments }) => {
                         tool_calls += 1;
-                        pending_calls.push_back((id, CodeModeToolRequest { tool_name, arguments }));
+                        pending_calls.push_back((id, CodeModeToolRequest { ordinal, tool_name, arguments }));
                     }
                     Some(RuntimeEvent::Text(text)) => {
                         returned_bytes = returned_bytes.saturating_add(text.len());
@@ -243,6 +275,7 @@ pub async fn execute_with_termination_mode(
                         if let Some(max_drain_ms) = termination_mode.drain_timeout_ms() {
                             let drained = drain_in_flight(
                                 &mut in_flight,
+                                &mut in_flight_identity,
                                 &mut in_flight_count,
                                 Duration::from_millis(max_drain_ms),
                             )
@@ -252,12 +285,9 @@ pub async fn execute_with_termination_mode(
                                     .as_ref()
                                     .is_some_and(|failure| failure.is_none())
                             {
-                                runtime_finished = Some(Some(RuntimeFailure {
-                                    kind: RuntimeFailureKind::Runtime,
-                                    message: format!(
-                                        "code mode started-child drain exceeded {max_drain_ms} ms"
-                                    ),
-                                }));
+                                runtime_finished = Some(Some(runtime_failure(format!(
+                                    "code mode started-child drain exceeded {max_drain_ms} ms"
+                                ))));
                             }
                         }
                     }
@@ -266,14 +296,14 @@ pub async fn execute_with_termination_mode(
                             host.stop_accepting_calls();
                             pending_calls.clear();
                         }
-                        runtime_finished = Some(Some(RuntimeFailure {
-                            kind: RuntimeFailureKind::Runtime,
-                            message: "code mode runtime thread ended without a terminal result".to_string(),
-                        }));
+                        runtime_finished = Some(Some(runtime_failure(
+                            "code mode runtime thread ended without a terminal result",
+                        )));
                         drop(execution_slot.take());
                         if let Some(max_drain_ms) = termination_mode.drain_timeout_ms() {
                             let _ = drain_in_flight(
                                 &mut in_flight,
+                                &mut in_flight_identity,
                                 &mut in_flight_count,
                                 Duration::from_millis(max_drain_ms),
                             )
@@ -282,7 +312,7 @@ pub async fn execute_with_termination_mode(
                     }
                 }
             }
-            completed = next_in_flight(&mut in_flight), if in_flight_count > 0 => {
+            completed = next_in_flight(&mut in_flight, &mut in_flight_identity), if in_flight_count > 0 => {
                 let Some((id, result)) = completed else {
                     in_flight_count = 0;
                     continue;
@@ -291,15 +321,13 @@ pub async fn execute_with_termination_mode(
                 if runtime_finished.is_none() {
                     match result {
                         Ok(response) => {
-                            let response = serde_json::to_value(response).unwrap_or_else(|_| json!({
-                                "success": false,
-                                "output": null,
-                                "error": "failed to serialize nested tool response",
-                            }));
-                            let _ = runtime.command_tx.send(RuntimeCommand::ToolResponse { id, result: response });
+                            let _ = runtime.command_tx.send(RuntimeCommand::ToolResponse {
+                                id,
+                                result: tool_response_json(response),
+                            });
                         }
-                        Err(error) => {
-                            let _ = runtime.command_tx.send(RuntimeCommand::ToolError { id, error });
+                        Err(failure) => {
+                            let _ = runtime.command_tx.send(RuntimeCommand::ToolError { id, failure });
                         }
                     }
                 }
@@ -320,6 +348,7 @@ pub async fn execute_with_termination_mode(
     if let Some(failure) = failure {
         let kind = match failure.kind {
             RuntimeFailureKind::Runtime => CodeModeErrorKind::Runtime,
+            RuntimeFailureKind::ChildCallFailed => CodeModeErrorKind::ChildCallFailed,
             RuntimeFailureKind::ToolCallBudgetExceeded => CodeModeErrorKind::ToolCallBudgetExceeded,
             RuntimeFailureKind::OutputLimitExceeded => CodeModeErrorKind::OutputLimitExceeded,
         };
@@ -327,10 +356,22 @@ pub async fn execute_with_termination_mode(
             kind,
             message: failure.message,
             stats,
+            child_failure: failure.child_failure,
+            limit: failure.limit,
         });
     }
 
     Ok(CodeModeExecution { content, stats })
+}
+
+fn tool_response_json(response: CodeModeToolResponse) -> JsonValue {
+    let mut result = serde_json::Map::new();
+    result.insert("success".to_string(), JsonValue::Bool(response.success));
+    result.insert("output".to_string(), response.output);
+    if let Some(error) = response.error {
+        result.insert("error".to_string(), JsonValue::String(error));
+    }
+    JsonValue::Object(result)
 }
 
 fn elapsed_ms(started_at: Instant) -> u64 {
@@ -376,27 +417,47 @@ fn validate_request(request: &CodeModeExecuteRequest) -> Result<(), String> {
     Ok(())
 }
 
+type InFlightToolResult = (String, Result<CodeModeToolResponse, CodeModeChildFailure>);
+
 async fn next_in_flight(
-    in_flight: &mut tokio::task::JoinSet<(String, Result<CodeModeToolResponse, String>)>,
-) -> Option<(String, Result<CodeModeToolResponse, String>)> {
-    match in_flight.join_next().await {
-        Some(Ok(completed)) => Some(completed),
-        Some(Err(error)) => Some((
-            "<host-task>".to_string(),
-            Err(format!("nested tool host task failed: {error}")),
-        )),
+    in_flight: &mut tokio::task::JoinSet<InFlightToolResult>,
+    identities: &mut HashMap<tokio::task::Id, (String, usize, String)>,
+) -> Option<InFlightToolResult> {
+    match in_flight.join_next_with_id().await {
+        Some(Ok((task_id, completed))) => {
+            identities.remove(&task_id);
+            Some(completed)
+        }
+        Some(Err(error)) => {
+            let task_id = error.id();
+            let (id, ordinal, tool) = identities
+                .remove(&task_id)
+                .expect("spawned Code Mode host task must retain child identity");
+            Some((
+                id,
+                Err(CodeModeChildFailure {
+                    ordinal,
+                    tool,
+                    failure_kind: "host_task_failure".to_string(),
+                    message: bounded_child_failure_message(&format!(
+                        "nested tool host task failed: {error}"
+                    )),
+                }),
+            ))
+        }
         None => None,
     }
 }
 
 async fn drain_in_flight(
-    in_flight: &mut tokio::task::JoinSet<(String, Result<CodeModeToolResponse, String>)>,
+    in_flight: &mut tokio::task::JoinSet<InFlightToolResult>,
+    identities: &mut HashMap<tokio::task::Id, (String, usize, String)>,
     in_flight_count: &mut usize,
     max_drain: Duration,
 ) -> bool {
     let drain = async {
         while *in_flight_count > 0 {
-            if next_in_flight(in_flight).await.is_none() {
+            if next_in_flight(in_flight, identities).await.is_none() {
                 *in_flight_count = 0;
                 break;
             }
@@ -413,6 +474,7 @@ async fn drain_in_flight(
     // guards retain their own canonical cancellation/reconciliation semantics.
     in_flight.abort_all();
     while in_flight.join_next().await.is_some() {}
+    identities.clear();
     *in_flight_count = 0;
     false
 }
@@ -494,8 +556,8 @@ fn run_runtime(
                     return;
                 }
             }
-            Ok(RuntimeCommand::ToolError { id, error }) => {
-                if let Err(message) = resolve_tool_response(scope, &id, Err(error)) {
+            Ok(RuntimeCommand::ToolError { id, failure }) => {
+                if let Err(message) = resolve_tool_response(scope, &id, Err(failure)) {
                     let _ = event_tx.send(RuntimeEvent::Finished(Some(runtime_failure(message))));
                     return;
                 }
@@ -590,6 +652,22 @@ fn completion_state(
                 return Some(Some(failure));
             }
             let result = promise.result(scope);
+            if let Ok(Some(value)) = v8_value_to_json(scope, result) {
+                if value.get("failure_kind").and_then(JsonValue::as_str)
+                    == Some("child_call_failed")
+                {
+                    if let Some(child) = value.get("child_failure").cloned().and_then(|value| {
+                        serde_json::from_value::<CodeModeChildFailure>(value).ok()
+                    }) {
+                        return Some(Some(RuntimeFailure {
+                            kind: RuntimeFailureKind::ChildCallFailed,
+                            message: child.message.clone(),
+                            child_failure: Some(child),
+                            limit: None,
+                        }));
+                    }
+                }
+            }
             Some(Some(runtime_failure(value_to_error_text(scope, result))))
         }
     }
@@ -628,7 +706,7 @@ fn tool_callback(
     let promise = resolver.get_promise(scope);
     let resolver = v8::Global::new(scope, resolver);
 
-    let (event_tx, tool_name, id) = {
+    let (event_tx, tool_name, id, ordinal) = {
         let Some(state) = scope.get_slot_mut::<RuntimeState>() else {
             throw_error(scope, "code mode runtime state unavailable");
             return;
@@ -637,6 +715,13 @@ fn tool_callback(
             state.fatal_error = Some(RuntimeFailure {
                 kind: RuntimeFailureKind::ToolCallBudgetExceeded,
                 message: format!("code mode nested tool call limit ({MAX_TOOL_CALLS}) exceeded"),
+                child_failure: None,
+                limit: Some(CodeModeLimit {
+                    kind: "nested_tool_calls".to_string(),
+                    allowed: MAX_TOOL_CALLS,
+                    current: state.tool_calls,
+                    attempted: state.tool_calls.saturating_add(1),
+                }),
             });
             throw_error(scope, "code mode nested tool call limit exceeded");
             return;
@@ -646,13 +731,15 @@ fn tool_callback(
             return;
         };
         state.tool_calls += 1;
+        let ordinal = state.tool_calls;
         let id = format!("nested-{}", state.next_tool_call_id);
         state.next_tool_call_id = state.next_tool_call_id.saturating_add(1);
         state.pending_tool_calls.insert(id.clone(), resolver);
-        (state.event_tx.clone(), tool_name, id)
+        (state.event_tx.clone(), tool_name, id, ordinal)
     };
     let _ = event_tx.send(RuntimeEvent::ToolCall {
         id,
+        ordinal,
         tool_name,
         arguments,
     });
@@ -684,6 +771,13 @@ fn text_callback(
         state.fatal_error = Some(RuntimeFailure {
             kind: RuntimeFailureKind::OutputLimitExceeded,
             message: format!("code mode text output exceeds the {MAX_OUTPUT_ITEMS}-emission limit"),
+            child_failure: None,
+            limit: Some(CodeModeLimit {
+                kind: "text_output_items".to_string(),
+                allowed: MAX_OUTPUT_ITEMS,
+                current: state.emitted_items,
+                attempted: state.emitted_items.saturating_add(1),
+            }),
         });
         throw_error(scope, "code mode text emission limit exceeded");
         return;
@@ -693,6 +787,13 @@ fn text_callback(
         state.fatal_error = Some(RuntimeFailure {
             kind: RuntimeFailureKind::OutputLimitExceeded,
             message: format!("code mode text output exceeds the {MAX_OUTPUT_BYTES}-byte limit"),
+            child_failure: None,
+            limit: Some(CodeModeLimit {
+                kind: "text_output_bytes".to_string(),
+                allowed: MAX_OUTPUT_BYTES,
+                current: state.emitted_bytes,
+                attempted: next_bytes,
+            }),
         });
         throw_error(scope, "code mode text output limit exceeded");
         return;
@@ -706,7 +807,7 @@ fn text_callback(
 fn resolve_tool_response(
     scope: &mut v8::PinScope<'_, '_>,
     id: &str,
-    response: Result<JsonValue, String>,
+    response: Result<JsonValue, CodeModeChildFailure>,
 ) -> Result<(), String> {
     let resolver = scope
         .get_slot_mut::<RuntimeState>()
@@ -721,10 +822,32 @@ fn resolve_tool_response(
                 .ok_or_else(|| "failed to serialize nested tool response".to_string())?;
             resolver.resolve(&tc, value);
         }
-        Err(error) => {
-            let error = v8::String::new(&tc, &error)
+        Err(failure) => {
+            // Preserve the original JavaScript rejected-Error ergonomics while
+            // attaching enumerable structured fields for outer failure classification.
+            let message = v8::String::new(&tc, &failure.message)
                 .ok_or_else(|| "failed to allocate nested tool host error".to_string())?;
-            resolver.reject(&tc, error.into());
+            let rejection = v8::Exception::error(&tc, message);
+            let rejection_object = v8::Local::<v8::Object>::try_from(rejection)
+                .map_err(|_| "failed to create nested tool host error object".to_string())?;
+            let failure_kind_key = v8::String::new(&tc, "failure_kind")
+                .ok_or_else(|| "failed to allocate child failure key".to_string())?;
+            let failure_kind = v8::String::new(&tc, "child_call_failed")
+                .ok_or_else(|| "failed to allocate child failure kind".to_string())?;
+            if rejection_object.set(&tc, failure_kind_key.into(), failure_kind.into()) != Some(true)
+            {
+                return Err("failed to attach child failure kind".to_string());
+            }
+            let child_failure_key = v8::String::new(&tc, "child_failure")
+                .ok_or_else(|| "failed to allocate child failure key".to_string())?;
+            let child_failure = serde_json::to_value(&failure)
+                .ok()
+                .and_then(|failure| json_to_v8(&mut tc, &failure))
+                .ok_or_else(|| "failed to serialize nested tool host failure".to_string())?;
+            if rejection_object.set(&tc, child_failure_key.into(), child_failure) != Some(true) {
+                return Err("failed to attach child failure detail".to_string());
+            }
+            resolver.reject(&tc, rejection);
         }
     }
     if tc.has_caught() {
@@ -781,9 +904,35 @@ fn json_to_v8<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     value: &JsonValue,
 ) -> Option<v8::Local<'s, v8::Value>> {
-    let json = serde_json::to_string(value).ok()?;
-    let json = v8::String::new(scope, &json)?;
-    v8::json::parse(scope, json)
+    match value {
+        JsonValue::Null => Some(v8::null(scope).into()),
+        JsonValue::Bool(value) => Some(v8::Boolean::new(scope, *value).into()),
+        JsonValue::Number(value) => Some(v8::Number::new(scope, value.as_f64()?).into()),
+        JsonValue::String(value) => Some(v8::String::new(scope, value)?.into()),
+        JsonValue::Array(values) => {
+            let length = i32::try_from(values.len()).ok()?;
+            let array = v8::Array::new(scope, length);
+            for (index, value) in values.iter().enumerate() {
+                let key = v8::String::new(scope, &index.to_string())?;
+                let value = json_to_v8(scope, value)?;
+                if array.create_data_property(scope, key.into(), value) != Some(true) {
+                    return None;
+                }
+            }
+            Some(array.into())
+        }
+        JsonValue::Object(values) => {
+            let object = v8::Object::new(scope);
+            for (key, value) in values {
+                let key = v8::String::new(scope, key)?;
+                let value = json_to_v8(scope, value)?;
+                if object.create_data_property(scope, key.into(), value) != Some(true) {
+                    return None;
+                }
+            }
+            Some(object.into())
+        }
+    }
 }
 
 fn value_to_error_text(
@@ -839,10 +988,27 @@ fn delete_global<'s>(
     }
 }
 
+fn bounded_child_failure_message(message: &str) -> String {
+    const MAX_CHILD_FAILURE_MESSAGE_BYTES: usize = 2_048;
+    if message.len() <= MAX_CHILD_FAILURE_MESSAGE_BYTES {
+        return message.to_string();
+    }
+    let suffix = "...[truncated]";
+    let mut end = MAX_CHILD_FAILURE_MESSAGE_BYTES.saturating_sub(suffix.len());
+    while end > 0 && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut bounded = message[..end].to_string();
+    bounded.push_str(suffix);
+    bounded
+}
+
 fn runtime_failure(message: impl Into<String>) -> RuntimeFailure {
     RuntimeFailure {
         kind: RuntimeFailureKind::Runtime,
         message: message.into(),
+        child_failure: None,
+        limit: None,
     }
 }
 
@@ -987,6 +1153,7 @@ mod tests {
         in_flight: AtomicUsize,
         max_in_flight: AtomicUsize,
         barrier: Barrier,
+        completion_order: Mutex<Vec<usize>>,
     }
 
     impl ConcurrentHost {
@@ -995,6 +1162,7 @@ mod tests {
                 in_flight: AtomicUsize::new(0),
                 max_in_flight: AtomicUsize::new(0),
                 barrier: Barrier::new(3),
+                completion_order: Mutex::new(Vec::new()),
             }
         }
     }
@@ -1002,16 +1170,19 @@ mod tests {
     impl CodeModeHost for ConcurrentHost {
         fn invoke_tool(
             &self,
-            _request: CodeModeToolRequest,
+            request: CodeModeToolRequest,
         ) -> CodeModeHostFuture<'_, Result<CodeModeToolResponse, CodeModeHostError>> {
             Box::pin(async move {
                 let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
                 self.max_in_flight.fetch_max(now, Ordering::SeqCst);
                 self.barrier.wait().await;
+                let delay_ms = 10 * (3usize.saturating_sub(request.ordinal)) as u64;
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                self.completion_order.lock().unwrap().push(request.ordinal);
                 self.in_flight.fetch_sub(1, Ordering::SeqCst);
                 Ok(CodeModeToolResponse {
                     success: true,
-                    output: json!({"ok": true}),
+                    output: json!({"ok": true, "ordinal": request.ordinal, "tool": request.tool_name}),
                     error: None,
                 })
             })
@@ -1028,7 +1199,7 @@ mod tests {
                 const [a,b,c] = await Promise.all([
                     tools.a({}), tools.b({}), tools.c({})
                 ]);
-                text([a.output.ok, b.output.ok, c.output.ok]);
+                text([a.output.ordinal, b.output.ordinal, c.output.ordinal]);
                 "#,
                 &["a", "b", "c"],
             ),
@@ -1038,6 +1209,145 @@ mod tests {
         assert!(host.max_in_flight.load(Ordering::SeqCst) >= 2);
         assert!(result.stats.max_in_flight >= 2);
         assert_eq!(result.stats.tool_calls, 3);
+        assert_eq!(result.content, vec!["[1,2,3]"]);
+        assert_eq!(host.completion_order.lock().unwrap().as_slice(), [3, 2, 1]);
+    }
+
+    struct FailingHost {
+        failure_kind: &'static str,
+    }
+
+    impl CodeModeHost for FailingHost {
+        fn invoke_tool(
+            &self,
+            _request: CodeModeToolRequest,
+        ) -> CodeModeHostFuture<'_, Result<CodeModeToolResponse, CodeModeHostError>> {
+            Box::pin(async move {
+                Err(CodeModeHostError::with_kind(
+                    self.failure_kind,
+                    "bounded child host failure",
+                ))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn child_host_failure_preserves_ordinal_tool_and_stable_kind() {
+        for failure_kind in ["invalid_arguments", "insufficient_scope"] {
+            let error = execute(
+                Arc::new(FailingHost { failure_kind }),
+                request("await tools.fake_read({});", &["fake_read"]),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.kind, CodeModeErrorKind::ChildCallFailed);
+            let child = error.child_failure.expect("structured child failure");
+            assert_eq!(child.ordinal, 1);
+            assert_eq!(child.tool, "fake_read");
+            assert_eq!(child.failure_kind, failure_kind);
+            assert_eq!(child.message, "bounded child host failure");
+            assert!(error.limit.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn caught_child_host_failure_remains_stringifiable_and_structured() {
+        let result = execute(
+            Arc::new(FailingHost {
+                failure_kind: "invalid_arguments",
+            }),
+            request(
+                r#"
+                try {
+                    await tools.fake_read({});
+                } catch (error) {
+                    text({
+                        rendered: String(error),
+                        failure_kind: error.failure_kind,
+                        child_kind: error.child_failure.failure_kind
+                    });
+                }
+                "#,
+                &["fake_read"],
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result.content,
+            vec![
+                r#"{"rendered":"Error: bounded child host failure","failure_kind":"child_call_failed","child_kind":"invalid_arguments"}"#
+            ]
+        );
+    }
+
+    struct PanickingHost;
+
+    impl CodeModeHost for PanickingHost {
+        fn invoke_tool(
+            &self,
+            _request: CodeModeToolRequest,
+        ) -> CodeModeHostFuture<'_, Result<CodeModeToolResponse, CodeModeHostError>> {
+            Box::pin(async move { panic!("intentional host task panic") })
+        }
+    }
+
+    #[tokio::test]
+    async fn host_task_failure_preserves_exact_child_identity() {
+        let error = execute(
+            Arc::new(PanickingHost),
+            request("await tools.fake_read({});", &["fake_read"]),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, CodeModeErrorKind::ChildCallFailed);
+        let child = error
+            .child_failure
+            .expect("structured host-task child failure");
+        assert_eq!(child.ordinal, 1);
+        assert_eq!(child.tool, "fake_read");
+        assert_eq!(child.failure_kind, "host_task_failure");
+        assert!(child.message.contains("nested tool host task failed"));
+    }
+
+    struct BusinessFailureHost;
+
+    impl CodeModeHost for BusinessFailureHost {
+        fn invoke_tool(
+            &self,
+            _request: CodeModeToolRequest,
+        ) -> CodeModeHostFuture<'_, Result<CodeModeToolResponse, CodeModeHostError>> {
+            Box::pin(async move {
+                Ok(CodeModeToolResponse {
+                    success: false,
+                    output: json!({
+                        "reason": "known_business_failure",
+                        "nested": {"items": [1, true, null, "x"]},
+                        "__proto__": {"polluted": true}
+                    }),
+                    error: Some("business failure".to_string()),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_business_failure_remains_a_javascript_value() {
+        let result = execute(
+            Arc::new(BusinessFailureHost),
+            request(
+                "const r = await tools.fake_read({}); text({success:r.success, reason:r.output.reason, nested:r.output.nested.items, proto_own:Object.prototype.hasOwnProperty.call(r.output,'__proto__'), polluted:r.output.polluted ?? null});",
+                &["fake_read"],
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result.content,
+            vec![
+                r#"{"success":false,"reason":"known_business_failure","nested":[1,true,null,"x"],"proto_own":true,"polluted":null}"#
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1053,6 +1363,15 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind, CodeModeErrorKind::ToolCallBudgetExceeded);
         assert_eq!(error.stats.tool_calls, MAX_TOOL_CALLS);
+        assert_eq!(
+            error.limit,
+            Some(CodeModeLimit {
+                kind: "nested_tool_calls".to_string(),
+                allowed: MAX_TOOL_CALLS,
+                current: MAX_TOOL_CALLS,
+                attempted: MAX_TOOL_CALLS + 1,
+            })
+        );
     }
 
     #[tokio::test]
@@ -1065,6 +1384,8 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind, CodeModeErrorKind::Runtime);
         assert!(error.message.contains("not_allowed"));
+        assert!(error.child_failure.is_none());
+        assert!(error.limit.is_none());
     }
 
     #[tokio::test]
@@ -1077,6 +1398,15 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind, CodeModeErrorKind::OutputLimitExceeded);
         assert_eq!(error.stats.returned_bytes, 0);
+        assert_eq!(
+            error.limit,
+            Some(CodeModeLimit {
+                kind: "text_output_bytes".to_string(),
+                allowed: MAX_OUTPUT_BYTES,
+                current: 0,
+                attempted: MAX_OUTPUT_BYTES + 1,
+            })
+        );
     }
 
     #[tokio::test]
@@ -1095,6 +1425,15 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind, CodeModeErrorKind::OutputLimitExceeded);
         assert_eq!(error.stats.returned_bytes, 0);
+        assert_eq!(
+            error.limit,
+            Some(CodeModeLimit {
+                kind: "text_output_items".to_string(),
+                allowed: MAX_OUTPUT_ITEMS,
+                current: MAX_OUTPUT_ITEMS,
+                attempted: MAX_OUTPUT_ITEMS + 1,
+            })
+        );
     }
 
     struct LifecycleHost {

@@ -94,6 +94,10 @@ async fn fast_cargo_test_require_tests_rejects_ignored_only_and_records_failed_s
     assert!(error.contains("substring filter"), "{error}");
     assert!(error.contains("full qualified name"), "{error}");
     assert!(error.contains("--exact"), "{error}");
+    assert!(error.contains("terminal"), "{error}");
+    assert!(error.contains("no active Job continuation"), "{error}");
+    assert!(result.output.get("job_id").is_none());
+    assert!(result.output.get("continuation").is_none());
     assert_eq!(result.output["test_count_assertion"]["actual_tests_run"], 0);
     assert_model_cargo_result_matches_schema("cargo_test", &result);
     assert!(

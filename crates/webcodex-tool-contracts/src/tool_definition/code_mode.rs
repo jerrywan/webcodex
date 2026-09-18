@@ -79,7 +79,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Validation Code Mode for E1 reads plus cargo_check/cargo_test. Default to direct validators; use only when related validations save model turns. Distill results before text(value). Children retain canonical Project/Session, permission, validation and Job semantics; no mutation, shell/process, nested Job observation, gateways or recursion.",
-        ).with_gpt_action_description("Validation orchestration for E1 reads plus cargo_check/cargo_test when multiple related validations save model turns. Default to direct validators. Canonical authority/evidence/Jobs remain; no mutation, shell/process, nested Job observation or recursion.")),
+        ).with_gpt_action_description("Validation orchestration for E1 reads plus cargo_check/cargo_test when multiple related validations save model turns. Default to direct validators. Canonical authority/evidence/Jobs remain; no mutation, shell/process, nested Job observation or recursion.").with_gpt_action_gateway_only()),
         105,
     ),
     adaptive_runtime_direct(
@@ -106,7 +106,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
                 "Guarded edit Code Mode for adaptive read -> one canonical apply_text_edits attempt. Default to direct mutation; use only when it saves model turns. Distill results before text(value). Nested canonical write authority and Edit evidence remain authoritative; no validation, shell/process, Jobs, other writes, gateways or recursion.",
-            ).with_gpt_action_description("Guarded edit orchestration for adaptive read -> one canonical apply_text_edits attempt when it saves model turns. Default to direct edits. Canonical authority/effects remain; no nested validation, shell/process, Jobs, other writes or recursion.")),
+            ).with_gpt_action_description("Guarded edit orchestration for adaptive read -> one canonical apply_text_edits attempt when it saves model turns. Default to direct edits. Canonical authority/effects remain; no nested validation, shell/process, Jobs, other writes or recursion.").with_gpt_action_gateway_only()),
             PERMISSION_RISK_WRITE,
         ),
         65,

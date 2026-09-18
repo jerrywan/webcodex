@@ -58,6 +58,81 @@ fn effect_receipt_schema() -> Value {
     })
 }
 
+fn child_failure_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Bounded identity for one nested call attempt that failed before a canonical business ToolResult existed. The ordinal is diagnostic only, not retry or durable execution identity.",
+        "additionalProperties": false,
+        "properties": {
+            "ordinal": {"type": "integer", "minimum": 1, "maximum": 32},
+            "tool": {"type": "string", "maxLength": 128},
+            "failure_kind": {
+                "type": "string",
+                "enum": [
+                    "invalid_arguments",
+                    "insufficient_scope",
+                    "tool_not_admitted",
+                    "composition_policy_denied",
+                    "frontend_closed",
+                    "mutation_budget_exceeded",
+                    "host_failure",
+                    "host_task_failure"
+                ]
+            },
+            "message": {"type": "string", "maxLength": 2048}
+        },
+        "required": ["ordinal", "tool", "failure_kind", "message"]
+    })
+}
+
+fn limit_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Actual Code Mode frontend hard-limit evidence when the runtime can prove it.",
+        "additionalProperties": false,
+        "properties": {
+            "kind": {"type": "string", "enum": ["nested_tool_calls", "text_output_bytes", "text_output_items"]},
+            "allowed": {"type": "integer", "minimum": 0},
+            "current": {"type": "integer", "minimum": 0},
+            "attempted": {"type": "integer", "minimum": 0}
+        },
+        "required": ["kind", "allowed", "current", "attempted"]
+    })
+}
+
+fn recovery_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Small deterministic recovery projection. Job identity is intentionally absent: existing Job handoffs remain canonical only in effect_receipt.children.",
+        "additionalProperties": false,
+        "properties": {
+            "retry_same_call_unchanged": {"type": "boolean", "description": "False for Code Mode frontend failures; callers must apply the listed recovery action or reconcile existing effects first."},
+            "actions": {
+                "type": "array",
+                "maxItems": 3,
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "fix_code_mode_request",
+                        "fix_code_mode_source",
+                        "fix_child_arguments",
+                        "obtain_required_scope",
+                        "remove_or_replace_child_call",
+                        "reduce_mutation_attempts",
+                        "inspect_child_host_failure",
+                        "reduce_or_bound_code_mode_work",
+                        "reduce_child_calls",
+                        "reduce_text_projection",
+                        "observe_existing_job_continuations",
+                        "reconcile_effect_state_before_retry"
+                    ]
+                }
+            }
+        },
+        "required": ["retry_same_call_unchanged", "actions"]
+    })
+}
+
 fn bounded_failure_message_schema() -> Value {
     let mut schema = schema_type(
         "string",
@@ -73,6 +148,7 @@ fn failure_kind_schema() -> Value {
         "enum": [
             "invalid_request",
             "runtime_error",
+            "child_call_failed",
             "timeout",
             "tool_call_budget_exceeded",
             "output_limit_exceeded"
@@ -88,6 +164,9 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ("stats", stats_schema()),
             ("message", bounded_failure_message_schema()),
             ("failure_kind", failure_kind_schema()),
+            ("child_failure", child_failure_schema()),
+            ("limit", limit_schema()),
+            ("recovery", recovery_schema()),
         ])),
         "code_mode_exec_effectful" | "code_mode_exec_mutating" => {
             Some(wrapped_output_schema(vec![
@@ -96,6 +175,9 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 ("effect_receipt", effect_receipt_schema()),
                 ("message", bounded_failure_message_schema()),
                 ("failure_kind", failure_kind_schema()),
+                ("child_failure", child_failure_schema()),
+                ("limit", limit_schema()),
+                ("recovery", recovery_schema()),
             ]))
         }
         _ => None,

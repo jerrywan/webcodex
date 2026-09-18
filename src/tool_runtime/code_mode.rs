@@ -4,11 +4,11 @@ use super::orchestration_host::{
 };
 use super::{ResolvedProject, ToolResult, ToolRuntime};
 use crate::auth::AuthContext;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use webcodex_code_mode::{
-    CodeModeExecuteRequest, CodeModeHost, CodeModeHostError, CodeModeHostFuture,
-    CodeModeTerminationMode, CodeModeToolRequest, CodeModeToolResponse,
+    CodeModeError, CodeModeErrorKind, CodeModeExecuteRequest, CodeModeHost, CodeModeHostError,
+    CodeModeHostFuture, CodeModeTerminationMode, CodeModeToolRequest, CodeModeToolResponse,
 };
 
 pub(crate) use super::orchestration_host::OrchestrationCompositionSummary as CodeModeCompositionSummary;
@@ -111,6 +111,64 @@ fn bounded_model_error(message: &str) -> String {
     bounded
 }
 
+fn code_mode_recovery(error: &CodeModeError, job_handoffs: usize, outcome_unknown: usize) -> Value {
+    let mut actions = Vec::new();
+    let primary = match error.kind {
+        CodeModeErrorKind::InvalidRequest => "fix_code_mode_request",
+        CodeModeErrorKind::Runtime => "fix_code_mode_source",
+        CodeModeErrorKind::ChildCallFailed => match error
+            .child_failure
+            .as_ref()
+            .map(|failure| failure.failure_kind.as_str())
+        {
+            Some("invalid_arguments") => "fix_child_arguments",
+            Some("insufficient_scope") => "obtain_required_scope",
+            Some("tool_not_admitted" | "composition_policy_denied") => {
+                "remove_or_replace_child_call"
+            }
+            Some("mutation_budget_exceeded") => "reduce_mutation_attempts",
+            Some("frontend_closed") => "fix_code_mode_source",
+            _ => "inspect_child_host_failure",
+        },
+        CodeModeErrorKind::Timeout => "reduce_or_bound_code_mode_work",
+        CodeModeErrorKind::ToolCallBudgetExceeded => "reduce_child_calls",
+        CodeModeErrorKind::OutputLimitExceeded => "reduce_text_projection",
+    };
+    actions.push(primary);
+    if job_handoffs > 0 {
+        actions.push("observe_existing_job_continuations");
+    }
+    if outcome_unknown > 0 {
+        actions.push("reconcile_effect_state_before_retry");
+    }
+    actions.dedup();
+    json!({
+        "retry_same_call_unchanged": false,
+        "actions": actions,
+    })
+}
+
+fn code_mode_failure_output(
+    error: &CodeModeError,
+    message: String,
+    job_handoffs: usize,
+    outcome_unknown: usize,
+) -> Value {
+    let mut output = json!({
+        "failure_kind": error.kind.as_str(),
+        "message": message,
+        "stats": error.stats,
+        "recovery": code_mode_recovery(error, job_handoffs, outcome_unknown),
+    });
+    if let Some(child_failure) = error.child_failure.as_ref() {
+        output["child_failure"] = json!(child_failure);
+    }
+    if let Some(limit) = error.limit.as_ref() {
+        output["limit"] = json!(limit);
+    }
+    output
+}
+
 /// Thin V8 frontend adapter. Authority, Project/Session injection, canonical
 /// dispatch, child evidence, and composition accounting live in the reusable
 /// CanonicalOrchestrationHost rather than in the JavaScript runtime adapter.
@@ -125,7 +183,7 @@ impl CodeModeHost for V8CodeModeHost {
     ) -> CodeModeHostFuture<'_, Result<CodeModeToolResponse, CodeModeHostError>> {
         Box::pin(async move {
             self.orchestration
-                .invoke_tool(request.tool_name, request.arguments)
+                .invoke_tool(request.ordinal, request.tool_name, request.arguments)
                 .await
                 .map(
                     |OrchestrationToolResponse {
@@ -138,7 +196,10 @@ impl CodeModeHost for V8CodeModeHost {
                         error,
                     },
                 )
-                .map_err(|error| CodeModeHostError::new(error.into_message()))
+                .map_err(|error| {
+                    let failure_kind = error.failure_kind().as_str();
+                    CodeModeHostError::with_kind(failure_kind, error.into_message())
+                })
         })
     }
 
@@ -203,11 +264,7 @@ impl ToolRuntime {
                 (
                     ToolResult::err_with_output(
                         "code mode execution failed",
-                        json!({
-                            "failure_kind": error.kind.as_str(),
-                            "message": bounded_model_error(&error.message),
-                            "stats": error.stats,
-                        }),
+                        code_mode_failure_output(&error, bounded_model_error(&error.message), 0, 0),
                     ),
                     stats,
                 )
@@ -305,11 +362,12 @@ impl ToolRuntime {
                 } else {
                     bounded_model_error(&error.message)
                 };
-                let mut output = json!({
-                    "failure_kind": error.kind.as_str(),
-                    "message": message,
-                    "stats": error.stats,
-                });
+                let mut output = code_mode_failure_output(
+                    &error,
+                    message,
+                    effect_receipt.job_handoffs,
+                    effect_receipt.outcome_unknown,
+                );
                 if has_consequential_work {
                     output["effect_receipt"] = json!(effect_receipt);
                 }
@@ -414,11 +472,12 @@ impl ToolRuntime {
                 } else {
                     bounded_model_error(&error.message)
                 };
-                let mut output = json!({
-                    "failure_kind": error.kind.as_str(),
-                    "message": message,
-                    "stats": error.stats,
-                });
+                let mut output = code_mode_failure_output(
+                    &error,
+                    message,
+                    effect_receipt.job_handoffs,
+                    effect_receipt.outcome_unknown,
+                );
                 if has_consequential_work {
                     output["effect_receipt"] = json!(effect_receipt);
                 }

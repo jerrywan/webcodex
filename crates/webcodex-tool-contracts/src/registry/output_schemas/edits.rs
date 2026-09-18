@@ -220,6 +220,24 @@ fn edit_candidate_range_schema() -> Value {
     })
 }
 
+fn conflicting_edit_ranges_schema() -> Value {
+    let mut schema = array_schema(
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "edit_index": {"type": "integer", "minimum": 0},
+                "start_line": {"type": "integer", "minimum": 1},
+                "end_line": {"type": "integer", "minimum": 1}
+            },
+            "required": ["edit_index", "start_line", "end_line"]
+        }),
+        "At most the resolved source-line ranges for conflicting edits; derived from the authoritative transactional edit plan and contains no source or replacement text.",
+    );
+    schema["maxItems"] = json!(2);
+    schema
+}
+
 fn read_files_recovery_call_schema() -> Value {
     json!({
         "type": "object",
@@ -421,6 +439,10 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             (
                 "conflicting_edit_indices",
                 array_schema(schema_type("integer", "Zero-based edit index participating in an overlap conflict."), "The edit indices whose planned ranges overlap."),
+            ),
+            (
+                "conflicting_edit_ranges",
+                conflicting_edit_ranges_schema(),
             ),
             (
                 "recovery",

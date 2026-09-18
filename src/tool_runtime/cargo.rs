@@ -32,7 +32,7 @@ pub(crate) use webcodex_validation::parse_cargo_test_run_metadata;
 const CARGO_STDIO_TAIL_CHARS: usize = 12_000;
 const CARGO_VALIDATION_FAILURE_KIND: &str = "validation_failed";
 const VALIDATION_FAILURE_GUIDANCE: &str =
-    "command was started; inspect bounded validation evidence, fix the reported issue, then rerun the same structured validation tool.";
+    "this result is terminal and has no active Job continuation; inspect bounded validation evidence, fix the reported issue, then run a new structured validation.";
 
 fn test_count_assertion_failure_message(tool_name: &str, payload: &Value) -> String {
     if tool_name == "cargo_test"
@@ -44,6 +44,13 @@ fn test_count_assertion_failure_message(tool_name: &str, payload: &Value) -> Str
         return "cargo_test test-count assertion was not proven; inspect test_count_assertion and rerun with a scope that executes enough tests.".to_string();
     }
     "structured test-count assertion was not proven; inspect test_count_assertion and rerun with a scope that executes enough tests.".to_string()
+}
+
+fn terminal_test_count_assertion_failure_message(tool_name: &str, payload: &Value) -> String {
+    format!(
+        "structured validation command completed with validation failure; {VALIDATION_FAILURE_GUIDANCE} {}",
+        test_count_assertion_failure_message(tool_name, payload)
+    )
 }
 
 fn cargo_fmt_check_is_stable_diff(
@@ -1457,9 +1464,9 @@ impl ToolRuntime {
             let error = if timed_out {
                 command_timeout_message(handoff.effective_timeout_secs, &stdout_tail, &stderr_tail)
             } else if process_passed {
-                test_count_assertion_failure_message(adapter.tool_identity(), &payload)
+                terminal_test_count_assertion_failure_message(adapter.tool_identity(), &payload)
             } else {
-                format!("structured validation command failed; {VALIDATION_FAILURE_GUIDANCE}")
+                format!("structured validation command completed with validation failure; {VALIDATION_FAILURE_GUIDANCE}")
             };
             let result = ToolResult {
                 success: false,
@@ -1611,9 +1618,9 @@ impl ToolRuntime {
                     "process_exit"
                 });
                 let error = if process_passed {
-                    test_count_assertion_failure_message(adapter.tool_identity(), &payload)
+                    terminal_test_count_assertion_failure_message(adapter.tool_identity(), &payload)
                 } else {
-                    format!("structured validation command failed; {VALIDATION_FAILURE_GUIDANCE}")
+                    format!("structured validation command completed with validation failure; {VALIDATION_FAILURE_GUIDANCE}")
                 };
                 ToolResult {
                     success: false,

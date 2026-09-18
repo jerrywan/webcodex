@@ -379,12 +379,16 @@ mod tests {
     }
 
     #[test]
-    fn gpt_action_direct_surface_inherits_adaptive_direct_without_duplicate_rank() {
+    fn gpt_action_direct_surface_follows_adaptive_direct_with_definition_owned_exceptions() {
         let adaptive = webcodex_tool_contracts::adaptive_runtime_direct_tool_definitions();
         let expected = adaptive
             .iter()
             .copied()
-            .filter(|definition| definition.supports_gpt_actions())
+            .filter(|definition| {
+                definition.supports_gpt_actions()
+                    && definition.gpt_action_exposure()
+                        != webcodex_tool_contracts::ToolGptActionExposure::GatewayOnly
+            })
             .map(|definition| definition.name)
             .collect::<Vec<_>>();
         let actual = gpt_action_direct_tool_definitions()
@@ -399,6 +403,11 @@ mod tests {
         assert!(ranks.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(actual.contains(&"apply_text_edits"));
         assert!(!actual.contains(&"apply_patch"));
+        #[cfg(feature = "experimental-code-mode")]
+        for name in ["code_mode_exec_effectful", "code_mode_exec_mutating"] {
+            assert!(webcodex_tool_contracts::gpt_action_tool_supported(name));
+            assert!(!actual.contains(&name));
+        }
     }
 
     #[test]

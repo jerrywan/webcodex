@@ -675,6 +675,14 @@ async fn e2b_timeout_after_mutation_dispatch_reconciles_known_true_result() {
     assert!(!result.success);
     assert_eq!(result.output["failure_kind"], "timeout");
     assert_eq!(
+        result.output["recovery"]["retry_same_call_unchanged"],
+        false
+    );
+    assert!(result.output["recovery"]["actions"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("reduce_or_bound_code_mode_work")));
+    assert_eq!(
         result.output["effect_receipt"]["children"][0]["outcome"],
         "known_result"
     );
@@ -708,6 +716,13 @@ async fn e2b_mutation_stall_beyond_bounded_drain_returns_outcome_unknown() {
     assert!(!result.success);
     assert_eq!(result.output["failure_kind"], "timeout");
     assert_eq!(result.output["effect_receipt"]["outcome_unknown"], 1);
+    assert_eq!(
+        result.output["recovery"]["retry_same_call_unchanged"],
+        false
+    );
+    let recovery_actions = result.output["recovery"]["actions"].as_array().unwrap();
+    assert!(recovery_actions.contains(&json!("reduce_or_bound_code_mode_work")));
+    assert!(recovery_actions.contains(&json!("reconcile_effect_state_before_retry")));
     assert_eq!(
         result.output["effect_receipt"]["children"][0]["outcome"],
         "outcome_unknown"
@@ -754,6 +769,7 @@ async fn e2b_same_project_mutation_fence_serializes_independent_hosts() {
         let host = Arc::clone(&first_host);
         async move {
             host.invoke_tool(
+                1,
                 "apply_text_edits".to_string(),
                 json!({"changes":[{"kind":"edit","path":"src/example.rs","edits":[{"kind":"replace_exact","old_text":"one","new_text":"first"}]}]}),
             )
@@ -775,6 +791,7 @@ async fn e2b_same_project_mutation_fence_serializes_independent_hosts() {
         let host = Arc::clone(&second_host);
         async move {
             host.invoke_tool(
+                1,
                 "apply_text_edits".to_string(),
                 json!({"changes":[{"kind":"edit","path":"src/example.rs","edits":[{"kind":"replace_exact","old_text":"first","new_text":"second"}]}]}),
             )
@@ -864,6 +881,7 @@ async fn e2b_mutation_fence_is_project_scoped_not_process_global() {
         let host = Arc::clone(&host_two);
         async move {
             host.invoke_tool(
+                1,
                 "apply_text_edits".to_string(),
                 json!({"changes":[{"kind":"edit","path":"src/example.rs","edits":[{"kind":"replace_exact","old_text":"two","new_text":"changed"}]}]}),
             )
@@ -914,6 +932,7 @@ async fn read_only_orchestration_does_not_acquire_project_mutation_fence() {
         let host = Arc::clone(&host);
         async move {
             host.invoke_tool(
+                1,
                 "read_files".to_string(),
                 json!({"items":[{"path":"src/example.rs"}]}),
             )
@@ -1494,6 +1513,7 @@ async fn e2b_child_permission_denial_is_canonical_and_non_effectful() {
     );
     let nested = host
         .invoke_tool(
+            1,
             "apply_text_edits".to_string(),
             json!({"changes":[{"kind":"create","path":"blocked.txt","content":"x"}]}),
         )

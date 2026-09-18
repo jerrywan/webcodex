@@ -44,6 +44,8 @@ Product direction: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - Use the `dogfood` Cargo profile for optimized development builds; reserve `release` for formal release/publication artifacts.
 - Full library/workspace tests, `--all-targets`, ignored tests, real-process harnesses, and E2E are not defaults. Use them for explicit requests, release/deployment, cross-cutting boundaries, broad conflict resolution, or gaps in focused coverage. State the reason first.
 - Put tests in existing dedicated module trees, grouped by domain. Keep inline `#[cfg(test)]` blocks small and tied to private helpers; process/network/integration fixtures belong in dedicated test modules.
+- Process fixtures must mirror production I/O ownership: absent stdin means EOF, explicit input means those bytes followed by EOF, and stdout/stderr must be drained or captured without pipe deadlocks. Never inherit the invoking terminal by accident. Prefer explicit config inputs and child-local environment over process-global mutation.
+- For console-only or flaky failures, compare the same source with one boundary changed and add a deterministic regression that also fails in headless CI. Retries, longer timeouts, and reduced concurrency are diagnostic/resource controls, not substitutes for fixing the demonstrated cause.
 - Async readiness must use a `wait_*` path with one absolute deadline that progress never resets. Use `probe_*` only when immediate absence is valid or inside an already-owned deadline.
 - Distinguish current failures, pre-existing failures, expected negative cases, and failures resolved by retry. Never weaken authentication, authorization, validation, schemas, sandboxing, or tests to get a passing result.
 

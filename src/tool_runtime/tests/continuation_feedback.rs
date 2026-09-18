@@ -261,7 +261,12 @@ async fn diagnostic_coding_workflow(
                 .await
         }
     });
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     while !task.is_finished() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "diagnostic coding workflow did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?}"
+        );
         if let Some(req) = runtime
             .runner_registry
             .poll(crate::runner_protocol::RunnerPollRequest {

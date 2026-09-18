@@ -5,6 +5,9 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::Arc;
 
+pub(in crate::tool_runtime::tests) const CODING_WORKFLOW_FIXTURE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(50);
+
 pub(in crate::tool_runtime::tests) const SAMPLE_PROJECT: &str = "agent:oe:private-drop";
 pub(in crate::tool_runtime::tests) const UNIT_TOOL_FIXTURES: &[&str] = &[
     "list_tools",

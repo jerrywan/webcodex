@@ -803,6 +803,13 @@ fn file_apply_text_edits_structured_overlap_is_atomic_and_body_free() {
         recovery["conflicting_edit_indices"],
         serde_json::json!([0, 1])
     );
+    assert_eq!(
+        recovery["conflicting_edit_ranges"],
+        serde_json::json!([
+            {"edit_index": 0, "start_line": 1, "end_line": 1},
+            {"edit_index": 1, "start_line": 1, "end_line": 1}
+        ])
+    );
     assert_eq!(recovery["recovery_action"], "refine_edit_batch");
     assert_eq!(recovery["direct_retry_safe"], true);
     assert_eq!(recovery["reread_required"], false);

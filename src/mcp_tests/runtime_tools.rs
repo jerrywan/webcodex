@@ -35,28 +35,24 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
         "retired start_coding_task must stay out of MCP tools/list"
     );
     let description = tool("work_on_project")["description"].as_str().unwrap();
-    assert!(description.contains("Canonical bootstrap"), "{description}");
-    assert!(
-        description.contains("ordinary coding/review"),
-        "{description}"
-    );
-    assert!(description.contains("mode=worktree"), "{description}");
-    assert!(description.contains("exact Git base"), "{description}");
-    assert!(
-        description.contains("fresh Workflow Session"),
-        "{description}"
-    );
-    assert!(description.contains("exact resume"), "{description}");
-    assert!(
-        description.contains("current model context"),
-        "{description}"
-    );
-    assert!(description.contains("Skills"), "{description}");
-    assert!(description.contains("Plugin"), "{description}");
-    assert!(
-        description.contains("without bypassing Project authority"),
-        "{description}"
-    );
+    let normalized_description = description.to_ascii_lowercase();
+    for phrase in [
+        "canonical bootstrap",
+        "ordinary coding/review",
+        "mode=worktree",
+        "exact git base",
+        "fresh workflow session",
+        "exact resume",
+        "current model context",
+        "skills",
+        "plugin",
+        "without bypassing project authority",
+    ] {
+        assert!(
+            normalized_description.contains(phrase),
+            "work_on_project description should mention {phrase}: {description}"
+        );
+    }
 
     let work_schema = &tool("work_on_project")["inputSchema"];
     assert!(
@@ -79,6 +75,7 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
         "instruction",
         "include_project_instructions",
         "include_workflow_guidance",
+        "guidance_profile",
         "include_extension_catalog",
         "session_id",
     ] {
@@ -86,9 +83,18 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
     }
     assert_eq!(work_props["include_project_instructions"]["default"], true);
     assert_eq!(work_props["include_workflow_guidance"]["default"], true);
+    assert_eq!(work_props["guidance_profile"]["default"], "direct");
+    assert_eq!(work_props["guidance_profile"]["enum"], json!(["direct"]));
     assert_eq!(work_props["include_extension_catalog"]["default"], true);
     assert_eq!(work_props["mode"]["enum"], json!(["checkout", "worktree"]));
     assert_eq!(work_props["mode"]["default"], "checkout");
+    assert!(
+        !work_schema["required"]
+            .as_array()
+            .expect("work_on_project required fields")
+            .contains(&json!("guidance_profile")),
+        "guidance_profile must remain optional in the MCP schema"
+    );
     assert_eq!(work_schema["required"], json!(["instruction"]));
     assert_eq!(work_schema["additionalProperties"], false);
     for keyword in [
