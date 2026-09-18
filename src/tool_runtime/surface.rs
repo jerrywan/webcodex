@@ -207,6 +207,9 @@ fn collect_code_mode_output_fields(
             }
         }
     }
+    if let Some(items) = schema.get("items") {
+        collect_code_mode_output_fields(items, prefix, depth + 1, fields);
+    }
     let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
         return;
     };

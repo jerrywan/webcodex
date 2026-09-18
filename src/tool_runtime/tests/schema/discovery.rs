@@ -1806,6 +1806,30 @@ async fn code_mode_callable_projection_preserves_key_input_constraints_and_outpu
     assert!(read_files["input"]["properties"]
         .get("session_id")
         .is_none());
+    let read_outputs = read_files["output_fields"].as_array().unwrap();
+    for field in [
+        "output.items[].path",
+        "output.items[].output.text",
+        "output.items[].output.read_revision",
+        "output.items[].output.returned_lines",
+        "output.items[].output.has_more",
+    ] {
+        assert!(read_outputs.contains(&json!(field)), "missing {field}");
+    }
+    let search = read_tools
+        .iter()
+        .find(|tool| tool["tool"] == "search_project_texts")
+        .expect("search_project_texts projection");
+    let search_outputs = search["output_fields"].as_array().unwrap();
+    for field in [
+        "output.items[].output.matches",
+        "output.items[].output.matches[].path",
+        "output.items[].output.matches[].line",
+        "output.items[].output.matches[].preview",
+        "output.items[].output.matches[].read_hint",
+    ] {
+        assert!(search_outputs.contains(&json!(field)), "missing {field}");
+    }
 
     let validation = runtime
         .dispatch(ToolCall::ToolManifest {
