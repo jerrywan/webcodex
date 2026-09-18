@@ -462,12 +462,16 @@ only for local/trusted-network demos."
                 .post(oauth_http::oauth_clients_update_scopes),
         )
         .push(
-            Router::with_path(route_metadata::api_path(RouteId::OAuthClientsAddRedirectUri))
-                .post(oauth_http::oauth_clients_add_redirect_uri),
+            Router::with_path(route_metadata::api_path(
+                RouteId::OAuthClientsAddRedirectUri,
+            ))
+            .post(oauth_http::oauth_clients_add_redirect_uri),
         )
         .push(
-            Router::with_path(route_metadata::api_path(RouteId::OAuthClientsRemoveRedirectUri))
-                .post(oauth_http::oauth_clients_remove_redirect_uri),
+            Router::with_path(route_metadata::api_path(
+                RouteId::OAuthClientsRemoveRedirectUri,
+            ))
+            .post(oauth_http::oauth_clients_remove_redirect_uri),
         )
         .push(
             Router::with_path(route_metadata::api_path(RouteId::OAuthClientsRevoke))
