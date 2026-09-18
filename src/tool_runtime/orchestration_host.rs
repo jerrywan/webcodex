@@ -116,9 +116,10 @@ pub(crate) struct OrchestrationPolicy {
     /// canonical Server-owned target/invocation fields below are always denied
     /// by the host and cannot be weakened by a frontend policy.
     pub(crate) additional_forbidden_argument_fields: &'static [&'static str],
-    /// Optional frontend-only cap for the synchronous handoff preference of
-    /// canonical tools whose continuation is observe_jobs. It never changes the
-    /// child's total execution timeout or Job identity.
+    /// Optional frontend-only cap for an explicitly requested synchronous handoff
+    /// preference of canonical tools whose continuation is observe_jobs. Omission
+    /// stays omitted so the child uses its canonical default. This never changes
+    /// the child's total execution timeout or Job identity.
     pub(crate) nested_sync_wait_max_secs: Option<u64>,
     /// Optional per-cell budget for canonical mutation attempts. Classification
     /// comes only from ToolEffect::Mutate; a rejected over-budget call never
@@ -685,14 +686,9 @@ impl CanonicalOrchestrationHost {
             if runtime_tool_execution_contract(tool_name).is_some_and(|execution| {
                 execution.continuation == ToolExecutionContinuation::ObserveJobs
             }) {
-                match arguments.get_mut("sync_wait_secs") {
-                    None => {
-                        arguments.insert("sync_wait_secs".to_string(), Value::from(max_secs));
-                    }
-                    Some(value) => {
-                        if value.as_u64().is_some_and(|seconds| seconds > max_secs) {
-                            *value = Value::from(max_secs);
-                        }
+                if let Some(value) = arguments.get_mut("sync_wait_secs") {
+                    if value.as_u64().is_some_and(|seconds| seconds > max_secs) {
+                        *value = Value::from(max_secs);
                     }
                 }
             }

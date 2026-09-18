@@ -322,6 +322,10 @@ fn sync_validation_and_run_shell_timeout_schema_defers_upper_bounds_to_runtime()
         let desc = sync_wait["description"].as_str().unwrap_or("");
         assert!(desc.contains("same execution"), "{name}: {desc}");
         assert!(
+            desc.contains("Runtime early-handoff default"),
+            "{name}: {desc}"
+        );
+        assert!(
             desc.contains("never extends timeout_secs"),
             "{name}: {desc}"
         );
@@ -337,6 +341,11 @@ fn sync_validation_and_run_shell_timeout_schema_defers_upper_bounds_to_runtime()
     assert_eq!(sync_wait["minimum"], 1);
     assert!(sync_wait.get("maximum").is_none());
     assert!(sync_wait.get("default").is_none());
+    let sync_wait_desc = sync_wait["description"].as_str().unwrap_or("");
+    assert!(
+        sync_wait_desc.contains("Runtime early-handoff default"),
+        "cargo_fmt: {sync_wait_desc}"
+    );
     for valid in [
         serde_json::json!({"project": "agent:demo:repo", "check": false, "sync_wait_secs": 1}),
         serde_json::json!({"project": "agent:demo:repo", "sync_wait_secs": 60}),

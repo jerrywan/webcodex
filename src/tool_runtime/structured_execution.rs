@@ -10,6 +10,8 @@ use std::time::Duration;
 use webcodex_core::runner_job_lifecycle::RunnerJobLifecycle;
 use webcodex_runner_registry::RunnerAccess;
 
+/// Canonical model-facing synchronous grace before an already-started
+/// structured execution is handed off as the same durable Job.
 pub(crate) const STRUCTURED_EXECUTION_SYNC_WAIT_SECS: u64 = 10;
 pub(crate) const INITIAL_JOB_HANDOFF_TAIL_LINES: usize = 40;
 pub(crate) use webcodex_core::runtime_contract::STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS;

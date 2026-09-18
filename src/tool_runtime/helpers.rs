@@ -693,12 +693,6 @@ pub(crate) const DEFAULT_CARGO_CHECK_TIMEOUT_SECS: u64 = 600;
 pub(crate) const DEFAULT_CARGO_TEST_TIMEOUT_SECS: u64 = 1800;
 pub(crate) const DEFAULT_CARGO_FMT_TIMEOUT_SECS: u64 = 120;
 
-/// Internal synchronous wait window for a structured validation. The tool call
-/// blocks up to this long for the command to finish in-process; after that the
-/// same execution is promoted to a queryable Job. Kept well below the 120s MCP
-/// hard ceiling so transport/result serialization retains substantial headroom.
-pub(crate) const SYNC_VALIDATION_WAIT_SECS: u64 = 60;
-
 /// Resolve a synchronous command timeout. Zero remains invalid, while an
 /// oversized caller preference is clamped to the largest wait this path can
 /// actually honor so the model does not need a second decision just to retry

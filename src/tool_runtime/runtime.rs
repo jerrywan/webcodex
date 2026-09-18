@@ -128,9 +128,10 @@ pub struct ToolRuntime {
     pub(crate) read_files_deadline: Duration,
     /// One deadline shared by every query in a `search_project_texts` batch.
     pub(crate) search_project_texts_deadline: Duration,
-    /// Internal synchronous wait window for a read-only structured validation
-    /// before it promotes to a Job. Defaults to `SYNC_VALIDATION_WAIT_SECS`;
-    /// tests shrink it so the handoff path can be exercised without sleeping.
+    /// Runtime cap for the effective synchronous grace before a read-only
+    /// structured validation promotes to a Job. Production permits the public
+    /// maximum; the validation budget selects the canonical default or explicit
+    /// caller preference. Tests shrink this cap to exercise handoff without sleeping.
     pub(crate) validation_sync_wait: Duration,
     /// Orders authoritative terminal-Job snapshot acquisition through Session
     /// marker/evidence materialization. Marker eviction interprets absence from
@@ -219,7 +220,9 @@ impl ToolRuntime {
             read_files_deadline: super::read_files::DEFAULT_READ_FILES_DEADLINE,
             search_project_texts_deadline:
                 super::search_project_texts::DEFAULT_SEARCH_PROJECT_TEXTS_DEADLINE,
-            validation_sync_wait: Duration::from_secs(super::helpers::SYNC_VALIDATION_WAIT_SECS),
+            validation_sync_wait: Duration::from_secs(
+                super::structured_execution::STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS,
+            ),
             validation_terminal_reconciliation: Arc::new(Mutex::new(())),
             #[cfg(test)]
             validation_terminal_reconciliation_test_hook: Arc::new(

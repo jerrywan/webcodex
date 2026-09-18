@@ -2198,11 +2198,13 @@ pub enum ToolCall {
         #[schemars(range(min = 1))]
         #[serde(default)]
         timeout_secs: Option<u64>,
-        /// Optional synchronous grace in seconds. With check=true it controls same-execution Job handoff;
-        /// positive values above 60 or above the effective timeout_secs are accepted and clamped to the
-        /// smaller bound, and it never extends timeout_secs. With check=false it is accepted for
-        /// caller-shape compatibility but ignored; ensure-format remains synchronous and timeout_secs
-        /// remains the full precheck-plus-mutation budget.
+        /// Optional synchronous grace in seconds. With check=true it controls only how long the caller
+        /// waits before the same execution is handed off as a Job; omission uses the Runtime early-handoff
+        /// default bounded by the effective timeout_secs. Explicit positive values above 60 or above the
+        /// effective timeout_secs are accepted and clamped to the smaller bound, and it never extends
+        /// timeout_secs or retries the validation. With check=false it is accepted for caller-shape
+        /// compatibility but ignored; ensure-format remains synchronous and timeout_secs remains the full
+        /// precheck-plus-mutation budget.
         #[schemars(range(min = 1))]
         #[serde(default)]
         sync_wait_secs: Option<u64>,
@@ -2242,11 +2244,11 @@ pub enum ToolCall {
         #[schemars(range(min = 1))]
         #[serde(default)]
         timeout_secs: Option<u64>,
-        /// Optional synchronous grace in seconds. Positive values above 60 or above the effective
-        /// timeout_secs are accepted and clamped to the smaller bound. Omission uses min(60, effective
-        /// timeout_secs). It bounds the wait for the submitted validation, which may still be queued;
-        /// unfinished work returns as the same execution Job when handoff is available. It never extends
-        /// timeout_secs or starts a second validation. For cargo_fmt, accepted only with check=true.
+        /// Optional synchronous grace in seconds. It controls only how long the caller waits before the
+        /// same execution is handed off as a Job. Omission uses the Runtime early-handoff default bounded
+        /// by the effective timeout_secs. Explicit positive values above 60 or above the effective
+        /// timeout_secs are accepted and clamped to the smaller bound. The submitted validation may still
+        /// be queued; this never extends timeout_secs, retries, or starts a second validation.
         #[schemars(range(min = 1))]
         #[serde(default)]
         sync_wait_secs: Option<u64>,
@@ -2310,11 +2312,11 @@ pub enum ToolCall {
         #[schemars(range(min = 1))]
         #[serde(default)]
         timeout_secs: Option<u64>,
-        /// Optional synchronous grace in seconds. Positive values above 60 or above the effective
-        /// timeout_secs are accepted and clamped to the smaller bound. Omission uses min(60, effective
-        /// timeout_secs). It bounds the wait for the submitted validation, which may still be queued;
-        /// unfinished work returns as the same execution Job when handoff is available. It never extends
-        /// timeout_secs or starts a second validation. For cargo_fmt, accepted only with check=true.
+        /// Optional synchronous grace in seconds. It controls only how long the caller waits before the
+        /// same execution is handed off as a Job. Omission uses the Runtime early-handoff default bounded
+        /// by the effective timeout_secs. Explicit positive values above 60 or above the effective
+        /// timeout_secs are accepted and clamped to the smaller bound. The submitted validation may still
+        /// be queued; this never extends timeout_secs, retries, or starts a second validation.
         #[schemars(range(min = 1))]
         #[serde(default)]
         sync_wait_secs: Option<u64>,
@@ -2345,11 +2347,11 @@ pub enum ToolCall {
         #[schemars(range(min = 1))]
         #[serde(default)]
         timeout_secs: Option<u64>,
-        /// Optional synchronous grace in seconds. Positive values above 60 or above the effective
-        /// timeout_secs are accepted and clamped to the smaller bound. Omission uses min(60, effective
-        /// timeout_secs). It bounds the wait for the submitted validation, which may still be queued;
-        /// unfinished work returns as the same execution Job when handoff is available. It never extends
-        /// timeout_secs or starts a second validation. For cargo_fmt, accepted only with check=true.
+        /// Optional synchronous grace in seconds. It controls only how long the caller waits before the
+        /// same execution is handed off as a Job. Omission uses the Runtime early-handoff default bounded
+        /// by the effective timeout_secs. Explicit positive values above 60 or above the effective
+        /// timeout_secs are accepted and clamped to the smaller bound. The submitted validation may still
+        /// be queued; this never extends timeout_secs, retries, or starts a second validation.
         #[schemars(range(min = 1))]
         #[serde(default)]
         sync_wait_secs: Option<u64>,

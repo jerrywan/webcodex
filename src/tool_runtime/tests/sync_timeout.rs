@@ -8,9 +8,8 @@ use super::support::*;
 use crate::runner_protocol::{
     RunnerCapabilities, RunnerPollRequest, RunnerResultRequest, ShellCommandExecutionState,
 };
-use crate::tool_runtime::helpers::{
-    resolve_sync_timeout_secs, MIN_SYNC_TIMEOUT_SECS, SYNC_VALIDATION_WAIT_SECS,
-};
+use crate::tool_runtime::helpers::{resolve_sync_timeout_secs, MIN_SYNC_TIMEOUT_SECS};
+use crate::tool_runtime::structured_execution::STRUCTURED_EXECUTION_SYNC_WAIT_SECS;
 use crate::tool_runtime::validation_events::validation_summary_for_session;
 use crate::tool_runtime::{SessionMode, ToolCall, ToolResult};
 use serde_json::json;
@@ -76,8 +75,8 @@ fn resolve_sync_timeout_secs_clamps_true_sync_paths_and_rejects_zero() {
 }
 
 #[test]
-fn structured_validation_sync_grace_is_sixty_seconds() {
-    assert_eq!(SYNC_VALIDATION_WAIT_SECS, 60);
+fn structured_validation_uses_structured_execution_early_handoff_default() {
+    assert_eq!(STRUCTURED_EXECUTION_SYNC_WAIT_SECS, 10);
 }
 
 fn assert_sync_wait_rejected(result: &ToolResult, tool_name: &str) {
@@ -106,8 +105,8 @@ async fn cargo_fmt_check_short_grace_hands_off_within_short_total_budget() {
     };
     register_agent(&runtime, client_id, None, caps).await;
     let project = agent_test_project_id(client_id);
-    // A total budget below the default grace must still use the Job path
-    // when the explicit grace leaves runtime headroom.
+    // An explicit short grace must still use the Job path while preserving the
+    // independently longer total execution budget.
     let timeout = 30u64;
 
     let started = std::time::Instant::now();
@@ -125,7 +124,7 @@ async fn cargo_fmt_check_short_grace_hands_off_within_short_total_budget() {
         ),
     )
     .await
-    .expect("explicit one-second grace must hand off before the default sixty-second wait");
+    .expect("explicit one-second grace must hand off before the Runtime default wait");
     assert!(started.elapsed() >= std::time::Duration::from_secs(1));
     assert!(
         result.success,

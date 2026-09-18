@@ -7,12 +7,11 @@ use super::helpers::{
     sync_timeout_out_of_range_result, validate_project_relative_path,
     DEFAULT_CARGO_CHECK_TIMEOUT_SECS, DEFAULT_CARGO_FMT_TIMEOUT_SECS,
     DEFAULT_CARGO_TEST_TIMEOUT_SECS, MAX_VALIDATION_TIMEOUT_SECS, MIN_VALIDATION_TIMEOUT_SECS,
-    SYNC_VALIDATION_WAIT_SECS,
 };
 use super::shell::{command_execution_state_name, ProjectCommandOutput};
 use super::structured_execution::{
     recover_hidden_structured_job, structured_job_observation, HiddenStructuredJobWait,
-    StructuredExecutionBudget, StructuredJobHandoffFailure,
+    StructuredExecutionBudget, StructuredJobHandoffFailure, STRUCTURED_EXECUTION_SYNC_WAIT_SECS,
 };
 use super::tool_result::ToolResult;
 use super::validation_profile::{
@@ -163,9 +162,8 @@ struct ValidationBudget {
 /// call's synchronous wait. Positive values above the supported ceilings are
 /// caller preferences and are clamped before dispatch. Explicit
 /// `sync_wait_secs` is likewise clamped to both 60 seconds and the effective
-/// total budget. When omitted, compatibility keeps
-/// `min(SYNC_VALIDATION_WAIT_SECS, effective_timeout)`; equal grace and total
-/// budget leaves no Cargo handoff headroom.
+/// total budget. When omitted, use the same canonical early-handoff default as
+/// ordinary structured execution, bounded by the effective total timeout.
 fn resolve_validation_budget(
     tool_name: &str,
     timeout_secs: Option<u64>,
@@ -187,13 +185,13 @@ fn resolve_validation_budget(
             return Err(validation_sync_wait_rejection(
                 tool_name,
                 format!("{tool_name} sync_wait_secs must be at least 1"),
-                "pass a positive sync_wait_secs, or omit it for the existing synchronous grace.",
+                "pass a positive sync_wait_secs, or omit it for the Runtime early-handoff default.",
             ));
         }
         Some(sync_wait) => sync_wait
             .min(STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS)
             .min(effective_timeout_secs),
-        None => SYNC_VALIDATION_WAIT_SECS.min(effective_timeout_secs),
+        None => STRUCTURED_EXECUTION_SYNC_WAIT_SECS.min(effective_timeout_secs),
     };
     Ok(ValidationBudget {
         effective_timeout_secs,
@@ -206,7 +204,27 @@ mod validation_budget_tests {
     use super::*;
 
     #[test]
-    fn oversized_validation_preferences_are_clamped_and_zero_is_rejected() {
+    fn validation_budget_uses_early_handoff_default_and_preserves_explicit_clamps() {
+        for (tool_name, default_timeout_secs) in [
+            ("cargo_check", DEFAULT_CARGO_CHECK_TIMEOUT_SECS),
+            ("cargo_test", DEFAULT_CARGO_TEST_TIMEOUT_SECS),
+            ("cargo_fmt", DEFAULT_CARGO_FMT_TIMEOUT_SECS),
+            ("go_test", DEFAULT_CARGO_TEST_TIMEOUT_SECS),
+        ] {
+            let default =
+                resolve_validation_budget(tool_name, None, None, default_timeout_secs).unwrap();
+            assert_eq!(default.effective_timeout_secs, default_timeout_secs);
+            assert_eq!(default.sync_wait_secs, STRUCTURED_EXECUTION_SYNC_WAIT_SECS);
+        }
+
+        let short = resolve_validation_budget("cargo_check", Some(3), None, 600).unwrap();
+        assert_eq!(short.effective_timeout_secs, 3);
+        assert_eq!(short.sync_wait_secs, 3);
+
+        let explicit = resolve_validation_budget("cargo_check", Some(600), Some(45), 600).unwrap();
+        assert_eq!(explicit.effective_timeout_secs, 600);
+        assert_eq!(explicit.sync_wait_secs, 45);
+
         let oversized =
             resolve_validation_budget("cargo_check", Some(4_000), Some(600), 600).unwrap();
         assert_eq!(

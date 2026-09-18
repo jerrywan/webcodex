@@ -17,6 +17,7 @@ use crate::runner_protocol::{
     ShellJobValidationProgress, ShellJobValidationStep, JOB_INVENTORY_MAX_TERMINAL_JOBS,
 };
 use crate::tool_runtime::sessions::{SessionTransport, DEFAULT_MAX_EVENTS_PER_SESSION};
+use crate::tool_runtime::structured_execution::STRUCTURED_EXECUTION_SYNC_WAIT_SECS;
 use crate::tool_runtime::validation_events::validation_summary_for_session;
 use crate::tool_runtime::{ObserveJobsItem, ObserveJobsWakeOn, ToolCall, ToolRuntime};
 use serde_json::json;
@@ -815,7 +816,7 @@ async fn fast_cargo_check_completes_in_windows_and_leaves_no_visible_job() {
 }
 
 #[tokio::test]
-async fn long_cargo_check_hands_off_with_immediately_observable_token() {
+async fn default_cargo_check_handoff_preserves_same_execution_through_terminal() {
     let client_id = "vhandoff-long-check";
     let runtime = runtime_with_agent_project(client_id)
         .with_validation_sync_wait(std::time::Duration::from_millis(20));
@@ -846,7 +847,7 @@ async fn long_cargo_check_hands_off_with_immediately_observable_token() {
                     None,
                     None,
                     Some(600),
-                    Some(1),
+                    None,
                     None,
                     None,
                     None,
@@ -874,7 +875,14 @@ async fn long_cargo_check_hands_off_with_immediately_observable_token() {
     let result = task.await.unwrap();
     assert!(result.success, "{:?}", result.error);
     assert_eq!(result.output["promoted_to_job"], true);
-    assert_eq!(result.output["sync_wait_secs"], 1);
+    assert_eq!(
+        result.output["sync_wait_secs"],
+        STRUCTURED_EXECUTION_SYNC_WAIT_SECS
+    );
+    assert_eq!(result.output["execution_state"], "running");
+    assert_eq!(result.output["command_started"], true);
+    assert_eq!(result.output["command_completed"], false);
+    assert_eq!(result.output["terminal"], false);
     assert!(result.output["stdout_tail"]
         .as_str()
         .is_some_and(|tail| tail.contains("Checking demo v0.1.0")));
@@ -899,6 +907,11 @@ async fn long_cargo_check_hands_off_with_immediately_observable_token() {
         })
     );
     assert_eq!(result.output["job_id"], job_id);
+    assert_eq!(result.output["continuation"]["tool"], "observe_jobs");
+    assert_eq!(
+        result.output["continuation"]["arguments"]["items"][0]["job_id"],
+        job_id
+    );
     let observation_token = result.output["observation_token"]
         .as_str()
         .expect("cargo_check handoff observation token")
@@ -928,6 +941,163 @@ async fn long_cargo_check_hands_off_with_immediately_observable_token() {
             .as_str()
             .expect("observed cargo_check observation token"),
     );
+    assert!(
+        probe_patch_agent_request(&runtime, client_id)
+            .await
+            .is_none(),
+        "handoff must not enqueue a replacement validation"
+    );
+
+    runtime
+        .runner_registry
+        .update_job(cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "completed",
+            "Finished `dev` profile [unoptimized + debuginfo] target(s)\n",
+            "",
+            Some(0),
+            completed_progress(),
+            true,
+        ))
+        .await
+        .unwrap();
+    let terminal = runtime
+        .job_status_for_auth(job_id.clone(), false, None)
+        .await;
+    assert!(terminal.success, "{:?}", terminal.error);
+    assert_eq!(terminal.output["job_id"], job_id);
+    assert_eq!(terminal.output["status"], "completed");
+    assert_eq!(terminal.output["terminal"], true);
+    assert!(
+        probe_patch_agent_request(&runtime, client_id)
+            .await
+            .is_none(),
+        "terminal completion must remain the original execution"
+    );
+}
+
+#[tokio::test]
+async fn default_validation_handoff_beats_host_like_observation_deadline() {
+    let client_id = "vhandoff-host-like-deadline";
+    // Scale the production early-handoff grace down for deterministic CI. The
+    // model-facing budget still reports the canonical default; only this test's
+    // runtime wait cap is shortened.
+    let runtime = runtime_with_agent_project(client_id)
+        .with_validation_sync_wait(std::time::Duration::from_millis(20));
+    register_agent(
+        &runtime,
+        client_id,
+        None,
+        RunnerCapabilities {
+            async_shell_jobs: true,
+            structured_validation_argv: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let project = agent_test_project_id(client_id);
+
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let project = project.clone();
+        async move {
+            runtime
+                .cargo_check_with_context(
+                    project,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(600),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+        }
+    });
+    let (request, job_id) = poll_start_validation_job(&runtime, client_id).await;
+    runtime
+        .runner_registry
+        .update_job(cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "running",
+            "Checking host-fence v0.1.0\n",
+            "",
+            None,
+            running_progress("check"),
+            false,
+        ))
+        .await
+        .unwrap();
+
+    // The caller observation fence is deliberately longer than the test-scaled
+    // handoff grace but shorter than simulated validation completion.
+    let completion = tokio::spawn({
+        let runtime = runtime.clone();
+        let request_id = request.request_id.clone();
+        let job_id = job_id.clone();
+        async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1_200)).await;
+            runtime
+                .runner_registry
+                .update_job(cargo_test_update(
+                    client_id,
+                    &request_id,
+                    &job_id,
+                    "completed",
+                    "Finished host-fence check\n",
+                    "",
+                    Some(0),
+                    completed_progress(),
+                    true,
+                ))
+                .await
+                .unwrap();
+        }
+    });
+    let handoff = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+        .await
+        .expect("default handoff must return before the caller observation deadline")
+        .unwrap();
+    assert!(handoff.success, "{:?}", handoff.error);
+    assert_eq!(handoff.output["promoted_to_job"], true);
+    assert_eq!(
+        handoff.output["sync_wait_secs"],
+        STRUCTURED_EXECUTION_SYNC_WAIT_SECS
+    );
+    assert_eq!(handoff.output["job_id"], job_id);
+    assert_eq!(handoff.output["execution_state"], "running");
+    assert_eq!(handoff.output["command_started"], true);
+    assert_eq!(handoff.output["command_completed"], false);
+    assert_eq!(handoff.output["terminal"], false);
+    assert_eq!(handoff.output["continuation"]["tool"], "observe_jobs");
+    assert_eq!(
+        handoff.output["continuation"]["arguments"]["items"][0]["job_id"],
+        job_id
+    );
+    assert!(
+        probe_patch_agent_request(&runtime, client_id)
+            .await
+            .is_none(),
+        "deadline-safe handoff must not redispatch validation"
+    );
+
+    completion.await.unwrap();
+    let terminal = runtime
+        .job_status_for_auth(job_id.clone(), false, None)
+        .await;
+    assert!(terminal.success, "{:?}", terminal.error);
+    assert_eq!(terminal.output["job_id"], job_id);
+    assert_eq!(terminal.output["status"], "completed");
+    assert_eq!(terminal.output["terminal"], true);
 }
 
 /// Auto handoff: a validation still running when the injected sync window
@@ -1010,7 +1180,10 @@ async fn long_cargo_test_hands_off_to_queryable_job() {
     assert_eq!(result.output["command_started"], true);
     assert_eq!(result.output["command_completed"], false);
     assert_eq!(result.output["effective_timeout_secs"], 1800);
-    assert_eq!(result.output["sync_wait_secs"], 60);
+    assert_eq!(
+        result.output["sync_wait_secs"],
+        STRUCTURED_EXECUTION_SYNC_WAIT_SECS
+    );
     assert!(result.output.get("passed").is_none());
     assert!(result.output.get("failure_kind").is_none());
     assert_eq!(result.output["job_id"].as_str().unwrap(), job_id.as_str());

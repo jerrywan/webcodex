@@ -8,6 +8,7 @@ use crate::tool_runtime::kernel::{
 use crate::tool_runtime::orchestration_host::{
     CanonicalOrchestrationHost, OrchestrationHostFailureKind, OrchestrationPolicy,
 };
+use crate::tool_runtime::structured_execution::STRUCTURED_EXECUTION_SYNC_WAIT_SECS;
 use crate::tool_runtime::{ObserveJobsItem, ObserveJobsWakeOn, ToolRuntime};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -303,6 +304,96 @@ async fn e2a_cargo_check_handoff_preserves_same_canonical_job_and_sparse_receipt
     let serialized = serde_json::to_string(&summary).unwrap();
     assert!(serialized.contains("cargo_check"));
     assert!(serialized.contains(&job_id));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2a_omitted_sync_wait_uses_canonical_validation_default() {
+    let client_id = "code-mode-e2a-default-handoff";
+    let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
+    let task = spawn_code_mode_call(
+        &runtime,
+        "code_mode_exec_effectful",
+        project,
+        session_id,
+        r#"
+        const check = await tools.cargo_check({timeout_secs: 600});
+        text({job_id: check.output?.job_id ?? null});
+        "#
+        .to_string(),
+        5_000,
+    );
+
+    let (request, job_id) =
+        super::validation_handoff::poll_start_validation_job(&runtime, client_id).await;
+    let request_json = serde_json::to_value(&request).unwrap();
+    assert_eq!(
+        request_json["job_context"]["validation"]["sync_wait_secs"],
+        STRUCTURED_EXECUTION_SYNC_WAIT_SECS,
+        "E2a omission must reach the canonical validation budget resolver"
+    );
+    assert_eq!(
+        request_json["job_context"]["validation"]["effective_timeout_secs"],
+        600
+    );
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "running",
+            "Checking default e2a v0.1.0\n",
+            "",
+            None,
+            super::validation_handoff::running_progress("check"),
+            false,
+        ))
+        .await
+        .unwrap();
+
+    let outcome = task.await.unwrap();
+    assert!(outcome.success, "{outcome:?}");
+    let result = outcome.result.expect("outer E2a ToolResult");
+    assert!(result.success, "{result:?}");
+    let receipt = &result.output["effect_receipt"];
+    assert_eq!(receipt["consequential_calls"], 1);
+    assert_eq!(receipt["job_handoffs"], 1);
+    assert_eq!(receipt["outcome_unknown"], 0);
+    assert_eq!(receipt["children"][0]["tool"], "cargo_check");
+    assert_eq!(receipt["children"][0]["outcome"], "job_handoff");
+    assert_eq!(receipt["children"][0]["job_id"], job_id);
+    assert_eq!(
+        receipt["children"][0]["continuation"]["tool"],
+        "observe_jobs"
+    );
+    assert!(
+        probe_patch_agent_request(&runtime, client_id)
+            .await
+            .is_none(),
+        "E2a default handoff must not start a replacement validation"
+    );
+
+    runtime
+        .runner_registry
+        .update_job(super::validation_handoff::cargo_test_update(
+            client_id,
+            &request.request_id,
+            &job_id,
+            "completed",
+            "Finished default e2a check\n",
+            "",
+            Some(0),
+            super::validation_handoff::completed_progress(),
+            true,
+        ))
+        .await
+        .unwrap();
+    let terminal = runtime
+        .job_status_for_auth(job_id.clone(), false, None)
+        .await;
+    assert!(terminal.success, "{:?}", terminal.error);
+    assert_eq!(terminal.output["job_id"], job_id);
+    assert_eq!(terminal.output["status"], "completed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
