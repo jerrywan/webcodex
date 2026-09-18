@@ -244,6 +244,9 @@ pub(super) struct PendingShellRequest {
     /// Revalidated at dequeue so neither check nor reload can silently retarget
     /// a replacement process using the same client_id.
     pub(super) expected_runner_config_runner_instance_id: Option<String>,
+    /// Exact Runner process lease captured for configured-instruction observation.
+    /// Revalidated at dequeue so a replacement process cannot inherit the request.
+    pub(super) expected_instruction_runner_instance_id: Option<String>,
     /// Exact Runner process lease plus source/read/manage mode captured for a
     /// Runner-global Skill request. Revalidated at dequeue so a replacement
     /// process using the same client_id cannot inherit authority.

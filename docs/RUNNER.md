@@ -178,6 +178,52 @@ configured `roots` list is a hot-reloadable Runner configuration change: edit
 `runner.toml`, run `runner_config_check`, then `runner_config_reload` with the
 current generation. No Runner process restart is required.
 
+## Runner-level configured instructions
+
+A Runner can project the same coding guidance into every Project bootstrap on that
+Runner. v1 is configured manually in the Runner's `runner.toml`; Desktop file
+selection/upload UI is intentionally deferred.
+
+```toml
+[instructions]
+files = [
+    "/home/alice/.codex/AGENTS.md",
+]
+```
+
+On macOS use the equivalent Runner-local absolute path such as
+`/Users/alice/.codex/AGENTS.md`. On Windows, TOML literal strings avoid escaping
+backslashes:
+
+```toml
+[instructions]
+files = [
+    'C:\\Users\\alice\\.codex\\AGENTS.md',
+]
+```
+
+There is no implicit `~/.codex/AGENTS.md` discovery. Each configured path is
+absolute and Runner-local. At coding startup, Runner-configured sources are
+projected first in deterministic config order, followed by the existing
+project-local candidates (`AGENTS.md`, `agents.md`, `CLAUDE.md`,
+`.codex/AGENTS.md`, `.github/copilot-instructions.md`). Both classes are model
+guidance only; neither changes execution authority.
+
+Configured instruction files are read by a narrow Runner-owned instruction
+runtime. Their parent directories are **not** added to `[policy].allowed_roots`,
+ordinary Project file/shell/process tools do not gain access to them, and native
+absolute paths are not projected to the model. Model-facing sources use sanitized
+logical identities instead.
+
+Changing `[instructions].files` is hot-reloadable: edit `runner.toml`, run
+`runner_config_check`, then `runner_config_reload` with the current generation.
+No Runner restart is required. The files themselves remain live: editing a
+configured `AGENTS.md` is visible to the next `work_on_project`/new Project
+bootstrap without any config reload. Each Project bootstrap observes the current
+Runner-global instructions independently; v1 does not retain or suppress them
+across Projects. Truncated Runner-global sources stay bounded and do not create a
+generic arbitrary-file `read_more` authority.
+
 ## Local MCP providers
 
 The Runner can directly host persistent stdio MCP providers for WebCodex's built-in MCP gateway:
@@ -601,8 +647,9 @@ of finding its PID or sending signals manually:
 4. Inspect `runtime_status(client_id=...)` (or `list_runners`) after reload.
 
 `runner_config_reload` never writes `runner.toml`; it only activates the candidate
-already on disk. Hot-reloadable policy, shell, configured Skill roots, Native Plugin, and static SSH-resource changes can
-become active immediately, while fields reported in `restart_required_fields`
+already on disk. Hot-reloadable policy, shell, configured Skill roots, configured
+instruction files, Native Plugin, and static SSH-resource changes can become active
+immediately, while fields reported in `restart_required_fields`
 remain startup-only until the Runner restarts. Invalid candidates leave the active
 snapshot and generation unchanged. Managed `ssh_resource` mutations are different:
 they use a frozen startup snapshot and require a Runner restart exactly when the

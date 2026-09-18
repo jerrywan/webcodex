@@ -9,6 +9,9 @@ use crate::coding_agent::{validate_request as validate_coding_agent_request, Cod
 use crate::lsp_bridge::RunnerLspPayload;
 use crate::mcp_gateway::{validate_request as validate_mcp_gateway_request, McpGatewayRequest};
 use crate::plugin::{validate_request as validate_plugin_gateway_request, PluginGatewayRequest};
+use crate::runner_instruction::{
+    RunnerInstructionRequest, RUNNER_INSTRUCTION_REQUEST_KIND, RUNNER_INSTRUCTION_REQUEST_MAX_BYTES,
+};
 use crate::runner_protocol::{
     shell_computer_request_payload_max_bytes, validate_process_argv,
     validate_raw_shell_wire_command, validate_script_request, PersistentShellRequest,
@@ -624,6 +627,7 @@ pub enum RunnerOperation {
     Skill(RunnerSkillRequest),
     SshResource(SshResourceRequest),
     RunnerConfig(RunnerConfigOperationRequest),
+    RunnerInstruction(RunnerInstructionRequest),
 }
 
 impl RunnerOperation {
@@ -656,6 +660,7 @@ impl RunnerOperation {
             Self::Skill(_) => RUNNER_SKILL_REQUEST_KIND,
             Self::SshResource(_) => "ssh_resource",
             Self::RunnerConfig(_) => RUNNER_CONFIG_REQUEST_KIND,
+            Self::RunnerInstruction(_) => RUNNER_INSTRUCTION_REQUEST_KIND,
         }
     }
 
@@ -907,6 +912,18 @@ fn encode_operation(
             }
             wire.content = Some(content);
             wire.timeout_secs = 60;
+        }
+        RunnerOperation::RunnerInstruction(operation) => {
+            operation
+                .validate()
+                .map_err(|error| format!("invalid Runner instruction request: {error}"))?;
+            let content = serde_json::to_string(&operation)
+                .map_err(|error| format!("could not encode Runner instruction request: {error}"))?;
+            if content.len() > RUNNER_INSTRUCTION_REQUEST_MAX_BYTES {
+                return Err("Runner instruction request exceeds V2 payload bound".to_string());
+            }
+            wire.content = Some(content);
+            wire.timeout_secs = 30;
         }
         RunnerOperation::RunnerConfig(operation) => {
             operation
@@ -1328,6 +1345,21 @@ fn decode_operation(wire: &RunnerRequest) -> Result<RunnerOperation, String> {
                 .validate()
                 .map_err(|error| format!("invalid SSH resource request: {error}"))?;
             Ok(RunnerOperation::SshResource(operation))
+        }
+        RUNNER_INSTRUCTION_REQUEST_KIND => {
+            ensure_special_payloads_absent(wire)?;
+            ensure_empty_generic_execution_fields(wire, true)?;
+            let content = bounded_content(
+                wire,
+                RUNNER_INSTRUCTION_REQUEST_MAX_BYTES,
+                RUNNER_INSTRUCTION_REQUEST_KIND,
+            )?;
+            let operation = serde_json::from_str::<RunnerInstructionRequest>(content)
+                .map_err(|error| format!("invalid Runner instruction payload: {error}"))?;
+            operation
+                .validate()
+                .map_err(|error| format!("invalid Runner instruction request: {error}"))?;
+            Ok(RunnerOperation::RunnerInstruction(operation))
         }
         RUNNER_CONFIG_REQUEST_KIND => {
             ensure_special_payloads_absent(wire)?;

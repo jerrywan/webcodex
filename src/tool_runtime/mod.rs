@@ -34,6 +34,7 @@ pub(crate) mod files;
 mod git;
 mod runner_authorization;
 mod runner_config;
+mod runner_instructions;
 #[cfg(test)]
 pub(crate) use git::{framed_clean_show_changes_test_stdout, framed_show_changes_test_block};
 mod git_committed;

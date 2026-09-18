@@ -968,6 +968,8 @@ impl ToolRuntime {
                 match parse_instruction_runner_stdout(resp.stdout.unwrap_or_default()) {
                     Ok(Some((content, total_lines, full_sha256))) => {
                         InstructionCandidateRead::Found(LoadedInstructionCandidate {
+                            source_scope:
+                                super::project_instructions::InstructionSourceScope::Project,
                             path: path.to_string(),
                             content,
                             total_lines,

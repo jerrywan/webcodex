@@ -31,6 +31,9 @@ use webcodex_core::plugin::{
     validate_request as validate_plugin_gateway_request, PluginDispatchState, PluginGatewayRequest,
     PluginGatewayResponse,
 };
+use webcodex_core::runner_instruction::{
+    RunnerInstructionRequest, RUNNER_INSTRUCTION_REQUEST_MAX_BYTES,
+};
 use webcodex_core::runner_operation::{
     RunnerBrowserOperation, RunnerBrowserOperationKind, RunnerComputerOperation,
     RunnerComputerOperationKind, RunnerFileOperation, RunnerInvocationMetadata, RunnerOperation,
@@ -245,6 +248,7 @@ pub(super) fn enqueue_pending_request_locked(
             expected_mcp_gateway_provider_instance_id: None,
             expected_ssh_resource_runner_instance_id: None,
             expected_runner_config_runner_instance_id: None,
+            expected_instruction_runner_instance_id: None,
             skill_fence: None,
             enqueued_at,
             dispatched_transport: None,
@@ -1879,6 +1883,74 @@ impl RunnerRegistry {
             .get_mut(&request_id)
             .expect("Runner config request was just enqueued")
             .expected_runner_config_runner_instance_id =
+            Some(expected_runner_instance_id.to_string());
+        notify_runner_locked(&inner, client_id);
+        Ok((request_id, rx))
+    }
+
+    /// Enqueue one narrow configured-instruction snapshot request against one
+    /// exact live Runner process. The request carries no filesystem path.
+    pub async fn enqueue_runner_instruction(
+        &self,
+        client_id: &str,
+        expected_runner_instance_id: &str,
+        operation: RunnerInstructionRequest,
+        auth: Option<&crate::RunnerAccess>,
+        requested_by: String,
+    ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), String> {
+        operation.validate().map_err(|_| {
+            "invalid_runner_instruction_request: request was not started".to_string()
+        })?;
+        let content = serde_json::to_string(&operation).map_err(|_| {
+            "invalid_runner_instruction_request: request was not started".to_string()
+        })?;
+        if content.len() > RUNNER_INSTRUCTION_REQUEST_MAX_BYTES {
+            return Err("invalid_runner_instruction_request: request was not started".to_string());
+        }
+        let request_id = next_request_id();
+        let (tx, rx) = oneshot::channel();
+        let request = encode_runner_operation(
+            &request_id,
+            client_id,
+            requested_by,
+            RunnerOperation::RunnerInstruction(operation),
+        )
+        .map_err(|_| "invalid_runner_instruction_request: request was not started".to_string())?;
+        let mut inner = self.inner.lock().await;
+        let runner = inner
+            .runners
+            .get(client_id)
+            .ok_or_else(|| "exact Runner is unavailable".to_string())?;
+        assert_runner_access(auth, runner)
+            .map_err(|_| "exact Runner is unavailable".to_string())?;
+        if runner.runner_instance_id != expected_runner_instance_id {
+            return Err("runner_replaced: request was not started".to_string());
+        }
+        if !runner
+            .runner_features
+            .supports(RunnerFeature::InstructionRuntime)
+        {
+            return Err(
+                "capability_unavailable: Runner instruction runtime is unsupported".to_string(),
+            );
+        }
+        if now_ts().saturating_sub(runner.last_seen) > RUNNER_ONLINE_WINDOW_SECS {
+            return Err("exact Runner is offline; request was not started".to_string());
+        }
+        enqueue_pending_request_locked(
+            self.telemetry.as_ref(),
+            &mut inner,
+            client_id,
+            request_id.clone(),
+            request,
+            Some(tx),
+            None,
+        )?;
+        inner
+            .pending_by_id
+            .get_mut(&request_id)
+            .expect("Runner instruction request was just enqueued")
+            .expected_instruction_runner_instance_id =
             Some(expected_runner_instance_id.to_string());
         notify_runner_locked(&inner, client_id);
         Ok((request_id, rx))

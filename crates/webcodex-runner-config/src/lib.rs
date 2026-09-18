@@ -355,6 +355,7 @@ pub fn generated_runner_config_toml(opts: &RunnerInitOptions) -> Result<String, 
             // against its startup-bound path and must never be inferred from a
             // generated static runner.toml capability block.
             runner_config_control: false,
+            instruction_runtime: false,
         },
         policy: GeneratedRunnerPolicy {
             allow_raw_shell: true,

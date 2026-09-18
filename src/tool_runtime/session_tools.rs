@@ -192,7 +192,10 @@ impl ToolRuntime {
         // CLAUDE.md, ...). Any read failure is swallowed and never fails
         // start_session. `null` when no project was provided.
         let project_instructions = match &resolved {
-            Some(resolved) => Some(self.load_project_instructions(&resolved.config).await),
+            Some(resolved) => Some(
+                self.load_effective_session_instructions(resolved, auth)
+                    .await,
+            ),
             None => None,
         };
         if resolved.is_none() && auth.is_some_and(AuthContext::is_open_anonymous) {

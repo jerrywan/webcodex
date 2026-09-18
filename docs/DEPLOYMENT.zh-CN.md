@@ -317,6 +317,7 @@ package 时默认将其设为 private；维护者
 | `project_registry_dir` | 项目注册文件目录。 |
 | `[policy]` | 本地执行边界（`allowed_roots` 等）。 |
 | `[skills].roots` | 可选的 Runner 本机绝对 live Skill roots；WebCodex 不修改其中内容，受支持脚本可经 `run_skill_resource` 执行，也不会复制进 managed Skill Store。 |
+| `[instructions].files` | 可选 Runner 本机绝对 instruction 文件；应用于该 Runner 上每个 Project。无隐式默认路径；路径列表可 hot reload，文件内容本身 live。 |
 | `[shell]` | 可选 shell profile 定义与有界 persistent-shell 限制。 |
 | `[ssh.resources.<name>]` | 可选命名 SSH 目标，用于 Session 绑定的 `run_shell` / `run_job`。 |
 
@@ -340,6 +341,13 @@ max_output_bytes = 262144
 重启、且不会假装已经在线生效的 startup-only 变更。Unix service reload/SIGHUP 仍保留为
 调用同一 reload primitive 的兼容 trigger，但 first-class config control 不依赖它。身份、
 server/auth、项目来源、并发、能力与传输等字段在被报告为 restart-only 时仍需要重启。
+
+`[instructions].files` 明确属于 hot-reloadable 字段：完成 check/reload 后，新 Project
+bootstrap 会立即使用新的路径列表，不需要重启 Runner。已配置 instruction 文件的内容
+发生变化时甚至不需要 config reload，下一次 bootstrap 会直接重新读取。Configured
+instruction path 不会扩大 `[policy].allowed_roots` 或普通 Project filesystem authority，
+startup projection 也不会暴露 native absolute path。当前行为是 Runner-level 的手工
+`runner.toml` 配置，对该 Runner 上每个 Project 生效；Desktop 文件选择/上传 UI 后续再做。
 
 `[plugins]` 支持 live reload：generic Runner config reload 与 `plugin_tool reload` 共用同一个
 Plugin candidate admission/atomic-commit primitive。Plugin provider Tool 始终是 Runner-local

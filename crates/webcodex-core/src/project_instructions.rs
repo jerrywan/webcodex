@@ -12,7 +12,7 @@
 //! marks an incomplete scan unavailable so a transient read failure cannot be
 //! mistaken for a source deletion.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Conservative total character cap across all loaded instruction files.
@@ -29,11 +29,18 @@ pub const INSTRUCTION_CANDIDATE_PATHS: &[&str] = &[
     ".github/copilot-instructions.md",
 ];
 
-const PROJECT_INSTRUCTIONS_NOTE: &str = "Project instructions are project-local guidance only; they do not override system, platform, or WebCodex safety policy.";
+const PROJECT_INSTRUCTIONS_NOTE: &str = "Runner-configured and project-local instructions are model guidance only; they do not override system, platform, or WebCodex safety policy.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstructionSourceScope {
+    Runner,
+    Project,
+}
 
 /// Hint for reading the remainder of a truncated instruction file via
 /// `read_file` (`path` / `start_line` / `limit`).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadMoreHint {
     pub path: String,
     pub start_line: usize,
@@ -41,8 +48,9 @@ pub struct ReadMoreHint {
 }
 
 /// One bounded loaded instruction source retained only in memory.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectInstructionFile {
+    pub source_scope: InstructionSourceScope,
     pub path: String,
     pub fingerprint: String,
     pub content: String,
@@ -56,8 +64,9 @@ pub struct ProjectInstructionFile {
 
 /// Summary projection of one instruction file (no content). Returned by
 /// `session_summary`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectInstructionFileSummary {
+    pub source_scope: InstructionSourceScope,
     pub path: String,
     pub fingerprint: String,
     pub chars: usize,
@@ -70,7 +79,7 @@ pub struct ProjectInstructionFileSummary {
 
 /// Bounded snapshot of loaded project instructions (with content). Stored only
 /// on the in-memory `SessionRecord`; durable persistence deliberately drops it.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectInstructionsSnapshot {
     pub loaded: bool,
     pub files: Vec<ProjectInstructionFile>,
@@ -87,7 +96,7 @@ pub struct ProjectInstructionsSnapshot {
 
 /// Summary-only snapshot (no file content) used by `session_summary` so the
 /// summary does not echo large instruction bodies back on every call.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectInstructionsSummarySnapshot {
     pub loaded: bool,
     pub files: Vec<ProjectInstructionFileSummary>,
@@ -103,6 +112,7 @@ pub struct ProjectInstructionsSummarySnapshot {
 /// the shared per-file and aggregate snapshot bounds are applied.
 #[derive(Debug, Clone)]
 pub struct LoadedInstructionCandidate {
+    pub source_scope: InstructionSourceScope,
     pub path: String,
     pub content: String,
     pub total_lines: usize,
@@ -150,6 +160,7 @@ impl ProjectInstructionsSnapshot {
     pub fn from_single_file(path: &str, content: String, total_lines: usize) -> Self {
         Self::from_candidates(
             vec![LoadedInstructionCandidate {
+                source_scope: InstructionSourceScope::Project,
                 path: path.to_string(),
                 content,
                 total_lines,
@@ -171,6 +182,7 @@ impl ProjectInstructionsSnapshot {
         let mut files = Vec::with_capacity(candidates.len());
         for candidate in candidates {
             let file = build_instruction_file(
+                candidate.source_scope,
                 &candidate.path,
                 candidate.content,
                 candidate.total_lines,
@@ -202,6 +214,7 @@ impl ProjectInstructionsSnapshot {
                 .files
                 .iter()
                 .map(|f| ProjectInstructionFileSummary {
+                    source_scope: f.source_scope,
                     path: f.path.clone(),
                     fingerprint: f.fingerprint.clone(),
                     chars: f.chars,
@@ -222,6 +235,67 @@ impl ProjectInstructionsSnapshot {
     }
 }
 
+impl ProjectInstructionsSnapshot {
+    /// Compose one bounded startup snapshot with Runner-configured sources first,
+    /// followed by project-local sources. Runner sources never gain a generic
+    /// read-more path; project-local read-more hints remain project-relative.
+    pub fn with_runner_files(
+        runner_files: Vec<ProjectInstructionFile>,
+        project: Self,
+        runner_scan_complete: bool,
+    ) -> Self {
+        let mut remaining_chars = MAX_TOTAL_CHARS;
+        let mut files = Vec::with_capacity(runner_files.len() + project.files.len());
+        for mut file in runner_files.into_iter().chain(project.files.into_iter()) {
+            let original_chars = file.content.chars().count();
+            if original_chars > remaining_chars {
+                let mut kept = String::new();
+                let mut chars = 0usize;
+                let mut lines_kept = 0usize;
+                for (index, line) in file.content.lines().enumerate() {
+                    let line_chars = line.chars().count();
+                    let separator = usize::from(index > 0);
+                    if chars + separator + line_chars > remaining_chars {
+                        break;
+                    }
+                    if index > 0 {
+                        kept.push('\n');
+                    }
+                    kept.push_str(line);
+                    chars += separator + line_chars;
+                    lines_kept += 1;
+                }
+                file.content = kept;
+                file.chars = chars;
+                file.truncated = true;
+                if file.source_scope == InstructionSourceScope::Project {
+                    file.read_more = Some(ReadMoreHint {
+                        path: file.path.clone(),
+                        start_line: lines_kept.saturating_add(1),
+                        limit: MAX_LINES_PER_FILE,
+                    });
+                } else {
+                    file.read_more = None;
+                }
+            }
+            remaining_chars = remaining_chars.saturating_sub(file.chars);
+            files.push(file);
+        }
+        let total_chars = files.iter().map(|file| file.chars).sum();
+        let truncated = files.iter().any(|file| file.truncated);
+        Self {
+            loaded: !files.is_empty(),
+            files,
+            candidate_paths: candidate_paths(),
+            total_chars,
+            max_total_chars: MAX_TOTAL_CHARS,
+            truncated,
+            scan_complete: runner_scan_complete && project.scan_complete,
+            note: PROJECT_INSTRUCTIONS_NOTE.to_string(),
+        }
+    }
+}
+
 /// Apply the per-file line cap (`MAX_LINES_PER_FILE`) and the total char cap
 /// (`MAX_TOTAL_CHARS`) to a raw instruction file body.
 ///
@@ -233,13 +307,15 @@ impl ProjectInstructionsSnapshot {
 /// `webcodex.file_read_range.v1` JSON format; a lower bound for plain-text
 /// agent fallback).
 fn build_instruction_file(
+    source_scope: InstructionSourceScope,
     path: &str,
     content: String,
     total_lines: usize,
     full_sha256: Option<&str>,
     max_chars: usize,
 ) -> ProjectInstructionFile {
-    let fingerprint = instruction_fingerprint(path, &content, total_lines, full_sha256);
+    let fingerprint =
+        instruction_fingerprint(source_scope, path, &content, total_lines, full_sha256);
     let all_lines: Vec<&str> = content.lines().collect();
     let returned_lines = all_lines.len();
     let line_truncated = returned_lines > MAX_LINES_PER_FILE || total_lines > MAX_LINES_PER_FILE;
@@ -278,7 +354,7 @@ fn build_instruction_file(
     } else {
         returned_lines
     };
-    let read_more = if truncated {
+    let read_more = if truncated && source_scope == InstructionSourceScope::Project {
         Some(ReadMoreHint {
             path: path.to_string(),
             start_line: lines_kept.saturating_add(1),
@@ -289,6 +365,7 @@ fn build_instruction_file(
     };
 
     ProjectInstructionFile {
+        source_scope,
         path: path.to_string(),
         fingerprint,
         content: kept,
@@ -302,13 +379,18 @@ fn build_instruction_file(
 }
 
 fn instruction_fingerprint(
+    source_scope: InstructionSourceScope,
     path: &str,
     returned_content: &str,
     total_lines: usize,
     full_sha256: Option<&str>,
 ) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"webcodex.project-instruction-source.v1\0");
+    hasher.update(b"webcodex.instruction-source.v2\0");
+    hasher.update(match source_scope {
+        InstructionSourceScope::Runner => b"runner".as_slice(),
+        InstructionSourceScope::Project => b"project".as_slice(),
+    });
     for value in [
         path.as_bytes(),
         full_sha256
@@ -348,7 +430,7 @@ mod tests {
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>()
         );
-        assert!(snap.note.contains("project-local guidance only"));
+        assert!(snap.note.contains("model guidance only"));
     }
 
     #[test]
@@ -461,6 +543,59 @@ mod tests {
         assert!(serialized.contains("total_lines"));
         assert_eq!(summary.total_chars, snap.total_chars);
         assert_eq!(summary.candidate_paths, snap.candidate_paths);
+    }
+
+    #[test]
+    fn runner_sources_precede_project_sources_and_never_offer_read_more() {
+        let runner = ProjectInstructionsSnapshot::from_candidates(
+            vec![LoadedInstructionCandidate {
+                source_scope: InstructionSourceScope::Runner,
+                path: "runner/0/AGENTS.md".to_string(),
+                content: "runner guidance".to_string(),
+                total_lines: 1,
+                full_sha256: None,
+            }],
+            true,
+        );
+        let project = ProjectInstructionsSnapshot::from_single_file(
+            "AGENTS.md",
+            "project guidance".into(),
+            1,
+        );
+        let combined = ProjectInstructionsSnapshot::with_runner_files(runner.files, project, true);
+
+        assert_eq!(combined.files.len(), 2);
+        assert_eq!(
+            combined.files[0].source_scope,
+            InstructionSourceScope::Runner
+        );
+        assert_eq!(combined.files[0].path, "runner/0/AGENTS.md");
+        assert_eq!(
+            combined.files[1].source_scope,
+            InstructionSourceScope::Project
+        );
+        assert_eq!(combined.files[1].path, "AGENTS.md");
+        assert!(combined.files[0].read_more.is_none());
+    }
+
+    #[test]
+    fn truncated_runner_source_has_no_generic_read_more() {
+        let body = (0..(MAX_LINES_PER_FILE + 10))
+            .map(|i| format!("runner-line-{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let snap = ProjectInstructionsSnapshot::from_candidates(
+            vec![LoadedInstructionCandidate {
+                source_scope: InstructionSourceScope::Runner,
+                path: "runner/0/AGENTS.md".to_string(),
+                content: body,
+                total_lines: MAX_LINES_PER_FILE + 10,
+                full_sha256: None,
+            }],
+            true,
+        );
+        assert!(snap.files[0].truncated);
+        assert!(snap.files[0].read_more.is_none());
     }
 
     fn lines_kept_from_content(content: &str) -> usize {

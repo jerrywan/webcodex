@@ -2849,6 +2849,8 @@ fn project_instructions_content_not_persisted_or_leaked_after_restore() {
             .with_project_instructions(Some(
                 ProjectInstructionsSnapshot::from_candidates(
                     vec![LoadedInstructionCandidate {
+                        source_scope:
+                            webcodex_core::project_instructions::InstructionSourceScope::Project,
                         path: "AGENTS.md".to_string(),
                         content: secret_body.to_string(),
                         total_lines: 1,

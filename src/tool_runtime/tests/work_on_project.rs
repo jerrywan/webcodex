@@ -24,6 +24,13 @@ use webcodex_core::plugin::{
     PluginGatewayRequest, PluginGatewayResponse, PluginGatewayResponsePayload,
     PluginSelectionAnnotations, ProjectPluginCatalog, ProjectPluginCatalogEntry,
 };
+use webcodex_core::project_instructions::{
+    InstructionSourceScope, LoadedInstructionCandidate, ProjectInstructionsSnapshot,
+};
+use webcodex_core::runner_instruction::{
+    RunnerInstructionSnapshotResponse, RUNNER_INSTRUCTION_REQUEST_KIND,
+    RUNNER_INSTRUCTION_RESPONSE_FORMAT,
+};
 use webcodex_core::runner_skill::{
     RunnerSkillDescriptor, RunnerSkillListResponse, RunnerSkillRequest,
     RUNNER_SKILL_RESPONSE_FORMAT,
@@ -556,6 +563,60 @@ async fn dispatch_recording_startup_requests(
     record_startup_requests(runtime, client_id, task).await
 }
 
+fn runner_instruction_snapshot_stdout(body: &str, generation: u64) -> String {
+    let snapshot = ProjectInstructionsSnapshot::from_candidates(
+        vec![LoadedInstructionCandidate {
+            source_scope: InstructionSourceScope::Runner,
+            path: "runner/0/AGENTS.md".to_string(),
+            content: body.to_string(),
+            total_lines: body.lines().count(),
+            full_sha256: None,
+        }],
+        true,
+    );
+    serde_json::to_string(&RunnerInstructionSnapshotResponse {
+        format: RUNNER_INSTRUCTION_RESPONSE_FORMAT.to_string(),
+        generation,
+        scan_complete: snapshot.scan_complete,
+        files: snapshot.files,
+    })
+    .unwrap()
+}
+
+async fn dispatch_recording_startup_requests_with_runner_instructions(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    call: ToolCall,
+    auth: Option<&crate::auth::AuthContext>,
+    window_id: &str,
+    runner_instruction_stdout: &str,
+) -> (ToolResult, Vec<String>) {
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let auth = auth.cloned();
+        let window_id = window_id.to_string();
+        async move {
+            let window = crate::client_window::ClientWindow::for_test(&window_id);
+            runtime
+                .dispatch_with_auth_transport_options_and_metadata_with_window(
+                    call,
+                    auth.as_ref(),
+                    crate::tool_runtime::sessions::SessionTransport::Mcp,
+                    Default::default(),
+                    Some(&window),
+                )
+                .await
+        }
+    });
+    record_startup_requests_with_runner_instruction_response(
+        runtime,
+        client_id,
+        task,
+        Some(runner_instruction_stdout),
+    )
+    .await
+}
+
 async fn dispatch_recording_coding_workflow_diagnostic(
     runtime: &ToolRuntime,
     client_id: &str,
@@ -598,6 +659,15 @@ async fn record_startup_requests(
     client_id: &str,
     task: tokio::task::JoinHandle<ToolResult>,
 ) -> (ToolResult, Vec<String>) {
+    record_startup_requests_with_runner_instruction_response(runtime, client_id, task, None).await
+}
+
+async fn record_startup_requests_with_runner_instruction_response(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    task: tokio::task::JoinHandle<ToolResult>,
+    runner_instruction_stdout: Option<&str>,
+) -> (ToolResult, Vec<String>) {
     let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     let mut request_kinds = Vec::new();
     loop {
@@ -613,7 +683,12 @@ async fn record_startup_requests(
             continue;
         };
         request_kinds.push(request.kind.clone());
-        if request.kind == AGENT_LSP_REQUEST_KIND {
+        if request.kind == RUNNER_INSTRUCTION_REQUEST_KIND {
+            let stdout = runner_instruction_stdout
+                .expect("instruction-runtime fixture requires a configured Runner response");
+            complete_patch_agent_request(runtime, client_id, &request.request_id, 0, stdout, "")
+                .await;
+        } else if request.kind == AGENT_LSP_REQUEST_KIND {
             assert_eq!(
                 request.lsp.as_ref().map(|payload| &payload.request),
                 Some(&RunnerLspRequest::Status)
@@ -3478,6 +3553,12 @@ async fn work_on_project_new_task_is_lightweight_and_preserves_startup_context()
             .all(|kind| kind != "file_project_overview"),
         "work_on_project unexpectedly enqueued an overview: {request_kinds:?}"
     );
+    assert!(
+        request_kinds
+            .iter()
+            .all(|kind| kind != RUNNER_INSTRUCTION_REQUEST_KIND),
+        "an older Runner without instruction_runtime must not receive the new request: {request_kinds:?}"
+    );
 
     // Instructions loaded with bounded body and headings.
     let instructions = &result.output["instructions"];
@@ -3541,6 +3622,165 @@ async fn work_on_project_new_task_is_lightweight_and_preserves_startup_context()
             .contains(&root.path().to_string_lossy().to_string()),
         "compact output leaked the absolute repository path"
     );
+}
+
+#[tokio::test]
+async fn runner_global_instructions_compose_change_and_repeat_across_projects() {
+    let root_a = tempfile::tempdir().unwrap();
+    let root_b = tempfile::tempdir().unwrap();
+    seed_coding_repository(root_a.path(), "project A rule");
+    init_git_repo(root_b.path());
+
+    let runtime = ToolRuntime::new_for_tests();
+    register_agent_with_projects(
+        &runtime,
+        "wop-global",
+        None,
+        RunnerCapabilities {
+            shell: true,
+            git: true,
+            file_read: true,
+            file_write: true,
+            lsp_read_only_navigation: true,
+            internal_posix_script: true,
+            instruction_runtime: true,
+            ..Default::default()
+        },
+        vec![
+            registered_project("a", &root_a.path().to_string_lossy()),
+            registered_project("b", &root_b.path().to_string_lossy()),
+        ],
+    )
+    .await;
+    let project_a = crate::tool_runtime::runner_project_runtime_id("wop-global", "a");
+    let project_b = crate::tool_runtime::runner_project_runtime_id("wop-global", "b");
+    let auth = auth_context(None, true);
+    let global_v1 = runner_instruction_snapshot_stdout("runner global v1", 7);
+
+    let (first, first_requests) = dispatch_recording_startup_requests_with_runner_instructions(
+        &runtime,
+        "wop-global",
+        work_on_project_call(&project_a, "project A task", None),
+        Some(&auth),
+        "wop-global-window",
+        &global_v1,
+    )
+    .await;
+    assert!(first.success, "{:?}", first.error);
+    assert!(first_requests
+        .iter()
+        .any(|kind| kind == RUNNER_INSTRUCTION_REQUEST_KIND));
+    let first_sources = first.output["instructions"]["sources"].as_array().unwrap();
+    assert_eq!(first_sources[0]["source_scope"], "runner");
+    assert_eq!(first_sources[0]["path"], "runner/0/AGENTS.md");
+    assert_eq!(first_sources[0]["content"], "runner global v1");
+    assert_eq!(first_sources[1]["source_scope"], "project");
+    assert_eq!(first_sources[1]["path"], "AGENTS.md");
+    assert!(first_sources[1]["content"]
+        .as_str()
+        .is_some_and(|content| content.contains("project A rule")));
+    let first_runner_fingerprint = first_sources[0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let first_session_id = first.output["session_id"].as_str().unwrap().to_string();
+
+    let durable_summary = runtime
+        .sessions
+        .summary(&first_session_id, Some(20))
+        .unwrap()
+        .project_instructions
+        .expect("instruction summary");
+    let durable_json = serde_json::to_string(&durable_summary).unwrap();
+    assert!(durable_json.contains("runner/0/AGENTS.md"));
+    assert!(!durable_json.contains("runner global v1"));
+    assert!(!durable_json.contains("project A rule"));
+
+    // The same ChatGPT window opening another Project must observe the Runner-global
+    // source again; v1 intentionally has no cross-Project model-context suppression.
+    let (second_project, second_requests) =
+        dispatch_recording_startup_requests_with_runner_instructions(
+            &runtime,
+            "wop-global",
+            work_on_project_call(&project_b, "project B task", None),
+            Some(&auth),
+            "wop-global-window",
+            &global_v1,
+        )
+        .await;
+    assert!(second_project.success, "{:?}", second_project.error);
+    assert!(second_requests
+        .iter()
+        .any(|kind| kind == RUNNER_INSTRUCTION_REQUEST_KIND));
+    let second_sources = second_project.output["instructions"]["sources"]
+        .as_array()
+        .unwrap();
+    assert_eq!(second_sources.len(), 1);
+    assert_eq!(second_sources[0]["source_scope"], "runner");
+    assert_eq!(second_sources[0]["content"], "runner global v1");
+
+    // Explicit body suppression remains one shared instruction projection switch;
+    // it does not create a special retention protocol for Runner-global sources.
+    let (suppressed, suppressed_requests) =
+        dispatch_recording_startup_requests_with_runner_instructions(
+            &runtime,
+            "wop-global",
+            work_on_project_call_with_instruction_projection(
+                &project_b,
+                "project B metadata-only task",
+                None,
+                false,
+            ),
+            Some(&auth),
+            "wop-global-window",
+            &global_v1,
+        )
+        .await;
+    assert!(suppressed.success, "{:?}", suppressed.error);
+    assert!(suppressed_requests
+        .iter()
+        .any(|kind| kind == RUNNER_INSTRUCTION_REQUEST_KIND));
+    let suppressed_runner = suppressed.output["instructions"]["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|source| source["source_scope"] == "runner")
+        .unwrap();
+    assert!(suppressed_runner.get("content").is_none());
+
+    // File contents are live independently from config generation: a new snapshot
+    // at the same generation changes continuation fingerprint/content immediately.
+    let global_v2 = runner_instruction_snapshot_stdout("runner global v2", 7);
+    let (changed, changed_requests) = dispatch_recording_startup_requests_with_runner_instructions(
+        &runtime,
+        "wop-global",
+        work_on_project_call(
+            &project_a,
+            "resume after global edit",
+            Some(&first_session_id),
+        ),
+        Some(&auth),
+        "wop-global-window",
+        &global_v2,
+    )
+    .await;
+    assert!(changed.success, "{:?}", changed.error);
+    assert!(changed_requests
+        .iter()
+        .any(|kind| kind == RUNNER_INSTRUCTION_REQUEST_KIND));
+    assert_eq!(changed.output["instructions"]["status"], "changed");
+    assert!(changed.output["instructions"]["changed_sources"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("runner/0/AGENTS.md")));
+    let changed_runner = changed.output["instructions"]["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|source| source["source_scope"] == "runner")
+        .unwrap();
+    assert_eq!(changed_runner["content"], "runner global v2");
+    assert_ne!(changed_runner["fingerprint"], first_runner_fingerprint);
 }
 
 #[tokio::test]

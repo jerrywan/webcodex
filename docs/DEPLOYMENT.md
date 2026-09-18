@@ -365,6 +365,7 @@ Client enrollment generates the Runner config. Important settings in
 | `project_registry_dir` | Directory of project registry files. |
 | `[policy]` | Local execution boundary (`allowed_roots`, etc.). |
 | `[skills].roots` | Optional absolute Runner-local live Skill roots. WebCodex does not modify them; supported scripts may execute via `run_skill_resource`; content is not copied into the managed Skill Store. |
+| `[instructions].files` | Optional absolute Runner-local instruction files applied to every Project on this Runner. No implicit default path; the list is hot-reloadable and file contents are live. |
 | `[shell]` | Optional shell profile definitions and bounded persistent-shell limits. |
 | `[ssh.resources.<name>]` | Optional named SSH target for Session-bound `run_shell` / `run_job`. |
 
@@ -391,6 +392,15 @@ until restart. Unix service reload/SIGHUP remains a compatibility trigger for th
 same reload primitive, but is not required for first-class config control. Identity,
 server/auth, project source, concurrency, capabilities, and transport changes
 remain restart-only where reported.
+
+`[instructions].files` is explicitly hot-reloadable: after check/reload, new
+Project bootstraps use the new list without Runner restart. Changing the contents
+of an already-configured instruction file needs no config reload at all; the next
+bootstrap re-reads it. These configured instruction paths do not widen
+`[policy].allowed_roots` or ordinary Project filesystem authority, and native
+absolute paths are not exposed in startup projection. The current manual
+`runner.toml` configuration is Runner-level and applies to every Project on that
+Runner; Desktop selection/upload UI is future work.
 
 `[plugins]` is live-reloadable: generic Runner config reload and `plugin_tool reload`
 share the same Plugin candidate admission/atomic-commit primitive. Plugin provider

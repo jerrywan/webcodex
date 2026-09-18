@@ -93,6 +93,71 @@ impl RunnerRegistry {
             let Some(request_id) = request_id else {
                 return Ok(None);
             };
+            let stale_instruction_error =
+                inner.pending_by_id.get(&request_id).and_then(|pending| {
+                    match (
+                        &pending.operation,
+                        pending.expected_instruction_runner_instance_id.as_deref(),
+                    ) {
+                        (RunnerOperation::RunnerInstruction(_), Some(expected)) => {
+                            let Some(runner) = inner.runners.get(&body.client_id) else {
+                                return Some((
+                                "runner_replaced",
+                                "Exact Runner disappeared before instruction observation dispatch"
+                                    .to_string(),
+                            ));
+                            };
+                            if runner.runner_instance_id != expected {
+                                return Some((
+                                    "runner_replaced",
+                                    "Exact Runner changed before instruction observation dispatch"
+                                        .to_string(),
+                                ));
+                            }
+                            (!runner
+                                .runner_features
+                                .supports(RunnerFeature::InstructionRuntime))
+                            .then_some((
+                                "capability_unavailable",
+                                "Runner instruction-runtime capability changed before dispatch"
+                                    .to_string(),
+                            ))
+                        }
+                        (RunnerOperation::RunnerInstruction(_), None) => Some((
+                            "runner_replaced",
+                            "Runner instruction exact-process fence is missing".to_string(),
+                        )),
+                        (_, Some(_)) => Some((
+                            "runner_replaced",
+                            "Runner instruction exact-process fence is inconsistent".to_string(),
+                        )),
+                        _ => None,
+                    }
+                });
+            if let Some((code, message)) = stale_instruction_error {
+                let Some(mut pending) = inner.pending_by_id.remove(&request_id) else {
+                    continue;
+                };
+                if let Some(waiter) = pending.waiter.take() {
+                    let _ = waiter.send(ShellRunResponse {
+                        success: false,
+                        request_id: request_id.clone(),
+                        client_id: body.client_id.clone(),
+                        cwd: None,
+                        command_preview: String::new(),
+                        exit_code: None,
+                        stdout: None,
+                        stderr: None,
+                        stdout_truncated: false,
+                        stderr_truncated: false,
+                        duration_ms: None,
+                        error: Some(format!("{code}: {message}")),
+                        request_dispatched: Some(false),
+                        command_execution_state: Some(ShellCommandExecutionState::NotStarted),
+                    });
+                }
+                continue;
+            }
             let stale_runner_config_error =
                 inner.pending_by_id.get(&request_id).and_then(|pending| {
                     match (

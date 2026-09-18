@@ -262,6 +262,7 @@ fn test_runner_config(server_url: String) -> RunnerConfig {
         quic: None,
         shell: ShellConfig::default(),
         skills: super::super::config::SkillsConfig::default(),
+        instructions: super::super::config::InstructionsConfig::default(),
         ssh: Default::default(),
         tool_providers: Default::default(),
         mcp_gateway: Default::default(),

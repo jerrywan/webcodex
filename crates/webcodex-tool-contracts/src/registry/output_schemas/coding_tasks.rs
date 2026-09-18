@@ -585,7 +585,7 @@ fn startup_workflow_role_schema() -> Value {
 fn startup_instructions_schema() -> Value {
     json!({
         "type": "object",
-        "description": "Project-local repository instructions discovered from fixed sources such as AGENTS.md or CLAUDE.md. Separate from the WebCodex built-in workflow.",
+        "description": "Runner-configured instructions followed by project-local repository instructions. Both are model guidance only and are separate from the WebCodex built-in workflow.",
         "properties": {
             "status": {
                 "type": "string",
@@ -593,24 +593,15 @@ fn startup_instructions_schema() -> Value {
             },
             "sources": {
                 "type": "array",
-                "maxItems": 5,
+                "maxItems": 21,
                 "items": startup_instruction_source_schema(),
-                "description": "Fixed, ordered repository-rule sources."
+                "description": "Deterministic Runner-global sources followed by fixed project-local repository-rule sources."
             },
             "changed_sources": {
                 "type": "array",
                 "uniqueItems": true,
-                "maxItems": 5,
-                "items": {
-                    "type": "string",
-                    "enum": [
-                        "AGENTS.md",
-                        "agents.md",
-                        "CLAUDE.md",
-                        ".codex/AGENTS.md",
-                        ".github/copilot-instructions.md"
-                    ]
-                }
+                "maxItems": 21,
+                "items": instruction_source_path_schema()
             },
             "content_included": {"type": "boolean"},
             "truncated": {"type": "boolean"},
@@ -628,11 +619,10 @@ fn startup_instructions_schema() -> Value {
     })
 }
 
-fn startup_instruction_source_schema() -> Value {
+fn instruction_source_path_schema() -> Value {
     json!({
-        "type": "object",
-        "properties": {
-            "path": {
+        "anyOf": [
+            {
                 "type": "string",
                 "enum": [
                     "AGENTS.md",
@@ -642,6 +632,20 @@ fn startup_instruction_source_schema() -> Value {
                     ".github/copilot-instructions.md"
                 ]
             },
+            {
+                "type": "string",
+                "pattern": "^runner/[0-9]+/[^/\\\\\\u0000]{1,255}$"
+            }
+        ]
+    })
+}
+
+fn startup_instruction_source_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "source_scope": {"type": "string", "enum": ["runner", "project"]},
+            "path": instruction_source_path_schema(),
             "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "truncated": {"type": "boolean"},
             "headings": {
@@ -675,7 +679,7 @@ fn startup_instruction_source_schema() -> Value {
                 ]
             }
         },
-        "required": ["path", "fingerprint", "truncated", "headings", "content", "read_more"],
+        "required": ["source_scope", "path", "fingerprint", "truncated", "headings", "content", "read_more"],
         "additionalProperties": false
     })
 }
@@ -1129,7 +1133,7 @@ fn semantic_navigation_schema() -> Value {
 
 fn work_on_project_instruction_source_schema() -> Value {
     let mut schema = startup_instruction_source_schema();
-    schema["required"] = json!(["path", "fingerprint"]);
+    schema["required"] = json!(["source_scope", "path", "fingerprint"]);
     schema
 }
 
@@ -1155,7 +1159,7 @@ fn work_on_project_output_schema() -> Value {
     });
     let compact_instructions = json!({
         "type": "object",
-        "description": "Compact project-local repository instruction projection, separate from the WebCodex built-in workflow. status reports repository/Workflow Session delta; content_included reports this call's caller-explicit model-facing body projection. False/null/empty body-projection defaults are omitted.",
+        "description": "Compact Runner-global plus project-local instruction projection, separate from the WebCodex built-in workflow. status reports Workflow Session delta; content_included reports this call's caller-explicit model-facing body projection. False/null/empty body-projection defaults are omitted.",
         "properties": {
             "status": {
                 "type": "string",
@@ -1163,24 +1167,15 @@ fn work_on_project_output_schema() -> Value {
             },
             "sources": {
                 "type": "array",
-                "maxItems": 5,
+                "maxItems": 21,
                 "items": work_on_project_instruction_source_schema(),
-                "description": "Fixed, ordered repository-rule sources. path/fingerprint are always present; false/null/empty body-projection defaults are omitted."
+                "description": "Runner-global sources precede project-local sources. source_scope/path/fingerprint are always present; false/null/empty body-projection defaults are omitted."
             },
             "changed_sources": {
                 "type": "array",
                 "uniqueItems": true,
-                "maxItems": 5,
-                "items": {
-                    "type": "string",
-                    "enum": [
-                        "AGENTS.md",
-                        "agents.md",
-                        "CLAUDE.md",
-                        ".codex/AGENTS.md",
-                        ".github/copilot-instructions.md"
-                    ]
-                }
+                "maxItems": 21,
+                "items": instruction_source_path_schema()
             },
             "content_included": {"type": "boolean", "description": "Emitted only when bounded instruction bodies are included for this call; omission means false. This is independent of status=reused."},
             "truncated": {"type": "boolean", "description": "Emitted only when true."},

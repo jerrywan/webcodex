@@ -21,6 +21,7 @@ pub(crate) mod patches;
 pub(crate) mod persistent_shell;
 pub(crate) mod plugin;
 pub(crate) mod projects;
+pub(crate) mod runner_instructions;
 pub(crate) mod runner_skills;
 // Remote persistent shells always run POSIX sh/bash on the SSH target. Their
 // local child ownership is platform-specific: Unix uses a private process group,
@@ -91,6 +92,7 @@ pub(crate) use projects::{
 pub(crate) use projects::{
     parse_runner_project_toml, runner_project_summary, validate_project_path_policy,
 };
+pub(crate) use runner_instructions::handle_runner_instruction_request;
 pub(crate) use runner_skills::{
     handle_runner_skill_request, run_skill_resource_with_profiles_and_execution_state,
 };

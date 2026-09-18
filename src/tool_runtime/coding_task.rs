@@ -813,7 +813,7 @@ impl ToolRuntime {
                 let (semantic_navigation, project_instructions, repository_overview, extensions) =
                     futures_util::future::join4(
                         self.probe_semantic_navigation_for_startup(&resolved),
-                        self.load_coding_project_instructions(&resolved.config),
+                        self.load_effective_coding_instructions(&resolved, auth),
                         self.repository_overview_for_startup(&resolved, auth),
                         extension_discovery,
                     )
@@ -828,7 +828,7 @@ impl ToolRuntime {
                 let (semantic_navigation, project_instructions, extensions) =
                     futures_util::future::join3(
                         self.probe_semantic_navigation_for_startup(&resolved),
-                        self.load_coding_project_instructions(&resolved.config),
+                        self.load_effective_coding_instructions(&resolved, auth),
                         extension_discovery,
                     )
                     .await;
@@ -2316,6 +2316,7 @@ struct WorkOnProjectInstructionsProjection {
 
 #[derive(Deserialize, Serialize)]
 struct WorkOnProjectInstructionSourceProjection {
+    source_scope: String,
     path: String,
     fingerprint: String,
     truncated: bool,
@@ -2353,6 +2354,7 @@ fn sparse_work_on_project_instruction_source(
     source: WorkOnProjectInstructionSourceProjection,
 ) -> Value {
     let WorkOnProjectInstructionSourceProjection {
+        source_scope,
         path,
         fingerprint,
         truncated,
@@ -2361,6 +2363,7 @@ fn sparse_work_on_project_instruction_source(
         read_more,
     } = source;
     let mut projected = json!({
+        "source_scope": source_scope,
         "path": path,
         "fingerprint": fingerprint,
     });

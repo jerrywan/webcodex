@@ -43,6 +43,14 @@ const MAX_PERSISTENT_SHELL_IDLE_TIMEOUT_SECS: u64 = 24 * 60 * 60;
 
 pub(crate) const MAX_CONFIGURED_SKILL_ROOTS: usize = 16;
 pub(crate) const MAX_CONFIGURED_SKILL_ROOT_PATH_BYTES: usize = 4096;
+pub(crate) const MAX_CONFIGURED_INSTRUCTION_FILES: usize = 16;
+pub(crate) const MAX_CONFIGURED_INSTRUCTION_PATH_BYTES: usize = 4096;
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub(crate) struct InstructionsConfig {
+    #[serde(default)]
+    pub(crate) files: Vec<PathBuf>,
+}
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub(crate) struct SkillsConfig {
@@ -84,6 +92,8 @@ pub(crate) struct RunnerConfig {
     pub(crate) policy: RunnerPolicy,
     #[serde(default)]
     pub(crate) skills: SkillsConfig,
+    #[serde(default)]
+    pub(crate) instructions: InstructionsConfig,
     /// Transport selection: `"websocket"` (default), `"polling"`, `"quic"`,
     /// or explicit `"auto"` fallback mode.
     #[serde(default)]
@@ -511,6 +521,7 @@ pub(crate) struct HotRunnerConfig {
     pub(crate) policy: RunnerPolicy,
     pub(crate) shell: ShellConfig,
     pub(crate) skills: SkillsConfig,
+    pub(crate) instructions: InstructionsConfig,
     /// Static/manual `[ssh.resources]` from the current runner.toml generation.
     pub(crate) static_ssh: SshConfig,
     /// Effective process-local resources: current static resources plus the
@@ -533,6 +544,7 @@ impl HotRunnerConfig {
             policy: cfg.policy.clone(),
             shell: cfg.shell.clone(),
             skills: cfg.skills.clone(),
+            instructions: cfg.instructions.clone(),
             static_ssh: cfg.ssh.clone(),
             ssh,
             external_tools: Arc::new(ExternalToolRouter::new(&cfg.tool_providers)),
@@ -974,8 +986,16 @@ fn reload_error_diagnostic(
             RunnerConfigErrorField::SkillsRoots,
         ),
         (
+            "instructions.files may contain at most ",
+            RunnerConfigErrorField::InstructionsFiles,
+        ),
+        (
             "skills.roots entries must be non-empty paths of at most ",
             RunnerConfigErrorField::SkillsRoots,
+        ),
+        (
+            "instructions.files entries must be non-empty paths of at most ",
+            RunnerConfigErrorField::InstructionsFiles,
         ),
         (
             "max_concurrent_jobs must be between ",
@@ -1002,6 +1022,15 @@ fn reload_error_diagnostic(
             RunnerConfigErrorField::McpRequestTimeoutSecs,
         ),
     ];
+    if error.starts_with("instructions.files entries must be absolute paths")
+        || error.starts_with("instructions.files contains an unsupported Windows path namespace")
+        || error.starts_with("instructions.files contains duplicate path identities")
+    {
+        return (
+            Some(RunnerConfigErrorField::InstructionsFiles),
+            Some(RunnerConfigErrorReason::InvalidPath),
+        );
+    }
     if error.starts_with("skills.roots entries must be absolute paths")
         || error.starts_with("skills.roots contains an unsupported Windows path namespace")
         || error.starts_with("skills.roots contains duplicate path identities")
@@ -1065,7 +1094,7 @@ pub(crate) fn restart_required_fields(
     macro_rules! classify {
         ($($field:ident),+ $(,)?) => {{
             let RunnerConfig {
-                policy: _, shell: _, skills: _, ssh: _, plugins: _, tool_providers: _, mcp_gateway: _, legacy_projects_dir: _,
+                policy: _, shell: _, skills: _, instructions: _, ssh: _, plugins: _, tool_providers: _, mcp_gateway: _, legacy_projects_dir: _,
                 $($field: _),+
             } = candidate;
             [$((stringify!($field), startup.$field != candidate.$field)),+]
@@ -1520,6 +1549,7 @@ pub(crate) fn load_config(path: &Path) -> Result<RunnerConfig, String> {
     }
     validate_max_concurrent_jobs(cfg.max_concurrent_jobs)?;
     validate_skills_config(&cfg.skills)?;
+    validate_instructions_config(&cfg.instructions)?;
     if let Some(host_context) = cfg.host_context.take() {
         cfg.host_context = Some(host_context.normalized()?);
     }
@@ -1595,6 +1625,75 @@ pub(crate) fn load_config(path: &Path) -> Result<RunnerConfig, String> {
 pub(crate) fn configured_skill_root_identity(root: &Path) -> String {
     let lexical = root.components().collect::<PathBuf>();
     crate::runner_config::paths::normalize_path_identity(&lexical)
+}
+
+fn validate_instructions_config(config: &InstructionsConfig) -> Result<(), String> {
+    use std::collections::HashSet;
+    if config.files.len() > MAX_CONFIGURED_INSTRUCTION_FILES {
+        return Err(format!(
+            "instructions.files may contain at most {MAX_CONFIGURED_INSTRUCTION_FILES} entries"
+        ));
+    }
+    let mut identities = HashSet::with_capacity(config.files.len());
+    for path in &config.files {
+        let text = path.to_string_lossy();
+        if text.is_empty()
+            || text.len() > MAX_CONFIGURED_INSTRUCTION_PATH_BYTES
+            || text.contains('\0')
+        {
+            return Err(format!(
+                "instructions.files entries must be non-empty paths of at most {MAX_CONFIGURED_INSTRUCTION_PATH_BYTES} bytes"
+            ));
+        }
+        if !path.is_absolute()
+            || crate::runner_config::paths::project_path_has_parent_traversal(path)
+        {
+            return Err(
+                "instructions.files entries must be absolute paths without parent traversal"
+                    .to_string(),
+            );
+        }
+        #[cfg(windows)]
+        if crate::runner_config::paths::windows_project_path_kind(path)
+            == Some(crate::runner_config::paths::WindowsProjectPathKind::UnsupportedNamespace)
+        {
+            return Err(
+                "instructions.files contains an unsupported Windows path namespace".to_string(),
+            );
+        }
+        let identity = configured_skill_root_identity(path);
+        if !identities.insert(identity) {
+            return Err("instructions.files contains duplicate path identities".to_string());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod instruction_windows_path_tests {
+    use super::*;
+
+    #[test]
+    fn instruction_paths_follow_windows_namespace_and_traversal_rules() {
+        let valid = InstructionsConfig {
+            files: vec![PathBuf::from(r"C:\Users\alice\.codex\AGENTS.md")],
+        };
+        assert!(validate_instructions_config(&valid).is_ok());
+
+        let parent = InstructionsConfig {
+            files: vec![PathBuf::from(r"C:\Users\alice\..\bob\AGENTS.md")],
+        };
+        assert!(validate_instructions_config(&parent)
+            .unwrap_err()
+            .contains("without parent traversal"));
+
+        let namespace = InstructionsConfig {
+            files: vec![PathBuf::from(r"\\?\C:\Users\alice\.codex\AGENTS.md")],
+        };
+        assert!(validate_instructions_config(&namespace)
+            .unwrap_err()
+            .contains("unsupported Windows path namespace"));
+    }
 }
 
 fn validate_skills_config(config: &SkillsConfig) -> Result<(), String> {

@@ -85,6 +85,7 @@ fn test_config(project_registry_dir: PathBuf) -> RunnerConfig {
         policy: unrestricted_test_policy(),
         shell: ShellConfig::default(),
         skills: crate::webcodex_runner::config::SkillsConfig::default(),
+        instructions: crate::webcodex_runner::config::InstructionsConfig::default(),
         ssh: SshConfig::default(),
         transport: None,
         websocket_connect_timeout_secs: default_websocket_connect_timeout_secs(),

@@ -2062,6 +2062,8 @@ fn runner_register_capabilities(cfg: &RunnerConfig) -> RunnerCapabilities {
     // startup-bound runner.toml path on every supported platform. Unix SIGHUP is
     // only an additional trigger and is not part of this capability contract.
     capabilities.runner_config_control = true;
+    // Configured instruction files are observed only through the narrow Runner-owned snapshot boundary.
+    capabilities.instruction_runtime = true;
     // MCP gateway support is fenced by the validated provider inventory in
     // registration rather than a separate capability bit. Older binaries omit
     // that inventory, so a newer Server will never target them.

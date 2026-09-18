@@ -642,6 +642,7 @@ mod tests {
             native_tool_plugins: false,
             managed_ssh_resources: false,
             runner_config_control: false,
+            instruction_runtime: false,
         });
         QuicRegisterFrame::new(
             RunnerRegisterRequest {

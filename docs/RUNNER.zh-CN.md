@@ -160,6 +160,46 @@ SHA-256。Managed installed Skill 还会用 `expected_package_revision` fence im
 只有修改 `roots` 配置列表时才需要按正式流程先执行 `runner_config_check`，再携带当前
 generation 执行 `runner_config_reload`；该字段支持 hot reload，不需要重启 Runner 进程。
 
+## Runner 级 configured instructions
+
+同一台 Runner 可以为其所有 Project bootstrap 投影一份共享 coding guidance。v1 直接在
+Runner 的 `runner.toml` 中手工配置；Desktop 的文件选择/上传 UI 留待后续实现。
+
+```toml
+[instructions]
+files = [
+    "/home/alice/.codex/AGENTS.md",
+]
+```
+
+macOS 使用等价的 Runner 本机绝对路径，例如 `/Users/alice/.codex/AGENTS.md`。Windows
+可使用 TOML literal string，避免反斜杠转义：
+
+```toml
+[instructions]
+files = [
+    'C:\\Users\\alice\\.codex\\AGENTS.md',
+]
+```
+
+不会隐式发现 `~/.codex/AGENTS.md`；所有路径都必须由用户显式配置，并且是 Runner 本机
+绝对路径。Coding startup 按确定顺序先投影 Runner configured sources，再投影现有
+Project-local candidates：`AGENTS.md`、`agents.md`、`CLAUDE.md`、
+`.codex/AGENTS.md`、`.github/copilot-instructions.md`。两者都只是 model guidance，
+不会改变执行 authority。
+
+Configured instruction 文件只通过 narrow Runner-owned instruction runtime 读取。其父目录
+不会加入 `[policy].allowed_roots`，普通 Project file/shell/process 工具不会因此得到额外
+filesystem authority，Runner native absolute path 也不会投影给模型；model-facing source
+只使用 sanitized logical identity。
+
+修改 `[instructions].files` 路径列表时，按正式流程编辑 `runner.toml`，先
+`runner_config_check`，再携带当前 generation 执行 `runner_config_reload`；无需重启
+Runner。文件内容本身始终是 live 的：直接修改 configured `AGENTS.md` 后，下一次
+`work_on_project` / 新 Project bootstrap 会重新读取，不需要 config reload。每个 Project
+bootstrap 都会独立观察当前 Runner-global instructions；v1 不做跨 Project context 去重。
+Runner-global source 被截断时保持有界，也不会因此开放 generic arbitrary-file `read_more`。
+
 ## 本地 MCP provider
 
 Runner 可以直接托管供 WebCodex 内建 MCP gateway 使用的 persistent stdio MCP provider：
@@ -469,7 +509,8 @@ User scope 使用 `systemctl --user`；system scope 使用 `/etc/systemd/system`
 4. reload 后调用 `runtime_status(client_id=...)`（或 `list_runners`）检查当前运行状态。
 
 `runner_config_reload` 不写 `runner.toml`，只激活磁盘上已经存在的 candidate。policy、
-shell、configured Skill roots、Native Plugin 与静态 SSH resource 中可热加载的字段可以立即生效；`restart_required_fields`
+shell、configured Skill roots、configured instruction files、Native Plugin 与静态 SSH resource
+中可热加载的字段可以立即生效；`restart_required_fields`
 报告的字段仍保持 startup-only，重启前不会假装已在线生效。无效 candidate 保留旧 active
 snapshot 与 generation。`ssh_resource` managed mutation 不同：它使用 frozen startup
 snapshot，且只在工具返回 `restart_required=true` 时要求重启 Runner。

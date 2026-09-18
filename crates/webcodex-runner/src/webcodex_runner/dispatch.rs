@@ -5,8 +5,8 @@ use super::validation::handle_validation_request;
 use super::{
     handle_browser_operation, handle_computer_operation, handle_prepare_managed_worktree_operation,
     handle_project_lifecycle_operation, handle_project_operation,
-    handle_resolve_or_register_project_operation, handle_runner_skill_request,
-    run_internal_posix_script_with_profiles_and_execution_state,
+    handle_resolve_or_register_project_operation, handle_runner_instruction_request,
+    handle_runner_skill_request, run_internal_posix_script_with_profiles_and_execution_state,
     run_internal_search_script_with_profiles_and_execution_state,
     run_process_with_profiles_and_execution_state, run_script_with_profiles_and_execution_state,
     run_shell_with_profiles_and_execution_state,
@@ -422,6 +422,15 @@ pub(crate) fn dispatch_request_with_outcome(
                 operation => runtime.plugins().handle(operation),
             };
             sink.submit_plugin_gateway_result(request_id, response)
+                .map(|_| true)
+        }
+        RunnerOperation::RunnerInstruction(operation) => {
+            let result = handle_runner_instruction_request(
+                config.generation,
+                &config.instructions,
+                operation,
+            );
+            sink.submit_result_with_metadata(request_id, result, config, runtime)
                 .map(|_| true)
         }
         RunnerOperation::RunnerConfig(operation) => {

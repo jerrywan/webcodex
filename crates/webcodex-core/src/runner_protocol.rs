@@ -386,6 +386,8 @@ pub const RUNNER_CAPABILITY_MANAGED_SSH_RESOURCES: &str = "managed_ssh_resources
 /// startup-bound configuration path. Missing on older Runners is false; Servers
 /// must never fall back to PID/signal emulation for this operation.
 pub const RUNNER_CAPABILITY_RUNNER_CONFIG_CONTROL: &str = "runner_config_control";
+/// Narrow Runner-owned observation of configured instruction files. Missing on older Runners is false.
+pub const RUNNER_CAPABILITY_INSTRUCTION_RUNTIME: &str = "instruction_runtime";
 pub const RUNNER_CONFIG_REQUEST_KIND: &str = "runner_config";
 pub const RUNNER_CONFIG_REQUEST_MAX_BYTES: usize = 512;
 pub const RUNNER_CONFIG_RESPONSE_MAX_BYTES: usize = 4096;
@@ -778,6 +780,9 @@ pub struct RunnerCapabilities {
     /// transport, Plugin support, or protocol generation.
     #[serde(default, skip_serializing_if = "is_false")]
     pub runner_config_control: bool,
+    /// Runner-owned configured instruction snapshot support. Missing on older Runners is false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub instruction_runtime: bool,
 }
 
 /// Bounded, non-secret status for the Runner's active configuration generation.
@@ -852,6 +857,8 @@ pub enum RunnerConfigErrorField {
     MaxConcurrentJobs,
     #[serde(rename = "skills.roots")]
     SkillsRoots,
+    #[serde(rename = "instructions.files")]
+    InstructionsFiles,
     #[serde(rename = "shell.max_persistent_shells")]
     ShellMaxPersistentShells,
     #[serde(rename = "shell.persistent_shell_idle_timeout_secs")]
@@ -962,6 +969,10 @@ impl RunnerConfigOperationResponse {
             (
                 Some(RunnerConfigErrorField::SkillsRoots),
                 Some(RunnerConfigErrorReason::InvalidPath),
+            )
+            | (
+                Some(RunnerConfigErrorField::InstructionsFiles),
+                Some(RunnerConfigErrorReason::InvalidPath),
             ) => {}
             _ => return Err("invalid config error diagnostic"),
         }
@@ -1063,6 +1074,7 @@ impl Default for RunnerCapabilities {
             native_tool_plugins: false,
             managed_ssh_resources: false,
             runner_config_control: false,
+            instruction_runtime: false,
         }
     }
 }
@@ -2601,6 +2613,7 @@ mod envelope_tests {
                 native_tool_plugins: false,
                 managed_ssh_resources: false,
                 runner_config_control: false,
+                instruction_runtime: false,
             },
             policy: None,
             job_concurrency_limit: Some(4),

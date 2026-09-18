@@ -636,6 +636,7 @@ fn runner_config(
         quic: None,
         shell,
         skills: SkillsConfig::default(),
+        instructions: crate::webcodex_runner::config::InstructionsConfig::default(),
         ssh: SshConfig::default(),
         tool_providers: ToolProvidersConfig::default(),
         mcp_gateway: McpGatewayConfig::default(),
