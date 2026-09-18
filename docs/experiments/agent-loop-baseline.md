@@ -2,17 +2,36 @@
 
 This experiment provides a repeatable measurement baseline for comparing a real
 coding-agent run that uses Direct Tools with a run of the same task through Code
-Mode. It measures facts already recorded by WebCodex. It does not infer model
-reasoning, intent, or private chain-of-thought.
+Mode. It measures facts already recorded by WebCodex plus an optional bounded
+run-annotation sidecar. It does not infer model reasoning, intent, private
+chain-of-thought, or unrecorded tool arguments.
 
 The deterministic [`scripts/eval_coding_loop.sh`](../../scripts/eval_coding_loop.sh)
-harness remains responsible for runtime mechanics. This protocol is deliberately
-separate: it measures real model/tool interaction against fixed task cases.
+harness remains responsible for runtime mechanics. This protocol extends that
+existing Agent Loop baseline; it does not create a second benchmark or reporting
+framework.
+
+## Typed Surface v1 dogfood goal
+
+The Typed Surface v1 dogfood lane asks whether a typed callable/result surface
+changes actual task throughput without weakening correctness. The paired report
+is designed to expose whether Code Mode uses fewer meaningful model-facing outer
+calls (a round-trip-pressure proxy, not an exact model-turn count), incurs fewer
+avoidable contract repairs, keeps more mechanical work inside one cell, and
+compresses nested raw results into a smaller returned projection.
+
+A lower call count is not a correctness verdict. A Direct/Code Mode comparison is
+decision-relevant only when both runs use the same exact case definition and
+40-hex Git base and both satisfy the case correctness/validation gate. The report
+never emits a winner, score, or overall ranking.
+
+Code Mode samples must identify the actual experimental surface as `e1`,
+`e2a`, or `e2b`. They are not pooled under a generic `code_mode` surface.
 
 ## Evidence contract
 
 The profiler is [`scripts/agent_loop_report.py`](../../scripts/agent_loop_report.py).
-It accepts two payload-safe evidence sources:
+It accepts the following evidence sources:
 
 1. **ActionAudit SQLite** is the preferred source for outer tool calls. Select one
    run with an exact Workflow Session id. Existing rows provide the hashed
@@ -20,12 +39,18 @@ It accepts two payload-safe evidence sources:
    response-handoff timestamps, serial/overlap classification, status, tool
    identity, and `model_ergonomics` metadata including serialized `ToolResult`
    bytes. Code Mode outer rows also persist the payload-safe
-   `code_mode_composition` summary: nested call counts/tool distribution,
-   consequential outcome counters, slot wait/internal duration, and nested/raw
-   versus returned byte counts.
+   `code_mode_composition` summary: nested call/success/failure counts, nested
+   tool distribution, maximum in-flight calls, consequential outcome counters,
+   slot wait/internal duration, and nested/raw versus returned byte counts.
 2. **Per-trace `events.jsonl`** is an optional supplement for observed Runner
    enqueue events. The profiler reads only JSONL metadata; it never opens captured
    request/result payload files.
+3. **Run annotation JSON** is optional and independent of ActionAudit. It records
+   only bounded categorical facts needed when runtime metadata cannot prove them:
+   repair-turn counts/reasons, explicit task start/end timestamps, and final
+   correctness/validation verdicts. It stores no prompt completion, chain of
+   thought, command, file content, credential, deployment identity, Project id,
+   Workflow Session id, ClientWindow, tunnel id, or instance id.
 
 On the current runtime, `WEBCODEX_TOOL_REQUEST_TRACE=true`/metadata mode does not
 persist a per-trace `events.jsonl` tree. That is not a blocker for the core
@@ -38,6 +63,71 @@ rather than zero.
 Trace persistence is fail-open observability, so `runner.requests_observed` means
 exactly that: enqueue records observed in the supplied trace tree. The report does
 not claim that the trace tree is a complete Runner-request ledger.
+
+## Repair-turn and annotation semantics
+
+A **repair turn** is a model turn whose primary purpose is to correct a previous
+avoidable tool-contract, callable-surface, argument-shape, or result-field-use
+error. Typical examples are a wrong argument shape, attempting an unavailable
+callable, reading the wrong result projection field, a JavaScript runtime error
+caused by surface misuse, or a follow-up that repairs the preceding tool
+selection.
+
+The following are not repair turns: a normal search-then-read decision, ordinary
+adaptive branching after new business information, fixing business code after a
+real validation failure, or normal Job continuation.
+
+ActionAudit does not prove that semantic distinction. The profiler therefore never
+classifies repair turns from model text, tool payloads, or chain-of-thought.
+Repair counts come only from the optional sidecar using this intentionally small
+vocabulary:
+
+- `invalid_arguments`
+- `unknown_callable`
+- `wrong_result_shape`
+- `javascript_runtime`
+- `tool_selection_repair`
+- `other_contract_repair`
+
+The sidecar schema is version 1 and rejects unknown fields. Example:
+
+```json
+{
+  "schema_version": 1,
+  "case_id": "<case-id>",
+  "variant": "<direct-or-code_mode>",
+  "surface": "<direct-or-e1-or-e2a-or-e2b>",
+  "base_revision": "<40-hex-base>",
+  "case_fingerprint": "<64-hex-case-sha256>",
+  "repair_turns": {
+    "total": 1,
+    "by_reason": {
+      "invalid_arguments": 1
+    }
+  },
+  "task_timing": {
+    "started_at_ms": 1000,
+    "ended_at_ms": 1700
+  },
+  "correctness": {
+    "task_verdict": "pass",
+    "validation_verdict": "not_required"
+  }
+}
+```
+
+`repair_turns`, `task_timing`, and `correctness` are individually optional.
+Missing sections stay unavailable; they are never coerced to zero. The identity
+fields are required so the sidecar cannot be accidentally attached to another
+case definition, variant, surface, or Git base. `case_fingerprint` must match the
+exact deterministic fingerprint emitted by the benchmark metadata.
+A practical flow is to summarize once without `--run-annotation`, copy the emitted
+`benchmark.case_fingerprint` into the sidecar, then rerun the same summary with the
+annotation attached.
+
+`task_wall_time_ms` is reported only when the sidecar contains both explicit
+independent task start and task end timestamps. `observed_span_ms` is never used
+as a substitute.
 
 ## Timing semantics
 
@@ -66,8 +156,7 @@ separately and never converted into a negative gap. Streaming handoff does not
 prove response completion. Continuity breaks remain missing evidence.
 
 `observed_span_ms` is only the span covered by observed WebCodex outer-call
-timestamps. It is not end-to-end task wall time unless some independent harness
-provides explicit task start/end timestamps.
+timestamps. It is not end-to-end task wall time.
 
 Percentiles use deterministic nearest-rank semantics. For metrics with partially
 missing samples, `observed_total` and sample counts remain visible, while `total`
@@ -76,157 +165,218 @@ is `null`; missing evidence is never substituted with zero.
 ## Benchmark cases
 
 [`scripts/agent_loop_cases.json`](../../scripts/agent_loop_cases.json) is the
-authoritative case manifest. Each run starts from a fresh clean target at an
-exact Git base revision. Direct and Code Mode runs must use the same case id and
-base revision before their reports are considered case-compatible.
+authoritative case manifest. Each run starts from a fresh clean target at an exact
+Git base revision. Direct and Code Mode runs must use the same case id, exact
+40-hex base revision, prompt/correctness definition, and validation expectation.
+The profiler includes a deterministic case fingerprint so changed case definitions
+cannot silently compare as the same pair.
 
-The four initial cases are:
+The corpus contains ten cases:
 
-- `readonly_review`: status/read/search/diff inspection with no workspace changes.
+- `readonly_review`: read-only status/read/search/diff inspection.
 - `focused_edit_validation`: one focused edit, diff review, and successful
-  `cargo check` using the existing coding-loop fixture recipe.
+  `cargo check`.
 - `failed_validation_recovery`: a deliberately failing `cargo test`, diagnostic
-  inspection, a fix, and a successful rerun.
-- `long_validation_handoff`: `cargo test --lib` with `sync_wait_secs=1`, independent
-  read-only work while a real same-execution Job runs, then terminal observation.
-  If the command completes synchronously, that run does not satisfy this case;
-  the agent must not fabricate a handoff or redispatch validation.
+  inspection, fix, and successful rerun.
+- `long_validation_handoff`: real same-execution Job handoff and terminal
+  observation when the validation actually hands off.
+- `independent_observations`: independent status/diff/search/read observations,
+  intended to expose meaningful-outer-call reduction and actual child concurrency.
+- `adaptive_search_read`: search first, then read only the result-dependent
+  target ranges.
+- `native_batching_observations`: several related reads and searches that have a
+  natural native batch shape.
+- `result_shape_pressure`: structured search-match output followed by a targeted
+  read, exercising layered success/output/optional result fields without telling
+  the model that field access is the subject of the test.
+- `known_business_failure`: a safe expected missing-file result followed by the
+  normal README fallback, distinguishing ordinary `success=false` business
+  behavior from host/protocol/JavaScript failure.
+- `compact_projection`: larger child read evidence distilled into exactly three
+  concise final facts.
 
 The fixture-oriented cases reuse the disposable Rust project recipe already owned
 by `eval_coding_loop.sh`; this protocol does not create a second runtime harness.
-Correctness and validation expectations remain case-level facts and should be
-checked alongside the profiler output when judging whether two runs did equivalent
-work.
+Read-only WebCodex-repository cases must leave the workspace clean.
+
+The corpus records an expected `code_mode_surface` for every current case:
+read-only cases use E1, the long validation/Job case uses E2a, and edit-oriented
+cases use E2b with validation outside the mutating cell where needed. The parser
+keeps `code_mode_surface` and `dogfood_focus` optional for historical schema-v1
+manifest compatibility, but a current case that declares a surface rejects a
+Code Mode run labeled with another surface.
+
+## Paired run protocol
+
+For one case, the Direct and Code Mode runs must satisfy all of these constraints:
+
+- same exact case definition and 40-hex Git base revision;
+- fresh clean workspace for each run;
+- same user task prompt and correctness expectations;
+- Direct uses `guidance_profile=direct`;
+- Code Mode uses `guidance_profile=code_mode`;
+- Code Mode records `surface=e1`, `e2a`, or `e2b` explicitly;
+- the only intended experimental variable is the guidance/surface behavior being
+  evaluated.
+
+Runtime Project, Workflow Session, Window, tunnel, and host-internal identifiers
+may be used transiently to select authoritative evidence. They must not be written
+into the manifest, docs, tests, run annotation, or durable benchmark result.
 
 ## Capture and summarize a run
 
-Record the exact Workflow Session id and 40-hex Git base revision for each real
-run. Session selection is authoritative only through ActionAudit; trace-only input
-cannot apply `--workflow-session-id`.
+Record the exact Workflow Session id and 40-hex Git base revision transiently for
+each real run. Session selection is authoritative only through ActionAudit;
+trace-only input cannot apply `--workflow-session-id`.
 
 Start each benchmark run with its fresh `work_on_project` bootstrap; that call
-links its own ActionAudit row through the canonical `WorkOnProject` relation. Once
-the bootstrap returns the exact run Session id, **every subsequent model-facing
-outer call in the run must pass that id as `recording_session_id`**. A business
+links its own ActionAudit row through the canonical `WorkOnProject` relation.
+Once the bootstrap returns the exact run Session id, every subsequent model-facing
+outer call in the run must pass that id as `recording_session_id`. A business
 `session_id` does not substitute for ActionAudit recorder provenance. Code Mode
 calls that require a business Session should pass both fields with the same exact
-benchmark Session id. Otherwise the Workflow Session ledger can contain the
-nested work while `--workflow-session-id` selects no corresponding outer
-ActionAudit row, producing an invalid measurement sample rather than proof of zero
-calls.
+benchmark Session id.
 
-The core report needs only the server's ActionAudit SQLite database:
+A Direct summary with optional sidecar:
 
 ```bash
 python3 scripts/agent_loop_report.py summarize \
   --audit-db <server-sqlite-db> \
-  --workflow-session-id <wc_sess_...> \
-  --case-id focused_edit_validation \
+  --workflow-session-id <workflow-session-id> \
+  --case-id <case-id> \
   --variant direct \
   --surface direct \
   --base-revision <40-hex-base> \
-  --output direct.json
+  --run-annotation <direct-run-annotation.json> \
+  --output <direct-report.json>
+```
+
+A Code Mode summary:
+
+```bash
+python3 scripts/agent_loop_report.py summarize \
+  --audit-db <server-sqlite-db> \
+  --workflow-session-id <workflow-session-id> \
+  --case-id <case-id> \
+  --variant code_mode \
+  --surface <e1-or-e2a-or-e2b> \
+  --base-revision <40-hex-base> \
+  --run-annotation <code-mode-run-annotation.json> \
+  --output <code-mode-report.json>
 ```
 
 When an `events.jsonl` trace tree was captured and Runner enqueue observations are
-useful, add:
-
-```text
---trace-root <tool-request-trace-root>
-```
-
-For a Code Mode benchmark run, use the same case id/base, `--variant code_mode`,
-and the exact experimental surface: `--surface e1`, `e2a`, or `e2b`. Direct
-benchmark runs use `--surface direct` (and the profiler also infers `direct` when
-that argument is omitted). A Code Mode benchmark intentionally requires an
-explicit surface so E1/E2a/E2b samples cannot be mixed under one generic label.
-`--variant` can still be used without a benchmark case when profiling an ad-hoc
-run; case metadata is only attached when `--case-id` is supplied.
-
-For the initial E2b-M capture pilot, use `readonly_review` with E1,
-`focused_edit_validation` with E2b plus the validation call outside the mutating
-cell, and `long_validation_handoff` with E2a. The pilot is for evidence-shape and
-capture validation first; repeated paired runs come only after these three reports
-are complete and correctly selected.
+useful, add `--trace-root <tool-request-trace-root>`.
 
 ## Reported metrics
 
 The schema-v1 JSON summary reports, when evidence is available:
 
-- outer model-facing tool calls: total, meaningful, success/failure, and tool-name
+- exact `model_round_trips` remains unavailable because ActionAudit does not persist
+  a model response/turn identity; parallel meaningful outer calls may share one
+  model response.
+- `model_round_trip_proxy`: the existing meaningful outer-call count, retained only
+  as an explicit round-trip-pressure proxy. Nested Code Mode children never count.
+- outer model-facing calls: total, meaningful, success/failure, and tool-name
   distribution;
-- Direct Tools canonical-call count from per-outer `model_ergonomics` records;
-- Code Mode composition distributions from outer ActionAudit
-  `code_mode_composition`, including nested call/success/failure counts,
-  `nested_tool_counts`, consequential known/Job/unknown outcomes, internal/slot
-  timing, optional program input bytes, and nested raw versus returned bytes;
-- WebCodex service time and ToolRuntime duration distributions;
-- canonical serial `outside_webcodex_gap` distributions and overlap count;
-- exact serialized `ToolResult` byte totals/distributions;
-- observed Runner enqueue count and request-kind distribution from trace JSONL;
-- structured error/failure/recovery-guidance distributions.
+- Direct canonical-call count from outer `model_ergonomics` records;
+- authoritative Code Mode composition: nested calls/successes/failures,
+  `max_in_flight`, nested tool counts, consequential known/Job/unknown outcomes,
+  internal duration, slot wait, optional program input bytes, and nested raw versus
+  returned bytes;
+- `child_calls.failed`: authoritative Code Mode nested failure count when the
+  composition summary is complete;
+- WebCodex service time, ToolRuntime duration, canonical outside-WebCodex serial
+  gaps, and overlap;
+- exact serialized outer `ToolResult` byte totals/distributions;
+- optional `repair_turns`, `task_wall_time_ms`, and correctness verdicts from
+  the bounded sidecar;
+- structured outer `error_kind`, `failure_kind`, and `recovery_kind`
+  distributions;
+- observed Runner enqueue count/request-kind distribution from trace JSONL.
 
-The report also carries an explicit `availability` object. Consumers must inspect
-it rather than assuming absent metrics are zero.
+The summary includes an explicit `availability` object. Consumers must inspect it
+rather than assuming an absent metric is zero.
 
-### Counting semantics and explicitly unavailable facts
+### Authoritative, annotated, and unavailable facts
 
-Code Mode nested canonical child calls are now provable from the payload-safe
-outer ActionAudit composition summary and are reported under
-`composition.nested_calls` and `composition.nested_tool_counts`.
-`composition.input_bytes` is additive: historical ActionAudit rows remain valid composition evidence when it is absent, while its metric reports missing samples instead of treating them as zero.
-`canonical_calls.total` deliberately remains `null` for a `code_mode` report: that
-older field keeps its outer/direct counting contract instead of silently combining
-one parent invocation with its child invocations.
+**Authoritative from ActionAudit:** meaningful outer calls (also reported as the
+`model_round_trip_proxy`), outer success/failure/tool distribution, service timing
+when timestamps exist,
+serialized result bytes when persisted, canonical serial gaps when continuity
+evidence exists, and Code Mode composition counts/timing/bytes/concurrency.
 
-Some desired comparison facts remain unprovable from the current metadata
-contract:
+**Manual bounded annotation:** repair turns, full task wall time, and final
+correctness/validation verdicts.
 
-- **Generic same-execution Job handoff count and terminal-observation count.** A
-  Runner `job_id` can exist before a command returns synchronously; its presence
-  does not prove that the model received a Job handoff. `jobs.handoffs` and
-  `jobs.terminal` remain `null` rather than using that unsafe proxy. For
-  consequential children inside E2a, the authoritative parent receipt-derived
-  count is separately available as `composition.job_handoffs`.
-- **Resolved recovery count.** `recovery_kind` is guidance attached to one failed
-  result. It does not itself prove that a later call resolved that failure.
-- **Complete Runner-request total from trace files.** Trace persistence is
-  observability, not execution authority, and has no completeness fence.
+**Unavailable when not explicitly recorded:**
 
-These gaps are candidates for a later small, generic metadata improvement if they
-become necessary. The profiler does not change production runtime merely to fill
-this table.
+- exact model round trips. ActionAudit can prove meaningful model-facing outer tool
+  calls and overlap, but it does not persist the model response/turn identity needed
+  to prove how many inference round trips produced those calls.
+- per-child Code Mode failure-kind distribution. Current composition persists the
+  authoritative nested failure count but not each child failure category.
+- native batch item counts. A `read_files` or `search_project_texts` child call
+  is visible, but ActionAudit does not persist payload-safe item/query counts.
+- exact `Promise.all` usage. `max_in_flight > 1` proves overlapping nested
+  execution; it does not prove which JavaScript syntax created it.
+- generic same-execution Job handoff count and terminal-observation count outside
+  the authoritative consequential-child receipt evidence.
+- resolved recovery count. `recovery_kind` is guidance on one failed result, not
+  proof that a later call resolved it.
+- complete Runner-request total from trace files; trace persistence has no
+  completeness fence.
+
+Contract/surface failure analysis uses existing structured outer
+`error_kind`/`failure_kind`/`recovery_kind` distributions directly. For
+example, `invalid_arguments`, `child_call_failed`, or Code Mode runtime failure
+kinds are counted when they are actually present. The profiler does not invent a
+larger taxonomy or parse error prose to infer one.
 
 ## Compare two reports
 
 ```bash
 python3 scripts/agent_loop_report.py compare \
-  --baseline direct.json \
-  --candidate code-mode.json \
-  --output comparison.json
+  --baseline <direct-report.json> \
+  --candidate <code-mode-report.json> \
+  --output <comparison.json>
 ```
 
-JSON is the authoritative comparison shape. Each numeric entry carries baseline,
-candidate, candidate-minus-baseline delta, and a `comparable` flag. Composition
-comparisons include nested calls, consequential outcomes, Code Mode internal/slot
-time, and nested/raw versus returned bytes; nested tool-name distributions are
-reported alongside the outer/canonical tool distributions. A metric that is
-unavailable on either side is emitted with `comparable: false` and an explicit
-reason. The comparison is descriptive and does not select a winner or score.
+JSON is the authoritative comparison shape. Numeric entries carry baseline,
+candidate, candidate-minus-baseline delta, and a `comparable` flag. The paired
+output includes at least:
 
-`case_compatibility` is true only when both reports name the same benchmark case
-and exact base revision. Equivalent final correctness/validation is still checked
-against the manifest expectations; the profiler does not infer quality from call
-counts or elapsed time.
+- meaningful outer-call/`model_round_trip_proxy` delta;
+- repair-turn delta and side-by-side repair reason counts;
+- failed outer-call delta;
+- failed Code Mode child calls;
+- structured contract/surface failure and recovery distributions;
+- outside-WebCodex gap and service time;
+- Code Mode nested-call count and `max_in_flight`;
+- nested raw-result bytes versus returned bytes;
+- task wall time when independently annotated;
+- full evidence availability for both runs.
+
+`case_compatibility` requires the same case id, exact base revision, and exact
+case fingerprint. `pair_compatibility` additionally requires Direct as the
+baseline and Code Mode with explicit E1/E2a/E2b as the candidate.
+`correctness_compatibility` requires both runs to pass the case correctness gate
+and any required validation. `throughput_compatibility` is true only when both
+the pair and correctness gates pass.
+
+The profiler still emits descriptive numeric deltas when a gate is closed so the
+raw evidence is inspectable, but those deltas are not treated as a valid throughput
+comparison. No metric ordering, score, winner, or automatic “better” judgment is
+produced.
 
 ## Privacy and non-inferences
 
-The report never emits raw `ClientWindow` values, principal ids, trace ids,
-commands, patches, file contents, credentials, or tool arguments. It does not
-parse command bodies or payloads to guess task type. Full payload tracing is not
-required for the core ActionAudit-derived metrics.
+The report never emits raw `ClientWindow` values, principal ids, Workflow Session
+ids, trace ids, runtime Project ids, tunnel/instance ids, commands, patches, file
+contents, credentials, or tool arguments. The run annotation rejects unknown
+fields so it cannot become a catch-all payload store.
 
 These measurements cannot establish model reasoning time, reasoning quality,
-intent, causal attribution for outside-WebCodex gaps, or a general claim that Code
-Mode is faster. They provide bounded observations for controlled Direct-vs-Code-
-Mode experiments only.
+intent, exact JavaScript source usage, causal attribution for outside-WebCodex
+gaps, or a general claim that Code Mode is faster. They provide bounded
+observations for controlled Direct-vs-Code-Mode experiments only.

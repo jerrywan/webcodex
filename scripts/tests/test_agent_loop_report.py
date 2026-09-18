@@ -179,6 +179,43 @@ class AgentLoopReportTests(unittest.TestCase):
         )
         return trace_root
 
+    def write_annotation(
+        self,
+        name: str,
+        *,
+        case_id: str = "readonly_review",
+        variant: str = "direct",
+        surface: str = "direct",
+        base_revision: str = "a" * 40,
+        case_fingerprint: str | None = None,
+        repair_turns: dict[str, object] | None = None,
+        task_timing: dict[str, object] | None = None,
+        correctness: dict[str, object] | None = None,
+    ) -> Path:
+        if case_fingerprint is None:
+            manifest = report.load_case_manifest(report.DEFAULT_CASE_MANIFEST)
+            case_fingerprint = report._case_fingerprint(report._case_by_id(manifest, case_id))
+        value: dict[str, object] = {
+            "schema_version": 1,
+            "case_id": case_id,
+            "variant": variant,
+            "surface": surface,
+            "base_revision": base_revision,
+            "case_fingerprint": case_fingerprint,
+        }
+        if repair_turns is not None:
+            value["repair_turns"] = repair_turns
+        if task_timing is not None:
+            value["task_timing"] = task_timing
+        if correctness is not None:
+            value["correctness"] = correctness
+        annotation = self.root / name
+        annotation.write_text(
+            json.dumps(value, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return annotation
+
     def test_multiple_traces_same_window_and_nonmeaningful_call_preserves_predecessor(self) -> None:
         self.insert_event("e1", started=100, handed=120, trace_id="trace-a")
         self.insert_event(
@@ -519,6 +556,8 @@ class AgentLoopReportTests(unittest.TestCase):
 
         self.assertEqual(result["outer_calls"]["total"], 1)
         self.assertIsNone(result["outer_calls"]["meaningful"])
+        self.assertIsNone(result["model_round_trips"])
+        self.assertFalse(result["availability"]["model_round_trips"]["available"])
         self.assertIsNone(result["canonical_calls"]["total"])
         self.assertIsNone(result["results"]["serialized_tool_result_bytes"]["total"])
         self.assertFalse(result["availability"]["window_timing"]["available"])
@@ -690,12 +729,32 @@ class AgentLoopReportTests(unittest.TestCase):
         serialized_once = report._stable_json(manifest)
         serialized_twice = report._stable_json(json.loads(serialized_once))
         self.assertEqual(serialized_once, serialized_twice)
-        self.assertEqual(len(manifest["cases"]), 4)
+        self.assertEqual(len(manifest["cases"]), 10)
+        typed_cases = [case for case in manifest["cases"] if "code_mode_surface" in case]
+        self.assertEqual(len(typed_cases), 10)
+        self.assertEqual(
+            {case["code_mode_surface"] for case in typed_cases},
+            {"e1", "e2a", "e2b"},
+        )
 
         broken = copy.deepcopy(manifest)
         del broken["cases"][0]["validation"]
         with self.assertRaisesRegex(report.ReportError, "validation"):
             report.validate_case_manifest(broken)
+
+        bad_surface = copy.deepcopy(manifest)
+        bad_surface["cases"][-1]["code_mode_surface"] = "generic_code_mode"
+        with self.assertRaisesRegex(report.ReportError, "code_mode_surface"):
+            report.validate_case_manifest(bad_surface)
+
+        bad_focus = copy.deepcopy(manifest)
+        bad_focus["cases"][-1]["dogfood_focus"] = ["same", "same"]
+        with self.assertRaisesRegex(report.ReportError, "dogfood_focus"):
+            report.validate_case_manifest(bad_focus)
+        bad_validation_required = copy.deepcopy(manifest)
+        bad_validation_required["cases"][0]["validation"]["required"] = "false"
+        with self.assertRaisesRegex(report.ReportError, "validation.required"):
+            report.validate_case_manifest(bad_validation_required)
 
     def test_benchmark_case_requires_exact_git_base_revision(self) -> None:
         with self.assertRaisesRegex(report.ReportError, "exact 40-hex Git commit"):
@@ -726,6 +785,19 @@ class AgentLoopReportTests(unittest.TestCase):
         )
         self.assertEqual(metadata["surface"], "e2b")
 
+    def test_benchmark_case_rejects_wrong_declared_code_mode_surface(self) -> None:
+        with self.assertRaisesRegex(
+            report.ReportError,
+            "requires Code Mode surface e1",
+        ):
+            report._benchmark_metadata(
+                case_manifest=None,
+                case_id="readonly_review",
+                variant="code_mode",
+                surface="e2a",
+                base_revision="a" * 40,
+            )
+
     def test_benchmark_direct_surface_is_inferred(self) -> None:
         metadata = report._benchmark_metadata(
             case_manifest=None,
@@ -735,6 +807,376 @@ class AgentLoopReportTests(unittest.TestCase):
             base_revision="a" * 40,
         )
         self.assertEqual(metadata["surface"], "direct")
+
+    def test_run_annotation_validation_is_bounded_and_payload_safe(self) -> None:
+        value = {
+            "schema_version": 1,
+            "case_id": "readonly_review",
+            "variant": "direct",
+            "surface": "direct",
+            "base_revision": "a" * 40,
+            "case_fingerprint": report._case_fingerprint(
+                report._case_by_id(
+                    report.load_case_manifest(report.DEFAULT_CASE_MANIFEST),
+                    "readonly_review",
+                )
+            ),
+            "repair_turns": {
+                "total": 2,
+                "by_reason": {
+                    "invalid_arguments": 1,
+                    "wrong_result_shape": 1,
+                },
+            },
+            "task_timing": {"started_at_ms": 1000, "ended_at_ms": 1450},
+            "correctness": {
+                "task_verdict": "pass",
+                "validation_verdict": "not_required",
+            },
+        }
+        self.assertEqual(report.validate_run_annotation(copy.deepcopy(value)), value)
+
+        leaked = copy.deepcopy(value)
+        leaked["session_id"] = "wc_sess_should_not_be_stored"
+        with self.assertRaisesRegex(report.ReportError, "unsupported fields"):
+            report.validate_run_annotation(leaked)
+
+        bad_reason = copy.deepcopy(value)
+        bad_reason["repair_turns"]["by_reason"] = {"speculative_future_taxonomy": 2}  # type: ignore[index]
+        with self.assertRaisesRegex(report.ReportError, "unsupported repair reason"):
+            report.validate_run_annotation(bad_reason)
+        missing_fingerprint = copy.deepcopy(value)
+        del missing_fingerprint["case_fingerprint"]
+        with self.assertRaisesRegex(report.ReportError, "case_fingerprint"):
+            report.validate_run_annotation(missing_fingerprint)
+
+    def test_annotation_metrics_remain_unavailable_without_sidecar(self) -> None:
+        self.insert_event("event")
+        result = self.summarize(
+            case_id="readonly_review",
+            base_revision="a" * 40,
+        )
+
+        self.assertIsNone(result["model_round_trips"])
+        self.assertEqual(result["model_round_trip_proxy"], 1)
+        self.assertFalse(result["availability"]["model_round_trips"]["available"])
+        self.assertTrue(result["availability"]["model_round_trip_proxy"]["available"])
+        self.assertIsNone(result["repair_turns"]["total"])
+        self.assertIsNone(result["task_wall_time_ms"])
+        self.assertIsNone(result["correctness"]["task_verdict"])
+        self.assertFalse(result["availability"]["repair_turns"]["available"])
+        self.assertFalse(result["availability"]["task_wall_time"]["available"])
+        self.assertFalse(result["availability"]["correctness"]["available"])
+
+    def test_run_annotation_projects_repair_wall_time_and_correctness(self) -> None:
+        self.insert_event("event")
+        annotation = self.write_annotation(
+            "direct-annotation.json",
+            repair_turns={
+                "total": 1,
+                "by_reason": {"invalid_arguments": 1},
+            },
+            task_timing={"started_at_ms": 1000, "ended_at_ms": 1625},
+            correctness={
+                "task_verdict": "pass",
+                "validation_verdict": "not_required",
+            },
+        )
+        result = self.summarize(
+            case_id="readonly_review",
+            base_revision="a" * 40,
+            run_annotation=annotation,
+        )
+
+        self.assertEqual(result["repair_turns"]["total"], 1)
+        self.assertEqual(
+            result["repair_turns"]["by_reason"],
+            {"invalid_arguments": 1},
+        )
+        self.assertEqual(result["task_wall_time_ms"], 625)
+        self.assertEqual(result["correctness"]["task_verdict"], "pass")
+        self.assertTrue(result["availability"]["repair_turns"]["available"])
+        self.assertTrue(result["availability"]["task_wall_time"]["available"])
+        self.assertTrue(result["availability"]["correctness"]["available"])
+
+    def test_run_annotation_must_match_case_variant_surface_and_base(self) -> None:
+        self.insert_event("event")
+        annotation = self.write_annotation(
+            "mismatched.json",
+            base_revision="b" * 40,
+        )
+        with self.assertRaisesRegex(report.ReportError, "base_revision does not match"):
+            self.summarize(
+                case_id="readonly_review",
+                base_revision="a" * 40,
+                run_annotation=annotation,
+            )
+        stale_case_annotation = self.write_annotation(
+            "stale-case.json",
+            case_fingerprint="0" * 64,
+        )
+        with self.assertRaisesRegex(report.ReportError, "case_fingerprint does not match"):
+            self.summarize(
+                case_id="readonly_review",
+                base_revision="a" * 40,
+                run_annotation=stale_case_annotation,
+            )
+
+    def test_failed_child_calls_use_authoritative_composition_but_kinds_stay_unavailable(self) -> None:
+        self.insert_event(
+            "code",
+            tool="code_mode_exec",
+            composition=code_mode_composition(
+                nested_successes=2,
+                nested_failures=1,
+            ),
+        )
+        result = self.summarize(variant="code_mode")
+
+        self.assertEqual(result["child_calls"]["failed"], 1)
+        self.assertTrue(result["availability"]["failed_child_calls"]["available"])
+        self.assertIsNone(result["failures"]["child_failure_kind_by_name"])
+        self.assertFalse(result["availability"]["child_failure_kinds"]["available"])
+
+    def test_paired_comparison_exposes_correctness_gate_and_required_deltas(self) -> None:
+        base_revision = "c" * 40
+        self.insert_event(
+            "direct-failed",
+            session="wc_sess_direct",
+            status="failed",
+            success=False,
+            started=100,
+            handed=120,
+        )
+        self.insert_event(
+            "direct-repair",
+            session="wc_sess_direct",
+            started=150,
+            handed=170,
+            transition="serial",
+        )
+        self.insert_event(
+            "code",
+            session="wc_sess_code",
+            tool="code_mode_exec",
+            composition=code_mode_composition(),
+        )
+        direct_annotation = self.write_annotation(
+            "direct-paired.json",
+            base_revision=base_revision,
+            repair_turns={
+                "total": 1,
+                "by_reason": {"invalid_arguments": 1},
+            },
+            task_timing={"started_at_ms": 0, "ended_at_ms": 1000},
+            correctness={
+                "task_verdict": "pass",
+                "validation_verdict": "not_required",
+            },
+        )
+        code_annotation = self.write_annotation(
+            "code-paired.json",
+            variant="code_mode",
+            surface="e1",
+            base_revision=base_revision,
+            repair_turns={"total": 0, "by_reason": {}},
+            task_timing={"started_at_ms": 0, "ended_at_ms": 700},
+            correctness={
+                "task_verdict": "pass",
+                "validation_verdict": "not_required",
+            },
+        )
+        direct = self.summarize(
+            workflow_session_id="wc_sess_direct",
+            case_id="readonly_review",
+            variant="direct",
+            surface="direct",
+            base_revision=base_revision,
+            run_annotation=direct_annotation,
+        )
+        code = self.summarize(
+            workflow_session_id="wc_sess_code",
+            case_id="readonly_review",
+            variant="code_mode",
+            surface="e1",
+            base_revision=base_revision,
+            run_annotation=code_annotation,
+        )
+        comparison = report.compare_reports(direct, code)
+        metrics = {item["metric"]: item for item in comparison["metrics"]}
+
+        self.assertTrue(comparison["case_compatibility"]["comparable"])
+        self.assertTrue(comparison["pair_compatibility"]["comparable"])
+        self.assertTrue(comparison["correctness_compatibility"]["comparable"])
+        self.assertTrue(comparison["throughput_compatibility"]["comparable"])
+        self.assertFalse(metrics["model_round_trips"]["comparable"])
+        self.assertIsNone(metrics["model_round_trips"]["delta"])
+        self.assertEqual(metrics["model_round_trip_proxy"]["delta"], -1)
+        self.assertEqual(metrics["repair_turns.total"]["delta"], -1)
+        self.assertEqual(metrics["outer_calls.failed"]["delta"], -1)
+        self.assertEqual(metrics["task_wall_time_ms"]["delta"], -300)
+        self.assertEqual(metrics["child_calls.failed"]["candidate"], 0)
+        self.assertEqual(metrics["composition.max_in_flight.total"]["candidate"], 1)
+        self.assertEqual(
+            metrics["composition.nested_raw_result_bytes_total.total"]["candidate"],
+            2895,
+        )
+        self.assertEqual(metrics["composition.returned_bytes.total"]["candidate"], 60)
+        self.assertEqual(
+            comparison["repair_turns"]["baseline_by_reason"],
+            {"invalid_arguments": 1},
+        )
+        self.assertEqual(
+            comparison["contract_surface_evidence"]["baseline"]["failure_kind_by_name"],
+            {"completed_failure": 1},
+        )
+        self.assertEqual(
+            report._stable_json(comparison),
+            report._stable_json(copy.deepcopy(comparison)),
+        )
+
+    def test_required_validation_must_pass_correctness_gate(self) -> None:
+        base_revision = "e" * 40
+        self.insert_event("direct", session="wc_sess_direct")
+        self.insert_event(
+            "code",
+            session="wc_sess_code",
+            tool="code_mode_exec_mutating",
+            composition=code_mode_composition(
+                nested_calls=1,
+                nested_successes=1,
+                nested_failures=0,
+                nested_tool_counts={"apply_text_edits": 1},
+                consequential_calls=1,
+                known_results=1,
+            ),
+        )
+        direct = self.summarize(
+            workflow_session_id="wc_sess_direct",
+            case_id="focused_edit_validation",
+            variant="direct",
+            surface="direct",
+            base_revision=base_revision,
+            run_annotation=self.write_annotation(
+                "direct-validation.json",
+                case_id="focused_edit_validation",
+                base_revision=base_revision,
+                correctness={
+                    "task_verdict": "pass",
+                    "validation_verdict": "pass",
+                },
+            ),
+        )
+        code = self.summarize(
+            workflow_session_id="wc_sess_code",
+            case_id="focused_edit_validation",
+            variant="code_mode",
+            surface="e2b",
+            base_revision=base_revision,
+            run_annotation=self.write_annotation(
+                "code-validation.json",
+                case_id="focused_edit_validation",
+                variant="code_mode",
+                surface="e2b",
+                base_revision=base_revision,
+                correctness={
+                    "task_verdict": "pass",
+                    "validation_verdict": "not_required",
+                },
+            ),
+        )
+        comparison = report.compare_reports(direct, code)
+
+        self.assertFalse(comparison["correctness_compatibility"]["comparable"])
+        self.assertIn(
+            "required validation verdict is not pass",
+            comparison["correctness_compatibility"]["reason"],
+        )
+        self.assertFalse(comparison["throughput_compatibility"]["comparable"])
+
+    def test_correctness_failure_closes_throughput_gate_without_hiding_metrics(self) -> None:
+        base_revision = "d" * 40
+        self.insert_event("direct", session="wc_sess_direct")
+        self.insert_event(
+            "code",
+            session="wc_sess_code",
+            tool="code_mode_exec",
+            composition=code_mode_composition(),
+        )
+        direct = self.summarize(
+            workflow_session_id="wc_sess_direct",
+            case_id="readonly_review",
+            variant="direct",
+            surface="direct",
+            base_revision=base_revision,
+            run_annotation=self.write_annotation(
+                "direct-good.json",
+                base_revision=base_revision,
+                repair_turns={"total": 0, "by_reason": {}},
+                correctness={
+                    "task_verdict": "pass",
+                    "validation_verdict": "not_required",
+                },
+            ),
+        )
+        code = self.summarize(
+            workflow_session_id="wc_sess_code",
+            case_id="readonly_review",
+            variant="code_mode",
+            surface="e1",
+            base_revision=base_revision,
+            run_annotation=self.write_annotation(
+                "code-bad.json",
+                variant="code_mode",
+                surface="e1",
+                base_revision=base_revision,
+                repair_turns={"total": 0, "by_reason": {}},
+                correctness={
+                    "task_verdict": "fail",
+                    "validation_verdict": "not_required",
+                },
+            ),
+        )
+        comparison = report.compare_reports(direct, code)
+
+        self.assertFalse(comparison["correctness_compatibility"]["comparable"])
+        self.assertFalse(comparison["throughput_compatibility"]["comparable"])
+        metric = next(
+            item
+            for item in comparison["metrics"]
+            if item["metric"] == "model_round_trip_proxy"
+        )
+        self.assertTrue(metric["comparable"])
+
+    def test_report_privacy_omits_raw_runtime_identity_and_payload_sentinels(self) -> None:
+        self.insert_event(
+            "event",
+            session="wc_sess_private_sentinel",
+            window="raw-window-private-sentinel",
+            principal="principal-private-sentinel",
+            trace_id="trace-private-sentinel",
+            ids={
+                "command": "secret-command-sentinel",
+                "payload": "secret-payload-sentinel",
+                "tunnel": "tunnel-private-sentinel",
+            },
+        )
+        result = self.summarize(
+            workflow_session_id="wc_sess_private_sentinel",
+        )
+        serialized = report._stable_json(result)
+
+        for forbidden in (
+            "wc_sess_private_sentinel",
+            "raw-window-private-sentinel",
+            "principal-private-sentinel",
+            "trace-private-sentinel",
+            "secret-command-sentinel",
+            "secret-payload-sentinel",
+            "tunnel-private-sentinel",
+            "agent:test:project",
+        ):
+            self.assertNotIn(forbidden, serialized)
 
     def test_compare_case_compatibility_requires_exact_git_base_revision(self) -> None:
         baseline = {"benchmark": {"case_id": "focused_edit_validation", "base_revision": "main"}}
@@ -747,6 +1189,29 @@ class AgentLoopReportTests(unittest.TestCase):
             },
         )
 
+    def test_compare_case_compatibility_rejects_changed_case_definition(self) -> None:
+        baseline = {
+            "benchmark": {
+                "case_id": "readonly_review",
+                "base_revision": "a" * 40,
+                "case_fingerprint": "1" * 64,
+            }
+        }
+        candidate = {
+            "benchmark": {
+                "case_id": "readonly_review",
+                "base_revision": "a" * 40,
+                "case_fingerprint": "2" * 64,
+            }
+        }
+        self.assertEqual(
+            report._case_compatibility(baseline, candidate),
+            {
+                "comparable": False,
+                "reason": "benchmark case definitions differ",
+            },
+        )
+
     def test_compare_case_compatibility_requires_same_case_and_base(self) -> None:
         self.insert_event("event")
         baseline = self.summarize()
@@ -755,11 +1220,13 @@ class AgentLoopReportTests(unittest.TestCase):
             "case_id": "focused_edit_validation",
             "base_revision": "a" * 40,
             "variant": "direct",
+            "case_fingerprint": "f" * 64,
         }
         candidate["benchmark"] = {
             "case_id": "focused_edit_validation",
             "base_revision": "a" * 40,
             "variant": "code_mode",
+            "case_fingerprint": "f" * 64,
         }
         comparison = report.compare_reports(baseline, candidate)
         self.assertEqual(
