@@ -184,6 +184,26 @@ Admission is not inferred from future tools. A canonical metadata regression tes
 
 `code_mode_exec` itself is not in the nested allowlist, so recursive Code Mode is impossible.
 
+## Job continuation and control boundary
+
+All three stages exclude `observe_jobs`, `list_jobs`, `wait_for_job_terminal`,
+`stop_job`, `present_job_terminal_continuation`, and other Job Host carriers from
+nested admission and from their Typed Surface callable contracts. All three
+entrypoints remain direct in ordinary MCP/Adaptive and definition-owned
+GatewayOnly in GPT Actions, keeping the existing Actions operation budget;
+this presentation policy changes no nested authority. Making
+`stop_job` directly callable in ordinary MCP/Adaptive does not change that
+allowlist. Query and mutation must not share a conditional-effect sidecar.
+
+An admitted E2a validation may return the same durable Job continuation. Retain
+it outside the cell. When terminal is a real dependency, use the ordinary
+`wait_for_job_terminal` primitive with a supported Host carrier; when work is
+independent, continue read/search/review. An ordinary outer observation can use
+`context_request=["jobs.attention"]` for bounded Project-level attention without
+logs or Session inference. Nested children still reject Server-owned sidecar and
+target overrides. Detailed observation and explicit `stop_job(confirm=true)`
+remain ordinary canonical calls, never nested Job controls.
+
 ## Authority and Session model
 
 The outer call requires `project`, `session_id`, and `source`.

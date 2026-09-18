@@ -14,22 +14,23 @@ For a generic runtime Server:
 
 ```text
 Adaptive Runtime Direct
-  - ToolDefinition.gpt_action_exposure == Unsupported
+  - ToolDefinition.gpt_action_exposure in {Unsupported, GatewayOnly}
   = GPT Action direct operations
 
-Adaptive Runtime model-visible long tail
+Adaptive Runtime model-visible long tail + definition-owned GatewayOnly
   + GPT-Action-supported
   = call_runtime_tool targets
 ```
 
-Tests must lock this relationship, not a hard-coded current direct-tool list. Changing `adaptive_runtime_direct(..., rank)` should automatically change ordinary GPT Action direct exposure.
+Tests must lock this relationship, not a hard-coded current direct-tool list. Changing `adaptive_runtime_direct(..., rank)` should automatically change ordinary GPT Action direct exposure unless the same definition declares an explicit exposure exception.
 
 ## 2. Action-specific state is presentation/transport only
 
 The only normal GPT Action-specific declarations are:
 
 - an optional short presentation description when the canonical description exceeds the Action importer limit;
-- an explicit `Unsupported` exposure exception for a concrete protocol incompatibility.
+- an explicit `Unsupported` exposure exception for a concrete protocol incompatibility;
+- an existing definition-owned `GatewayOnly` policy to preserve the direct-operation budget while retaining the same canonical gateway-callable tool. For example, `stop_job` is MCP/Adaptive direct but GPT Actions gateway-only, with unchanged effect, approval, authority, parser, and handler. All three experimental Code Mode entrypoints use the same gateway-only Actions policy; their ordinary Adaptive directness and nested allowlists are unchanged. Gateway target enums must include definition-owned GatewayOnly entries, not just Adaptive long-tail routes.
 
 Do not add `gpt_action_rank` or a name-based exposure allowlist. Do not exclude a tool merely because its schema is complex, its canonical description is long, or it is used infrequently.
 
@@ -72,9 +73,9 @@ Compact Action operation copy should prioritize: what the tool does, when to cho
 
 ## 5. Operation budget
 
-Generic GPT Actions must stay below the host's 30-operation limit. The generated surface is Adaptive Direct minus explicit unsupported exceptions plus `call_runtime_tool`.
+Generic GPT Actions must stay below the host's 30-operation limit. The generated surface is Adaptive Direct minus definition-owned `Unsupported` and `GatewayOnly` exceptions plus `call_runtime_tool`.
 
-Do not silently truncate operations. CI must fail if the derived projection reaches the limit so the developer explicitly decides whether a protocol-supported direct tool should move out of Adaptive Direct or whether a real GPT Action protocol exception exists.
+Do not silently truncate operations. CI must fail if the derived projection reaches the limit so the developer explicitly chooses a definition-owned GatewayOnly policy, moves a tool out of Adaptive Direct, or identifies a real protocol incompatibility. Do not raise the budget or add a second name-based registry.
 
 The Custom GPT importer also rejects OpenAPI schemas at 1 MB. Keep the generic Action document comfortably below that host ceiling: CI checks both compact and pretty-printed JSON against an internal 800,000-byte budget. Direct request schemas remain canonical, but response schemas intentionally expose only the real `ToolResult { success, output, error? }` envelope with generic `output`; complete canonical output schemas stay in `ToolSpec`/MCP rather than being duplicated into every Action response.
 

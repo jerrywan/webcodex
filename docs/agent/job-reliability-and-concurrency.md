@@ -9,6 +9,71 @@ The purpose is to keep implementation, operator diagnosis, and model-facing tool
 descriptions aligned. It is not a new scheduler, persistence layer, or retry
 framework.
 
+## Continuation and control workflow
+
+Retain the exact continuation returned when a long ordinary tool hands off to a
+Job. Job observation never starts or replaces execution:
+
+```text
+long tool -> same durable Job -> exact continuation retained
+  blocked on terminal -> wait_for_job_terminal
+  independent work    -> continue read/search/review; optional jobs.attention
+  need logs/details   -> observe_jobs on the retained Job
+  need stop           -> stop_job(project="<project>", job_id="<job>", confirm=true)
+  identity lost       -> list_jobs recovery before considering any retry
+```
+
+`wait_for_job_terminal(job_id="<job>", idempotency_key="<wait-key>")` registers
+bounded one-shot terminal attention. Prefer it when progress genuinely depends
+on completion and a real Host carrier is available. Check
+`automatic_resume_available`; registration without a carrier does not promise
+automatic model resumption. Do not poll the wait registration or repeatedly use
+short `observe_jobs` waits just to keep a Job visible. Explicit `observe_jobs`
+remains the fallback for details and recovery.
+
+A handoff failure after execution admission is `outcome_unknown`, not proof of
+pre-start rejection. Recovery reuses the same canonical, atomic promotion:
+caller authorization, cleanup ownership, terminal status, and an observation
+token are checked under the registry lock. A nonterminal safely Public Job
+retains machine-readable `job_id`, `job_status`, and the existing
+`continuation` SuggestedToolCall to `observe_jobs`. A terminal hidden race is
+projected through the initiating tool, not exposed as redundant active work.
+If safe public visibility cannot be proved, hidden identity stays private and
+the failure carries a parser-ready `suggested_call` to `list_jobs` for the exact
+Project. CleanupPending cannot be adopted by observation. Neither recovery
+branch dispatches a replacement or authorizes retrying the original call.
+
+A sparse validation handoff failure remains incomplete `outcome_unknown`
+evidence even without a log snapshot. The immutable Session ledger retains that
+failure. Its bounded evidence view may replace the snapshot only when a known
+terminal result reconciles the same Job, exact Project, Session, tool, and
+validation target. A successful replacement execution with a matching target
+must not erase an earlier unknown outcome.
+
+An ordinary observation can request `context_request=["jobs.attention"]`.
+This is an explicit post-tool context material, not another execution or a
+business-tool argument. It reuses `active_jobs_summary` for the exact resolved
+Project, requires canonical `runtime:read` independently of `project:read`,
+filters caller visibility and Project before limiting recent summaries to eight,
+and shares the existing context-projection byte budget. Zero active Jobs is an
+available zero-count projection. Missing Project/scope or projection budget is
+nonfatal to the main call. Recorder or prior Sessions never select a business
+Session. The summary contains bounded counts and brief Job metadata, not logs,
+command bodies, observation tokens, host details, or arbitrary payload.
+
+Query may piggyback; control may not. `stop_job` is the explicit canonical
+Mutate/JobRun/Standard/DesiredState primitive, with `confirm=true`, `job:run`,
+and unchanged Project/Session ownership checks. MCP/Adaptive expose it directly;
+GPT Actions uses the same definition through `call_runtime_tool` under its
+GatewayOnly policy. There is no cancel alias, mixed observe/mutate manager, or
+control sidecar. Direct exposure does not admit any Job lifecycle/control or
+Host carrier tool into nested Code Mode E1/E2a/E2b.
+
+A Server can preserve authoritative identity in its ToolResult, but cannot prove
+that a remote Host/tool wrapper retained or delivered that result. Diagnose that
+boundary separately; do not add replacement execution or invent authority to
+hide delivery loss outside the Server.
+
 ## 1. Keep request lifetime, Job lifetime, and observation state separate
 
 Three identities have different lifetimes:
@@ -250,12 +315,12 @@ item errors, or one shared absolute deadline expires. It never returns an
 `changed=true`. Item errors take precedence over terminal, then timeout.
 
 Canonical execution handoffs still expose the exact `wait_secs=100,
-wake_on=terminal` parser-ready continuation. Its behavioral meaning is
-**dependency-blocked wait**: use it when the next useful action actually depends
-on terminal outcome. When useful independent work remains, retain that exact Job
-identity/continuation, continue the independent work, and observe later; do not
-repeatedly poll a running Job merely to keep it visible. The 100 seconds is a
-maximum, so terminal completion wakes immediately. Any missing token still gives
+wake_on=terminal` parser-ready observation continuation. When blocked on terminal,
+prefer `wait_for_job_terminal` with a real Host carrier; the bounded observation
+wait remains the details/recovery fallback, not a polling subscription. When
+independent work remains, retain the exact identity/continuation and continue
+that work, optionally requesting `jobs.attention` on an ordinary observation.
+The 100 seconds is a maximum, so terminal completion wakes immediately. Any missing token still gives
 an immediate baseline, and omitting `wait_secs` gives an immediate observation.
 Each Job waiter advances a private opaque cursor on non-terminal updates; final
 bounded deltas always use the caller's original token. Waiters use canonical
