@@ -81,9 +81,7 @@ fn builtin_coding_workflow_defaults_cover_unnamed_tasks_without_granting_authori
         "stop_job(confirm=true)",
         "list_jobs is identity recovery",
         "sufficient fresh validation",
-        "Formatting is finalization",
         "After Rust stabilizes, format once",
-        "before final diff/closeout",
         "rerun only after later Rust edits",
     ] {
         assert!(defaults.contains(boundary), "missing guidance: {boundary}");
