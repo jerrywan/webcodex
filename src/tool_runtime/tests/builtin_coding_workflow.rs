@@ -174,6 +174,8 @@ fn code_mode_strategy_changes_only_guidance_and_teaches_compact_composition() {
     let strategy = strategy_text(&composed);
     for phrase in [
         "simple observation use a direct primitive",
+        "prefer direct search_and_read",
+        "multi-step related search/read observations",
         "read-only code_mode_exec",
         "soft heuristic",
         "bounded callable contract",
