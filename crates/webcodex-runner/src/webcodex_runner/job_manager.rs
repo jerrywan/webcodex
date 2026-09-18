@@ -21,7 +21,7 @@ use super::shutdown::{lock_unpoison, ActivityTracker};
 use super::ssh::{is_transport_failure, SshConnectionPool};
 use super::transport::RunnerSink;
 use std::collections::{HashMap, HashSet, VecDeque};
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
