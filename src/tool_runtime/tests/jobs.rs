@@ -1589,14 +1589,26 @@ async fn model_facing_stop_job_session_project_mismatch_beats_auto_approve() {
     assert!(event.permission.is_none());
 }
 
-async fn register_job_agent_for_auth(
+pub(super) async fn register_job_agent_for_auth(
     runtime: &ToolRuntime,
     client_id: &str,
     project_id: &str,
     auth: &crate::auth::AuthContext,
 ) {
+    register_job_agent_for_auth_with_reconciliation(runtime, client_id, project_id, auth, false)
+        .await;
+}
+
+pub(super) async fn register_job_agent_for_auth_with_reconciliation(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    project_id: &str,
+    auth: &crate::auth::AuthContext,
+    reconciliation: bool,
+) {
     let caps = crate::test_support::current_runner_capabilities(RunnerCapabilities {
         async_shell_jobs: true,
+        job_state_reconciliation: reconciliation,
         ..Default::default()
     });
     runtime
@@ -1606,7 +1618,10 @@ async fn register_job_agent_for_auth(
                 process_started_at: None,
                 build: None,
                 job_concurrency_limit: Some(4),
-                job_inventory: None,
+                job_inventory: reconciliation.then(|| crate::runner_protocol::ShellJobInventory {
+                    active_complete: true,
+                    jobs: Vec::new(),
+                }),
                 coding_agent_providers: None,
                 coding_agent_inventory: None,
                 client_id: client_id.to_string(),
@@ -1696,7 +1711,7 @@ async fn start_agent_runtime_job(
     start_agent_runtime_job_in_session(runtime, client_id, project_id, None, auth).await
 }
 
-async fn start_agent_runtime_job_in_session(
+pub(super) async fn start_agent_runtime_job_in_session(
     runtime: &ToolRuntime,
     client_id: &str,
     project_id: &str,
@@ -1721,7 +1736,7 @@ async fn start_agent_runtime_job_in_session(
     result.output["job_id"].as_str().unwrap().to_string()
 }
 
-async fn mark_next_agent_job_running(runtime: &ToolRuntime, client_id: &str) -> String {
+pub(super) async fn mark_next_agent_job_running(runtime: &ToolRuntime, client_id: &str) -> String {
     let request = wait_for_runner_request_for_instance(runtime, client_id, "inst").await;
     let job_id = request.job_id.clone().expect("Job request id");
     runtime
@@ -1731,7 +1746,7 @@ async fn mark_next_agent_job_running(runtime: &ToolRuntime, client_id: &str) -> 
             runner_instance_id: "inst".to_string(),
             job_id: job_id.clone(),
             request_id: Some(request.request_id),
-            update_seq: None,
+            update_seq: Some(1),
             status: "running".to_string(),
             stdout_chunk: None,
             stderr_chunk: None,

@@ -327,6 +327,8 @@ mod file_validation;
 mod instance_lease;
 #[path = "tests/internal_posix.rs"]
 mod internal_posix;
+#[path = "tests/job_handoff.rs"]
+mod job_handoff;
 #[path = "tests/job_lifecycle.rs"]
 mod job_lifecycle;
 #[path = "tests/job_log_wait.rs"]

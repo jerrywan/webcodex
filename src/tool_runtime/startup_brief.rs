@@ -69,8 +69,8 @@ pub(crate) fn builtin_coding_workflow_projection(profile: CodingGuidanceProfile)
             "Verify Project/branch/HEAD/changes/nested rules. Recovery/compaction/exact Session resume is continuation: reuse still-current Git/read/validation/Job facts; revalidate changed snapshots/HEAD/worktree/instructions.",
             "Preserve unrelated work; push/publish/deploy/restart need explicit action/target. If a user answer/Job/validation/result is not a dependency, continue independent work; wait only on real dependencies.",
             "Ordinary implementation is default: map cross-layer changes end to end; use compiler/schema/exhaustiveness failures for gaps; minimize concepts, avoid speculative redesign.",
-            "Validation failure is evidence, not queue cleanliness. Fix blockers before dependent work; otherwise continue. Reuse assertion_name on rerun; mutation stales evidence; outcome_unknown fails closed. Formatting is finalization.",
-            "Use one execution/Job, exact continuation; wait_secs=100,wake_on=terminal when blocked, not for visibility. After Rust stabilizes, format once before final diff/closeout; rerun only after later Rust edits. Final source needs sufficient fresh validation."
+            "Validation failure is evidence, not queue cleanliness. Reuse assertion_name on rerun; outcome_unknown fails closed. Formatting is finalization. After Rust stabilizes, format once before final diff/closeout; rerun only after later Rust edits. Final source needs sufficient fresh validation.",
+            "Retain one execution/Job and its exact continuation. When blocked on terminal, prefer wait_for_job_terminal with a real Host carrier; no short polling. Use observe_jobs for details and stop_job(confirm=true) for control; list_jobs is identity recovery."
         ],
         "tool_strategy": {
             "profile": profile,
@@ -81,7 +81,7 @@ pub(crate) fn builtin_coding_workflow_projection(profile: CodingGuidanceProfile)
             "session_recording": "When work_on_project creates or resumes, pass recording_session_id for recorder provenance only. business session_id may target another Session; it grants no authority.",
             "session_message_ack": "For retained session_attention with requires_ack, echo ack_session_message_ids. This proves model-context retention only; it never resolves messages, grants authority, or gates execution.",
             "session_message_resolution": "For a handled non-todo, send session_message_resolution on the next ordinary call with recording_session_id; if requires_ack, also send ack_session_message_ids. It cannot predict the main call. Todos use complete_session_message.",
-            "context_sidecar": "context_request adds bounded context after the main tool and never authorizes effects. Recover lost project.instructions with an observation call before dependent mutation.",
+            "context_sidecar": "context_request adds bounded context after the main tool and never authorizes effects. Continue independent work with optional jobs.attention Project-level summaries; no Session inference or control sidecars. Recover lost project.instructions with an observation call before dependent mutation.",
             "runner_targeting": "For exact Runner client_id, use runtime_status(client_id=...) or list_projects(client_id=...) before treating it as absent.",
             "persistent_shell": "Local: run_process=literal argv; run_shell=shell grammar/short chains; run_script=program-like scripts; specialize for added semantics. Persistent shell only for repeated named-SSH state or local same-process state.",
             "normal_closeout": "Source/validation/open evidence: finish_coding_task(summary_only=true). Read/planning/artifact: finalize directly."

@@ -3,7 +3,7 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 use crate::model_surface::{
-    adaptive_runtime_gateway_target_route, AdaptiveRuntimeGatewayTargetRoute,
+    gpt_action_gateway_target_route, AdaptiveRuntimeGatewayTargetRoute,
     ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
 };
 use webcodex_tool_contracts::{
@@ -103,7 +103,7 @@ fn gateway_operation() -> Value {
     let mut targets = model_visible_tool_definitions()
         .filter(|definition| definition.supports_gpt_actions())
         .filter(|definition| {
-            adaptive_runtime_gateway_target_route(definition.name)
+            gpt_action_gateway_target_route(definition.name)
                 == AdaptiveRuntimeGatewayTargetRoute::Gateway
         })
         .map(|definition| definition.name)
@@ -404,10 +404,42 @@ mod tests {
         assert!(actual.contains(&"apply_text_edits"));
         assert!(!actual.contains(&"apply_patch"));
         #[cfg(feature = "experimental-code-mode")]
-        for name in ["code_mode_exec_effectful", "code_mode_exec_mutating"] {
+        for name in [
+            "code_mode_exec",
+            "code_mode_exec_effectful",
+            "code_mode_exec_mutating",
+        ] {
             assert!(webcodex_tool_contracts::gpt_action_tool_supported(name));
             assert!(!actual.contains(&name));
         }
+    }
+
+    #[test]
+    fn stop_job_is_direct_runtime_but_gateway_only_action_without_operation_growth() {
+        let definition = webcodex_tool_contracts::lookup_tool_definition("stop_job").unwrap();
+        assert!(definition.adaptive_runtime_direct_rank().is_some());
+        assert_eq!(
+            definition.gpt_action_exposure(),
+            webcodex_tool_contracts::ToolGptActionExposure::GatewayOnly
+        );
+        assert!(webcodex_tool_contracts::gpt_action_tool_supported(
+            "stop_job"
+        ));
+        let gateway = gateway_operation();
+        let targets = gateway["requestBody"]["content"]["application/json"]["schema"]["properties"]
+            ["tool"]["enum"]
+            .as_array()
+            .unwrap();
+        assert!(
+            targets.contains(&json!("stop_job")),
+            "GatewayOnly tools must be parser-ready gateway targets"
+        );
+        let ids = operation_ids(&build_openapi_spec());
+        assert!(!ids.contains("stop_job"));
+        assert!(!ids.contains("cancel_job"));
+        assert!(ids.contains(ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME));
+        assert!(ids.len() < GPT_ACTION_OPERATION_LIMIT);
+        assert_eq!(ids.len(), gpt_action_direct_tool_definitions().len() + 1);
     }
 
     #[test]

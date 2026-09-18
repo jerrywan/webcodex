@@ -185,8 +185,10 @@ fn assert_builtin_workflow(output: &Value) {
         "Reuse assertion_name",
         "outcome_unknown fails closed",
         "exact continuation",
-        "wait_secs=100,wake_on=terminal",
-        "not for visibility",
+        "wait_for_job_terminal with a real Host carrier",
+        "no short polling",
+        "stop_job(confirm=true)",
+        "list_jobs is identity recovery",
         "sufficient fresh validation",
     ] {
         assert!(defaults.contains(phrase), "workflow guidance: {phrase}");

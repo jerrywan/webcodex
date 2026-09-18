@@ -638,7 +638,7 @@ fn gpt_action_admit_target(path_tool: &str, target: &str) -> Result<(), String> 
             "runtime tool '{target}' is not available through GPT Actions"
         ));
     }
-    let route = crate::model_surface::adaptive_runtime_gateway_target_route(target);
+    let route = crate::model_surface::gpt_action_gateway_target_route(target);
     if path_tool == crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME {
         return match route {
             AdaptiveRuntimeGatewayTargetRoute::Gateway => Ok(()),
@@ -676,7 +676,7 @@ fn gpt_action_suggested_tool_call_route(
     if !webcodex_tool_contracts::gpt_action_tool_supported(target) {
         return SuggestedToolCallRoute::Unavailable;
     }
-    match crate::model_surface::adaptive_runtime_gateway_target_route(target) {
+    match crate::model_surface::gpt_action_gateway_target_route(target) {
         AdaptiveRuntimeGatewayTargetRoute::Direct => SuggestedToolCallRoute::Direct,
         AdaptiveRuntimeGatewayTargetRoute::Gateway => SuggestedToolCallRoute::Gateway(
             crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
@@ -854,6 +854,32 @@ pub async fn runtime_status(req: &mut Request, depot: &mut Depot, res: &mut Resp
     let auth = depot.obtain::<crate::auth::AuthContext>().ok().cloned();
     let result = runtime.dispatch_with_auth(call, auth.as_ref()).await;
     render_result(res, &audit, "runtime_status", None, result);
+}
+
+#[cfg(test)]
+mod job_action_routing_tests {
+    use super::*;
+
+    #[test]
+    fn stop_job_actions_admission_and_followup_use_definition_owned_gateway_policy() {
+        let gateway = crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME;
+        assert!(gpt_action_admit_target(gateway, "stop_job").is_ok());
+        assert!(gpt_action_admit_target("stop_job", "stop_job").is_err());
+        assert_eq!(
+            gpt_action_suggested_tool_call_route("stop_job"),
+            crate::model_surface::SuggestedToolCallRoute::Gateway(gateway)
+        );
+        for definition in webcodex_tool_contracts::model_visible_tool_definitions() {
+            if definition.gpt_action_exposure()
+                == webcodex_tool_contracts::ToolGptActionExposure::GatewayOnly
+            {
+                assert!(gpt_action_admit_target(gateway, definition.name).is_ok());
+                assert!(gpt_action_admit_target(definition.name, definition.name).is_err());
+            }
+        }
+        assert!(gpt_action_admit_target(gateway, "cancel_job").is_err());
+        assert!(gpt_action_admit_target(gateway, gateway).is_err());
+    }
 }
 
 #[cfg(test)]

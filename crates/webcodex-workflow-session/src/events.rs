@@ -982,22 +982,35 @@ pub(super) fn extract_job_id(output: &Value) -> Option<String> {
 
 pub fn validation_output_summary_for_tool_result(tool_name: &str, output: &Value) -> Option<Value> {
     let execution_policy = execution_policy_for_tool(tool_name)?;
-    let stdout_value = output.get("stdout_tail")?;
-    let stderr_value = output.get("stderr_tail")?;
-    let stdout = stdout_value.as_str()?;
-    let stderr = stderr_value.as_str()?;
+    // A started execution whose handoff observation failed has no log snapshot.
+    // Preserve its unknown outcome in the existing ledger instead of mistaking
+    // sparse recovery for "no validation invoked". Missing output is incomplete,
+    // never evidence of an empty successful capture.
+    let unknown_started = output.get("execution_state").and_then(Value::as_str)
+        == Some("outcome_unknown")
+        && output.get("command_started").and_then(Value::as_bool) == Some(true);
+    let stdout = output
+        .get("stdout_tail")
+        .and_then(Value::as_str)
+        .or_else(|| unknown_started.then_some(""))?;
+    let stderr = output
+        .get("stderr_tail")
+        .and_then(Value::as_str)
+        .or_else(|| unknown_started.then_some(""))?;
     let stdout_excerpt = validation_excerpt(stdout);
     let stderr_excerpt = validation_excerpt(stderr);
     let stdout_truncated = output
         .get("stdout_truncated")
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || stdout_excerpt.filtered;
+        || stdout_excerpt.filtered
+        || (unknown_started && output.get("stdout_tail").and_then(Value::as_str).is_none());
     let stderr_truncated = output
         .get("stderr_truncated")
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || stderr_excerpt.filtered;
+        || stderr_excerpt.filtered
+        || (unknown_started && output.get("stderr_tail").and_then(Value::as_str).is_none());
 
     let mut summary = json!({
         "tool_name": tool_name,
@@ -1067,6 +1080,35 @@ pub fn validation_output_summary_for_tool_result(tool_name: &str, output: &Value
         }
     }
     Some(summary)
+}
+
+#[cfg(test)]
+mod handoff_evidence_tests {
+    use super::*;
+
+    #[test]
+    fn sparse_job_handoff_unknown_retains_incomplete_evidence_without_payload() {
+        for tool in ["run_shell", "cargo_check", "cargo_test"] {
+            let output = json!({"execution_state": "outcome_unknown", "command_started": true,
+                "command_completed": false, "failure_kind": "outcome_unknown", "terminal": false});
+            let summary = validation_output_summary_for_tool_result(tool, &output).unwrap();
+            assert_eq!(summary["execution_state"], "outcome_unknown");
+            assert_eq!(summary["stdout_truncated"], true);
+            assert_eq!(summary["stderr_truncated"], true);
+            assert_eq!(summary["stdout_tail_excerpt"], "");
+            assert_eq!(summary["stderr_tail_excerpt"], "");
+            assert!(validation_output_summary_for_tool_result(
+                tool,
+                &json!({"execution_state": "completed"})
+            )
+            .is_none());
+            assert!(validation_output_summary_for_tool_result(
+                tool,
+                &json!({"execution_state": "outcome_unknown", "command_started": false})
+            )
+            .is_none());
+        }
+    }
 }
 
 pub(super) fn sanitize_persisted_validation_output_summary(

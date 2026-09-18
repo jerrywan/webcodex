@@ -312,7 +312,7 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
         )),
         TOOL_CATEGORY_JOB,
     ),
-    permission_risk(
+    adaptive_runtime_direct(permission_risk(
         model_spec(
             def(
                 "stop_job",
@@ -335,9 +335,9 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Stop one existing WebCodex Job by job_id. Requires confirm=true and preserves project/session ownership; log bodies are not returned.",
-        ),
+        ).with_gpt_action_gateway_only(),
         PERMISSION_RISK_JOB,
-    ),
+    ), 81),
     adaptive_runtime_direct(
         model_spec(
             def(

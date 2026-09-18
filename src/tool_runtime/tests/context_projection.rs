@@ -13,6 +13,8 @@ use webcodex_core::plugin::{
     PluginSelectionAnnotations, ProjectPluginCatalog, ProjectPluginCatalogEntry,
 };
 
+mod jobs_attention;
+
 fn context_material<'a>(result: &'a ToolResult, key: &str) -> &'a Value {
     result.output["context_projection"]["materials"]
         .as_array()

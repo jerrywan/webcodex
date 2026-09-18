@@ -14,6 +14,10 @@ fn workflow_schema() -> Value {
 #[test]
 fn builtin_coding_workflow_defaults_are_required_and_bounded() {
     let workflow = builtin_coding_workflow_projection(Default::default());
+    assert!(workflow["model_protocol"]["context_sidecar"]
+        .as_str()
+        .unwrap()
+        .contains("jobs.attention"));
     let schema = workflow_schema();
     validate_schema_instance_for_test(&workflow, &schema).unwrap();
 
@@ -72,8 +76,10 @@ fn builtin_coding_workflow_defaults_cover_unnamed_tasks_without_granting_authori
         "outcome_unknown fails closed",
         "one execution/Job",
         "exact continuation",
-        "wait_secs=100,wake_on=terminal",
-        "not for visibility",
+        "wait_for_job_terminal with a real Host carrier",
+        "no short polling",
+        "stop_job(confirm=true)",
+        "list_jobs is identity recovery",
         "sufficient fresh validation",
         "Formatting is finalization",
         "After Rust stabilizes, format once",

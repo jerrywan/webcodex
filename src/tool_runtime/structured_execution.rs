@@ -109,54 +109,155 @@ pub(crate) async fn structured_job_observation(
     })
 }
 
+/// An execution has already been admitted. Only an independently authorized
+/// Public record may carry identity into a model-facing failure; error prose is
+/// deliberately not retained as recovery authority (or leaked as payload).
+pub(crate) struct StructuredJobHandoffFailure {
+    public_job: Option<ShellJobInfo>,
+}
+
+impl StructuredJobHandoffFailure {
+    pub(crate) async fn unresolved(
+        clients: &RunnerRegistry,
+        access: Option<&RunnerAccess>,
+        job_id: &str,
+    ) -> Self {
+        Self {
+            public_job: clients.get_job_for_auth(access, job_id).await.ok(),
+        }
+    }
+
+    pub(crate) fn has_public_continuation(&self) -> bool {
+        self.public_job.is_some()
+    }
+
+    pub(crate) fn into_tool_result(
+        self,
+        project: &str,
+        budget: StructuredExecutionBudget,
+    ) -> super::ToolResult {
+        use serde_json::json;
+        let mut result = super::process::outcome_unknown_result(
+            "durable execution was admitted but handoff observation failed; recover the original execution before considering any retry",
+        );
+        super::process::add_structured_continuation_facts(
+            &mut result,
+            budget.effective_timeout_secs,
+            budget.sync_wait_secs,
+            true,
+        );
+        if let Some(job) = self.public_job {
+            result.output["promoted_to_job"] = json!(true);
+            result.output["job_id"] = json!(job.job_id);
+            result.output["job_status"] = json!(job.status);
+            result.output["activity"] = serde_json::Value::Null;
+            result.output["continuation"] = super::jobs::observe_job_continuation(
+                &job.job_id,
+                job.observation_token.as_deref(),
+            );
+        } else {
+            result.output["suggested_call"] =
+                super::SuggestedToolCall::new("list_jobs", json!({"project": project})).to_value();
+        }
+        result
+    }
+}
+
+/// Re-observe/promote the same durable record, never a replacement execution.
+/// A terminal race belongs to the initiating call; an unprojectable hidden or
+/// cleanup-pending record stays private and keeps its cleanup guard armed.
+pub(crate) async fn recover_hidden_structured_job(
+    clients: &RunnerRegistry,
+    access: Option<&RunnerAccess>,
+    job_id: &str,
+) -> Result<HiddenStructuredJobWait, StructuredJobHandoffFailure> {
+    if let Ok(job) = clients.promote_hidden_job(access, job_id).await {
+        if !super::jobs::is_terminal_job_status(&job.status) {
+            return Err(StructuredJobHandoffFailure {
+                public_job: Some(job),
+            });
+        }
+        if let Ok(terminal) = hidden_terminal_snapshot(clients, access, job_id).await {
+            return Ok(terminal);
+        }
+    }
+    // Public may already have been established before observation failed. This
+    // lookup rechecks visibility and caller authority; it cannot reveal hidden
+    // terminal or CleanupPending records and does not infer a token from prose.
+    Err(StructuredJobHandoffFailure::unresolved(clients, access, job_id).await)
+}
+
 pub(crate) async fn await_hidden_structured_job(
     clients: Arc<RunnerRegistry>,
     job_id: String,
     sync_wait: Duration,
     auth: Option<AuthContext>,
-) -> Result<HiddenStructuredJobWait, String> {
+) -> Result<HiddenStructuredJobWait, StructuredJobHandoffFailure> {
     let access = crate::runner_http::runner_access_from_auth(auth.as_ref());
     let mut guard = HiddenJobCleanupGuard::new(clients.clone(), job_id.clone(), access.clone());
-    let deadline = std::time::Instant::now() + sync_wait;
-    loop {
-        if let Ok(job) = clients
-            .get_hidden_job_for_auth(access.as_ref(), &job_id)
-            .await
-        {
-            if crate::tool_runtime::jobs::is_terminal_job_status(&job.status) {
-                let terminal = hidden_terminal_snapshot(&clients, access.as_ref(), &job_id).await?;
-                guard.disarm();
-                return Ok(terminal);
+    let attempt: Result<HiddenStructuredJobWait, String> = async {
+        let deadline = std::time::Instant::now() + sync_wait;
+        loop {
+            if let Ok(job) = clients
+                .get_hidden_job_for_auth(access.as_ref(), &job_id)
+                .await
+            {
+                if crate::tool_runtime::jobs::is_terminal_job_status(&job.status) {
+                    let terminal =
+                        hidden_terminal_snapshot(&clients, access.as_ref(), &job_id).await?;
+                    guard.disarm();
+                    return Ok(terminal);
+                }
             }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        if std::time::Instant::now() >= deadline {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
 
-    let promoted = clients.promote_hidden_job(&job_id).await?;
-    if crate::tool_runtime::jobs::is_terminal_job_status(&promoted.status) {
-        let terminal = hidden_terminal_snapshot(&clients, access.as_ref(), &job_id).await?;
+        let promoted = clients.promote_hidden_job(access.as_ref(), &job_id).await?;
+        if crate::tool_runtime::jobs::is_terminal_job_status(&promoted.status) {
+            let terminal = hidden_terminal_snapshot(&clients, access.as_ref(), &job_id).await?;
+            guard.disarm();
+            return Ok(terminal);
+        }
+        let observation = structured_job_observation(&clients, access.as_ref(), &job_id).await?;
+        if crate::tool_runtime::jobs::is_terminal_job_status(&observation.job.status) {
+            let terminal = hidden_terminal_snapshot(&clients, access.as_ref(), &job_id).await?;
+            guard.disarm();
+            return Ok(terminal);
+        }
+        let (execution_state, command_started) = continued_execution_state(
+            observation.job.status.as_str(),
+            observation.job.started_at.is_some(),
+        );
         guard.disarm();
-        return Ok(terminal);
+        Ok(HiddenStructuredJobWait::Continued {
+            observation,
+            execution_state,
+            command_started,
+        })
     }
-    let observation = structured_job_observation(&clients, access.as_ref(), &job_id).await?;
-    if crate::tool_runtime::jobs::is_terminal_job_status(&observation.job.status) {
-        let terminal = hidden_terminal_snapshot(&clients, access.as_ref(), &job_id).await?;
+    .await;
+    let result = match attempt {
+        Ok(result) => Ok(result),
+        Err(_) => {
+            Box::pin(recover_hidden_structured_job(
+                &clients,
+                access.as_ref(),
+                &job_id,
+            ))
+            .await
+        }
+    };
+    if result.is_ok()
+        || result
+            .as_ref()
+            .is_err_and(|failure| failure.has_public_continuation())
+    {
         guard.disarm();
-        return Ok(terminal);
     }
-    let (execution_state, command_started) = continued_execution_state(
-        observation.job.status.as_str(),
-        observation.job.started_at.is_some(),
-    );
-    guard.disarm();
-    Ok(HiddenStructuredJobWait::Continued {
-        observation,
-        execution_state,
-        command_started,
-    })
+    result
 }
 
 fn continued_execution_state(status: &str, started: bool) -> (&'static str, bool) {

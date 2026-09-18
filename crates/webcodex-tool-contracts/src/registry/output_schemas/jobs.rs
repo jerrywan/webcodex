@@ -286,7 +286,7 @@ fn structured_execution_lifecycle_constraints(execution_source: &str) -> Value {
                 "properties": {
                     "job_id": {"type": "string", "minLength": 1},
                     "job_status": {"type": "string", "minLength": 1},
-                    "continuation": continuation,
+                    "continuation": observe_job_continuation_schema(),
                     "observation_token": {"type": "string", "minLength": 1},
                     "terminal": {"const": false},
                     "command_completed": {"const": false},
@@ -300,7 +300,14 @@ fn structured_execution_lifecycle_constraints(execution_source: &str) -> Value {
                     "job_status",
                     "terminal",
                     "command_completed",
-                ]
+                ],
+                "allOf": [{
+                    "if": {
+                        "properties": {"execution_state": {"enum": ["queued", "running"]}},
+                        "required": ["execution_state"]
+                    },
+                    "then": {"properties": {"continuation": continuation}}
+                }]
             }
         },
         {
@@ -379,6 +386,7 @@ fn structured_continuation_properties() -> Vec<(&'static str, Value)> {
             ),
         ),
         ("continuation", observe_job_continuation_schema()),
+        ("suggested_call", list_jobs_recovery_call_schema(true)),
         ("activity", job_activity_schema()),
         (
             "effective_timeout_secs",
@@ -452,7 +460,7 @@ fn job_structured_execution_metadata_schema() -> Value {
     })
 }
 
-fn list_jobs_recovery_call_schema(project: bool) -> Value {
+pub(super) fn list_jobs_recovery_call_schema(project: bool) -> Value {
     let arguments = if project {
         json!({
             "type": "object",
@@ -846,10 +854,6 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
         }
         "run_process" => {
             let mut properties = vec![
-                ("suggested_call", suggested_tool_call_schema(
-                    "run_shell", run_process_shell_recovery_arguments_schema(),
-                    "Optional failure-only advisory call for a proven lossless shell-command-mode conversion rejected before process start. It grants no retry or execution authority."
-                )),
                 (
                     "duration_ms",
                     schema_type("integer", "Process duration in milliseconds. Diagnostic telemetry: omitted on ordinary synchronous terminal success and from the default model-facing failure projection."),
@@ -949,6 +953,13 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
             ];
             properties.extend(structured_continuation_properties());
             let mut schema = wrapped_output_schema(properties);
+            schema["properties"]["output"]["properties"]["suggested_call"] = json!({"anyOf": [
+                list_jobs_recovery_call_schema(true),
+                suggested_tool_call_schema(
+                    "run_shell", run_process_shell_recovery_arguments_schema(),
+                    "Failure-only advisory conversion proven lossless and rejected before process start. Never retry authority after execution may have started."
+                )
+            ]});
             schema["properties"]["output"]["properties"]["execution_source"]["const"] =
                 json!("run_process");
             schema["properties"]["output"]["allOf"] =

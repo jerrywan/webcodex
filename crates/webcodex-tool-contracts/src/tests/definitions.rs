@@ -513,6 +513,66 @@ fn every_runtime_tool_has_an_explicit_fail_closed_audit_contract() {
 }
 
 #[test]
+fn stop_job_direct_exposure_preserves_one_canonical_effect_and_gateway_budget() {
+    let definition = lookup_tool_definition("stop_job").unwrap();
+    assert_eq!(
+        tool_definitions()
+            .filter(|item| item.name == "stop_job")
+            .count(),
+        1
+    );
+    assert_eq!(definition.adaptive_runtime_direct_rank(), Some(81));
+    assert_eq!(
+        definition.gpt_action_exposure(),
+        ToolGptActionExposure::GatewayOnly
+    );
+    assert!(definition.supports_gpt_actions());
+    assert_eq!(definition.metadata.effect, ToolEffect::Mutate);
+    assert_eq!(definition.metadata.risk, ToolRisk::JobRun);
+    assert_eq!(definition.metadata.approval, ToolApprovalPolicy::Standard);
+    assert_eq!(
+        definition.metadata.idempotency,
+        ToolIdempotency::DesiredState
+    );
+    assert_eq!(
+        definition.metadata.authority,
+        ToolAuthorityPolicy::Require(JOB_RUN)
+    );
+    assert!(!gpt_action_direct_tool_definitions()
+        .iter()
+        .any(|item| item.name == "stop_job"));
+    assert!(lookup_tool_definition("cancel_job").is_none());
+    assert!(lookup_tool_definition("manage_jobs").is_none());
+    let schema = input_schema_for_tool("stop_job");
+    let properties = schema["properties"].as_object().unwrap();
+    assert_eq!(properties.len(), 4);
+    for key in ["project", "job_id", "session_id", "confirm"] {
+        assert!(properties.contains_key(key));
+    }
+    for name in [
+        "read_files",
+        "search_project_texts",
+        "git_status",
+        "apply_text_edits",
+    ] {
+        let schema = input_schema_for_tool(name);
+        let properties = schema["properties"].as_object().unwrap();
+        for forbidden in [
+            "observe_job",
+            "job_id",
+            "cancel_job",
+            "wait_job",
+            "job_control",
+        ] {
+            assert!(
+                !properties.contains_key(forbidden),
+                "{name} gained {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
 fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
     let mut seen_ranks = std::collections::BTreeMap::new();
     for definition in tool_definitions() {
@@ -550,6 +610,7 @@ fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
         ("run_detached_process", 72),
         ("run_shell", 75),
         ("observe_jobs", 80),
+        ("stop_job", 81),
     ] {
         let definition = derived
             .iter()

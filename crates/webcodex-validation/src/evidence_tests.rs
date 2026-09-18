@@ -2862,6 +2862,94 @@ fn current_evidence_validation_started_before_new_attempt_does_not_enter_new_att
 }
 
 #[test]
+fn unknown_job_handoff_reconciles_only_authoritative_same_execution() {
+    for same_execution in [false, true] {
+        let store = SessionStore::default();
+        let project = "agent:fixture:repo";
+        let session = store.start_session(Some(project.to_string()), None);
+        let target = "target:aaaaaaaaaaaaaaaaaaaaaaaa";
+        let job_id = "job_handoff_original";
+        record_finished_tool(
+            &store,
+            &session.session_id,
+            "cargo_check",
+            json!({"project": project, "validation_target_id": target}),
+            false,
+            json!({"job_id": job_id, "execution_state": "outcome_unknown",
+                "command_started": true, "command_completed": false, "terminal": false,
+                "failure_kind": "outcome_unknown"}),
+        );
+        let pending = store.summary(&session.session_id, Some(50)).unwrap();
+        assert_eq!(
+            validation_summary_for_session(&pending)["unresolved_failures"]["count"],
+            1
+        );
+        let terminal_id = if same_execution {
+            job_id
+        } else {
+            "job_unrelated_replacement"
+        };
+        assert!(store.record_validation_job_terminal(
+            &session.session_id,
+            terminal_id,
+            &[terminal_id],
+            "cargo_check",
+            session_tool_contract("cargo_check"),
+            Some(project.to_string()),
+            target,
+            None,
+            "completed",
+            Some(0),
+            Some(true),
+            Some(pending.updated_at),
+            Some(pending.updated_at),
+            Some(1),
+            None
+        ));
+        let reconciled = store.summary(&session.session_id, Some(50)).unwrap();
+        let result = validation_summary_for_session(&reconciled);
+        assert_eq!(
+            result["unresolved_failures"]["count"],
+            if same_execution { 0 } else { 1 },
+            "{result}"
+        );
+        assert!(
+            reconciled.events.iter().any(|event| event
+                .validation_output_summary
+                .as_ref()
+                .is_some_and(|summary| summary["execution_state"] == "outcome_unknown")),
+            "immutable ledger must retain original uncertainty"
+        );
+        if same_execution {
+            assert_eq!(result["status"], "passed");
+            assert_eq!(result["current_evidence"]["status"], "passed");
+            for mismatch in ["project", "session", "tool"] {
+                let mut mismatched = reconciled.clone();
+                let terminal = mismatched
+                    .events
+                    .iter_mut()
+                    .find(|event| event.kind == "validation_job_terminal")
+                    .unwrap();
+                match mismatch {
+                    "project" => {
+                        terminal.project = Some("agent:fixture:other".into());
+                        terminal.resolved_project = terminal.project.clone();
+                    }
+                    "session" => terminal.session_id = "other-session".into(),
+                    "tool" => terminal.tool_name = "cargo_test".into(),
+                    _ => unreachable!(),
+                }
+                assert_eq!(
+                    validation_summary_for_session(&mismatched)["unresolved_failures"]["count"],
+                    1,
+                    "{mismatch} cannot resolve another execution"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn validation_job_terminal_inherits_public_failure_expectation() {
     let store = SessionStore::default();
     let project = "agent:eval:demo";

@@ -1055,9 +1055,7 @@ impl ToolRuntime {
                         "continuation": continuation,
                     }))
                 }
-                Err(error) => outcome_unknown_result(format!(
-                    "the durable process Job could not be observed during handoff: {error}"
-                )),
+                Err(failure) => return failure.into_tool_result(&project, budget),
             };
             if result.output["promoted_to_job"] != json!(true) {
                 add_structured_continuation_facts(

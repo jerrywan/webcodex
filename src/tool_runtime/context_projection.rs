@@ -60,6 +60,12 @@ pub(crate) const CONTEXT_MATERIAL_SPECS: &[ContextMaterialSpec] = &[
         surface: ContextMaterialSurface::AnySidecar,
     },
     ContextMaterialSpec {
+        key: "jobs.attention",
+        project_required: true,
+        scope_policy: ContextMaterialScopePolicy::Require(crate::auth::SCOPE_RUNTIME_READ),
+        surface: ContextMaterialSurface::AnySidecar,
+    },
+    ContextMaterialSpec {
         key: "skills.catalog",
         project_required: true,
         scope_policy: ContextMaterialScopePolicy::Require(crate::auth::SCOPE_PROJECT_READ),
@@ -209,6 +215,24 @@ impl ToolRuntime {
                                     "projection": projection,
                                 })
                             }
+                        }
+                        "jobs.attention" => {
+                            let project =
+                                resolved_project.expect("registry requires project target");
+                            // Project-level attention only. Recorder/ambient Sessions never
+                            // select a business Session or grant Job inventory authority.
+                            let projection = Box::pin(self.active_jobs_summary(
+                                Some(&project.resolved_id),
+                                None,
+                                auth,
+                                8,
+                            ))
+                            .await;
+                            json!({
+                                "key": key,
+                                "status": "available",
+                                "projection": projection,
+                            })
                         }
                         "skills.catalog" => {
                             let project =

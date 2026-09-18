@@ -1276,13 +1276,30 @@ impl RunnerRegistry {
         ids
     }
 
-    pub async fn promote_hidden_job(&self, job_id: &str) -> Result<ShellJobInfo, String> {
+    /// The sole handoff/recovery visibility transition. Authorization, terminal
+    /// races, cleanup ownership and the observation-token proof are checked
+    /// under the same lock; retrying this transition never dispatches execution.
+    pub async fn promote_hidden_job(
+        &self,
+        auth: Option<&crate::RunnerAccess>,
+        job_id: &str,
+    ) -> Result<ShellJobInfo, String> {
+        #[cfg(any(test, feature = "root-test-support"))]
+        self.hidden_handoff_failure_for_test(false).await?;
+        validate_id(job_id, "job_id")?;
         let mut inner = self.inner.lock().await;
         refresh_job_status_locked(&mut inner, job_id);
         let job = inner
             .jobs_by_id
-            .get_mut(job_id)
+            .get(job_id)
             .ok_or_else(|| format!("unknown shell job: {job_id}"))?;
+        if !shell_job_visible_to_auth(auth, &inner, job) {
+            return Err(format!("unknown shell job: {job_id}"));
+        }
+        let job = inner
+            .jobs_by_id
+            .get_mut(job_id)
+            .expect("authorized job exists");
         if job.visibility == ShellJobVisibility::CleanupPending {
             return Err(format!("structured job cleanup is pending: {job_id}"));
         }
@@ -1346,6 +1363,8 @@ impl RunnerRegistry {
         job_id: &str,
         tail_lines: Option<usize>,
     ) -> Result<(ShellJobInfo, Option<String>, Option<String>, usize, usize), String> {
+        #[cfg(any(test, feature = "root-test-support"))]
+        self.hidden_handoff_failure_for_test(true).await?;
         validate_id(job_id, "job_id")?;
         let mut inner = self.inner.lock().await;
         refresh_job_status_locked(&mut inner, job_id);

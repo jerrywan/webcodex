@@ -10,6 +10,95 @@ use webcodex_code_mode::{
     CodeModeToolRequest, CodeModeToolResponse,
 };
 
+#[tokio::test]
+async fn stop_job_manifest_remains_one_direct_canonical_mutation() {
+    let mut result = test_runtime()
+        .dispatch(ToolCall::ToolManifest {
+            tool_name: Some("stop_job".into()),
+            category: None,
+            intent: None,
+            include_recommended_flows: false,
+            include_risk_summary: false,
+        })
+        .await;
+    assert!(result.success, "{:?}", result.error);
+    crate::tool_runtime::surface::sparsify_tool_manifest_model_result(&mut result);
+    assert_eq!(result.output["name"], "stop_job");
+    assert_eq!(result.output["route"]["mode"], "direct");
+    assert_eq!(result.output["effect"], "mutate");
+    assert_eq!(result.output["idempotency"], "desired_state");
+    assert_eq!(
+        result.output["input_schema"],
+        webcodex_tool_contracts::input_schema_for_tool("stop_job")
+    );
+}
+
+#[cfg(feature = "experimental-code-mode")]
+#[tokio::test]
+async fn code_mode_job_tools_stay_outside_all_typed_surfaces_and_host_admission() {
+    use crate::tool_runtime::code_mode::{code_mode_orchestration_policy, CodeModeCallableStage};
+    use crate::tool_runtime::kernel::ToolTransport;
+    use crate::tool_runtime::orchestration_host::CanonicalOrchestrationHost;
+    let runtime = runtime_with_agent_project("job-admission-fixture");
+    register_agent(&runtime, "job-admission-fixture", None, Default::default()).await;
+    let project = agent_test_project_id("job-admission-fixture");
+    let session = runtime.sessions.start_session(Some(project.clone()), None);
+    let auth = bootstrap_auth_context();
+    for stage in [
+        CodeModeCallableStage::ReadOnly,
+        CodeModeCallableStage::Validation,
+        CodeModeCallableStage::GuardedEdit,
+    ] {
+        let policy = code_mode_orchestration_policy(stage);
+        let result = runtime
+            .dispatch(ToolCall::ToolManifest {
+                tool_name: Some(stage.entry_tool().into()),
+                category: None,
+                intent: None,
+                include_recommended_flows: false,
+                include_risk_summary: false,
+            })
+            .await;
+        assert!(result.success, "{:?}", result.error);
+        let names = result.output["code_mode_callable_contract"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["tool"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(names, policy.admitted_tools);
+        let host = CanonicalOrchestrationHost::new(
+            runtime.clone(),
+            Some(&auth),
+            project.clone(),
+            session.session_id.clone(),
+            ToolTransport::Mcp,
+            None,
+            policy,
+        );
+        for (index, name) in [
+            "observe_jobs",
+            "list_jobs",
+            "wait_for_job_terminal",
+            "stop_job",
+            "present_job_terminal_continuation",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(!names.contains(&name));
+            assert!(!policy.is_admitted(name));
+            let denied = host
+                .invoke_tool(index + 1, name.to_string(), json!({}))
+                .await;
+            assert_eq!(denied.unwrap_err().failure_kind(), crate::tool_runtime::orchestration_host::OrchestrationHostFailureKind::ToolNotAdmitted, "{} admitted {name}", stage.entry_tool());
+        }
+        assert!(probe_patch_agent_request(&runtime, "job-admission-fixture")
+            .await
+            .is_none());
+    }
+}
+
 #[cfg(feature = "experimental-code-mode")]
 struct CallableExampleHost {
     input_schemas: HashMap<String, Value>,
@@ -415,6 +504,10 @@ fn expected_cross_listed_discovery_groups(tool: &str) -> Option<&'static [&'stat
         "cargo_test" => Some(&["shell", "validation"]),
         #[cfg(feature = "experimental-code-mode")]
         "code_mode_exec" => Some(&["inspect", "runtime"]),
+        #[cfg(feature = "experimental-code-mode")]
+        "code_mode_exec_effectful" => Some(&["runtime", "validation"]),
+        #[cfg(feature = "experimental-code-mode")]
+        "code_mode_exec_mutating" => Some(&["edit", "runtime"]),
         "discard_untracked" => Some(&["cleanup", "git"]),
         "finish_coding_task" => Some(&["review", "runtime"]),
         "artifact_upload_abort"
@@ -502,7 +595,15 @@ fn tool_discovery_groups_drive_tool_categories() {
                 );
                 assert!(
                     allowed_tool_definition_categories_for_discovery_group(group.name)
-                        .contains(&definition.category),
+                        .contains(&definition.category)
+                        // Existing stage entrypoints retain their canonical runtime
+                        // category even in purpose-oriented discovery groups. Keep
+                        // these exceptions exact; do not admit arbitrary runtime tools.
+                        || matches!(
+                            (group.name, *name, definition.category),
+                            ("validation", "code_mode_exec_effectful", "runtime")
+                                | ("edit", "code_mode_exec_mutating", "runtime")
+                        ),
                     "{} discovery group entry {} has ToolDefinition category {}, which is not in the explicit allowlist",
                     group.name,
                     name,

@@ -75,6 +75,22 @@ pub(crate) fn adaptive_runtime_gateway_target_route(
     }
 }
 
+/// GPT Actions derives its route from the same definition and Adaptive surface.
+/// GatewayOnly is a transport exposure exception, never an authority change.
+pub(crate) fn gpt_action_gateway_target_route(target: &str) -> AdaptiveRuntimeGatewayTargetRoute {
+    let route = adaptive_runtime_gateway_target_route(target);
+    if route == AdaptiveRuntimeGatewayTargetRoute::Direct
+        && webcodex_tool_contracts::lookup_tool_definition(target).is_some_and(|definition| {
+            definition.gpt_action_exposure()
+                == webcodex_tool_contracts::ToolGptActionExposure::GatewayOnly
+        })
+    {
+        AdaptiveRuntimeGatewayTargetRoute::Gateway
+    } else {
+        route
+    }
+}
+
 /// Presentation route for one canonical SuggestedToolCall target. This is not
 /// authority: adapters resolve the route from their already-admitted model
 /// surface and the canonical target still runs through ordinary ToolRuntime
@@ -488,6 +504,32 @@ mod tests {
         assert_eq!(
             adaptive_runtime_gateway_target_route("read_files"),
             AdaptiveRuntimeGatewayTargetRoute::Direct
+        );
+    }
+
+    #[test]
+    fn job_stop_gateway_only_policy_changes_actions_not_adaptive_route() {
+        assert_eq!(
+            adaptive_runtime_gateway_target_route("stop_job"),
+            AdaptiveRuntimeGatewayTargetRoute::Direct
+        );
+        assert_eq!(
+            gpt_action_gateway_target_route("stop_job"),
+            AdaptiveRuntimeGatewayTargetRoute::Gateway
+        );
+        for definition in webcodex_tool_contracts::model_visible_tool_definitions() {
+            if definition.gpt_action_exposure()
+                == webcodex_tool_contracts::ToolGptActionExposure::GatewayOnly
+            {
+                assert_eq!(
+                    gpt_action_gateway_target_route(definition.name),
+                    AdaptiveRuntimeGatewayTargetRoute::Gateway
+                );
+            }
+        }
+        assert_eq!(
+            gpt_action_gateway_target_route("cancel_job"),
+            AdaptiveRuntimeGatewayTargetRoute::Unknown
         );
     }
 

@@ -710,28 +710,24 @@ impl ToolRuntime {
             )
             .await;
             let mut result = match handoff {
-                    Ok(HiddenStructuredJobWait::Terminal {
-                        job,
-                        stdout,
-                        stderr,
-                    }) => {
-                        let result = Self::run_shell_terminal_job_result(
-                            &job,
-                            stdout,
-                            stderr,
-                            timeout,
-                        );
-                        self.runner_registry
-                            .remove_projected_hidden_terminal_job_record(&job.job_id)
-                            .await;
-                        result
-                    }
-                    Ok(HiddenStructuredJobWait::Continued {
-                        observation,
-                        execution_state,
-                        command_started,
-                    }) => {
-                        let detected_summary = crate::tool_runtime::jobs::detected_job_summary_with_activity(
+                Ok(HiddenStructuredJobWait::Terminal {
+                    job,
+                    stdout,
+                    stderr,
+                }) => {
+                    let result = Self::run_shell_terminal_job_result(&job, stdout, stderr, timeout);
+                    self.runner_registry
+                        .remove_projected_hidden_terminal_job_record(&job.job_id)
+                        .await;
+                    result
+                }
+                Ok(HiddenStructuredJobWait::Continued {
+                    observation,
+                    execution_state,
+                    command_started,
+                }) => {
+                    let detected_summary =
+                        crate::tool_runtime::jobs::detected_job_summary_with_activity(
                             Some(&command_summary),
                             Some(declared_purpose.as_str()),
                             &observation.job.status,
@@ -741,11 +737,11 @@ impl ToolRuntime {
                             observation.stdout_truncated || observation.stderr_truncated,
                             observation.job.activity.as_ref(),
                         );
-                        let continuation = crate::tool_runtime::jobs::observe_job_continuation(
-                            &observation.job.job_id,
-                            observation.job.observation_token.as_deref(),
-                        );
-                        ToolResult::ok(json!({
+                    let continuation = crate::tool_runtime::jobs::observe_job_continuation(
+                        &observation.job.job_id,
+                        observation.job.observation_token.as_deref(),
+                    );
+                    ToolResult::ok(json!({
                         "execution_state": execution_state,
                         "command_started": command_started,
                         "command_completed": false,
@@ -772,12 +768,9 @@ impl ToolRuntime {
                         "detected_summary": detected_summary,
                         "continuation": continuation,
                     }))
-                    },
-                    Err(error) => Self::run_shell_outcome_unknown_result(format!(
-                        "the hidden durable shell Job {} could not be safely promoted or observed during handoff: {error}. Do not redispatch this command; inspect Job inventory and target state before deciding whether any retry is safe.",
-                        job.job_id
-                    )),
-                };
+                }
+                Err(failure) => return failure.into_tool_result(&project, budget),
+            };
             if result.output["promoted_to_job"] != json!(true) {
                 add_structured_continuation_facts(
                     &mut result,

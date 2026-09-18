@@ -448,7 +448,9 @@ fn authoritative_validation_start_event_index(
                 .find(|(_, event)| {
                     event.kind == "tool_call_finished"
                         && event.job_id.as_deref() == Some(job_id)
-                        && event_is_job_acceptance_only(event)
+                        && same_job_execution(event, source)
+                        && (event_is_job_acceptance_only(event)
+                            || event_is_unknown_job_handoff(event))
                 })?;
             exact_tool_start_event_index(ledger_events, acceptance_index, acceptance)
         }
@@ -846,7 +848,7 @@ pub fn extract_validation_events(events: &[SessionEvent]) -> Vec<ValidationEvent
 
 fn extract_validation_event_records(events: &[SessionEvent]) -> Vec<ExtractedValidationEvent> {
     let mut started = Vec::new();
-    let mut validation_events = Vec::new();
+    let mut validation_events: Vec<ExtractedValidationEvent> = Vec::new();
     let mut terminal_jobs = HashSet::new();
     let canonical_finished_ids = canonical_tool_call_finished_events(events)
         .into_iter()
@@ -887,6 +889,30 @@ fn extract_validation_event_records(events: &[SessionEvent]) -> Vec<ExtractedVal
                     continue;
                 }
                 if let Some(validation_event) = validation_event_from_finished(event, Some(event)) {
+                    // Reconcile a failed handoff snapshot only with a terminal
+                    // observation of that exact Job execution. A successful new
+                    // Job with the same validation target is not proof about an
+                    // earlier unknown execution. The ledger itself stays intact;
+                    // only its bounded evidence projection replaces the snapshot.
+                    if !validation_event_is_outcome_unknown(&validation_event)
+                        && (validation_event.exit_code.is_some()
+                            || matches!(
+                                validation_event.execution_state.as_str(),
+                                "timed_out" | "cancelled"
+                            ))
+                    {
+                        validation_events.retain(|record| {
+                            !(validation_event_is_outcome_unknown(&record.event)
+                                && record.event.identity == validation_event.identity
+                                && events
+                                    .iter()
+                                    .find(|source| source.event_id == record.source_event_id)
+                                    .is_some_and(|source| {
+                                        event_is_unknown_job_handoff(source)
+                                            && same_job_execution(source, event)
+                                    }))
+                        });
+                    }
                     validation_events.push(ExtractedValidationEvent {
                         source_event_id: event.event_id.clone(),
                         event: validation_event,
@@ -898,6 +924,38 @@ fn extract_validation_event_records(events: &[SessionEvent]) -> Vec<ExtractedVal
     }
 
     validation_events
+}
+
+fn event_is_unknown_job_handoff(event: &SessionEvent) -> bool {
+    event.kind == "tool_call_finished"
+        && event.job_id.as_deref().is_some_and(|id| !id.is_empty())
+        && event.exit_code.is_none()
+        && event
+            .validation_output_summary
+            .as_ref()
+            .and_then(|summary| summary.get("execution_state"))
+            .and_then(Value::as_str)
+            == Some("outcome_unknown")
+}
+
+fn same_job_execution(source: &SessionEvent, terminal: &SessionEvent) -> bool {
+    source
+        .job_id
+        .as_deref()
+        .is_some_and(|id| !id.is_empty() && terminal.job_id.as_deref() == Some(id))
+        && source.session_id == terminal.session_id
+        && source.tool_name == terminal.tool_name
+        && source
+            .resolved_project
+            .as_deref()
+            .or(source.project.as_deref())
+            .is_some_and(|project| {
+                terminal
+                    .resolved_project
+                    .as_deref()
+                    .or(terminal.project.as_deref())
+                    == Some(project)
+            })
 }
 
 /// True for a finished tool event that merely accepted a Job (or promoted a

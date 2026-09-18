@@ -53,7 +53,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     .review(super::ToolReviewEvidence::ReadOnlyInspection),
             ),
             "Read-only Code Mode for related inspections. Prefer a direct tool for one simple observation. Use Promise.all only for independent calls; keep dependent follow-ups sequential inside one cell. Filter child results before text(value); never a raw-result dump. Project before the outer-output limit. Children keep canonical authority; no shell/fs/network/mutation/validation/Jobs.",
-        ).with_gpt_action_description("Read-only orchestration for related inspections. Use direct tools for simple observations; parallelize only independent calls, keep adaptive follow-ups inside the cell. Distill evidence before text(value); avoid raw-result dumps. Canonical Project/Session checks remain.")),
+        ).with_gpt_action_description("Read-only orchestration for related inspections. Use direct tools for simple observations; parallelize only independent calls, keep adaptive follow-ups inside the cell. Distill evidence before text(value); avoid raw-result dumps. Canonical Project/Session checks remain.").with_gpt_action_gateway_only()),
         45,
     ),
     adaptive_runtime_direct(
