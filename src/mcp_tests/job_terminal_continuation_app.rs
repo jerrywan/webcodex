@@ -52,6 +52,54 @@ async fn handle_with_apps(
     .await
 }
 
+#[test]
+fn job_terminal_wait_resume_setup_is_host_specific_and_parser_ready() {
+    let base = json!({
+        "wait_id": "wc_job_wait_q6urq6urq6urq6ur",
+        "job_id": "wc_job_exact",
+        "state": "waiting",
+        "delivery_state": "not_ready",
+        "terminal_status": null,
+        "terminal_outcome": null,
+        "replayed": false,
+        "state_changed": true,
+        "automatic_resume_available": false,
+        "expires_at": 4_102_444_800_i64,
+        "fallback_tool": "observe_jobs",
+    });
+
+    let mut capable = ToolResult::ok(base.clone());
+    super::super::tools::project_job_terminal_resume_setup(true, &mut capable);
+    assert_eq!(
+        capable.output["resume_setup"],
+        json!({
+            "tool": "present_job_terminal_continuation",
+            "arguments": {"wait_id": "wc_job_wait_q6urq6urq6urq6ur"}
+        })
+    );
+    assert_eq!(capable.output["automatic_resume_available"], false);
+
+    let mut no_carrier = ToolResult::ok(base.clone());
+    super::super::tools::project_job_terminal_resume_setup(false, &mut no_carrier);
+    assert!(no_carrier.output.get("resume_setup").is_none());
+
+    let mut already_bound = ToolResult::ok({
+        let mut value = base.clone();
+        value["automatic_resume_available"] = json!(true);
+        value
+    });
+    super::super::tools::project_job_terminal_resume_setup(true, &mut already_bound);
+    assert!(already_bound.output.get("resume_setup").is_none());
+
+    let mut unknown = ToolResult::ok({
+        let mut value = base;
+        value["delivery_state"] = json!("delivery_unknown");
+        value
+    });
+    super::super::tools::project_job_terminal_resume_setup(true, &mut unknown);
+    assert!(unknown.output.get("resume_setup").is_none());
+}
+
 #[tokio::test]
 async fn job_terminal_continuation_app_surface_is_explicit_sparse_and_app_only() {
     assert_eq!(
@@ -266,7 +314,11 @@ fn job_terminal_continuation_app_source_encodes_bounded_pull_and_single_dispatch
         "ui/resource-teardown",
         "delivery_unknown",
         "VISIBLE_POLL_MS = 3000",
-        "HIDDEN_POLL_MS = 15000",
+        "HIDDEN_EARLY_POLL_MS = 15000",
+        "HIDDEN_MEDIUM_POLL_MS = 60000",
+        "HIDDEN_LATE_POLL_MS = 300000",
+        "HIDDEN_EARLY_POLLS = 20",
+        "HIDDEN_MEDIUM_POLLS = 25",
     ] {
         assert!(
             MCP_JOB_TERMINAL_CONTINUATION_APP_HTML.contains(required),

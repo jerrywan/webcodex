@@ -31,7 +31,11 @@
   const ATTEMPT_ID = /^wc_job_delivery_[A-Za-z0-9_-]{16}$/;
   const CALL_TIMEOUT_MS = 10000;
   const VISIBLE_POLL_MS = 3000;
-  const HIDDEN_POLL_MS = 15000;
+  const HIDDEN_EARLY_POLL_MS = 15000;
+  const HIDDEN_MEDIUM_POLL_MS = 60000;
+  const HIDDEN_LATE_POLL_MS = 300000;
+  const HIDDEN_EARLY_POLLS = 20;
+  const HIDDEN_MEDIUM_POLLS = 25;
   const MAX_AUTOMATIC_MESSAGE_CHARS = 1024;
   const TERMINAL_DELIVERY = new Set(["delivered", "delivery_unknown"]);
 
@@ -50,6 +54,7 @@
   let pendingFinish = null;
   let rebindAttemptedAfterLoss = false;
   let carrierLost = false;
+  let hiddenPollCount = 0;
 
   const el = id => document.getElementById(id);
 
@@ -190,6 +195,20 @@
       || !!(value && (TERMINAL_DELIVERY.has(value.delivery_state) || expired(value)));
   }
 
+  function nextPollDelay() {
+    if (!document.hidden) {
+      hiddenPollCount = 0;
+      return VISIBLE_POLL_MS;
+    }
+    const delay = hiddenPollCount < HIDDEN_EARLY_POLLS
+      ? HIDDEN_EARLY_POLL_MS
+      : hiddenPollCount < HIDDEN_EARLY_POLLS + HIDDEN_MEDIUM_POLLS
+        ? HIDDEN_MEDIUM_POLL_MS
+        : HIDDEN_LATE_POLL_MS;
+    hiddenPollCount += 1;
+    return delay;
+  }
+
   function scheduleNext() {
     if (timer !== null) clearTimeout(timer);
     timer = null;
@@ -197,7 +216,7 @@
     timer = setTimeout(() => {
       timer = null;
       void reconcile();
-    }, document.hidden ? HIDDEN_POLL_MS : VISIBLE_POLL_MS);
+    }, nextPollDelay());
   }
 
   async function bind() {
@@ -474,6 +493,7 @@
   addEventListener("visibilitychange", () => {
     if (timer !== null) clearTimeout(timer);
     timer = null;
+    if (!document.hidden) hiddenPollCount = 0;
     void reconcile();
   });
   addEventListener("pagehide", teardown, { once: true });

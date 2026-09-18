@@ -755,6 +755,75 @@ fn log_agent_continuation_app_result(
     );
 }
 
+fn attach_job_terminal_resume_setup_schema(tool_name: &str, app_enabled: bool, value: &mut Value) {
+    if !app_enabled || tool_name != "wait_for_job_terminal" {
+        return;
+    }
+    let Some(properties) = value
+        .pointer_mut("/outputSchema/properties/output/properties")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    properties.insert(
+        "resume_setup".to_string(),
+        json!({
+            "type": "object",
+            "description": "Host-specific parser-ready setup for the current MCP App continuation carrier. Present only when this Host can create that carrier.",
+            "additionalProperties": false,
+            "properties": {
+                "tool": {"type": "string", "const": "present_job_terminal_continuation"},
+                "arguments": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "wait_id": {
+                            "type": "string",
+                            "pattern": "^wc_job_wait_[A-Za-z0-9_-]{16}$"
+                        }
+                    },
+                    "required": ["wait_id"]
+                }
+            },
+            "required": ["tool", "arguments"]
+        }),
+    );
+}
+
+pub(super) fn project_job_terminal_resume_setup(carrier_available: bool, result: &mut ToolResult) {
+    if !carrier_available || !result.success {
+        return;
+    }
+    let Some(output) = result.output.as_object_mut() else {
+        return;
+    };
+    if output
+        .get("automatic_resume_available")
+        .and_then(Value::as_bool)
+        != Some(false)
+        || matches!(
+            output.get("delivery_state").and_then(Value::as_str),
+            Some("delivered" | "delivery_unknown")
+        )
+    {
+        return;
+    }
+    let Some(wait_id) = output
+        .get("wait_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    output.insert(
+        "resume_setup".to_string(),
+        json!({
+            "tool": "present_job_terminal_continuation",
+            "arguments": {"wait_id": wait_id},
+        }),
+    );
+}
+
 fn mcp_tool_spec_json(mut spec: ToolSpec, compact: bool, app_enabled: bool) -> Value {
     let tool_name = spec.name.clone();
     if matches!(tool_name.as_str(), "computer_observe" | "browser_observe") {
@@ -839,6 +908,7 @@ fn mcp_tool_spec_json(mut spec: ToolSpec, compact: bool, app_enabled: bool) -> V
             resources::MCP_JOB_TERMINAL_CONTINUATION_UI_RESOURCE_URI,
         );
     }
+    attach_job_terminal_resume_setup_schema(&tool_name, app_enabled, &mut value);
     value
 }
 
@@ -2061,6 +2131,12 @@ pub(super) async fn handle_call(
             .expect("tool kernel outcome without error must include result"),
     };
     debug_assert_eq!(outcome.success, result.success);
+    project_job_terminal_resume_setup(
+        app_enabled
+            && job_terminal_continuation_app_admitted
+            && params.name == "wait_for_job_terminal",
+        &mut result,
+    );
     project_tool_result_suggested_calls(&params.name, &mut result, &|target| {
         mcp_suggested_tool_call_route(target, stateless_2026)
     });

@@ -282,12 +282,34 @@ test("expired projection stops terminal polling", async () => {
   assert.equal(hostMessages(view).length, 0);
 });
 
-test("hidden visibility uses the bounded background polling cadence", async () => {
+test("hidden visibility uses bounded deterministic backoff and visible reset", async () => {
   const view = await boundWaitingView();
   await view.visibility(true);
-  const state = calls(view, "job_terminal_continuation_state").at(-1);
+  let state = calls(view, "job_terminal_continuation_state").at(-1);
   await view.reply(state, stateResult(waiting));
   assert.ok([...view.timers.values()].some(timer => timer.delay === 15000));
-  await view.fireTimers(15000);
-  assert.ok(calls(view, "job_terminal_continuation_state").length >= 3);
+
+  for (let index = 0; index < 20; index += 1) {
+    await view.fireTimers(15000);
+    state = calls(view, "job_terminal_continuation_state").at(-1);
+    await view.reply(state, stateResult(waiting));
+  }
+  assert.ok([...view.timers.values()].some(timer => timer.delay === 60000));
+
+  for (let index = 0; index < 25; index += 1) {
+    await view.fireTimers(60000);
+    state = calls(view, "job_terminal_continuation_state").at(-1);
+    await view.reply(state, stateResult(waiting));
+  }
+  assert.ok([...view.timers.values()].some(timer => timer.delay === 300000));
+
+  await view.visibility(false);
+  state = calls(view, "job_terminal_continuation_state").at(-1);
+  await view.reply(state, stateResult(waiting));
+  assert.ok([...view.timers.values()].some(timer => timer.delay === 3000));
+
+  await view.visibility(true);
+  state = calls(view, "job_terminal_continuation_state").at(-1);
+  await view.reply(state, stateResult(waiting));
+  assert.ok([...view.timers.values()].some(timer => timer.delay === 15000));
 });
