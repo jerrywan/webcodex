@@ -135,8 +135,25 @@ fn strip_code_mode_schema_noise(value: &mut Value) {
             for key in ["description", "title", "examples", "$comment"] {
                 object.remove(key);
             }
-            for nested in object.values_mut() {
-                strip_code_mode_schema_noise(nested);
+            for (key, nested) in object.iter_mut() {
+                if matches!(
+                    key.as_str(),
+                    "properties"
+                        | "patternProperties"
+                        | "dependentSchemas"
+                        | "dependentRequired"
+                        | "dependencies"
+                        | "$defs"
+                        | "definitions"
+                ) {
+                    if let Some(named) = nested.as_object_mut() {
+                        for schema in named.values_mut() {
+                            strip_code_mode_schema_noise(schema);
+                        }
+                    }
+                } else {
+                    strip_code_mode_schema_noise(nested);
+                }
             }
         }
         Value::Array(values) => {
@@ -1339,4 +1356,56 @@ where
             }))
         })
         .collect()
+}
+
+#[cfg(all(test, feature = "experimental-code-mode"))]
+mod code_mode_projection_tests {
+    use super::*;
+
+    #[test]
+    fn schema_noise_compaction_preserves_business_property_names() {
+        let mut schema = json!({
+            "type": "object",
+            "description": "root schema noise",
+            "properties": {
+                "description": {"type": "string", "description": "field noise"},
+                "title": {"type": "string", "title": "field title noise"},
+                "examples": {"type": "array", "items": {"type": "string"}, "examples": [["x"]]},
+                "$comment": {"type": "string", "$comment": "field comment noise"},
+                "nested": {
+                    "type": "object",
+                    "properties": {
+                        "description": {"type": "boolean", "description": "nested noise"}
+                    }
+                }
+            },
+            "$defs": {
+                "description": {"type": "integer", "description": "definition noise"}
+            }
+        });
+
+        strip_code_mode_schema_noise(&mut schema);
+
+        assert!(schema.get("description").is_none());
+        let properties = schema["properties"].as_object().unwrap();
+        for name in ["description", "title", "examples", "$comment", "nested"] {
+            assert!(
+                properties.contains_key(name),
+                "business property {name} was dropped"
+            );
+        }
+        assert!(properties["description"].get("description").is_none());
+        assert!(properties["title"].get("title").is_none());
+        assert!(properties["examples"].get("examples").is_none());
+        assert!(properties["$comment"].get("$comment").is_none());
+        assert!(properties["nested"]["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("description"));
+        assert!(schema["$defs"]
+            .as_object()
+            .unwrap()
+            .contains_key("description"));
+        assert!(schema["$defs"]["description"].get("description").is_none());
+    }
 }

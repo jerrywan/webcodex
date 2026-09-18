@@ -737,6 +737,16 @@ class AgentLoopReportTests(unittest.TestCase):
             {"read_only", "validation", "guarded_edit"},
         )
 
+        legacy = copy.deepcopy(manifest)
+        legacy_case = legacy["cases"][0]
+        legacy_case["code_mode_surface"] = "e1"
+        legacy_fingerprint = report._case_fingerprint(legacy_case)
+        validated_legacy = report.validate_case_manifest(legacy)
+        self.assertEqual(validated_legacy["cases"][0]["code_mode_surface"], "e1")
+        self.assertEqual(
+            report._case_fingerprint(validated_legacy["cases"][0]), legacy_fingerprint
+        )
+
         broken = copy.deepcopy(manifest)
         del broken["cases"][0]["validation"]
         with self.assertRaisesRegex(report.ReportError, "validation"):
@@ -746,6 +756,11 @@ class AgentLoopReportTests(unittest.TestCase):
         bad_surface["cases"][-1]["code_mode_surface"] = "generic_code_mode"
         with self.assertRaisesRegex(report.ReportError, "code_mode_surface"):
             report.validate_case_manifest(bad_surface)
+
+        bad_surface_type = copy.deepcopy(manifest)
+        bad_surface_type["cases"][-1]["code_mode_surface"] = ["read_only"]
+        with self.assertRaisesRegex(report.ReportError, "code_mode_surface"):
+            report.validate_case_manifest(bad_surface_type)
 
         bad_focus = copy.deepcopy(manifest)
         bad_focus["cases"][-1]["dogfood_focus"] = ["same", "same"]
@@ -784,6 +799,15 @@ class AgentLoopReportTests(unittest.TestCase):
             base_revision="a" * 40,
         )
         self.assertEqual(metadata["surface"], "guarded_edit")
+
+        legacy_metadata = report._benchmark_metadata(
+            case_manifest=None,
+            case_id="focused_edit_validation",
+            variant="code_mode",
+            surface="e2b",
+            base_revision="a" * 40,
+        )
+        self.assertEqual(legacy_metadata["surface"], "e2b")
 
     def test_benchmark_case_rejects_wrong_declared_code_mode_surface(self) -> None:
         with self.assertRaisesRegex(
@@ -835,6 +859,11 @@ class AgentLoopReportTests(unittest.TestCase):
             },
         }
         self.assertEqual(report.validate_run_annotation(copy.deepcopy(value)), value)
+
+        legacy = copy.deepcopy(value)
+        legacy["variant"] = "code_mode"
+        legacy["surface"] = "e1"
+        self.assertEqual(report.validate_run_annotation(copy.deepcopy(legacy)), legacy)
 
         leaked = copy.deepcopy(value)
         leaked["session_id"] = "wc_sess_should_not_be_stored"
@@ -1007,6 +1036,11 @@ class AgentLoopReportTests(unittest.TestCase):
 
         self.assertTrue(comparison["case_compatibility"]["comparable"])
         self.assertTrue(comparison["pair_compatibility"]["comparable"])
+        legacy_code = copy.deepcopy(code)
+        legacy_code["benchmark"]["surface"] = "e1"
+        self.assertTrue(
+            report.compare_reports(direct, legacy_code)["pair_compatibility"]["comparable"]
+        )
         self.assertTrue(comparison["correctness_compatibility"]["comparable"])
         self.assertTrue(comparison["throughput_compatibility"]["comparable"])
         self.assertFalse(metrics["model_round_trips"]["comparable"])

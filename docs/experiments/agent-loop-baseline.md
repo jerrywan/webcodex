@@ -25,8 +25,10 @@ decision-relevant only when both runs use the same exact case definition and
 40-hex Git base and both satisfy the case correctness/validation gate. The report
 never emits a winner, score, or overall ranking.
 
-Code Mode samples must identify the actual experimental surface as `read_only`,
+New Code Mode samples identify the actual experimental surface as `read_only`,
 `validation`, or `guarded_edit`. They are not pooled under a generic `code_mode` surface.
+For schema-v1 replay, the reporter still accepts the historical `e1` / `e2a` / `e2b`
+aliases without rewriting the original case object or its fingerprint.
 
 ## Evidence contract
 
@@ -215,7 +217,7 @@ For one case, the Direct and Code Mode runs must satisfy all of these constraint
 - same user task prompt and correctness expectations;
 - Direct uses `guidance_profile=direct`;
 - Code Mode uses `guidance_profile=code_mode`;
-- Code Mode records `surface=read_only`, `validation`, or `guarded_edit` explicitly;
+- new Code Mode captures record `surface=read_only`, `validation`, or `guarded_edit` explicitly; historical schema-v1 `e1` / `e2a` / `e2b` labels remain replay-compatible aliases;
 - the only intended experimental variable is the guidance/surface behavior being
   evaluated.
 

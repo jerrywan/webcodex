@@ -1,8 +1,8 @@
 # Code Mode performance: measured baseline and next development steps
 
-Review date: 2026-09-18. Source basis: `bc23562eaf988ef1ccb1eea17c8f210dec61a7d8`
-in the `special` main checkout. This is an engineering roadmap, not an expansion
-of the currently admitted tools or a stable execution contract.
+Review date: 2026-09-18. Source basis: `bc23562eaf988ef1ccb1eea17c8f210dec61a7d8`.
+This is an engineering roadmap, not an expansion of the currently admitted tools
+or a stable execution contract.
 
 ## Decision
 
@@ -31,10 +31,10 @@ other changes below are proposals with explicit validation boundaries.
 | Guidance / recovery | Direct vs Code Mode guidance profiles and structured failure recovery | Commits `e1a91868` and `bc23562e` |
 
 Source presence does not establish deployment or Host behavior. During this review,
-the selected WebCodex connection did not expose `code_mode_exec`; the independent
-`special` tunnel returned an unavailable-client error. No Server or Runner was
-replaced. Consequently this review has local runtime measurements, not a live
-ChatGPT Direct-vs-Code-Mode task comparison.
+the available self-hosted connections did not provide a comparable live
+Direct-vs-Code-Mode task pair. No Server or Runner was replaced. Consequently this
+review has local runtime measurements, not a live ChatGPT Direct-vs-Code-Mode task
+comparison.
 
 ## What to measure
 
