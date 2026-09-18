@@ -59,7 +59,7 @@ describe("product workspace task flows", () => {
   it("shows every project with branch/activity and keeps other projects when switching current", async () => {
     const open = vi.fn(); const add = vi.fn();
     const view = render(wrap(<ProjectsPanel state={state} onChooseProject={add} onSelectProject={open} />));
-    await screen.findByText("2 active sessions"); expect(screen.getAllByText("feat/export")).toHaveLength(2);
+    await screen.findByText("2 active sessions"); expect(await screen.findAllByText("feat/export")).toHaveLength(2);
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Open Project beta" })); expect(open).toHaveBeenCalledWith(beta.path);
     const switched = { ...state, project: { ...state.project!, path: beta.path, runtime_project_id: beta.id } };
