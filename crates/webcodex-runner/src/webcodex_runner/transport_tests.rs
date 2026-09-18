@@ -1031,7 +1031,10 @@ fn polling_job_request(
     let mut request = polling_shell_request(request_id, cwd, command);
     request.kind = "start_job".to_string();
     request.job_id = Some(job_id.to_string());
-    request.job_context = Some(crate::test_job_context(cwd, Vec::new()));
+    request.job_context = Some(crate::webcodex_runner::job_manager::test_job_context(
+        cwd,
+        Vec::new(),
+    ));
     request
 }
 
@@ -3519,7 +3522,10 @@ fn start_job_request(cwd: &Path, command: &str) -> RunnerRequest {
         created_at: 0,
         validation: None,
         lsp: None,
-        job_context: Some(crate::test_job_context(cwd, Vec::new())),
+        job_context: Some(crate::webcodex_runner::job_manager::test_job_context(
+            cwd,
+            Vec::new(),
+        )),
         mcp_gateway: None,
         plugin_gateway: None,
         coding_agent: None,

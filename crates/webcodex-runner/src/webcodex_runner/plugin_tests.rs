@@ -621,7 +621,7 @@ fn runner_real_process_plugin_blocking_stdin_write_respects_total_deadline_and_r
         .marker_pid("descendant-pid:")
         .expect("fixture descendant pid");
     assert!(wait_until(Duration::from_secs(1), || {
-        !crate::job_manager_tests::process_running(descendant_pid)
+        !crate::webcodex_runner::job_manager::job_manager_tests::process_running(descendant_pid)
     }));
 
     let retired = fixture.call();
@@ -690,7 +690,7 @@ fn runner_real_process_plugin_shutdown_terminates_process_tree_while_effectful_s
     ));
     let descendant_pid = fixture.marker_pid("descendant-pid:").unwrap();
     assert!(wait_until(Duration::from_secs(1), || {
-        !crate::job_manager_tests::process_running(descendant_pid)
+        !crate::webcodex_runner::job_manager::job_manager_tests::process_running(descendant_pid)
     }));
 }
 

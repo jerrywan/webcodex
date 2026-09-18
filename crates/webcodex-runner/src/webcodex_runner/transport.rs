@@ -7,6 +7,7 @@ use super::contains_any;
 use super::detached_job::DetachedJobStore;
 #[cfg(windows)]
 use super::exit_diagnostics::RunnerExitDiagnostics;
+use super::job_manager::JobManager;
 use super::lsp::LspSupervisor;
 use super::projects::RunnerProjectCache;
 use super::shutdown::{
@@ -35,7 +36,7 @@ mod websocket_connect;
 
 use crate::{
     build_register_request_with_provider_status, dispatch_request_with_outcome, handle_one_poll,
-    register, JobManager, PollingDispatchSupervisor, PollingRecoveryAction, RegisterRecoveryAction,
+    register, PollingDispatchSupervisor, PollingRecoveryAction, RegisterRecoveryAction,
 };
 #[cfg(test)]
 use crate::{CommandResult, RunnerHttpError, RunnerHttpErrorKind};
@@ -204,7 +205,7 @@ impl RunnerRuntimeState {
         // Persistent shells reuse the same authenticated OpenSSH multiplex pool
         // as async jobs: one transport per (session, resource, generation),
         // never a second SSH configuration or connection pool.
-        let persistent_shells = PersistentShellManager::new(&cfg.shell, jobs.ssh_pool.clone());
+        let persistent_shells = PersistentShellManager::new(&cfg.shell, jobs.ssh_pool().clone());
         Self {
             lsp: LspSupervisor::default(),
             browser: BrowserSupervisor::new(),
@@ -331,8 +332,8 @@ impl RunnerRuntimeState {
 
         let started = Instant::now();
         let job_batch = self.jobs.signal_all_for_shutdown();
-        let active_jobs = job_batch.running;
-        let signal_failures = job_batch.failures;
+        let active_jobs = job_batch.running();
+        let signal_failures = job_batch.failures();
         phases.push(shutdown_phase(
             "active_jobs_signal",
             started,
@@ -349,9 +350,9 @@ impl RunnerRuntimeState {
         phases.push(shutdown_phase(
             "active_jobs_drain",
             started,
-            jobs.resources,
-            jobs.timed_out,
-            jobs.failures.saturating_sub(signal_failures),
+            jobs.resources(),
+            jobs.timed_out(),
+            jobs.failures().saturating_sub(signal_failures),
             "job_reap_failed",
         ));
 
@@ -1720,7 +1721,7 @@ fn run_polling_runner_with_shutdown(
                 &mut project_cache,
                 Some(shutdown.as_ref()),
                 runner_instance_id,
-                jobs.prepared_profiles.len(),
+                jobs.prepared_profiles().len(),
                 &jobs,
             ) {
                 Ok((projects_count, registered_jobs, registered_projects, _inventory_status)) => {

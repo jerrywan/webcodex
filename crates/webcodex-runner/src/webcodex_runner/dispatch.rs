@@ -1,4 +1,5 @@
 use super::external_tools::ExternalRoute;
+use super::job_manager::{decode_failure_prestart_lifecycle, JobManager, PendingJobStart};
 use super::lsp::{handle_lsp_operation, LspSupervisor};
 use super::transport::ResultSubmission;
 use super::validation::handle_validation_request;
@@ -14,12 +15,12 @@ use super::{
     CommandResult, HotRunnerConfig, PersistentShellManager, ReloadableRunnerConfig, RunnerSink,
     ShellCommandResult, SubmitResultError,
 };
+use crate::handle_file_operation;
 use crate::runner_protocol::{
     PersistentShellResult, RunnerConfigAction, RunnerConfigOperationRequest,
     RunnerJobUpdateRequest, RunnerRequest, EXTERNAL_SEARCH_REQUEST_PREFIX,
     RUNNER_CONFIG_RESPONSE_MAX_BYTES,
 };
-use crate::{handle_file_operation, JobManager, PendingJobStart};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use webcodex_core::runner_operation::{
@@ -119,7 +120,7 @@ fn run_native_shell_or_internal_search(
             &config.policy,
             &config.shell,
             project_registry_dir,
-            &jobs.prepared_profiles,
+            jobs.prepared_profiles(),
             operation.cwd.as_deref(),
             operation.stdin.as_deref(),
             operation.timeout_secs,
@@ -132,7 +133,7 @@ fn run_native_shell_or_internal_search(
             &config.policy,
             &config.shell,
             project_registry_dir,
-            &jobs.prepared_profiles,
+            jobs.prepared_profiles(),
             operation.cwd.as_deref(),
             script,
             operation.timeout_secs,
@@ -144,7 +145,7 @@ fn run_native_shell_or_internal_search(
         &config.policy,
         &config.shell,
         project_registry_dir,
-        &jobs.prepared_profiles,
+        jobs.prepared_profiles(),
         operation.cwd.as_deref(),
         &operation.command,
         operation.stdin.as_deref(),
@@ -195,7 +196,7 @@ fn submit_invalid_job_start(sink: &RunnerSink, request: &RunnerRequest, error: S
     } else {
         format!("invalid Runner Job request: {error}")
     };
-    let command_execution_state = crate::decode_failure_prestart_lifecycle(request);
+    let command_execution_state = decode_failure_prestart_lifecycle(request);
     let _ = sink.send_job_update(&RunnerJobUpdateRequest {
         client_id: sink.client_id().to_string(),
         runner_instance_id: sink.runner_instance_id().to_string(),
@@ -497,7 +498,7 @@ pub(crate) fn dispatch_request_with_outcome(
                 policy,
                 shell,
                 project_registry_dir,
-                &jobs.prepared_profiles,
+                jobs.prepared_profiles(),
                 operation.cwd.as_deref(),
                 &operation.request,
                 operation.timeout_secs,
@@ -518,7 +519,7 @@ pub(crate) fn dispatch_request_with_outcome(
                 policy,
                 shell,
                 project_registry_dir,
-                &jobs.prepared_profiles,
+                jobs.prepared_profiles(),
                 operation.cwd.as_deref(),
                 &operation.process.executable,
                 &operation.process.args,
@@ -535,7 +536,7 @@ pub(crate) fn dispatch_request_with_outcome(
                 policy,
                 shell,
                 project_registry_dir,
-                &jobs.prepared_profiles,
+                jobs.prepared_profiles(),
                 operation.cwd.as_deref(),
                 &operation.script,
                 operation.stdin.as_deref(),
@@ -551,7 +552,7 @@ pub(crate) fn dispatch_request_with_outcome(
                 policy,
                 shell,
                 project_registry_dir,
-                &jobs.prepared_profiles,
+                jobs.prepared_profiles(),
                 operation.cwd.as_deref(),
                 &operation.script.script,
                 operation.timeout_secs,
@@ -598,7 +599,7 @@ pub(crate) fn dispatch_request_with_outcome(
             if let Some(resource) = ssh_resource {
                 let result = match ssh_session_id {
                     Some(session_id) => run_ssh_shell_with_execution_state(
-                        &jobs.ssh_pool,
+                        jobs.ssh_pool(),
                         config.generation,
                         &config.ssh,
                         policy,
@@ -725,18 +726,13 @@ pub(crate) fn dispatch_request_with_outcome(
             } else {
                 jobs.enqueue(
                     sink.clone(),
-                    PendingJobStart {
-                        generation: config.generation,
-                        policy: policy.clone(),
-                        shell: shell.clone(),
-                        ssh: config.ssh.clone(),
-                        skills: config.skills.clone(),
-                        client_id: runtime.client_id().to_string(),
-                        server_url: runtime.server_url().to_string(),
-                        project_registry_dir: project_registry_dir.to_path_buf(),
-                        metadata: invocation_metadata,
+                    PendingJobStart::from_invocation(
+                        config,
+                        runtime,
+                        project_registry_dir,
+                        invocation_metadata,
                         operation,
-                    },
+                    ),
                 );
                 Ok(true)
             }
