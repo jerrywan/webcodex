@@ -224,6 +224,96 @@ fn native_single_file_search_spec_builds_bounded_rg_argv() {
 
 #[cfg(windows)]
 #[test]
+fn native_single_file_search_count_keeps_filename_for_parser() {
+    let payload = serde_json::json!({
+        "pattern": "needle", "path": "file.txt", "limit": 8,
+        "context_before": 0, "context_after": 0, "result_mode": "count"
+    })
+    .to_string();
+    let spec = native_single_file_search_spec(&payload).unwrap();
+    assert!(spec.args.iter().any(|arg| arg == "--with-filename"));
+    assert!(spec.args.iter().any(|arg| arg == "--null"));
+}
+
+#[cfg(all(windows, feature = "runner-real-process-tests"))]
+#[test]
+#[ignore = "requires native rg.exe; run explicitly for Windows search validation"]
+fn runner_real_process_native_single_file_search_preserves_modes_and_fallback() {
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    let path = "代码 file.txt";
+    std::fs::write(
+        project.join(path),
+        "needle.literal\r\nother\r\nneedle.literal\r\n",
+    )
+    .unwrap();
+    std::fs::write(root.path().join("outside.txt"), "needle.literal").unwrap();
+    let shell = ShellConfig::default();
+    let policy = unrestricted_policy();
+    let cache = PreparedShellProfileCache::default();
+    let payload = |mode: &str, pattern: &str, path: &str| {
+        serde_json::json!({
+            "pattern": pattern, "path": path, "limit": 8,
+            "context_before": 0, "context_after": 0, "result_mode": mode
+        })
+    };
+    let run = |payload: &serde_json::Value| {
+        run_windows_native_single_file_search_with_profiles(
+            1,
+            &policy,
+            &shell,
+            root.path(),
+            &cache,
+            Some(project.to_str().unwrap()),
+            Some(&payload.to_string()),
+            10,
+            None,
+        )
+    };
+    for (mode, expected) in [
+        (
+            "matches",
+            vec![
+                format!("{path}\0{}:needle.literal", 1),
+                format!("{path}\0{}:needle.literal", 3),
+            ],
+        ),
+        ("files_with_matches", vec![path.to_string()]),
+        ("count", vec![format!("{path}\0{}", 2)]),
+    ] {
+        let result =
+            run(&payload(mode, r"needle\.literal", path)).expect("native rg.exe must be available");
+        assert_eq!(
+            result.execution_state,
+            ShellCommandExecutionState::Completed
+        );
+        assert_eq!(result.result.exit_code, Some(0), "{result:?}");
+        let stdout = result.result.stdout.as_deref().unwrap();
+        assert!(stdout.starts_with("{\"webcodex_search\":"));
+        assert_eq!(
+            stdout.lines().skip(1).collect::<Vec<_>>(),
+            expected,
+            "{mode}"
+        );
+        eprintln!(
+            "windows_native_search mode={mode} duration_ms={:?}",
+            result.result.duration_ms
+        );
+    }
+    let empty = run(&payload("matches", "absent", path)).unwrap();
+    assert_eq!(empty.result.exit_code, Some(1));
+    assert_eq!(empty.result.stdout.unwrap().lines().count(), 1);
+    for fallback_path in [".", "missing.txt", "../outside.txt"] {
+        assert!(run(&payload("matches", "needle", fallback_path)).is_none());
+    }
+    let mut glob = payload("matches", "needle", path);
+    glob["include_globs"] = serde_json::json!(["*.txt"]);
+    assert!(run(&glob).is_none());
+}
+
+#[cfg(windows)]
+#[test]
 fn native_single_file_search_spec_rejects_globs_and_absolute_paths() {
     let with_glob = serde_json::json!({
         "pattern": "needle",

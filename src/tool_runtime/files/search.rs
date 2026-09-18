@@ -616,7 +616,7 @@ fn ripgrep_search_command(options: &SearchOptions) -> String {
             options.context_before, options.context_after
         ),
         SearchResultMode::FilesWithMatches => "--files-with-matches".to_string(),
-        SearchResultMode::Count => "--count --null".to_string(),
+        SearchResultMode::Count => "--with-filename --count --null".to_string(),
     };
     // Deliberately no `--sort path`: a global sort forces ripgrep to scan and
     // buffer the whole search space before emitting anything, so a small

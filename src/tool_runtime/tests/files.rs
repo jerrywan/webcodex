@@ -3746,6 +3746,35 @@ async fn search_project_text_files_with_matches_is_unique_stable_and_bounded() {
 }
 
 #[tokio::test]
+async fn search_project_text_single_file_count_preserves_filename() {
+    if !host_ripgrep_available() {
+        eprintln!("skipping real-ripgrep integration test: rg is unavailable");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let path = "count file.rs";
+    std::fs::write(tmp.path().join(path), "COUNT_NEEDLE\nCOUNT_NEEDLE\n").unwrap();
+    let runtime = test_runtime();
+    let project =
+        register_runner_project_at_path(&runtime, "single-file-count", "demo", tmp.path()).await;
+    let (result, _) = execute_agent_search(
+        &runtime,
+        "single-file-count",
+        project,
+        SearchRequest {
+            pattern: "COUNT_NEEDLE".to_string(),
+            path: Some(path.to_string()),
+            result_mode: Some(SearchResultMode::Count),
+            ..raw_search_request()
+        },
+    )
+    .await;
+    assert!(result.success, "{:?}", result.error);
+    assert_eq!(result.output["total_matches"], 2);
+    assert_eq!(result.output["files"][0]["path"], path);
+}
+
+#[tokio::test]
 async fn search_project_text_count_distinguishes_complete_and_truncated_totals() {
     // count result mode is ripgrep-only; without host rg this is a capability
     // error, not a product regression (see

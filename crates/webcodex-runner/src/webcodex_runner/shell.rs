@@ -592,7 +592,11 @@ fn native_single_file_search_spec(payload: &str) -> Option<NativeSingleFileSearc
             ]);
         }
         "files_with_matches" => args.push("--files-with-matches".to_string()),
-        "count" => args.extend(["--count".to_string(), "--null".to_string()]),
+        "count" => args.extend([
+            "--with-filename".to_string(),
+            "--count".to_string(),
+            "--null".to_string(),
+        ]),
         _ => return None,
     }
     args.extend([

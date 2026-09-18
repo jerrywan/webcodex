@@ -150,3 +150,30 @@ These fixtures validate correctness and the `4 -> 1` source-block reduction,
 not native Windows process execution or the original latency percentages.
 Native Windows execution and an exact-head Windows A/B benchmark remain separate
 validation evidence.
+
+## Native Windows verification during PR #526 review
+
+The follow-up was exercised on Windows 11 (build 26100), using the
+`x86_64-pc-windows-msvc` toolchain and an installed native `rg.exe`. The isolated
+real-process fixture invokes the production native search helper, rather than
+mocking its stdout. It covers a Unicode filename containing spaces, CRLF input,
+match/file/count result modes, no-match exit status, and fallback selection for
+directories, missing files, out-of-project paths, and include globs.
+
+This exposed a single-file count defect: `rg --count --null` emits only the count
+when given one file. The canonical parser requires a filename-bearing record.
+Both native Windows and generated fallback commands now request
+`--with-filename`; the regression verifies the exact `path + NUL + count` record.
+The fixture failed before the fix and passed afterward. An ordinary argv test
+also protects the flag without requiring real-process execution.
+
+Run native verification explicitly:
+
+```text
+cargo test --locked -p webcodex-runner --features runner-real-process-tests runner_real_process_native_single_file_search -- --ignored --test-threads=1 --nocapture
+```
+
+This closes the native correctness gap for the scenarios listed above. It does
+not remeasure the contributor's 20-run A/B workload, validate every timeout or
+cancellation path, or establish an end-to-end model latency improvement. The
+original timing percentages remain separately attributed measurements.
