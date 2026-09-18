@@ -176,6 +176,7 @@ fn code_mode_strategy_changes_only_guidance_and_teaches_compact_composition() {
         "simple observation use a direct primitive",
         "read-only code_mode_exec",
         "soft heuristic",
+        "bounded callable contract",
         "adaptive follow-up inside one cell",
         "sequential inside the cell",
         "small dependency DAG",

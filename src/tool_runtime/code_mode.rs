@@ -13,6 +13,42 @@ use webcodex_code_mode::{
 
 pub(crate) use super::orchestration_host::OrchestrationCompositionSummary as CodeModeCompositionSummary;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CodeModeCallableStage {
+    ReadOnly,
+    Validation,
+    GuardedEdit,
+}
+
+impl CodeModeCallableStage {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::Validation => "validation",
+            Self::GuardedEdit => "guarded_edit",
+        }
+    }
+
+    pub(crate) const fn entry_tool(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "code_mode_exec",
+            Self::Validation => "code_mode_exec_effectful",
+            Self::GuardedEdit => "code_mode_exec_mutating",
+        }
+    }
+}
+
+pub(crate) fn code_mode_callable_stage_for_entry_tool(
+    tool_name: &str,
+) -> Option<CodeModeCallableStage> {
+    match tool_name {
+        "code_mode_exec" => Some(CodeModeCallableStage::ReadOnly),
+        "code_mode_exec_effectful" => Some(CodeModeCallableStage::Validation),
+        "code_mode_exec_mutating" => Some(CodeModeCallableStage::GuardedEdit),
+        _ => None,
+    }
+}
+
 /// E1 admission is intentionally explicit. A future tool becoming read-only does
 /// not opt it into Code Mode automatically.
 pub(crate) const READ_ONLY_NESTED_TOOLS: &[&str] = &[
@@ -89,6 +125,16 @@ const CODE_MODE_E2B_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     nested_sync_wait_max_secs: None,
     max_mutation_calls: Some(1),
 };
+
+pub(crate) const fn code_mode_orchestration_policy(
+    stage: CodeModeCallableStage,
+) -> OrchestrationPolicy {
+    match stage {
+        CodeModeCallableStage::ReadOnly => CODE_MODE_E1_POLICY,
+        CodeModeCallableStage::Validation => CODE_MODE_E2A_POLICY,
+        CodeModeCallableStage::GuardedEdit => CODE_MODE_E2B_POLICY,
+    }
+}
 
 pub(crate) fn is_admitted_nested_tool(tool_name: &str) -> bool {
     CODE_MODE_E1_POLICY.is_admitted(tool_name)
@@ -223,6 +269,7 @@ impl ToolRuntime {
             super::sessions::SessionTransport::Api => ToolTransport::Api,
             super::sessions::SessionTransport::Mcp => ToolTransport::Mcp,
         };
+        let policy = code_mode_orchestration_policy(CodeModeCallableStage::ReadOnly);
         let orchestration = Arc::new(CanonicalOrchestrationHost::new(
             self.clone(),
             auth,
@@ -230,7 +277,7 @@ impl ToolRuntime {
             session_id,
             transport,
             composition_parent_invocation_id.clone(),
-            CODE_MODE_E1_POLICY,
+            policy,
         ));
         let host = Arc::new(V8CodeModeHost {
             orchestration: Arc::clone(&orchestration),
@@ -240,7 +287,8 @@ impl ToolRuntime {
             host as Arc<dyn CodeModeHost>,
             CodeModeExecuteRequest {
                 source,
-                allowed_tools: READ_ONLY_NESTED_TOOLS
+                allowed_tools: policy
+                    .admitted_tools
                     .iter()
                     .map(|tool| (*tool).to_string())
                     .collect(),
@@ -310,6 +358,7 @@ impl ToolRuntime {
             super::sessions::SessionTransport::Api => ToolTransport::Api,
             super::sessions::SessionTransport::Mcp => ToolTransport::Mcp,
         };
+        let policy = code_mode_orchestration_policy(CodeModeCallableStage::Validation);
         let orchestration = Arc::new(CanonicalOrchestrationHost::new(
             self.clone(),
             auth,
@@ -317,7 +366,7 @@ impl ToolRuntime {
             session_id,
             transport,
             composition_parent_invocation_id.clone(),
-            CODE_MODE_E2A_POLICY,
+            policy,
         ));
         let host = Arc::new(V8CodeModeHost {
             orchestration: Arc::clone(&orchestration),
@@ -327,7 +376,8 @@ impl ToolRuntime {
             host as Arc<dyn CodeModeHost>,
             CodeModeExecuteRequest {
                 source,
-                allowed_tools: E2A_NESTED_TOOLS
+                allowed_tools: policy
+                    .admitted_tools
                     .iter()
                     .map(|tool| (*tool).to_string())
                     .collect(),
@@ -420,6 +470,7 @@ impl ToolRuntime {
             super::sessions::SessionTransport::Api => ToolTransport::Api,
             super::sessions::SessionTransport::Mcp => ToolTransport::Mcp,
         };
+        let policy = code_mode_orchestration_policy(CodeModeCallableStage::GuardedEdit);
         let orchestration = Arc::new(CanonicalOrchestrationHost::new(
             self.clone(),
             auth,
@@ -427,7 +478,7 @@ impl ToolRuntime {
             session_id,
             transport,
             composition_parent_invocation_id.clone(),
-            CODE_MODE_E2B_POLICY,
+            policy,
         ));
         let host = Arc::new(V8CodeModeHost {
             orchestration: Arc::clone(&orchestration),
@@ -437,7 +488,8 @@ impl ToolRuntime {
             host as Arc<dyn CodeModeHost>,
             CodeModeExecuteRequest {
                 source,
-                allowed_tools: E2B_NESTED_TOOLS
+                allowed_tools: policy
+                    .admitted_tools
                     .iter()
                     .map(|tool| (*tool).to_string())
                     .collect(),
@@ -539,6 +591,45 @@ mod tests {
         assert!(READ_ONLY_NESTED_TOOLS.contains(&"show_changes"));
         assert!(!READ_ONLY_NESTED_TOOLS.contains(&"code_mode_exec"));
         assert!(!READ_ONLY_NESTED_TOOLS.contains(&"run_shell"));
+    }
+
+    #[test]
+    fn callable_stage_projection_keys_reuse_exact_execution_admission() {
+        assert_eq!(
+            code_mode_orchestration_policy(CodeModeCallableStage::ReadOnly).admitted_tools,
+            READ_ONLY_NESTED_TOOLS
+        );
+        assert_eq!(
+            &E2A_NESTED_TOOLS[..READ_ONLY_NESTED_TOOLS.len()],
+            READ_ONLY_NESTED_TOOLS
+        );
+        assert_eq!(
+            &E2A_NESTED_TOOLS[READ_ONLY_NESTED_TOOLS.len()..],
+            ["cargo_check", "cargo_test"]
+        );
+        assert_eq!(
+            &E2B_NESTED_TOOLS[..READ_ONLY_NESTED_TOOLS.len()],
+            READ_ONLY_NESTED_TOOLS
+        );
+        assert_eq!(
+            &E2B_NESTED_TOOLS[READ_ONLY_NESTED_TOOLS.len()..],
+            ["apply_text_edits"]
+        );
+        for stage in [
+            CodeModeCallableStage::ReadOnly,
+            CodeModeCallableStage::Validation,
+            CodeModeCallableStage::GuardedEdit,
+        ] {
+            let policy = code_mode_orchestration_policy(stage);
+            assert_eq!(
+                code_mode_callable_stage_for_entry_tool(stage.entry_tool()),
+                Some(stage)
+            );
+            assert!(policy
+                .admitted_tools
+                .iter()
+                .all(|tool| !RECURSIVE_CODE_MODE_TOOLS.contains(tool)));
+        }
     }
 
     #[test]

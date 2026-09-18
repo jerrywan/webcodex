@@ -211,7 +211,8 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 schema_type("string", "Recommended next discovery action."),
             ),
         ])),
-        "tool_manifest" => Some(wrapped_output_schema(vec![
+        "tool_manifest" => {
+            let fields = vec![
             (
                 "name",
                 schema_type(
@@ -460,7 +461,20 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                     "Short list of recommended tool flows for common tasks.",
                 ),
             ),
-        ])),
+        ];
+            #[cfg(feature = "experimental-code-mode")]
+            let fields = {
+                let mut fields = fields;
+                fields.push((
+                    "code_mode_callable_contract",
+                    open_object_schema(
+                        "Bounded presentation-only callable contract attached only to exact Code Mode entry-tool discovery. It is derived from canonical ToolSpecs plus the existing Code Mode admission policy and grants no authority.",
+                    ),
+                ));
+                fields
+            };
+            Some(wrapped_output_schema(fields))
+        }
         _ => None,
     }
 }

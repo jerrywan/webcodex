@@ -1,5 +1,168 @@
 use super::*;
 
+#[cfg(feature = "experimental-code-mode")]
+use std::collections::HashMap;
+#[cfg(feature = "experimental-code-mode")]
+use std::sync::Arc;
+#[cfg(feature = "experimental-code-mode")]
+use webcodex_code_mode::{
+    CodeModeExecuteRequest, CodeModeHost, CodeModeHostError, CodeModeHostFuture,
+    CodeModeToolRequest, CodeModeToolResponse,
+};
+
+#[cfg(feature = "experimental-code-mode")]
+struct CallableExampleHost {
+    input_schemas: HashMap<String, Value>,
+}
+
+#[cfg(feature = "experimental-code-mode")]
+impl CodeModeHost for CallableExampleHost {
+    fn invoke_tool(
+        &self,
+        request: CodeModeToolRequest,
+    ) -> CodeModeHostFuture<'_, Result<CodeModeToolResponse, CodeModeHostError>> {
+        Box::pin(async move {
+            let schema = self.input_schemas.get(&request.tool_name).ok_or_else(|| {
+                CodeModeHostError::new(format!("unexpected example tool {}", request.tool_name))
+            })?;
+            crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+                &request.arguments,
+                schema,
+            )
+            .map_err(|error| {
+                CodeModeHostError::new(format!(
+                    "{} example arguments drifted from callable input: {error}",
+                    request.tool_name
+                ))
+            })?;
+            let output = match request.tool_name.as_str() {
+                "search_project_texts" => json!({
+                    "items": [{
+                        "success": true,
+                        "output": {
+                            "matches": [{
+                                "path": "src/tool_runtime/code_mode.rs",
+                                "line": 1,
+                                "preview": "CanonicalOrchestrationHost",
+                                "read_hint": {"start_line": 1, "limit": 80}
+                            }]
+                        }
+                    }]
+                }),
+                "read_files" => json!({
+                    "items": [{
+                        "path": "src/tool_runtime/code_mode.rs",
+                        "success": true,
+                        "output": {
+                            "text": "detail",
+                            "read_revision": 1,
+                            "returned_lines": 1,
+                            "has_more": false
+                        }
+                    }]
+                }),
+                "git_status" => json!({"stdout": "## clean"}),
+                "cargo_check" => json!({
+                    "execution_state": "running",
+                    "terminal": false,
+                    "job_id": "wc_job_example",
+                    "continuation": {"tool": "observe_jobs", "arguments": {}}
+                }),
+                "apply_text_edits" => json!({
+                    "state_changed": true,
+                    "execution_state": "completed",
+                    "error_kind": null,
+                    "recovery": null
+                }),
+                other => {
+                    return Err(CodeModeHostError::new(format!(
+                        "example unexpectedly invoked {other}"
+                    )))
+                }
+            };
+            Ok(CodeModeToolResponse {
+                success: true,
+                output,
+                error: None,
+            })
+        })
+    }
+}
+
+#[cfg(feature = "experimental-code-mode")]
+#[tokio::test]
+async fn code_mode_callable_projection_examples_execute_against_projected_inputs() {
+    let runtime = test_runtime();
+    for entry_tool in [
+        "code_mode_exec",
+        "code_mode_exec_effectful",
+        "code_mode_exec_mutating",
+    ] {
+        let manifest = runtime
+            .dispatch(ToolCall::ToolManifest {
+                tool_name: Some(entry_tool.to_string()),
+                category: None,
+                intent: None,
+                include_recommended_flows: false,
+                include_risk_summary: false,
+            })
+            .await;
+        assert!(manifest.success, "{entry_tool}: {:?}", manifest.error);
+        let projection = &manifest.output["code_mode_callable_contract"];
+        let tools = projection["tools"]
+            .as_array()
+            .expect("projected callable tools");
+        let input_schemas = tools
+            .iter()
+            .map(|tool| {
+                (
+                    tool["tool"]
+                        .as_str()
+                        .expect("projected tool name")
+                        .to_string(),
+                    tool["input"].clone(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let allowed_tools = tools
+            .iter()
+            .map(|tool| tool["tool"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        for example in projection["examples"]
+            .as_array()
+            .expect("callable usage examples")
+        {
+            let source = example["source"]
+                .as_str()
+                .expect("Code Mode example source")
+                .to_string();
+            let result = webcodex_code_mode::execute(
+                Arc::new(CallableExampleHost {
+                    input_schemas: input_schemas.clone(),
+                }),
+                CodeModeExecuteRequest {
+                    source,
+                    allowed_tools: allowed_tools.clone(),
+                    timeout_ms: Some(2_000),
+                },
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{} example {} failed: {error}",
+                    projection["stage"], example["name"]
+                )
+            });
+            assert!(
+                !result.content.is_empty(),
+                "{}: {}",
+                projection["stage"],
+                example["name"]
+            );
+        }
+    }
+}
+
 #[test]
 fn discovery_output_schemas_cover_runtime_payload_keys() {
     use crate::tool_runtime::tool_definition::TOOL_CATEGORY_GIT;
@@ -1496,6 +1659,241 @@ async fn filtered_tool_manifest_recommended_flows_only_reference_returned_tools(
     assert_eq!(limited["returned_count"], 3);
     assert_eq!(limited["truncated"], true);
     assert_recommended_flows_subset_of_manifest_tools(&limited, "intent=coding limit=3");
+}
+
+#[cfg(feature = "experimental-code-mode")]
+#[tokio::test]
+async fn code_mode_exact_manifest_projects_canonical_stage_callable_contracts() {
+    use crate::tool_runtime::code_mode::{
+        code_mode_callable_stage_for_entry_tool, code_mode_orchestration_policy,
+    };
+    use crate::tool_runtime::orchestration_host::is_server_owned_orchestration_argument;
+
+    let runtime = test_runtime();
+    let specs = registered_tool_specs();
+    let cases = [
+        ("code_mode_exec", "read_only"),
+        ("code_mode_exec_effectful", "validation"),
+        ("code_mode_exec_mutating", "guarded_edit"),
+    ];
+
+    for (entry_tool, expected_stage) in cases {
+        let result = runtime
+            .dispatch(ToolCall::ToolManifest {
+                tool_name: Some(entry_tool.to_string()),
+                category: None,
+                intent: None,
+                include_recommended_flows: false,
+                include_risk_summary: false,
+            })
+            .await;
+        assert!(result.success, "{entry_tool}: {:?}", result.error);
+        let projection = &result.output["code_mode_callable_contract"];
+        assert_eq!(projection["stage"], expected_stage, "{entry_tool}");
+        assert_eq!(projection["entry_tool"], entry_tool, "{entry_tool}");
+        assert_eq!(projection["authority"], "presentation_only", "{entry_tool}");
+        let mut sparse = crate::tool_runtime::ToolResult::ok(result.output.clone());
+        crate::tool_runtime::surface::sparsify_tool_manifest_model_result(&mut sparse);
+        assert_eq!(
+            sparse.output["code_mode_callable_contract"], *projection,
+            "{entry_tool} sparse model projection must preserve the bounded callable contract"
+        );
+
+        let stage =
+            code_mode_callable_stage_for_entry_tool(entry_tool).expect("Code Mode entry stage");
+        let policy = code_mode_orchestration_policy(stage);
+        let projected_names = projection["tools"]
+            .as_array()
+            .expect("projected callable tools")
+            .iter()
+            .map(|tool| tool["tool"].as_str().expect("projected tool name"))
+            .collect::<Vec<_>>();
+        assert_eq!(projected_names, policy.admitted_tools, "{entry_tool}");
+        assert!(!projected_names
+            .iter()
+            .any(|name| name.starts_with("code_mode_exec")));
+
+        for tool in projection["tools"].as_array().unwrap() {
+            let tool_name = tool["tool"].as_str().unwrap();
+            let canonical = spec_named(&specs, tool_name);
+            let input = &tool["input"];
+            let input_properties = input["properties"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{tool_name} projected input properties"));
+            assert!(
+                input_properties
+                    .keys()
+                    .all(|field| !is_server_owned_orchestration_argument(field)),
+                "{tool_name} exposed a server-owned input: {input_properties:?}"
+            );
+            if let Some(required) = input.get("required").and_then(Value::as_array) {
+                assert!(required.iter().all(|field| {
+                    field
+                        .as_str()
+                        .is_none_or(|field| !is_server_owned_orchestration_argument(field))
+                }));
+            }
+            let output_fields = tool["output_fields"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{tool_name} output_fields"));
+            assert!(
+                !output_fields.is_empty(),
+                "{tool_name} must expose bounded useful output fields"
+            );
+            assert!(
+                output_fields.len()
+                    <= crate::tool_runtime::surface::CODE_MODE_OUTPUT_FIELDS_PER_TOOL_MAX,
+                "{tool_name} output projection exceeded its per-tool field bound: {}",
+                output_fields.len()
+            );
+            assert_eq!(
+                input["additionalProperties"], canonical.input_schema["additionalProperties"],
+                "{tool_name} closed-object semantics drifted"
+            );
+        }
+
+        assert_eq!(
+            projection["bounds"]["output_fields_per_tool_max"],
+            crate::tool_runtime::surface::CODE_MODE_OUTPUT_FIELDS_PER_TOOL_MAX
+        );
+        let bytes = serde_json::to_vec(projection).unwrap().len();
+        println!("code_mode_callable_projection stage={expected_stage} bytes={bytes}");
+        let soft_max_bytes = match expected_stage {
+            "read_only" => 10 * 1024,
+            "validation" | "guarded_edit" => 13 * 1024,
+            _ => unreachable!(),
+        };
+        assert!(
+            bytes <= soft_max_bytes,
+            "{expected_stage} projection is {bytes} bytes; soft cap is {soft_max_bytes}"
+        );
+        assert!(
+            bytes <= crate::tool_runtime::surface::CODE_MODE_CALLABLE_CONTRACT_HARD_MAX_BYTES,
+            "{expected_stage} projection is {bytes} bytes"
+        );
+    }
+}
+
+#[cfg(feature = "experimental-code-mode")]
+#[tokio::test]
+async fn code_mode_callable_projection_preserves_key_input_constraints_and_output_handoffs() {
+    let runtime = test_runtime();
+
+    let read_only = runtime
+        .dispatch(ToolCall::ToolManifest {
+            tool_name: Some("code_mode_exec".to_string()),
+            category: None,
+            intent: None,
+            include_recommended_flows: false,
+            include_risk_summary: false,
+        })
+        .await;
+    assert!(read_only.success, "{:?}", read_only.error);
+    let read_tools = read_only.output["code_mode_callable_contract"]["tools"]
+        .as_array()
+        .unwrap();
+    let read_files = read_tools
+        .iter()
+        .find(|tool| tool["tool"] == "read_files")
+        .expect("read_files projection");
+    assert_eq!(read_files["input"]["required"], json!(["items"]));
+    assert_eq!(read_files["input"]["properties"]["items"]["maxItems"], 8);
+    assert_eq!(
+        read_files["input"]["properties"]["items"]["items"]["properties"]["start_line"]["minimum"],
+        0
+    );
+    assert!(read_files["input"]["properties"].get("project").is_none());
+    assert!(read_files["input"]["properties"]
+        .get("session_id")
+        .is_none());
+
+    let validation = runtime
+        .dispatch(ToolCall::ToolManifest {
+            tool_name: Some("code_mode_exec_effectful".to_string()),
+            category: None,
+            intent: None,
+            include_recommended_flows: false,
+            include_risk_summary: false,
+        })
+        .await;
+    assert!(validation.success, "{:?}", validation.error);
+    let validation_tools = validation.output["code_mode_callable_contract"]["tools"]
+        .as_array()
+        .unwrap();
+    let cargo_test = validation_tools
+        .iter()
+        .find(|tool| tool["tool"] == "cargo_test")
+        .expect("cargo_test projection");
+    assert_eq!(cargo_test["input"]["properties"]["min_tests"]["minimum"], 1);
+    assert!(cargo_test["input"]["properties"]
+        .get("result_expectation")
+        .is_none());
+    let cargo_test_outputs = cargo_test["output_fields"].as_array().unwrap();
+    for field in [
+        "success",
+        "output.execution_state",
+        "output.terminal",
+        "output.passed",
+        "output.failure_kind",
+        "output.job_id",
+        "output.continuation",
+        "output.diagnostics",
+    ] {
+        assert!(
+            cargo_test_outputs.contains(&json!(field)),
+            "missing {field}"
+        );
+    }
+
+    let guarded = runtime
+        .dispatch(ToolCall::ToolManifest {
+            tool_name: Some("code_mode_exec_mutating".to_string()),
+            category: None,
+            intent: None,
+            include_recommended_flows: false,
+            include_risk_summary: false,
+        })
+        .await;
+    assert!(guarded.success, "{:?}", guarded.error);
+    let guarded_tools = guarded.output["code_mode_callable_contract"]["tools"]
+        .as_array()
+        .unwrap();
+    let edit = guarded_tools
+        .iter()
+        .find(|tool| tool["tool"] == "apply_text_edits")
+        .expect("apply_text_edits projection");
+    assert_eq!(edit["input"]["properties"]["changes"]["maxItems"], 16);
+    assert!(edit["input"]["properties"].get("project").is_none());
+    let edit_outputs = edit["output_fields"].as_array().unwrap();
+    for field in [
+        "success",
+        "output.state_changed",
+        "output.execution_state",
+        "output.error_kind",
+        "output.change_index",
+        "output.edit_index",
+        "output.conflicting_edit_indices",
+        "output.conflicting_edit_ranges",
+        "output.recovery",
+    ] {
+        assert!(edit_outputs.contains(&json!(field)), "missing {field}");
+    }
+}
+
+#[cfg(feature = "experimental-code-mode")]
+#[test]
+fn experimental_tool_manifest_schema_declares_callable_contract_sidecar() {
+    let specs = registered_tool_specs();
+    let manifest = spec_named(&specs, "tool_manifest");
+    assert!(output_schema_properties(manifest).contains_key("code_mode_callable_contract"));
+}
+
+#[cfg(not(feature = "experimental-code-mode"))]
+#[test]
+fn default_tool_manifest_schema_omits_callable_contract_sidecar() {
+    let specs = registered_tool_specs();
+    let manifest = spec_named(&specs, "tool_manifest");
+    assert!(!output_schema_properties(manifest).contains_key("code_mode_callable_contract"));
 }
 
 #[tokio::test]

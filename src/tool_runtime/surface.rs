@@ -4,8 +4,14 @@
 //! manifests, and bounded `list_tools` filtering close together while leaving
 //! dispatch and authorization flow in `mod.rs`.
 
+#[cfg(feature = "experimental-code-mode")]
+use super::code_mode::{
+    code_mode_callable_stage_for_entry_tool, code_mode_orchestration_policy, CodeModeCallableStage,
+};
 use super::kernel::ToolProtocolCapabilities;
 use super::metadata::ToolAuthorityPolicy;
+#[cfg(feature = "experimental-code-mode")]
+use super::orchestration_host::is_server_owned_orchestration_argument;
 use super::registry::{registered_tool_specs, stateless_operator_extension_tool_specs};
 use super::runtime::ToolRuntime;
 use super::tool_definition::{
@@ -18,11 +24,17 @@ use super::tool_definition::{
 };
 use super::tool_inputs::ListToolsOptions;
 use super::tool_result::ToolResult;
+#[cfg(feature = "experimental-code-mode")]
+use crate::json_measurement::serialized_json_len;
 use serde_json::{json, Value};
+#[cfg(feature = "experimental-code-mode")]
+use std::collections::BTreeSet;
 use std::collections::{BTreeMap, HashMap};
 use webcodex_tool_contracts::ToolSpec;
 
 const TOOL_MANIFEST_SELECTION_DESCRIPTION_MAX_CHARS: usize = 180;
+#[cfg(feature = "experimental-code-mode")]
+pub(crate) const CODE_MODE_CALLABLE_CONTRACT_HARD_MAX_BYTES: usize = 16 * 1024;
 const TOOL_MANIFEST_CANONICAL_KEYS: &[&str] = &[
     "schema_version",
     "tool_count",
@@ -47,6 +59,301 @@ const TOOL_MANIFEST_CANONICAL_KEYS: &[&str] = &[
     "risk_summary",
     "recommended_flows",
 ];
+
+#[cfg(feature = "experimental-code-mode")]
+const CODE_MODE_USEFUL_OUTPUT_FIELD_NAMES: &[&str] = &[
+    "success",
+    "error",
+    "execution_state",
+    "terminal",
+    "passed",
+    "failure_kind",
+    "job_id",
+    "job_status",
+    "promoted_to_job",
+    "continuation",
+    "diagnostics",
+    "state_changed",
+    "error_kind",
+    "change_index",
+    "edit_index",
+    "conflicting_edit_indices",
+    "conflicting_edit_ranges",
+    "recovery",
+    "changed",
+    "items",
+    "matches",
+    "path",
+    "text",
+    "read_revision",
+    "returned_lines",
+    "has_more",
+    "line",
+    "preview",
+    "read_hint",
+    "output_truncated",
+    "truncation_reason",
+    "suggested_call",
+    "project_types",
+    "manifests",
+    "key_files",
+    "suggested_next_reads",
+    "entries",
+    "total_files",
+    "next_offset",
+    "list_truncated",
+    "exit_code",
+    "stdout",
+    "stderr",
+    "head_commit",
+    "commits",
+    "files",
+    "hunk_count",
+    "truncated",
+    "truncation_reasons",
+    "scope",
+    "stats",
+    "signals",
+    "warnings",
+    "reason_code",
+    "branch",
+    "head",
+    "clean",
+    "counts",
+    "files_truncated",
+    "diff_stat",
+];
+#[cfg(feature = "experimental-code-mode")]
+pub(crate) const CODE_MODE_OUTPUT_FIELDS_PER_TOOL_MAX: usize = 20;
+#[cfg(feature = "experimental-code-mode")]
+const CODE_MODE_OUTPUT_PATH_DEPTH_MAX: usize = 7;
+
+#[cfg(feature = "experimental-code-mode")]
+fn strip_code_mode_schema_noise(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for key in ["description", "title", "examples", "$comment"] {
+                object.remove(key);
+            }
+            for nested in object.values_mut() {
+                strip_code_mode_schema_noise(nested);
+            }
+        }
+        Value::Array(values) => {
+            for nested in values {
+                strip_code_mode_schema_noise(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(feature = "experimental-code-mode")]
+fn code_mode_input_schema_projection(
+    schema: &Value,
+    policy: super::orchestration_host::OrchestrationPolicy,
+) -> Value {
+    let mut projected = schema.clone();
+    strip_code_mode_schema_noise(&mut projected);
+    let Some(object) = projected.as_object_mut() else {
+        return projected;
+    };
+    if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.retain(|field, _| {
+            !is_server_owned_orchestration_argument(field)
+                && !policy
+                    .additional_forbidden_argument_fields
+                    .contains(&field.as_str())
+        });
+    }
+    if let Some(required) = object.get_mut("required").and_then(Value::as_array_mut) {
+        required.retain(|field| {
+            field.as_str().is_none_or(|field| {
+                !is_server_owned_orchestration_argument(field)
+                    && !policy.additional_forbidden_argument_fields.contains(&field)
+            })
+        });
+    }
+    projected
+}
+
+#[cfg(feature = "experimental-code-mode")]
+fn schema_can_be_array(schema: &Value) -> bool {
+    if schema.get("type").and_then(Value::as_str) == Some("array") {
+        return true;
+    }
+    ["anyOf", "oneOf", "allOf"].iter().any(|key| {
+        schema
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|branches| branches.iter().any(schema_can_be_array))
+    })
+}
+
+#[cfg(feature = "experimental-code-mode")]
+fn collect_code_mode_output_fields(
+    schema: &Value,
+    prefix: &str,
+    depth: usize,
+    fields: &mut BTreeSet<String>,
+) {
+    if depth >= CODE_MODE_OUTPUT_PATH_DEPTH_MAX {
+        return;
+    }
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(branches) = schema.get(key).and_then(Value::as_array) {
+            for branch in branches {
+                collect_code_mode_output_fields(branch, prefix, depth, fields);
+            }
+        }
+    }
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return;
+    };
+    for (name, child) in properties {
+        let path = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}.{name}")
+        };
+        if CODE_MODE_USEFUL_OUTPUT_FIELD_NAMES.contains(&name.as_str()) {
+            fields.insert(path.clone());
+        }
+        let nested_prefix = if schema_can_be_array(child) {
+            format!("{path}[]")
+        } else {
+            path
+        };
+        collect_code_mode_output_fields(child, &nested_prefix, depth + 1, fields);
+    }
+}
+
+#[cfg(feature = "experimental-code-mode")]
+fn code_mode_output_fields(schema: &Value) -> Vec<String> {
+    let mut fields = BTreeSet::new();
+    collect_code_mode_output_fields(schema, "", 0, &mut fields);
+    let mut fields = fields.into_iter().collect::<Vec<_>>();
+    fields.sort_by(|left, right| {
+        let rank = |path: &str| {
+            let leaf = path
+                .rsplit('.')
+                .next()
+                .unwrap_or(path)
+                .trim_end_matches("[]");
+            CODE_MODE_USEFUL_OUTPUT_FIELD_NAMES
+                .iter()
+                .position(|candidate| *candidate == leaf)
+                .unwrap_or(CODE_MODE_USEFUL_OUTPUT_FIELD_NAMES.len())
+        };
+        rank(left).cmp(&rank(right)).then_with(|| left.cmp(right))
+    });
+    fields.truncate(CODE_MODE_OUTPUT_FIELDS_PER_TOOL_MAX);
+    fields
+}
+
+#[cfg(feature = "experimental-code-mode")]
+fn code_mode_usage_examples(stage: CodeModeCallableStage) -> Vec<Value> {
+    let mut examples = vec![
+        json!({
+            "name": "adaptive_search_then_read",
+            "source": r#"const search = await tools.search_project_texts({queries:[{pattern:"CanonicalOrchestrationHost",pattern_mode:"literal",limit:8}]});
+const matches = search.output.items?.[0]?.output?.matches ?? [];
+const detail = await tools.read_files({items:matches.slice(0,3).map(m=>({path:m.path,start_line:m.read_hint.start_line,limit:m.read_hint.limit}))});
+text({matches:matches.map(m=>({path:m.path,line:m.line,preview:m.preview})),files:detail.output.items?.map(i=>({path:i.path,text:i.output?.text,read_revision:i.output?.read_revision}))});"#,
+        }),
+        json!({
+            "name": "independent_observations",
+            "source": r#"const [status, detail] = await Promise.all([
+  tools.git_status({}),
+  tools.read_files({items:[{path:"src/tool_runtime/code_mode.rs",start_line:1,limit:80}]})
+]);
+text({status:status.output?.stdout,file:detail.output.items?.[0]?.output?.text});"#,
+        }),
+    ];
+    match stage {
+        CodeModeCallableStage::ReadOnly => {}
+        CodeModeCallableStage::Validation => examples.push(json!({
+            "name": "validation_job_handoff",
+            "source": r#"const check = await tools.cargo_check({sync_wait_secs:1});
+if (!check.output?.terminal && check.output?.job_id) {
+  text({job_id:check.output.job_id,continuation:check.output.continuation});
+} else {
+  text({passed:check.output?.passed,failure_kind:check.output?.failure_kind,diagnostics:check.output?.diagnostics});
+}"#,
+        })),
+        CodeModeCallableStage::GuardedEdit => examples.push(json!({
+            "name": "guarded_edit",
+            "source": r#"const path = "src/example.rs";
+const read = await tools.read_files({items:[{path,start_line:1,limit:120}]});
+const revision = read.output.items?.[0]?.output?.read_revision;
+const edit = await tools.apply_text_edits({changes:[{path,old_text:"old",new_text:"new",expected_read_revision:revision}]});
+text({success:edit.success,state_changed:edit.output?.state_changed,execution_state:edit.output?.execution_state,error_kind:edit.output?.error_kind,recovery:edit.output?.recovery});"#,
+        })),
+    }
+    examples
+}
+
+#[cfg(feature = "experimental-code-mode")]
+fn code_mode_callable_contract(
+    stage: CodeModeCallableStage,
+    specs: &[ToolSpec],
+) -> Result<Value, ToolResult> {
+    let policy = code_mode_orchestration_policy(stage);
+    let by_name = specs
+        .iter()
+        .map(|spec| (spec.name.as_str(), spec))
+        .collect::<HashMap<_, _>>();
+    let mut tools = Vec::with_capacity(policy.admitted_tools.len());
+    for tool_name in policy.admitted_tools {
+        let Some(spec) = by_name.get(tool_name).copied() else {
+            return Err(ToolResult::err_with_output(
+                "code mode callable projection is inconsistent with the canonical tool registry",
+                json!({"code":"code_mode_projection_missing_tool","tool":tool_name}),
+            ));
+        };
+        let output_fields = code_mode_output_fields(&spec.output_schema);
+        if output_fields.is_empty() {
+            return Err(ToolResult::err_with_output(
+                "code mode callable projection found no useful canonical output fields",
+                json!({"code":"code_mode_projection_missing_useful_output","tool":tool_name}),
+            ));
+        }
+        tools.push(json!({
+            "tool": spec.name,
+            "purpose": selection_description(&spec.description),
+            "input": code_mode_input_schema_projection(&spec.input_schema, policy),
+            "output_fields": output_fields,
+        }));
+    }
+    let projection = json!({
+        "kind": "code_mode_callable_contract",
+        "version": 1,
+        "stage": stage.as_str(),
+        "entry_tool": stage.entry_tool(),
+        "authority": "presentation_only",
+        "tool_count": tools.len(),
+        "tools": tools,
+        "examples": code_mode_usage_examples(stage),
+        "bounds": {
+            "hard_max_bytes": CODE_MODE_CALLABLE_CONTRACT_HARD_MAX_BYTES,
+            "description_max_chars": TOOL_MANIFEST_SELECTION_DESCRIPTION_MAX_CHARS,
+            "output_fields_per_tool_max": CODE_MODE_OUTPUT_FIELDS_PER_TOOL_MAX,
+        },
+    });
+    let bytes = serialized_json_len(&projection).expect("Value serialization is infallible");
+    if bytes > CODE_MODE_CALLABLE_CONTRACT_HARD_MAX_BYTES {
+        return Err(ToolResult::err_with_output(
+            "code mode callable projection exceeded its hard model-surface bound",
+            json!({
+                "code":"code_mode_projection_too_large",
+                "stage":stage.as_str(),
+                "bytes":bytes,
+                "hard_max_bytes":CODE_MODE_CALLABLE_CONTRACT_HARD_MAX_BYTES,
+            }),
+        ));
+    }
+    Ok(projection)
+}
 
 pub(crate) fn registered_tool_categories() -> Value {
     let mut categories = serde_json::Map::new();
@@ -301,6 +608,10 @@ impl ToolRuntime {
                 Value::Array(tool_manifest_recommended_flows_for_visible_tools([spec
                     .name
                     .as_str()]));
+        }
+        #[cfg(feature = "experimental-code-mode")]
+        if let Some(stage) = code_mode_callable_stage_for_entry_tool(spec.name.as_str()) {
+            output["code_mode_callable_contract"] = code_mode_callable_contract(stage, &specs)?;
         }
         Ok(output)
     }
