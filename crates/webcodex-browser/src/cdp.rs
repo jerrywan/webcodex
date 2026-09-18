@@ -693,6 +693,16 @@ impl BrowserBackend for CdpBackend {
 
     fn click(&mut self, target_id: &str, backend_node_id: i64) -> BrowserResult<()> {
         let deadline = Instant::now() + REQUEST_TIMEOUT;
+        // CDP mouse coordinates are viewport-relative. Ensure off-screen
+        // controls are visible before deriving the box-model click point.
+        self.page_call_until(
+            target_id,
+            "DOM.scrollIntoViewIfNeeded",
+            json!({ "backendNodeId": backend_node_id }),
+            false,
+            deadline,
+        )
+        .map_err(pre_dispatch_error)?;
         let model = self
             .page_call_until(
                 target_id,
