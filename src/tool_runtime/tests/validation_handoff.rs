@@ -3190,7 +3190,7 @@ fn cargo_output_schema_enforces_handoff_terminal_and_rejection_branches() {
                         "job_id": "job-123",
                         "after_observation_token": "observation"
                     }],
-                    "wait_secs": 100,
+                    "wait_secs": webcodex_core::runtime_contract::MODEL_JOB_CONTINUATION_WAIT_SECS,
                     "wake_on": "terminal"
                 }
             },
