@@ -500,7 +500,7 @@ impl CdpBackend {
             ),
             "invalid_control_value" => (
                 "invalid_control_value",
-                "Browser rejected or normalized the requested native control value",
+                "Browser rejected, normalized, or constraint-invalidated the requested native control value",
             ),
             _ => (
                 "form_control_rejected",
@@ -859,7 +859,7 @@ impl BrowserBackend for CdpBackend {
                 }
             }
             probe.value = requested;
-            if (probe.value !== requested) {
+            if (probe.value !== requested || !probe.checkValidity()) {
                 return { ok: false, kind: "invalid_control_value" };
             }
             this.value = requested;
@@ -1070,7 +1070,6 @@ fn is_actionable(role: &str) -> bool {
             | "switch"
             | "menuitem"
             | "tab"
-            | "option"
     )
 }
 
@@ -1350,12 +1349,16 @@ mod tests {
 
     #[test]
     fn form_control_roles_needed_for_structured_fill_are_actionable() {
-        for role in ["textbox", "combobox", "option", "DateTime"] {
+        for role in ["textbox", "combobox", "DateTime"] {
             assert!(
                 is_actionable(role),
                 "{role} should project an element identity"
             );
         }
+        assert!(
+            !is_actionable("option"),
+            "native option nodes are semantic choices; the owning combobox carries select_option authority"
+        );
     }
 
     fn fake_cdp_server(reply: Option<Value>) -> (Url, thread::JoinHandle<()>) {
