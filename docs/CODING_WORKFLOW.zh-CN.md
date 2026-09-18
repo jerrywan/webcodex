@@ -107,7 +107,7 @@ Formatting 属于收尾，不是每次编辑后的 validation。普通循环是�
 
 ## 长时间运行的工作
 
-命令或 validation 超过同步等待窗口时，会作为同一条 WebCodex Job 继续执行。保留其精确 Job identity 与 parser-ready continuation；如果仍有有用的独立工作，就先继续这些工作，之后再 observe，不要为了“保持可见”反复轮询 running Job。只有下一步真正依赖 terminal result 时，才使用返回的 `wait_secs=100, wake_on=terminal` 有界等待 continuation。单个 Job 或任一 terminal result 即可推进时使用 `terminal`；预先确定的一组 Job 必须全部结束才能推进时使用 `all_terminal`。Recovery/continuation hint 不会授权对不确定 effect 做 retry。
+命令或 validation 超过同步等待窗口时，会作为同一条 WebCodex Job 继续执行。保留其精确 Job identity 与 parser-ready continuation；如果仍有有用的独立工作，就先继续这些工作，之后再 observe，不要为了“保持可见”反复轮询 running Job。只有下一步真正依赖 terminal result 时，才使用返回的 host-safe `wait_secs=55, wake_on=terminal` continuation。Runtime 仍接受最长 100 秒的显式 observation wait，但更长的 model-facing wait 可能超过外层 MCP Host deadline。单个 Job 或任一 terminal result 即可推进时使用 `terminal`；预先确定的一组 Job 必须全部结束才能推进时使用 `all_terminal`。Recovery/continuation hint 不会授权对不确定 effect 做 retry。
 
 ## 手动多窗口协作
 

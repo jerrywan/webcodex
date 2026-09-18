@@ -3597,8 +3597,10 @@ pub enum ToolCall {
         /// Optional one shared bounded wait (a maximum), never a minimum sleep or multiplied by item count.
         /// Omission or any item without a token returns an immediate observation/baseline. Values above 100
         /// seconds are clamped to 100. With tokens, wake_on selects early wake behavior; updates never
-        /// extend the deadline. The canonical 100-second terminal wait is for when further useful progress
-        /// depends on terminal outcome; otherwise defer observation while independent work continues.
+        /// extend the deadline. Runtime accepts explicit waits up to 100 seconds, while model-facing
+        /// continuations recommend 55 seconds to stay below common MCP Host deadlines. Use terminal waits
+        /// when further useful progress depends on terminal outcome; otherwise defer observation while
+        /// independent work continues.
         #[schemars(range(min = 1))]
         #[serde(default, deserialize_with = "deserialize_observe_jobs_wait_secs")]
         wait_secs: Option<u64>,

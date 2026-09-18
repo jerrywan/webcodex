@@ -314,13 +314,14 @@ item errors, or one shared absolute deadline expires. It never returns an
 `updated` wake reason: at the deadline `wait.outcome=timeout` can coexist with
 `changed=true`. Item errors take precedence over terminal, then timeout.
 
-Canonical execution handoffs still expose the exact `wait_secs=100,
+Canonical execution handoffs expose the host-safe `wait_secs=55,
 wake_on=terminal` parser-ready observation continuation. When blocked on terminal,
 prefer `wait_for_job_terminal` with a real Host carrier; the bounded observation
 wait remains the details/recovery fallback, not a polling subscription. When
 independent work remains, retain the exact identity/continuation and continue
 that work, optionally requesting `jobs.attention` on an ordinary observation.
-The 100 seconds is a maximum, so terminal completion wakes immediately. Any missing token still gives
+The Runtime still accepts explicit waits up to 100 seconds and terminal completion wakes immediately,
+but longer model-facing waits may exceed an outer MCP Host deadline. Any missing token still gives
 an immediate baseline, and omitting `wait_secs` gives an immediate observation.
 Each Job waiter advances a private opaque cursor on non-terminal updates; final
 bounded deltas always use the caller's original token. Waiters use canonical

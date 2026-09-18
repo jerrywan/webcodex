@@ -1064,7 +1064,6 @@ fn observe_jobs_wake_policy_schema_is_closed_and_compatible() {
         "no wait_secs",
         "wake_on=change",
         "wake_on=terminal",
-        "wait_secs=100",
         "useful progress is blocked on terminal outcome",
         "independent work remains",
         "do not poll for visibility",
@@ -1072,11 +1071,24 @@ fn observe_jobs_wake_policy_schema_is_closed_and_compatible() {
     ] {
         assert!(spec.description.contains(phrase), "missing {phrase}");
     }
+    let recommended_wait = format!(
+        "wait_secs={}",
+        webcodex_core::runtime_contract::MODEL_JOB_CONTINUATION_WAIT_SECS
+    );
+    assert!(
+        spec.description.contains(&recommended_wait),
+        "missing {recommended_wait}"
+    );
     let wait_description = spec.input_schema["properties"]["wait_secs"]["description"]
         .as_str()
         .unwrap();
     assert!(wait_description.contains("above 100 seconds"));
     assert!(wait_description.contains("clamped to 100"));
+    let recommended_wait_description = format!(
+        "recommend {} seconds",
+        webcodex_core::runtime_contract::MODEL_JOB_CONTINUATION_WAIT_SECS
+    );
+    assert!(wait_description.contains(&recommended_wait_description));
     assert!(wait_description.contains("further useful progress depends on terminal outcome"));
     assert!(wait_description.contains("independent work continues"));
     let wake_description = wake["description"].as_str().unwrap();
