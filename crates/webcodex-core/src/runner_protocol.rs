@@ -1720,9 +1720,9 @@ pub const STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS: u64 = 1;
 pub const STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS: u64 = 3_600;
 pub const STRUCTURED_EXECUTION_TIMEOUT_DEFAULT_SECS: u64 = 60;
 /// Ceiling for direct synchronous structured Runner requests.
-/// Durable typed Jobs use `STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS` instead.
+/// Durable typed Jobs use their execution-form lifetime ceiling instead.
 pub const STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS: u64 = 120;
-pub const PROCESS_TIMEOUT_MAX_SECS: u64 = STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS;
+pub const PROCESS_TIMEOUT_MAX_SECS: u64 = 7 * 24 * 60 * 60;
 
 pub const SCRIPT_MIN_BYTES: usize = 1;
 pub const SCRIPT_MAX_BYTES: usize = 512 * 1024;
@@ -1731,7 +1731,17 @@ pub const SCRIPT_ARG_MAX_BYTES: usize = 8_192;
 pub const SCRIPT_ARGV_MAX_BYTES: usize = 16_000;
 pub const SCRIPT_STDIN_MAX_BYTES: usize = 64 * 1024;
 pub const SCRIPT_CWD_MAX_BYTES: usize = 1_024;
-pub const SCRIPT_TIMEOUT_MAX_SECS: u64 = STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS;
+pub const SCRIPT_TIMEOUT_MAX_SECS: u64 = 7 * 24 * 60 * 60;
+
+/// Canonical maximum execution lifetime for a durable Job kind. Unknown,
+/// validation, shell, and Skill Job kinds retain the shared 1-hour ceiling.
+pub fn job_execution_timeout_max_secs(kind: &str) -> u64 {
+    match kind {
+        "run_process" | "run_detached_process" => PROCESS_TIMEOUT_MAX_SECS,
+        "run_script" => SCRIPT_TIMEOUT_MAX_SECS,
+        _ => STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
+    }
+}
 
 /// Validate the transport-neutral executable/argv payload. Both Server and
 /// Runner call this so a stale or malicious peer cannot bypass either side.
@@ -3389,6 +3399,32 @@ mod envelope_tests {
     }
 
     #[test]
+    fn durable_job_execution_lifetime_ceiling_depends_on_execution_form() {
+        assert_eq!(PROCESS_TIMEOUT_MAX_SECS, 604_800);
+        assert_eq!(SCRIPT_TIMEOUT_MAX_SECS, 604_800);
+        assert_eq!(STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS, 3_600);
+        assert_eq!(STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS, 120);
+        assert_eq!(
+            job_execution_timeout_max_secs("run_process"),
+            PROCESS_TIMEOUT_MAX_SECS
+        );
+        assert_eq!(
+            job_execution_timeout_max_secs("run_detached_process"),
+            PROCESS_TIMEOUT_MAX_SECS
+        );
+        assert_eq!(
+            job_execution_timeout_max_secs("run_script"),
+            SCRIPT_TIMEOUT_MAX_SECS
+        );
+        for kind in ["shell", "validation", "run_skill_resource", "unknown"] {
+            assert_eq!(
+                job_execution_timeout_max_secs(kind),
+                STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS
+            );
+        }
+    }
+
+    #[test]
     fn script_request_validation_is_bounded_and_allows_whitespace_only_content() {
         let valid = ShellScriptPayload {
             language: ShellScriptLanguage::Sh,
@@ -3459,6 +3495,7 @@ mod envelope_tests {
         )
         .is_err());
         assert!(validate_script_request(&valid, None, Some("bad\0cwd"), 60).is_err());
+        assert!(validate_script_request(&valid, None, None, 21_600).is_ok());
         assert!(validate_script_request(&valid, None, None, 0).is_err());
         assert!(validate_script_request(&valid, None, None, SCRIPT_TIMEOUT_MAX_SECS + 1).is_err());
     }

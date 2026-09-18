@@ -57,7 +57,7 @@ impl ToolRuntime {
         auth: Option<&AuthContext>,
     ) -> ToolResult {
         let budget =
-            match StructuredExecutionBudget::resolve_with_sync_wait(timeout_secs, sync_wait_secs) {
+            match StructuredExecutionBudget::resolve_script_with_sync_wait(timeout_secs, sync_wait_secs) {
             Ok(budget) => budget,
             Err(error) => {
                 return process_tool_failure_result(

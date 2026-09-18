@@ -803,7 +803,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 ("failure_kind", nullable_schema("string", "Structured detached initiation failure kind.")),
                 ("tool_failure", schema_type("boolean", "True for WebCodex initiation/runtime failures.")),
                 ("terminal", schema_type("boolean", "False after successful detached Job admission.")),
-                ("effective_timeout_secs", schema_type("integer", "Total detached process runtime budget in seconds.")),
+                ("effective_timeout_secs", schema_type("integer", "Total detached process execution lifetime in seconds.")),
                 ("created_at", schema_type("integer", "Durable Job creation timestamp.")),
                 ("continuation", observe_job_continuation_schema()),
                 ("last_update_seq", nullable_schema("integer", "Latest agent update sequence when available.")),

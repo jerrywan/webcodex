@@ -2,7 +2,8 @@ use super::helpers::{bounded_tail, COMMAND_STDIO_TAIL_CHARS};
 use crate::auth::AuthContext;
 use crate::runner_http::RunnerRegistry;
 use crate::runner_protocol::{
-    ShellJobInfo, STRUCTURED_EXECUTION_TIMEOUT_DEFAULT_SECS, STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
+    ShellJobInfo, PROCESS_TIMEOUT_MAX_SECS, SCRIPT_TIMEOUT_MAX_SECS,
+    STRUCTURED_EXECUTION_TIMEOUT_DEFAULT_SECS, STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
     STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS,
 };
 use std::sync::Arc;
@@ -23,13 +24,39 @@ pub(crate) struct StructuredExecutionBudget {
 }
 
 impl StructuredExecutionBudget {
-    pub(crate) fn resolve(timeout_secs: Option<u64>) -> Result<Self, String> {
-        Self::resolve_with_sync_wait(timeout_secs, None)
+    pub(crate) fn resolve_process(timeout_secs: Option<u64>) -> Result<Self, String> {
+        Self::resolve_with_timeout_max(timeout_secs, None, PROCESS_TIMEOUT_MAX_SECS)
+    }
+
+    pub(crate) fn resolve_process_with_sync_wait(
+        timeout_secs: Option<u64>,
+        sync_wait_secs: Option<u64>,
+    ) -> Result<Self, String> {
+        Self::resolve_with_timeout_max(timeout_secs, sync_wait_secs, PROCESS_TIMEOUT_MAX_SECS)
+    }
+
+    pub(crate) fn resolve_script_with_sync_wait(
+        timeout_secs: Option<u64>,
+        sync_wait_secs: Option<u64>,
+    ) -> Result<Self, String> {
+        Self::resolve_with_timeout_max(timeout_secs, sync_wait_secs, SCRIPT_TIMEOUT_MAX_SECS)
     }
 
     pub(crate) fn resolve_with_sync_wait(
         timeout_secs: Option<u64>,
         sync_wait_secs: Option<u64>,
+    ) -> Result<Self, String> {
+        Self::resolve_with_timeout_max(
+            timeout_secs,
+            sync_wait_secs,
+            STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
+        )
+    }
+
+    fn resolve_with_timeout_max(
+        timeout_secs: Option<u64>,
+        sync_wait_secs: Option<u64>,
+        timeout_max_secs: u64,
     ) -> Result<Self, String> {
         let requested_timeout_secs =
             timeout_secs.unwrap_or(STRUCTURED_EXECUTION_TIMEOUT_DEFAULT_SECS);
@@ -38,8 +65,7 @@ impl StructuredExecutionBudget {
                 "timeout_secs must be at least {STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS}"
             ));
         }
-        let effective_timeout_secs =
-            requested_timeout_secs.min(STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS);
+        let effective_timeout_secs = requested_timeout_secs.min(timeout_max_secs);
         let sync_wait_secs = match sync_wait_secs {
             Some(0) => return Err("sync_wait_secs must be at least 1".to_string()),
             Some(sync_wait_secs) => sync_wait_secs
@@ -402,6 +428,38 @@ mod tests {
         assert_eq!(
             oversized.sync_wait_secs,
             STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS
+        );
+
+        let process_default = StructuredExecutionBudget::resolve_process(None).unwrap();
+        assert_eq!(process_default.effective_timeout_secs, 60);
+        let process_six_hours =
+            StructuredExecutionBudget::resolve_process_with_sync_wait(Some(21_600), None).unwrap();
+        assert_eq!(process_six_hours.effective_timeout_secs, 21_600);
+        assert_eq!(
+            process_six_hours.sync_wait_secs,
+            STRUCTURED_EXECUTION_SYNC_WAIT_SECS
+        );
+        let process_oversized =
+            StructuredExecutionBudget::resolve_process(Some(PROCESS_TIMEOUT_MAX_SECS + 1)).unwrap();
+        assert_eq!(
+            process_oversized.effective_timeout_secs,
+            PROCESS_TIMEOUT_MAX_SECS
+        );
+
+        let script_default =
+            StructuredExecutionBudget::resolve_script_with_sync_wait(None, None).unwrap();
+        assert_eq!(script_default.effective_timeout_secs, 60);
+        let script_six_hours =
+            StructuredExecutionBudget::resolve_script_with_sync_wait(Some(21_600), None).unwrap();
+        assert_eq!(script_six_hours.effective_timeout_secs, 21_600);
+        let script_oversized = StructuredExecutionBudget::resolve_script_with_sync_wait(
+            Some(SCRIPT_TIMEOUT_MAX_SECS + 1),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            script_oversized.effective_timeout_secs,
+            SCRIPT_TIMEOUT_MAX_SECS
         );
 
         let over_total =

@@ -130,7 +130,7 @@ from `wc_job_receipts` before accepting traffic. Receipt writes happen after the
 registry lock is released and cannot change a terminal verdict. The receipt
 reuses the safe Job snapshot, excludes executable validation metadata, and fixes
 `terminal_observed_at` / `expires_at` at the first accepted terminal observation.
-SQLite retains at most 64 receipts per logical Runner for 15 minutes. Expired
+SQLite retains at most 64 receipts per logical Runner for 24 hours. Expired
 receipts are pruned on database open, writes, reads, and the existing recovery
 sweep. Historical owner attribution is independent of replacement registration.
 A new observation epoch resets old tokens without granting execution authority.
@@ -194,6 +194,40 @@ Useful reconciliation diagnostics should remain bounded and secret-free. A
 summary such as runner instance, active/terminal inventory counts, reconstructed
 count, updated count, and missing count is sufficient; command text, log bodies,
 credentials, and private paths are not required.
+
+## Long-running native process/script Jobs
+
+Execution duration and lifetime ownership are separate policies. `run_process`,
+`run_script`, and `run_detached_process` default to 60 seconds and accept a
+total execution lifetime up to 604800 seconds (7 days). Values above that
+ceiling clamp to 7 days. `sync_wait_secs` controls only the bounded synchronous
+handoff grace; it never extends execution lifetime. `run_shell`, structured
+validation, and trusted Skill resource execution retain the 3600-second
+ceiling, and direct synchronous structured Runner requests retain the
+120-second ceiling.
+
+Use ordinary `run_process`/`run_script` for hours-to-days work on one Runner
+host when the Runner process is expected to remain the lifetime owner. Use
+`run_detached_process` only when the native payload must survive Runner process
+restart, upgrade, stop, or replacement; duration alone is not a detach reason.
+Detached recovery preserves the same logical Job/execution fence and does not
+permit duplicate payload dispatch.
+
+Long-running Jobs still occupy the Runner's normal `max_concurrent_jobs`
+execution quota. Detached Jobs remain excluded only from Runner shutdown drain
+because shutdown is not allowed to kill their supervisor-owned payload; they
+are not excluded from execution scheduling quota.
+
+This facility is intentionally not a cluster scheduler. It supports one Runner
+host, native processes/scripts, bounded observation, durable stop, and detached
+Runner-process replacement recovery. It does not promise native process
+survival across host OS reboot or power loss, multi-node scheduling, GPU
+allocation, preemption/requeue, Slurm/Kubernetes replacement, arbitrary
+model-provided secret environments, or detached named SSH resources. Training
+programs should write checkpoints and complete logs to project files;
+`observe_jobs` is a bounded tail and the 64 KiB Job snapshot tail is not a
+training-log store. Secret/environment configuration should remain
+Runner-owned rather than expanding model-authored inputs.
 
 ## 4. Runner Job capacity is shared across windows and projects
 

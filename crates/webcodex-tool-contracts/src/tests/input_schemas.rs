@@ -568,6 +568,38 @@ fn run_script_schema_is_typed_bounded_and_hides_execution_infrastructure() {
 }
 
 #[test]
+fn execution_timeout_schema_descriptions_keep_form_specific_lifetime_ceilings() {
+    let specs = registered_tool_specs();
+    for name in ["run_process", "run_script", "run_detached_process"] {
+        let timeout = &spec_named(&specs, name).input_schema["properties"]["timeout_secs"];
+        assert_eq!(timeout["minimum"], 1, "{name}");
+        assert_eq!(timeout["default"], 60, "{name}");
+        assert!(timeout.get("maximum").is_none(), "{name}");
+        let description = timeout["description"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{name} timeout description"));
+        assert!(
+            description.contains("execution lifetime"),
+            "{name}: {description}"
+        );
+        assert!(description.contains("604800"), "{name}: {description}");
+        assert!(description.contains("7 days"), "{name}: {description}");
+    }
+
+    for name in ["run_shell", "run_skill_resource", "cargo_check"] {
+        let timeout = &spec_named(&specs, name).input_schema["properties"]["timeout_secs"];
+        let description = timeout["description"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{name} timeout description"));
+        assert!(description.contains("3600"), "{name}: {description}");
+        assert!(
+            !description.contains("604800"),
+            "{name} must retain the one-hour ceiling: {description}"
+        );
+    }
+}
+
+#[test]
 fn cargo_fmt_conditional_timeout_schema_matches_contract() {
     let specs = registered_tool_specs();
     let schema = &spec_named(&specs, "cargo_fmt").input_schema;

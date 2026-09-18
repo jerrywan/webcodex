@@ -18,7 +18,7 @@ use crate::runner_protocol::{
     RunnerConfigOperationRequest, RunnerRequest, ShellFileOpRequest, ShellJobContext,
     ShellJobStructuredExecutionMetadata, ShellJobValidationStep, ShellProcessArgv,
     ShellScriptLanguage, ShellScriptPayload, PROCESS_CWD_MAX_BYTES, PROCESS_STDIN_MAX_BYTES,
-    RUNNER_CONFIG_REQUEST_KIND, RUNNER_CONFIG_REQUEST_MAX_BYTES,
+    PROCESS_TIMEOUT_MAX_SECS, RUNNER_CONFIG_REQUEST_KIND, RUNNER_CONFIG_REQUEST_MAX_BYTES,
     STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS, STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
     STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS,
 };
@@ -998,6 +998,7 @@ fn encode_job_operation(
                 operation.cwd.as_deref(),
                 operation.stdin.as_deref(),
                 operation.timeout_secs,
+                PROCESS_TIMEOUT_MAX_SECS,
             )?;
             validate_process_argv(&operation.process)?;
             validate_job_context_coherence(operation.cwd.as_deref(), &operation.context)?;
@@ -1028,7 +1029,12 @@ fn encode_job_operation(
                 .request
                 .validate()
                 .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
-            validate_structured_job_common(operation.cwd.as_deref(), None, operation.timeout_secs)?;
+            validate_structured_job_common(
+                operation.cwd.as_deref(),
+                None,
+                operation.timeout_secs,
+                STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
+            )?;
             validate_job_context_coherence(operation.cwd.as_deref(), &operation.context)?;
             let content = serde_json::to_string(&operation.request).map_err(|error| {
                 format!("could not encode Runner Skill execution request: {error}")
@@ -1465,6 +1471,7 @@ fn decode_job_operation(wire: &RunnerRequest) -> Result<RunnerJobOperation, Stri
                 wire.cwd.as_deref(),
                 wire.stdin.as_deref(),
                 wire.timeout_secs,
+                PROCESS_TIMEOUT_MAX_SECS,
             )?;
             let operation = RunnerJobProcessOperation {
                 job_id,
@@ -1541,7 +1548,12 @@ fn decode_job_operation(wire: &RunnerRequest) -> Result<RunnerJobOperation, Stri
             request
                 .validate()
                 .map_err(|error| format!("invalid Runner Skill execution request: {error}"))?;
-            validate_structured_job_common(wire.cwd.as_deref(), None, wire.timeout_secs)?;
+            validate_structured_job_common(
+                wire.cwd.as_deref(),
+                None,
+                wire.timeout_secs,
+                STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
+            )?;
             let job = RunnerJobOperation::StartSkillResource(RunnerJobSkillResourceOperation {
                 job_id,
                 cwd: wire.cwd.clone(),
@@ -1614,13 +1626,12 @@ fn validate_structured_job_common(
     cwd: Option<&str>,
     stdin: Option<&str>,
     timeout_secs: u64,
+    timeout_max_secs: u64,
 ) -> Result<(), String> {
     validate_structured_text_fields(cwd, stdin)?;
-    if !(STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS..=STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS)
-        .contains(&timeout_secs)
-    {
+    if !(STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS..=timeout_max_secs).contains(&timeout_secs) {
         return Err(format!(
-            "timeout_secs must be between {STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS} and {STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS}"
+            "timeout_secs must be between {STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS} and {timeout_max_secs}"
         ));
     }
     Ok(())
@@ -2095,6 +2106,139 @@ mod tests {
             args: Vec::new(),
         });
         assert!(wire.decode_operation().unwrap_err().contains("conflicts"));
+    }
+
+    #[test]
+    fn durable_long_process_script_jobs_round_trip_while_direct_and_skill_limits_stay_bounded() {
+        let process = ShellProcessArgv {
+            executable: "printf".to_string(),
+            args: vec!["ok".to_string()],
+        };
+        for (operation, expected_kind) in [
+            (
+                RunnerOperation::Job(RunnerJobOperation::StartProcess(
+                    RunnerJobProcessOperation {
+                        job_id: "job-long-process".to_string(),
+                        cwd: Some("/repo".to_string()),
+                        process: process.clone(),
+                        stdin: None,
+                        timeout_secs: 21_600,
+                        context: structured_job_context(
+                            Some("/repo"),
+                            "run_process",
+                            None,
+                            None,
+                            1,
+                            false,
+                        ),
+                    },
+                )),
+                "start_process_job",
+            ),
+            (
+                RunnerOperation::Job(RunnerJobOperation::StartDetachedProcess(
+                    RunnerJobProcessOperation {
+                        job_id: "job-long-detached".to_string(),
+                        cwd: Some("/repo".to_string()),
+                        process: process.clone(),
+                        stdin: None,
+                        timeout_secs: 21_600,
+                        context: structured_job_context(
+                            Some("/repo"),
+                            "run_detached_process",
+                            None,
+                            None,
+                            1,
+                            false,
+                        ),
+                    },
+                )),
+                "start_detached_process_job",
+            ),
+        ] {
+            let wire = round_trip_kind(operation);
+            assert_eq!(wire.kind, expected_kind);
+            assert_eq!(wire.timeout_secs, 21_600);
+        }
+
+        let script = ShellScriptPayload {
+            language: ShellScriptLanguage::Sh,
+            script: "printf ok".to_string(),
+            args: Vec::new(),
+        };
+        let script_wire = round_trip_kind(RunnerOperation::Job(RunnerJobOperation::StartScript(
+            RunnerJobScriptOperation {
+                job_id: "job-long-script".to_string(),
+                cwd: Some("/repo".to_string()),
+                script: script.clone(),
+                stdin: None,
+                timeout_secs: 21_600,
+                context: structured_job_context(
+                    Some("/repo"),
+                    "run_script",
+                    Some(ShellScriptLanguage::Sh),
+                    Some(script.script.len()),
+                    0,
+                    false,
+                ),
+            },
+        )));
+        assert_eq!(script_wire.timeout_secs, 21_600);
+
+        let oversized_process = RunnerOperation::Job(RunnerJobOperation::StartProcess(
+            RunnerJobProcessOperation {
+                job_id: "job-too-long".to_string(),
+                cwd: None,
+                process: process.clone(),
+                stdin: None,
+                timeout_secs: PROCESS_TIMEOUT_MAX_SECS + 1,
+                context: structured_job_context(None, "run_process", None, None, 1, false),
+            },
+        ));
+        assert!(RunnerRequest::from_operation(metadata(), oversized_process)
+            .unwrap_err()
+            .contains(&PROCESS_TIMEOUT_MAX_SECS.to_string()));
+
+        let direct_process = RunnerOperation::RunProcess(RunnerProcessOperation {
+            cwd: None,
+            process,
+            stdin: None,
+            timeout_secs: STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS + 1,
+        });
+        assert!(RunnerRequest::from_operation(metadata(), direct_process)
+            .unwrap_err()
+            .contains(&STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS.to_string()));
+
+        let direct_script = RunnerOperation::RunScript(RunnerScriptOperation {
+            cwd: None,
+            script,
+            stdin: None,
+            timeout_secs: STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS + 1,
+        });
+        assert!(RunnerRequest::from_operation(metadata(), direct_script)
+            .unwrap_err()
+            .contains(&STRUCTURED_EXECUTION_DIRECT_SYNC_TIMEOUT_MAX_SECS.to_string()));
+
+        let skill_request = skill_execution_request();
+        let skill_job = RunnerOperation::Job(RunnerJobOperation::StartSkillResource(
+            RunnerJobSkillResourceOperation {
+                job_id: "job-long-skill".to_string(),
+                cwd: None,
+                request: skill_request.clone(),
+                timeout_secs: STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS + 1,
+                context: structured_job_context(
+                    None,
+                    "run_skill_resource",
+                    None,
+                    None,
+                    skill_request.args.len(),
+                    true,
+                ),
+            },
+        ));
+        assert!(RunnerRequest::from_operation(metadata(), skill_job)
+            .unwrap_err()
+            .contains(&STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS.to_string()));
     }
 
     #[test]

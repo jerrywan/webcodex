@@ -1690,9 +1690,9 @@ pub enum ToolCall {
         /// unlinked to Workflow Session state.
         #[serde(default)]
         session_id: Option<String>,
-        /// Total process runtime budget in seconds (minimum 1, default 60). Values above 3600 are accepted
-        /// and clamped to 3600. Short work returns synchronously; longer work keeps the same execution and
-        /// returns job_id when durable structured execution is available.
+        /// Total process execution lifetime in seconds (minimum 1, default 60). Values above 604800
+        /// (7 days) are accepted and clamped to 604800. Short work may return synchronously; longer work keeps
+        /// the same execution and returns job_id when durable structured execution is available.
         #[schemars(extend("default" = 60))]
         #[schemars(range(min = 1))]
         #[serde(default)]
@@ -1724,8 +1724,8 @@ pub enum ToolCall {
         /// Configured project id.
         project: String,
         /// Required bounded caller-chosen key for this detached initiation. While the logical Job is active
-        /// or retained for 900 seconds after terminal completion, reusing the same key resolves to that Job
-        /// and cannot redispatch its payload. After retained history expires the key may identify a new
+        /// or retained for 86400 seconds (24 hours) after terminal completion, reusing the same key resolves
+        /// to that Job and cannot redispatch its payload. After retained history expires the key may identify a new
         /// execution, so never reuse an expired key as a retry token. After Server restart an existing
         /// retained Job is returned for recovery rather than guessing that a resent body matches.
         #[schemars(length(min = 1, max = 128))]
@@ -1755,9 +1755,9 @@ pub enum ToolCall {
         #[serde(default)]
         session_id: Option<String>,
         #[schemars(extend("default" = 60))]
-        /// Total detached process runtime budget in seconds (minimum 1, default 60). Values above 3600 are
-        /// accepted and clamped to 3600. Admission returns the stable Job identity without waiting for
-        /// terminal completion.
+        /// Total detached process execution lifetime in seconds (minimum 1, default 60). Values above
+        /// 604800 (7 days) are accepted and clamped to 604800. Admission returns the stable Job identity
+        /// without waiting for terminal completion.
         #[schemars(range(min = 1))]
         #[serde(default)]
         timeout_secs: Option<u64>,
@@ -1864,9 +1864,9 @@ pub enum ToolCall {
         #[serde(default)]
         session_id: Option<String>,
         #[schemars(extend("default" = 60))]
-        /// Total script runtime budget in seconds (minimum 1, default 60). Values above 3600 are accepted
-        /// and clamped to 3600. Short work returns synchronously; longer work keeps the same execution and
-        /// returns job_id when durable structured execution is available.
+        /// Total script execution lifetime in seconds (minimum 1, default 60). Values above 604800
+        /// (7 days) are accepted and clamped to 604800. Short work may return synchronously; longer work keeps
+        /// the same execution and returns job_id when durable structured execution is available.
         #[schemars(range(min = 1))]
         #[serde(default)]
         timeout_secs: Option<u64>,
@@ -1904,8 +1904,8 @@ pub enum ToolCall {
         #[serde(default)]
         session_id: Option<String>,
         #[schemars(extend("default" = 60))]
-        /// Total lifetime seconds (default 60, min 1); clamped to shared structured-execution ceiling;
-        /// named SSH keeps direct ceiling.
+        /// Total lifetime seconds (default 60, min 1); values above the shared structured-execution
+        /// ceiling of 3600 seconds are accepted and clamped to 3600; named SSH keeps the direct ceiling.
         #[schemars(range(min = 1))]
         #[serde(default)]
         timeout_secs: Option<u64>,

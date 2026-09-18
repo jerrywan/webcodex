@@ -219,10 +219,10 @@ pub(crate) fn registration_snapshot(
     now: i64,
 ) -> JobTerminalRegistrationSnapshot {
     let terminal_event = capture_terminal_event(job);
-    let active_retention = (webcodex_core::runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS
-        as i64)
-        .saturating_add(crate::JOB_RECOVERY_GRACE_MAX_SECS)
-        .saturating_add(JOB_TERMINAL_RETENTION_SECS);
+    let active_retention =
+        (webcodex_core::runner_protocol::job_execution_timeout_max_secs(&job.kind) as i64)
+            .saturating_add(crate::JOB_RECOVERY_GRACE_MAX_SECS)
+            .saturating_add(JOB_TERMINAL_RETENTION_SECS);
     let wait_expires_at = terminal_event
         .as_ref()
         .map(|event| event.expires_at)

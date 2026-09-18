@@ -97,6 +97,66 @@ fn job_reconciliation_inventory_prioritizes_active_and_bounds_terminal_history()
 }
 
 #[test]
+fn runner_structured_timeout_admission_matches_execution_form_ceilings() {
+    assert!(validate_runner_structured_common(
+        None,
+        None,
+        21_600,
+        runner_protocol::PROCESS_TIMEOUT_MAX_SECS,
+    )
+    .is_ok());
+    assert!(validate_runner_structured_common(
+        None,
+        None,
+        runner_protocol::PROCESS_TIMEOUT_MAX_SECS + 1,
+        runner_protocol::PROCESS_TIMEOUT_MAX_SECS,
+    )
+    .is_err());
+
+    assert!(validate_runner_structured_common(
+        None,
+        None,
+        runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
+        runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
+    )
+    .is_ok());
+    assert!(validate_runner_structured_common(
+        None,
+        None,
+        runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS + 1,
+        runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
+    )
+    .is_err());
+}
+
+#[test]
+fn terminal_inventory_retains_past_old_fifteen_minutes_and_prunes_at_24h_boundary() {
+    let manager = JobManager::new(1);
+    let now = chrono::Utc::now().timestamp();
+    let old_fifteen_minute_id = "terminal-past-old-fifteen-minute-window";
+    let expired_id = "terminal-at-24h-boundary";
+    lock_unpoison(&manager.jobs).insert(
+        old_fifteen_minute_id.to_string(),
+        retained_terminal_job(old_fifteen_minute_id, now - 15 * 60 - 1),
+    );
+    lock_unpoison(&manager.jobs).insert(
+        expired_id.to_string(),
+        retained_terminal_job(expired_id, now - JOB_TERMINAL_RETENTION_SECS),
+    );
+
+    assert_eq!(JOB_TERMINAL_RETENTION_SECS, 86_400);
+    let inventory = manager.inventory();
+    assert!(inventory
+        .jobs
+        .iter()
+        .any(|snapshot| snapshot.job_id == old_fifteen_minute_id));
+    assert!(!inventory
+        .jobs
+        .iter()
+        .any(|snapshot| snapshot.job_id == expired_id));
+}
+
+#[test]
 fn job_reconciliation_inventory_drops_terminal_payload_before_active_jobs() {
     let manager = JobManager::new(1);
     let now = chrono::Utc::now().timestamp();

@@ -33,8 +33,7 @@ use webcodex_core::runner_protocol::{
     ShellJobActivitySource, ShellJobActivityState, ShellJobContext, ShellJobSnapshot,
     ShellJobStreamSnapshot, ShellProcessArgv, JOB_INVENTORY_MAX_JOBS,
     JOB_SNAPSHOT_STREAM_MAX_BYTES, JOB_TERMINAL_RETENTION_SECS, PROCESS_CWD_MAX_BYTES,
-    PROCESS_STDIN_MAX_BYTES, STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
-    STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS,
+    PROCESS_STDIN_MAX_BYTES, PROCESS_TIMEOUT_MAX_SECS, STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS,
 };
 
 #[cfg(unix)]
@@ -853,11 +852,11 @@ fn validate_launch_spec(spec: &DetachedLaunchSpec) -> Result<(), String> {
             return Err("detached process stdin cannot contain NUL bytes".to_string());
         }
     }
-    if !(STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS..=STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS)
+    if !(STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS..=PROCESS_TIMEOUT_MAX_SECS)
         .contains(&spec.timeout_secs)
     {
         return Err(format!(
-            "detached process timeout must be {STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS}..={STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS} seconds"
+            "detached process timeout must be {STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS}..={PROCESS_TIMEOUT_MAX_SECS} seconds"
         ));
     }
     if spec.env.len() > DETACHED_ENV_MAX_ENTRIES {

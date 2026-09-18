@@ -105,6 +105,23 @@ fn test_request(executable: String, args: Vec<String>) -> DetachedStartRequest {
     }
 }
 
+#[test]
+fn detached_launch_accepts_six_hours_and_rejects_above_seven_days() {
+    let mut request = test_request("/bin/true".to_string(), Vec::new());
+    request.launch.timeout_secs = 21_600;
+    assert!(validate_start_request(&request).is_ok());
+
+    request.launch.timeout_secs = PROCESS_TIMEOUT_MAX_SECS;
+    assert!(validate_start_request(&request).is_ok());
+
+    request.launch.timeout_secs = PROCESS_TIMEOUT_MAX_SECS + 1;
+    let error = validate_start_request(&request).unwrap_err();
+    assert!(
+        error.contains(&PROCESS_TIMEOUT_MAX_SECS.to_string()),
+        "{error}"
+    );
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn pre_accept_failure_advances_beyond_public_agent_queued_sequence() {

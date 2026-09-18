@@ -9,7 +9,7 @@ use super::state::{
 };
 use super::{
     clamp_grace, job_recovery_grace_secs, now_ts, RunnerRegistry, RUNNER_ONLINE_WINDOW_SECS,
-    JOB_RECOVERY_GRACE_SECS, LIVE_JOB_STREAM_RETENTION_BYTES,
+    JOB_RECOVERY_GRACE_MAX_SECS, JOB_RECOVERY_GRACE_SECS, LIVE_JOB_STREAM_RETENTION_BYTES,
 };
 use webcodex_core::runner_operation::{
     RunnerInvocationMetadata, RunnerJobOperation, RunnerOperation,
@@ -22,7 +22,7 @@ use crate::runner_protocol::{
     ShellJobTestCountEvidence, ShellJobValidationMetadata, ShellJobValidationProgress,
     ShellJobValidationStep,
     ShellProcessArgv, ShellScriptLanguage, ShellScriptPayload, JOB_INVENTORY_MAX_TERMINAL_JOBS,
-    JOB_SNAPSHOT_STREAM_MAX_BYTES, JOB_TERMINAL_RETENTION_SECS,
+    JOB_SNAPSHOT_STREAM_MAX_BYTES, JOB_TERMINAL_RETENTION_SECS, PROCESS_TIMEOUT_MAX_SECS,
 };
 use webcodex_core::validation_evidence::CargoTestCountEvidenceStatus;
 
@@ -823,13 +823,56 @@ async fn job_reconciliation_server_restart_restores_running_job_and_completion()
 }
 
 #[tokio::test]
+async fn long_process_terminal_wait_horizon_covers_execution_recovery_and_retention() {
+    let registry = RunnerRegistry::default();
+    register(&registry, INSTANCE_A, empty_inventory()).await;
+    let mut request = start_request("");
+    request.timeout_secs = Some(PROCESS_TIMEOUT_MAX_SECS);
+    let job = registry
+        .start_job_with_metadata(
+            request,
+            "tester".to_string(),
+            ShellJobStartMetadata {
+                project_id: Some(RUNTIME_PROJECT_ID.to_string()),
+                session_id: Some(SESSION_ID.to_string()),
+                project_cwd: Some("/srv/demo".to_string()),
+                purpose: Some("operation".to_string()),
+                shell: Some("direct_argv".to_string()),
+                visibility: ShellJobVisibility::Public,
+                structured_execution: Some(StructuredJobExecution::Process(ShellProcessArgv {
+                    executable: "/bin/echo".to_string(),
+                    args: vec!["long".to_string()],
+                })),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let before = now_ts();
+    let snapshot = registry
+        .job_terminal_registration_snapshot_for_auth(None, &job.job_id)
+        .await
+        .unwrap();
+    let after = now_ts();
+    let expected_horizon = PROCESS_TIMEOUT_MAX_SECS as i64
+        + JOB_RECOVERY_GRACE_MAX_SECS
+        + JOB_TERMINAL_RETENTION_SECS;
+    assert!(snapshot.wait_expires_at >= before + expected_horizon);
+    assert!(snapshot.wait_expires_at <= after + expected_horizon);
+    assert_eq!(expected_horizon, 694_800);
+}
+
+#[tokio::test]
 async fn structured_process_reconciliation_restores_active_and_terminal_evidence_without_redispatch(
 ) {
     let registry_a = RunnerRegistry::default();
     register(&registry_a, INSTANCE_A, empty_inventory()).await;
+    let mut long_request = start_request("");
+    long_request.timeout_secs = Some(21_600);
     let job = registry_a
         .start_job_with_metadata(
-            start_request(""),
+            long_request,
             "tester".to_string(),
             ShellJobStartMetadata {
                 project_id: Some(RUNTIME_PROJECT_ID.to_string()),
@@ -860,6 +903,7 @@ async fn structured_process_reconciliation_restores_active_and_terminal_evidence
         .unwrap()
         .expect("typed process Job request");
     assert_eq!(request.kind, "start_process_job");
+    assert_eq!(request.timeout_secs, 21_600);
     assert_eq!(request.command, "");
     assert!(request.process.is_some());
     assert!(request.script.is_none());

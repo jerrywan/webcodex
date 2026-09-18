@@ -499,13 +499,13 @@ impl ToolRuntime {
         session_id: Option<String>,
         auth: Option<&AuthContext>,
     ) -> ToolResult {
-        let budget = match StructuredExecutionBudget::resolve(timeout_secs) {
+        let budget = match StructuredExecutionBudget::resolve_process(timeout_secs) {
             Ok(budget) => budget,
             Err(error) => {
                 return process_tool_failure_result(
                     command_rejected_message(
                         format!("run_detached_process {error}"),
-                        "pass a positive timeout_secs, or omit it for the default of 60 seconds; values above 3600 are clamped.",
+                        "pass a positive timeout_secs, or omit it for the default of 60 seconds; values above 604800 seconds (7 days) are clamped.",
                     ),
                     "invalid_arguments",
                     ShellCommandExecutionState::NotStarted,
@@ -754,8 +754,11 @@ impl ToolRuntime {
         allow_async_handoff: bool,
         skill_resource: Option<RunnerSkillExecutionRequest>,
     ) -> ToolResult {
-        let budget =
-            match StructuredExecutionBudget::resolve_with_sync_wait(timeout_secs, sync_wait_secs) {
+        let budget = match if skill_resource.is_some() {
+            StructuredExecutionBudget::resolve_with_sync_wait(timeout_secs, sync_wait_secs)
+        } else {
+            StructuredExecutionBudget::resolve_process_with_sync_wait(timeout_secs, sync_wait_secs)
+        } {
             Ok(budget) => budget,
             Err(error) => {
                 return process_tool_failure_result(

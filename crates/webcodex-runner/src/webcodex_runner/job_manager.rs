@@ -1245,6 +1245,7 @@ fn validate_runner_job_context_operation(
                 operation.cwd.as_deref(),
                 operation.stdin.as_deref(),
                 operation.timeout_secs,
+                runner_protocol::PROCESS_TIMEOUT_MAX_SECS,
             )?;
         }
         RunnerJobOperation::StartScript(operation) => {
@@ -1270,6 +1271,7 @@ fn validate_runner_job_context_operation(
                 operation.cwd.as_deref(),
                 None,
                 operation.timeout_secs,
+                runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS,
             )?;
         }
         RunnerJobOperation::StartValidation(_) => {}
@@ -1323,6 +1325,7 @@ fn validate_runner_structured_common(
     cwd: Option<&str>,
     stdin: Option<&str>,
     timeout_secs: u64,
+    timeout_max_secs: u64,
 ) -> Result<(), String> {
     if let Some(stdin) = stdin {
         if stdin.len() > runner_protocol::PROCESS_STDIN_MAX_BYTES {
@@ -1346,14 +1349,13 @@ fn validate_runner_structured_common(
             return Err("cwd cannot contain NUL bytes".to_string());
         }
     }
-    if !(runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS
-        ..=runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS)
+    if !(runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS..=timeout_max_secs)
         .contains(&timeout_secs)
     {
         return Err(format!(
             "timeout_secs must be between {} and {}",
             runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MIN_SECS,
-            runner_protocol::STRUCTURED_EXECUTION_TIMEOUT_MAX_SECS
+            timeout_max_secs
         ));
     }
     Ok(())

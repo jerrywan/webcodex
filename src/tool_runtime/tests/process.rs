@@ -1356,7 +1356,7 @@ async fn run_process_fast_prestart_rejection_retains_not_started_through_the_hid
 }
 
 #[tokio::test]
-async fn run_process_slow_handoff_is_queryable_once_and_keeps_the_original_budget() {
+async fn run_process_six_hour_handoff_is_queryable_once_and_keeps_the_original_budget() {
     let temp = tempfile::tempdir().unwrap();
     let runtime = test_runtime().with_structured_execution_sync_wait(Duration::from_millis(40));
     let project = register_process_job_agent(&runtime, "process-slow-job", temp.path()).await;
@@ -1375,7 +1375,7 @@ async fn run_process_slow_handoff_is_queryable_once_and_keeps_the_original_budge
             ],
             stdin: Some("input\n".to_string()),
             session_id: None,
-            timeout_secs: Some(121),
+            timeout_secs: Some(21_600),
             sync_wait_secs: Some(45),
             cwd: None,
             purpose: Some(ExecutionPurpose::Diagnostic),
@@ -1387,7 +1387,7 @@ async fn run_process_slow_handoff_is_queryable_once_and_keeps_the_original_budge
     assert_eq!(request.command, "");
     assert!(request.process.is_some());
     assert!(request.script.is_none());
-    assert_eq!(request.timeout_secs, 121);
+    assert_eq!(request.timeout_secs, 21_600);
     update_process_job(
         &runtime,
         "process-slow-job",
@@ -1409,7 +1409,7 @@ async fn run_process_slow_handoff_is_queryable_once_and_keeps_the_original_budge
     assert_eq!(handoff.output["execution_state"], "running");
     assert_eq!(handoff.output["command_started"], true);
     assert_eq!(handoff.output["command_completed"], false);
-    assert_eq!(handoff.output["effective_timeout_secs"], 121);
+    assert_eq!(handoff.output["effective_timeout_secs"], 21_600);
     assert_eq!(handoff.output["sync_wait_secs"], 45);
     assert_eq!(
         handoff.output["stdout_tail"],
