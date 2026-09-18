@@ -50,6 +50,46 @@ fn instruction_reader_stops_at_byte_cap_even_when_the_source_grows() {
     assert_eq!(reader.position(), cap + 1);
 }
 
+#[test]
+fn unsupported_instruction_open_fails_closed() {
+    let error = unsupported_instruction_file_open(Path::new("ignored")).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_vendor = "apple",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "solaris",
+    target_os = "illumos",
+    target_os = "aix",
+    target_os = "fuchsia"
+))]
+#[test]
+fn instruction_open_supports_search_only_parent_directories() {
+    use std::io::Read as _;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let parent = root.join("search-only");
+    std::fs::create_dir(&parent).unwrap();
+    let path = parent.join("AGENTS.md");
+    std::fs::write(&path, "search-only guidance").unwrap();
+
+    let original_permissions = std::fs::metadata(&parent).unwrap().permissions();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o111)).unwrap();
+    let opened = open_instruction_file(&path);
+    std::fs::set_permissions(&parent, original_permissions).unwrap();
+
+    let mut file = opened.unwrap();
+    let mut content = String::new();
+    file.read_to_string(&mut content).unwrap();
+    assert_eq!(content, "search-only guidance");
+}
+
 #[cfg(windows)]
 #[test]
 fn instruction_snapshot_reads_unicode_crlf_and_canonical_windows_paths() {
@@ -125,6 +165,111 @@ fn instruction_snapshot_rejects_parent_symlink_redirection() {
     let result = observe(&link.join("AGENTS.md"));
     assert!(!result.scan_complete);
     assert!(result.files.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn instruction_open_marks_parent_swap_unavailable_instead_of_following_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let configured = root.join("configured");
+    let moved = root.join("configured-before-swap");
+    let outside = root.join("outside");
+    std::fs::create_dir(&configured).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    let path = configured.join("AGENTS.md");
+    std::fs::write(&path, "configured guidance").unwrap();
+    std::fs::write(outside.join("AGENTS.md"), "unconfigured secret").unwrap();
+
+    let error = open_instruction_file_unix(&path, || {
+        std::fs::rename(&configured, &moved).unwrap();
+        std::os::unix::fs::symlink(&outside, &configured).unwrap();
+    })
+    .unwrap_err();
+
+    assert_ne!(error.kind(), io::ErrorKind::NotFound);
+}
+
+#[cfg(unix)]
+#[test]
+fn instruction_open_detects_ordinary_parent_replacement_by_identity() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let configured = root.join("configured");
+    let moved = root.join("configured-before-swap");
+    std::fs::create_dir(&configured).unwrap();
+    let path = configured.join("AGENTS.md");
+    std::fs::write(&path, "configured guidance").unwrap();
+
+    let error = open_instruction_file_unix(&path, || {
+        std::fs::rename(&configured, &moved).unwrap();
+        std::fs::create_dir(&configured).unwrap();
+        std::fs::write(configured.join("AGENTS.md"), "replacement guidance").unwrap();
+    })
+    .unwrap_err();
+
+    assert_ne!(error.kind(), io::ErrorKind::NotFound);
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_leaf_during_parent_swap_is_not_confirmed_removal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let configured = root.join("configured");
+    let moved = root.join("configured-before-swap");
+    let outside = root.join("outside");
+    std::fs::create_dir(&configured).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    let path = configured.join("AGENTS.md");
+    std::fs::write(outside.join("AGENTS.md"), "unconfigured secret").unwrap();
+
+    let error = open_instruction_file_unix(&path, || {
+        std::fs::rename(&configured, &moved).unwrap();
+        std::os::unix::fs::symlink(&outside, &configured).unwrap();
+    })
+    .unwrap_err();
+
+    assert_ne!(error.kind(), io::ErrorKind::NotFound);
+}
+
+#[cfg(windows)]
+#[test]
+fn instruction_open_rejects_parent_replacement_after_parent_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    let configured = tmp.path().join("configured");
+    let moved = tmp.path().join("configured-before-swap");
+    std::fs::create_dir(&configured).unwrap();
+    let path = configured.join("AGENTS.md");
+    std::fs::write(&path, "configured guidance").unwrap();
+
+    let error = open_instruction_file_windows(&path, || {
+        std::fs::rename(&configured, &moved).unwrap();
+        std::fs::create_dir(&configured).unwrap();
+        std::fs::write(configured.join("AGENTS.md"), "replacement guidance").unwrap();
+    })
+    .unwrap_err();
+
+    assert_ne!(error.kind(), io::ErrorKind::NotFound);
+}
+
+#[cfg(windows)]
+#[test]
+fn missing_leaf_during_parent_swap_is_not_confirmed_removal_on_windows() {
+    let tmp = tempfile::tempdir().unwrap();
+    let configured = tmp.path().join("configured");
+    let moved = tmp.path().join("configured-before-swap");
+    std::fs::create_dir(&configured).unwrap();
+    let path = configured.join("AGENTS.md");
+
+    let error = open_instruction_file_windows(&path, || {
+        std::fs::rename(&configured, &moved).unwrap();
+        std::fs::create_dir(&configured).unwrap();
+        std::fs::write(configured.join("AGENTS.md"), "replacement guidance").unwrap();
+    })
+    .unwrap_err();
+
+    assert_ne!(error.kind(), io::ErrorKind::NotFound);
 }
 
 #[test]

@@ -195,8 +195,14 @@ filesystem authority，Runner native absolute path 也不会投影给模型；mo
 
 配置来源必须是普通 UTF-8 文件，每个文件最多 1 MiB。文件及其父目录组件不能是
 symbolic link 或 Windows reparse point（包括目录 junction）；此时应配置解析后的
-物理路径。Windows verbatim disk/UNC 长路径仍受支持。读取时检查已打开的文件句柄，
-并在读取过程中强制限制字节数，而不只依赖读取前的 metadata。无法读取、被重定向、
+物理路径。Unix 上父目录通过 handle-relative traversal 逐层固定，并在平台提供
+search-only 目录打开语义时保持原有的仅执行/搜索权限行为；Windows 会先用 native
+no-reparse open 获取父目录，再相对这个已固定的父目录句柄打开 leaf，并在接受
+observation 前重新核对父目录 identity，因此并发父目录替换不能把 configured read
+重定向到别处。非 Unix/Windows 目标直接 fail closed，不再回退到按路径重新打开。Windows verbatim disk/UNC 长路径仍可接受，但远端
+文件系统最终取决于服务端实际提供的 reparse 与 handle 语义，不能假定比远端实现
+本身更强的保证。读取时检查已打开的文件句柄，并在读取过程中强制限制字节数，
+而不只依赖读取前的 metadata。无法读取、被重定向、
 超限或 UTF-8 无效的来源会将 instruction scan 标记为 incomplete，但不会暴露原生路径
 或令整个 Project bootstrap 失败。
 

@@ -218,9 +218,17 @@ logical identities instead.
 Configured sources must be ordinary UTF-8 files, at most 1 MiB each. The file and
 its parent components must not be symbolic links or Windows reparse points
 (including directory junctions); configure the resolved physical path instead.
-Supported Windows verbatim disk/UNC paths remain valid. The reader checks the
-opened file handle and enforces the byte bound during reading, not only through
-a prior metadata check. Unreadable, redirected, oversized, or invalid-UTF-8
+Parent traversal is handle-relative on Unix and preserves search-only directory
+semantics where the platform exposes them. On Windows, the parent path is
+acquired with a native no-reparse open and the leaf is opened relative to that
+pinned parent handle; the parent identity is rechecked before accepting the
+observation, so a concurrent parent replacement cannot retarget the configured
+read. Non-Unix/non-Windows targets fail closed instead of falling back to a
+path-based open. Windows verbatim disk/UNC paths remain accepted, but remote filesystems
+depend on their server-side reparse and handle semantics and should not be
+treated as providing stronger guarantees than the remote server implements.
+The reader checks the opened file handle and enforces the byte bound during
+reading, not only through a prior metadata check. Unreadable, redirected, oversized, or invalid-UTF-8
 sources make the instruction scan incomplete without exposing their native paths
 or failing the entire Project bootstrap.
 
