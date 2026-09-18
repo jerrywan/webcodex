@@ -128,8 +128,7 @@ impl ToolRuntime {
         }
 
         let requested_reads = items.len();
-        let items = super::read_files::coalesce_read_files_items(items);
-        let coalesced_reads = items.len();
+        let coalesced_reads = super::read_files::coalesce_read_files_items(items.clone()).len();
         let projection = super::read_files::ReadModelProjection::Batch {
             project: resolved.resolved_id.clone(),
             items: items.clone(),
@@ -137,6 +136,9 @@ impl ToolRuntime {
             with_line_numbers,
             max_result_bytes: Some(super::read_files::DEFAULT_READ_FILES_RESULT_BYTES),
         };
+        // Keep the original member ranges here. read_files_resolved performs the
+        // physical coalescing itself and can safely fall back to those members if
+        // a merged range crosses the canonical byte ceiling.
         let mut reads = self
             .read_files_resolved(resolved, items, with_line_numbers)
             .await;

@@ -257,6 +257,11 @@ fn required_runner_capability_matches_metadata_risk_table() {
             RunnerCapabilityRequirement::Shell,
         ),
         (
+            "search_and_read",
+            ToolRisk::Read,
+            RunnerCapabilityRequirement::Shell,
+        ),
+        (
             "show_changes",
             ToolRisk::Read,
             RunnerCapabilityRequirement::GitOrShell,

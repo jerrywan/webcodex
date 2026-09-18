@@ -827,6 +827,89 @@ impl ToolRuntime {
             .await
     }
 
+    async fn read_planned_member(
+        &self,
+        resolved: &ResolvedProject,
+        runner_project_id: &str,
+        runner_instance_id: &str,
+        path: &str,
+        member: PlannedReadMember,
+        expected_sha256: Option<&str>,
+        with_line_numbers: bool,
+        deadline: Instant,
+    ) -> Value {
+        let mut result = self
+            .read_one_resolved_project_file(
+                &resolved.config,
+                runner_project_id,
+                runner_instance_id,
+                path.to_string(),
+                member.start_line,
+                member.limit,
+                false,
+                deadline,
+            )
+            .await;
+        if result.success {
+            if let Some(expected_sha256) = expected_sha256 {
+                let actual_sha256 = result.output.get("sha256").and_then(Value::as_str);
+                if actual_sha256 != Some(expected_sha256) {
+                    result = stale_read_revision_failure(path);
+                }
+            }
+        }
+        let success = result.success;
+        let error = result.error.clone();
+        let output = result.output;
+        if !success {
+            return json!({
+                "index": member.index,
+                "path": path,
+                "success": false,
+                "output": output,
+                "error": error,
+            });
+        }
+
+        let target = read_revision_target(resolved, path, runner_instance_id);
+        let read_revision = output
+            .get("sha256")
+            .and_then(Value::as_str)
+            .map(|sha256| self.read_revisions.observe(target, sha256.to_string()));
+        let Some(mut member_output) = super::files::slice_read_file_success_output(
+            &output,
+            member.start_line,
+            member.limit,
+            with_line_numbers,
+            path,
+        ) else {
+            return json!({
+                "index": member.index,
+                "path": path,
+                "success": false,
+                "output": {
+                    "error_kind": "read_file_failed",
+                    "reason_code": "malformed_agent_response",
+                    "path": path,
+                    "state_changed": false,
+                },
+                "error": "read_file failed: malformed_agent_response",
+            });
+        };
+        if let Some(read_revision) = read_revision {
+            if let Some(object) = member_output.as_object_mut() {
+                object.insert("read_revision".to_string(), json!(read_revision));
+            }
+        }
+        json!({
+            "index": member.index,
+            "path": path,
+            "success": true,
+            "output": member_output,
+            "error": Value::Null,
+        })
+    }
+
     pub(crate) async fn read_files_resolved(
         &self,
         resolved: &ResolvedProject,
@@ -883,7 +966,7 @@ impl ToolRuntime {
                 let runner_project_id = runner_project_id.clone();
                 let runner_instance_id = runner_instance_id.clone();
                 async move {
-                    let item = planned.item;
+                    let PlannedRead { item, members } = planned;
                     let path = item.path;
                     let target = read_revision_target(resolved, &path, &runner_instance_id);
                     let expected_sha256 = match item.expected_read_revision {
@@ -891,8 +974,7 @@ impl ToolRuntime {
                             Ok(sha256) => Some(sha256),
                             Err(_) => {
                                 let result = stale_read_revision_failure(&path);
-                                return planned
-                                    .members
+                                return members
                                     .into_iter()
                                     .map(|member| {
                                         json!({
@@ -928,21 +1010,48 @@ impl ToolRuntime {
                             }
                         }
                     }
+
+                    // Coalescing is an optimization, never a semantic reason for
+                    // otherwise-valid member reads to fail. A merged UTF-8 range
+                    // can cross the canonical raw-byte ceiling even when each
+                    // caller range fits independently; only that bounded failure
+                    // falls back to the original member reads.
+                    if members.len() > 1
+                        && !result.success
+                        && result.output.get("reason_code").and_then(Value::as_str)
+                            == Some("range_too_large")
+                    {
+                        let mut fallback = Vec::with_capacity(members.len());
+                        for member in members {
+                            fallback.push(
+                                self.read_planned_member(
+                                    resolved,
+                                    &runner_project_id,
+                                    &runner_instance_id,
+                                    &path,
+                                    member,
+                                    expected_sha256.as_deref(),
+                                    with_line_numbers,
+                                    deadline,
+                                )
+                                .await,
+                            );
+                        }
+                        return fallback;
+                    }
+
                     let success = result.success;
                     let error = result.error.clone();
                     let output = result.output;
-                    let mut read_revision = None;
-                    if success {
-                        if let Some(sha256) = output
+                    let read_revision = if success {
+                        output
                             .get("sha256")
                             .and_then(Value::as_str)
-                            .map(str::to_string)
-                        {
-                            read_revision = Some(self.read_revisions.observe(target, sha256));
-                        }
-                    }
-                    planned
-                        .members
+                            .map(|sha256| self.read_revisions.observe(target, sha256.to_string()))
+                    } else {
+                        None
+                    };
+                    members
                         .into_iter()
                         .map(|member| {
                             if success {

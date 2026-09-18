@@ -393,6 +393,78 @@ async fn read_files_returns_ordered_normalized_successes_after_out_of_order_comp
 }
 
 #[tokio::test]
+async fn read_files_coalescing_falls_back_when_merged_range_crosses_byte_ceiling() {
+    use webcodex_workspace::file_read_range::{read_range_from, EffectiveRange, ReadFileReason};
+
+    let line = format!("{}\n", "x".repeat(600));
+    let content = line.repeat(360);
+    assert!(read_range_from(content.as_bytes(), EffectiveRange::new(Some(1), Some(180))).is_ok());
+    assert!(read_range_from(
+        content.as_bytes(),
+        EffectiveRange::new(Some(181), Some(180))
+    )
+    .is_ok());
+    let merged_error =
+        read_range_from(content.as_bytes(), EffectiveRange::new(Some(1), Some(360))).unwrap_err();
+    assert_eq!(merged_error.reason, ReadFileReason::RangeTooLarge);
+
+    let root = tempfile::tempdir().unwrap();
+    let runtime = ToolRuntime::new_for_tests();
+    let client_id = "coalesced-range-byte-fallback";
+    register_runner_project_at_path(&runtime, client_id, "demo", root.path()).await;
+
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .read_files(
+                    "demo".to_string(),
+                    vec![
+                        item("src/lib.rs", Some(1), Some(180)),
+                        item("src/lib.rs", Some(181), Some(180)),
+                    ],
+                    Some(false),
+                )
+                .await
+        }
+    });
+
+    let merged = next_read_request(&runtime, client_id).await;
+    assert_eq!(merged.start_line, Some(1));
+    assert_eq!(merged.end_line, Some(360));
+    complete_patch_agent_request(
+        &runtime,
+        client_id,
+        &merged.request_id,
+        1,
+        "",
+        "read_file failed: range_too_large",
+    )
+    .await;
+
+    let first = next_read_request(&runtime, client_id).await;
+    assert_eq!(first.start_line, Some(1));
+    assert_eq!(first.end_line, Some(180));
+    complete_read(&runtime, client_id, &first, &content).await;
+
+    let second = next_read_request(&runtime, client_id).await;
+    assert_eq!(second.start_line, Some(181));
+    assert_eq!(second.end_line, Some(360));
+    complete_read(&runtime, client_id, &second, &content).await;
+
+    let result = task.await.unwrap();
+    assert!(result.success, "{:?}", result.error);
+    assert_eq!(result.output["succeeded_count"], 2);
+    assert_eq!(result.output["failed_count"], 0);
+    assert_eq!(result.output["items"][0]["output"]["returned_lines"], 180);
+    assert_eq!(result.output["items"][1]["output"]["returned_lines"], 180);
+    assert_eq!(
+        result.output["items"][0]["output"]["sha256"],
+        result.output["items"][1]["output"]["sha256"]
+    );
+}
+
+#[tokio::test]
 async fn read_files_reuses_read_revision_for_same_full_file_snapshot_across_ranges() {
     let root = tempfile::tempdir().unwrap();
     let runtime = ToolRuntime::new_for_tests();

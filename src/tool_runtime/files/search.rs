@@ -2567,6 +2567,6 @@ mod tests {
             timeout_secs: None,
         })
         .unwrap();
-        assert_eq!((options.context_before, options.context_after), (20, 20));
+        assert_eq!((options.context_before, options.context_after), (21, 80));
     }
 }

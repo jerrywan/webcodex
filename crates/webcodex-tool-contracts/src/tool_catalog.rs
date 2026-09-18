@@ -39,6 +39,7 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
             "run_script",
             "run_shell",
             "search_project_texts",
+            "search_and_read",
             "document_symbols",
             "document_diagnostics",
             "hover",

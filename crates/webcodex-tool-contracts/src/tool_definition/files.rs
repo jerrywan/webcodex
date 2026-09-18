@@ -103,8 +103,8 @@ pub(super) const SEARCH_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE.review(super::ToolReviewEvidence::Search).exploration(super::ToolExplorationEvidence::SearchBatch),
             ).with_composition_policy(super::ToolCompositionPolicy::Parallel),
-            "Batch-capable project-text search for 1..8 independent queries when bounded structured results, protected-path policy, isolated failures, or portable Runtime search semantics help. Runs at most two Runner requests in flight. For broad discovery prefer files_with_matches/count or a small bounded match set with little context, then target read_files/native reads. When locating matches will predictably be followed immediately by reading their source code, prefer search_and_read to avoid a second outer model/tool round trip. For one small known-scope search without a follow-up read, native rg via run_process or a shell command is first-class. Batch only queries already known to be needed; keep result-dependent follow-ups sequential. Queries default to regex; prefer pattern_mode=literal for exact text and request context explicitly. Whole-query continuation uses one parser-ready suggested_call when the remaining batch fits the model result budget; otherwise Runtime truncates without a raw cursor or fake call. A truncated query has no safe match cursor and should be refined.",
-        ).with_gpt_action_description("Batch-search 1..8 predetermined independent queries. Prefer search_and_read when the expected next step is immediately reading the matched source. For broad discovery use files/count or small low-context matches, then targeted reads; keep result-dependent follow-ups sequential. Known-scope native rg is first-class. Follow returned batch continuation; never cursor-guess truncation."),
+            "Batch-capable project-text search for 1..8 predetermined independent queries with bounded structured results, protected-path policy, and isolated failures. For broad discovery prefer files_with_matches/count or a small low-context match set. When matched source will be read immediately, prefer search_and_read; for one small known-scope search, native rg is first-class. Queries default to regex; prefer pattern_mode=literal for exact text. Batch only independent queries and keep result-dependent follow-ups sequential. Use the returned suggested_call for whole-query continuation; truncated individual queries must be narrowed.",
+        ).with_gpt_action_description("Batch-search 1..8 independent queries. Prefer search_and_read when matched source will be read immediately; use files/count or small low-context matches for broad discovery. Prefer literal mode for exact text. Follow suggested_call for batch continuation; narrow truncated queries."),
         40,
     ),
     adaptive_runtime_direct(
@@ -132,9 +132,9 @@ pub(super) const SEARCH_DEFINITIONS: &[ToolDefinition] = &[
                     .review(super::ToolReviewEvidence::ReadOnlyInspection)
                     .exploration(super::ToolExplorationEvidence::SearchBatch),
             ),
-            "Compound coding inspection tool: run one bounded project-text search, then immediately read source ranges around up to eight matches. Use it when the next action after locating matches is predictably to inspect their code. Runtime forces match-mode search with zero search context, converts matches to bounded read ranges, coalesces duplicate/overlapping/nearby ranges before returning source, and reuses the canonical read_files path so SHA/read-revision semantics stay consistent without duplicate code blocks. Prefer search_project_texts alone for discovery/count/files-only tasks.",
-        ),
-        55,
+            "Compound coding inspection: run one bounded project-text search, then read source ranges around up to eight matches in the same outer call. Use it when locating code will predictably be followed by inspection. Runtime forces match mode with zero search context and reuses canonical read_files planning, snapshot, and fallback semantics. Prefer search_project_texts alone for discovery, count, or files-only tasks.",
+        ).with_gpt_action_description("Search once, then read bounded source around up to eight matches in the same call. Use when matched code will be inspected immediately. Reuses canonical read_files snapshot/fallback semantics. Prefer search_project_texts for discovery/count/files-only work."),
+        52,
     ),
 ];
 
