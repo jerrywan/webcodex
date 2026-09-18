@@ -48,11 +48,11 @@ async fn start(
                 .await
         }
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     while !task.is_finished() {
         assert!(
             std::time::Instant::now() < deadline,
-            "coding workflow did not finish within the 10-second test deadline"
+            "coding workflow did not finish within the {CODING_WORKFLOW_FIXTURE_TIMEOUT:?} test deadline"
         );
         if let Some(req) = runtime
             .runner_registry

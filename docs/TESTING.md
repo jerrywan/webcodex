@@ -44,6 +44,19 @@ successive continuation Attempts. Rust projection and capability tests use
 `cargo test --locked -p webcodex --lib goal`, and
 `cargo test --locked -p webcodex --lib agent_continuation`.
 
+## Full Local Server Suite
+
+Plain `cargo test` must work without a special environment variable or wrapper,
+including when launched from an interactive console. On high-core developer or shared
+hosts, `bash scripts/test_server.sh` is an optional resource-control entry point for the
+complete Server package lane. It runs the same package command as ordinary Linux CI
+(`cargo test --locked -p webcodex`) but, when `RUST_TEST_THREADS` is unset, caps
+libtest fan-out at the smaller of the detected logical CPU count and 32. Set
+`RUST_TEST_THREADS` explicitly when intentionally testing another concurrency level.
+Cargo `-j` / `CARGO_BUILD_JOBS` controls compilation, not libtest execution concurrency.
+A passing limited-concurrency run does not prove a console-only failure was caused by
+parallelism; keep the original failing entry point in the final regression evidence.
+
 ## Explicit High-Cost Local Evidence
 
 Ordinary `cargo test` and ordinary CI intentionally skip ignored timing/real-process
@@ -142,9 +155,13 @@ The lanes above define test semantics; workflows decide when to run them.
 - Local mock server tests must be isolated. Bind to `127.0.0.1:0`, avoid fixed
   ports, scope URL rewrites to the test fixture, reset global overrides even on
   failure paths, and stop spawned tasks when the fixture drops.
-- Tests that mutate process environment must acquire `TEST_ENV_LOCK` or an
-  equivalent shared guard, save the previous value, and restore or remove it at
-  the end. Do not print token values while diagnosing these tests.
+- Prefer explicit config inputs or child-local `Command::env` / `env_remove` over
+  mutating the parallel test process's environment. Existing tests that must mutate
+  process environment require `TEST_ENV_LOCK` or an equivalent shared guard and
+  panic-safe restoration of previous values. A lock used only by writers does not
+  isolate unguarded readers or children inheriting temporary values; use an isolated
+  child process when those readers cannot be controlled. Do not print token values
+  while diagnosing these tests.
 - Tests that touch HTTP/auth behavior must use `AuthEnvGuard` or an equivalent
   `TEST_ENV_LOCK` guard for auth mode env, especially
   `WEBCODEX_SHARED_KEY_ENABLED`, `WEBCODEX_ALLOW_ANONYMOUS`,
@@ -170,6 +187,60 @@ The lanes above define test semantics; workflows decide when to run them.
   documented command for running it intentionally. Ordinary CI never opts into
   `--ignored`: `runner_real_process_`, `desktop_real_process_windows_`, slow timing
   regressions, and real Codex/LSP dogfood remain explicit local/operator evidence.
+
+## Process Fixture Contracts and Regression Workflow
+
+The local Runner fixture is an adapter, not a second execution contract. Keep its
+stdin, output capture, exit-status, deadline, and cleanup behavior aligned with the
+production Runner. In particular, `Command::spawn()` inherits stdin by default whereas
+`Command::output()` closes it by default; switching between them requires an explicit
+I/O decision. In the common test helper:
+
+- `None` must configure `Stdio::null()`, overriding any preconfigured stdin.
+  `Some(b"")` must also produce EOF, while a nonempty payload supplies exactly its
+  bytes followed by EOF. No ordinary fixture reads the developer's terminal.
+- Capture both output streams without waiting on undrained bounded pipes, preserve
+  exit status, and retain bounded waits plus cleanup of fixture-owned processes.
+  Explicit input larger than pipe capacity must not deadlock the harness either.
+- Keep cwd, temporary repositories, child environment, and input handles local to the
+  fixture. Do not change process-global stdin or environment to simulate a console.
+
+`src/tool_runtime/tests/runner_fixtures.rs` provides ordinary deterministic coverage
+for missing, empty, and large explicit input, plus a subprocess regression of the
+existing unborn-repository workflow. That test re-executes one exact libtest case with
+finite invalid parent input: an incorrect fixture lets `git mktree` consume the input
+and fail immediately, even in headless CI. It verifies that the child actually runs
+one test. With an interactive console or an open pipe, the same defect instead waits
+for EOF and surfaces as a misleading Runner command timeout. These tests assert I/O
+semantics, not scheduler latency, so they belong in the ordinary lane:
+
+```bash
+cargo test --locked -p webcodex --lib runner_fixtures
+```
+
+For a newly reported console-only or cross-suite failure, use this sequence:
+
+1. Record the exact revision, command, test target, executed count, input mode, and
+   relevant concurrency settings. Separate compile time from test execution time.
+   Compare the same case with closed stdin and with a parent-owned pipe whose writer
+   stays open. Do not use `communicate()` for that probe: it closes the child's stdin
+   and can hide an EOF bug. Bound the probe and clean up only its owned processes.
+2. Make the smallest deterministic regression fail on the old implementation before
+   changing the helper. Use finite poisoned input or controlled local state where
+   possible, rather than making every CI run wait for the original timeout.
+3. After the fix, run the focused regression and repeat the original failing mode.
+   For changes to a shared fixture or cross-suite behavior, also run the affected
+   package at default concurrency; a filtered/serial pass alone is insufficient.
+   Let Cargo select/build the current test binary rather than guessing a potentially
+   stale executable under `target/`.
+
+As related test areas are changed, improve them incrementally: move pure projection,
+parsing, and policy assertions out of real Git/shell workflows; retain a small set of
+real process-boundary contract tests; inject settings rather than adding new global
+environment guards; and replace scheduler sleeps with owned readiness signals and
+one absolute deadline. Keep actual lifecycle/timing evidence in the existing explicit
+lanes. Do not weaken assertions, ignore a deterministic failure, extend deadlines, or
+serialize the entire suite merely to obtain a green run.
 
 ## `import_http` Coverage
 

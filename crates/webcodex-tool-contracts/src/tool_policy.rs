@@ -76,7 +76,7 @@ impl ToolDefinition {
 
     pub fn supports_gpt_actions(self) -> bool {
         self.visibility.is_model_visible()
-            && self.gpt_action_exposure() == ToolGptActionExposure::Inherit
+            && self.gpt_action_exposure() != ToolGptActionExposure::Unsupported
     }
 
     pub fn gpt_action_description(self) -> Option<&'static str> {
@@ -440,13 +440,17 @@ pub fn adaptive_runtime_direct_tool_definitions() -> Vec<&'static ToolDefinition
     definitions
 }
 
-/// GPT Actions ordinary direct exposure is a pure projection of Adaptive
-/// Runtime Direct. Protocol exceptions stay on the canonical ToolDefinition;
-/// there is deliberately no second rank or operation registry.
+/// GPT Actions ordinary direct exposure follows Adaptive Runtime Direct while
+/// canonical ToolDefinition exposure may route a compatible tool through the
+/// gateway to satisfy a concrete surface budget. There is deliberately no
+/// second rank or operation registry.
 pub fn gpt_action_direct_tool_definitions() -> Vec<&'static ToolDefinition> {
     adaptive_runtime_direct_tool_definitions()
         .into_iter()
-        .filter(|definition| definition.supports_gpt_actions())
+        .filter(|definition| {
+            definition.supports_gpt_actions()
+                && definition.gpt_action_exposure() != ToolGptActionExposure::GatewayOnly
+        })
         .collect()
 }
 

@@ -20,11 +20,11 @@ async fn service_agent_task_until_finished(
     task: &tokio::task::JoinHandle<ToolResult>,
     label: &str,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     while !task.is_finished() {
         assert!(
             Instant::now() < deadline,
-            "{label} did not finish within the 10-second test deadline"
+            "{label} did not finish within the {CODING_WORKFLOW_FIXTURE_TIMEOUT:?} test deadline"
         );
         if let Some(request) = probe_patch_agent_request(runtime, client_id).await {
             complete_agent_request_by_running_locally(runtime, client_id, request).await;

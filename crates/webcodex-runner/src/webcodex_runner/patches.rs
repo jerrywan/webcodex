@@ -425,12 +425,19 @@ fn apply_patch_matching_mode(
     })
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ResolvedEditSourceRange {
+    edit_index: usize,
+    start_line: usize,
+    end_line: usize,
+}
+
 #[derive(Debug)]
 enum EditPlanConflict {
     Match(ApplyTextMatchConflict),
     Overlap {
-        first_edit_index: usize,
-        second_edit_index: usize,
+        first: ResolvedEditSourceRange,
+        second: ResolvedEditSourceRange,
     },
 }
 
@@ -472,6 +479,27 @@ struct PlannedFileChange {
 struct AppliedFileChange {
     plan_index: usize,
     created_dirs: Vec<PathBuf>,
+}
+
+fn resolved_edit_source_range(
+    original: &str,
+    start: usize,
+    end: usize,
+    edit_index: usize,
+) -> ResolvedEditSourceRange {
+    let start_line = 1 + original[..start].matches('\n').count();
+    let mut end_line = 1 + original[..end].matches('\n').count();
+    if end > start && original.as_bytes().get(end - 1) == Some(&b'\n') {
+        end_line = end_line.saturating_sub(1).max(start_line);
+    }
+    if end == start {
+        end_line = start_line;
+    }
+    ResolvedEditSourceRange {
+        edit_index,
+        start_line,
+        end_line,
+    }
 }
 
 fn edit_plan(
@@ -653,8 +681,8 @@ fn edit_plan(
                 edit_kind: edits[pair[1].3].kind.as_str(),
                 message: "edits overlap".to_string(),
                 conflict: Some(EditPlanConflict::Overlap {
-                    first_edit_index: pair[0].3,
-                    second_edit_index: pair[1].3,
+                    first: resolved_edit_source_range(original, pair[0].0, pair[0].1, pair[0].3),
+                    second: resolved_edit_source_range(original, pair[1].0, pair[1].1, pair[1].3),
                 }),
             });
         }
@@ -666,19 +694,12 @@ fn edit_plan(
         replacement.push_str(&original[cursor..start]);
         replacement.push_str(text);
         cursor = end;
-        let old_start_line = 1 + original[..start].matches('\n').count();
-        let mut old_end_line = 1 + original[..end].matches('\n').count();
-        if end > start && original.as_bytes().get(end - 1) == Some(&b'\n') {
-            old_end_line = old_end_line.saturating_sub(1).max(old_start_line);
-        }
-        if end == start {
-            old_end_line = old_start_line;
-        }
+        let source_range = resolved_edit_source_range(original, start, end, index);
         summaries.push(serde_json::json!({
             "index": index,
             "kind": edits[index].kind.as_str(),
-            "old_start_line": old_start_line,
-            "old_end_line": old_end_line,
+            "old_start_line": source_range.start_line,
+            "old_end_line": source_range.end_line,
             "new_line_count": if text.is_empty() { 0 } else { text.lines().count() },
         }));
     }
@@ -737,16 +758,17 @@ fn edit_conflict_recovery(error: &EditPlanError) -> Option<serde_json::Value> {
             }
             Some(recovery)
         }
-        EditPlanConflict::Overlap {
-            first_edit_index,
-            second_edit_index,
-        } => Some(serde_json::json!({
+        EditPlanConflict::Overlap { first, second } => Some(serde_json::json!({
             "schema_version": 1,
             "conflict_kind": "overlapping_edits",
             "occurrence_selector_supported": false,
             "direct_retry_safe": true,
             "reread_required": false,
-            "conflicting_edit_indices": [first_edit_index, second_edit_index],
+            "conflicting_edit_indices": [first.edit_index, second.edit_index],
+            "conflicting_edit_ranges": [
+                {"edit_index": first.edit_index, "start_line": first.start_line, "end_line": first.end_line},
+                {"edit_index": second.edit_index, "start_line": second.start_line, "end_line": second.end_line}
+            ],
             "recovery_action": "refine_edit_batch",
         })),
     }

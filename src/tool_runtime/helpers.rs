@@ -21,12 +21,68 @@ fn run_command_sync_with_shell(
     timeout_secs: u64,
     shell: &Path,
 ) -> (i32, String, String, u64) {
-    let start = Instant::now();
     let mut command = std::process::Command::new(shell);
     #[cfg(windows)]
-    command.arg("-s").stdin(std::process::Stdio::piped());
+    command.arg("-s");
     #[cfg(not(windows))]
     command.arg("-c").arg(cmd);
+    command.current_dir(cwd);
+    #[cfg(windows)]
+    let stdin_payload = Some(cmd.as_bytes());
+    #[cfg(not(windows))]
+    let stdin_payload: Option<&[u8]> = None;
+    let (exit_code, stdout, stderr, elapsed_ms, _timed_out) =
+        run_test_command_with_timeout(command, stdin_payload, timeout_secs);
+    (exit_code, stdout, stderr, elapsed_ms)
+}
+
+#[cfg(test)]
+pub(crate) fn run_test_command_with_timeout(
+    mut command: std::process::Command,
+    stdin_payload: Option<&[u8]>,
+    timeout_secs: u64,
+) -> (i32, String, String, u64, bool) {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    let start = Instant::now();
+    if let Some(stdin_payload) = stdin_payload {
+        let mut stdin_source = match tempfile::tempfile() {
+            Ok(file) => file,
+            Err(error) => {
+                return (
+                    -1,
+                    String::new(),
+                    format!("Failed to create stdin source: {error}"),
+                    start.elapsed().as_millis() as u64,
+                    false,
+                );
+            }
+        };
+        if let Err(error) = stdin_source.write_all(stdin_payload) {
+            return (
+                -1,
+                String::new(),
+                format!("Failed to write stdin source: {error}"),
+                start.elapsed().as_millis() as u64,
+                false,
+            );
+        }
+        if let Err(error) = stdin_source.seek(SeekFrom::Start(0)) {
+            return (
+                -1,
+                String::new(),
+                format!("Failed to rewind stdin source: {error}"),
+                start.elapsed().as_millis() as u64,
+                false,
+            );
+        }
+        command.stdin(std::process::Stdio::from(stdin_source));
+    } else {
+        // Match the non-interactive Runner: no payload means EOF, not the
+        // invoking console's stdin. Commands such as `git mktree` otherwise
+        // wait for user input even though headless CI happens to pass.
+        command.stdin(std::process::Stdio::null());
+    }
     let mut stdout_capture = match tempfile::tempfile() {
         Ok(file) => file,
         Err(error) => {
@@ -35,6 +91,7 @@ fn run_command_sync_with_shell(
                 String::new(),
                 format!("Failed to create stdout capture: {error}"),
                 start.elapsed().as_millis() as u64,
+                false,
             );
         }
     };
@@ -46,6 +103,7 @@ fn run_command_sync_with_shell(
                 String::new(),
                 format!("Failed to create stderr capture: {error}"),
                 start.elapsed().as_millis() as u64,
+                false,
             );
         }
     };
@@ -57,6 +115,7 @@ fn run_command_sync_with_shell(
                 String::new(),
                 format!("Failed to clone stdout capture: {error}"),
                 start.elapsed().as_millis() as u64,
+                false,
             );
         }
     };
@@ -68,54 +127,35 @@ fn run_command_sync_with_shell(
                 String::new(),
                 format!("Failed to clone stderr capture: {error}"),
                 start.elapsed().as_millis() as u64,
+                false,
             );
         }
     };
     command
-        .current_dir(cwd)
         .stdout(std::process::Stdio::from(stdout_sink))
         .stderr(std::process::Stdio::from(stderr_sink));
     // Put the command in its own process group so its whole subtree can be
-    // reaped as a group. Argument 0 makes the child a group leader whose pgid
-    // equals its pid. This is separate from output capture: regular-file capture
-    // prevents pipe-capacity deadlocks, while process-group ownership prevents a
-    // backgrounded descendant from leaking beyond the fixture.
+    // reaped as a group. Regular-file capture prevents pipe-capacity deadlocks,
+    // while process-group ownership prevents background descendants from
+    // leaking beyond the fixture.
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
     let mut child = match command.spawn() {
-        Ok(c) => c,
-        Err(e) => {
+        Ok(child) => child,
+        Err(error) => {
             return (
                 -1,
                 String::new(),
-                format!("Failed to execute command: {}", e),
+                format!("Failed to execute command: {error}"),
                 start.elapsed().as_millis() as u64,
+                false,
             );
         }
     };
-    #[cfg(windows)]
-    {
-        use std::io::Write;
-        let write_result = child
-            .stdin
-            .take()
-            .expect("test shell stdin")
-            .write_all(cmd.as_bytes());
-        if let Err(error) = write_result {
-            let _ = child.kill();
-            let _ = child.wait();
-            return (
-                -1,
-                String::new(),
-                format!("Failed to write command to test shell: {error}"),
-                start.elapsed().as_millis() as u64,
-            );
-        }
-    }
-    // Under `process_group(0)` the child's pid is also its process-group id.
+    // Under process_group(0) the child's pid is also its process-group id.
     let pgid = child.id();
     let timeout = Duration::from_secs(timeout_secs);
     let mut timed_out = false;
@@ -129,23 +169,20 @@ fn run_command_sync_with_shell(
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            Err(e) => {
-                // Still reap the group so a spawned subtree is not leaked.
+            Err(error) => {
+                let _ = child.kill();
                 reap_process_group(pgid);
+                let _ = child.wait();
                 return (
                     -1,
                     String::new(),
-                    format!("Failed to wait for command: {}", e),
+                    format!("Failed to wait for command: {error}"),
                     start.elapsed().as_millis() as u64,
+                    false,
                 );
             }
         }
     }
-    // Capture stdout/stderr into regular temporary files rather than pipes. The
-    // old test helper waited for process exit before draining its pipes, so a
-    // healthy child that produced more than the host pipe capacity could block
-    // forever in write(2) and be misclassified as a command timeout. File-backed
-    // capture keeps the real wall-clock timeout independent of output volume.
     if timed_out {
         let _ = child.kill();
     }
@@ -155,7 +192,6 @@ fn run_command_sync_with_shell(
     let status = child.wait();
     let elapsed = start.elapsed().as_millis() as u64;
 
-    use std::io::{Read, Seek, SeekFrom};
     let read_capture = |file: &mut std::fs::File| -> std::io::Result<Vec<u8>> {
         file.seek(SeekFrom::Start(0))?;
         let mut bytes = Vec::new();
@@ -172,32 +208,34 @@ fn run_command_sync_with_shell(
                 if !stderr.is_empty() && !stderr.ends_with('\n') {
                     stderr.push('\n');
                 }
-                stderr.push_str(&format!("Command timed out after {} seconds", timeout_secs));
-                (-1, stdout, stderr, elapsed)
+                stderr.push_str(&format!("Command timed out after {timeout_secs} seconds"));
+                (-1, stdout, stderr, elapsed, true)
             } else {
-                (status.code().unwrap_or(-1), stdout, stderr, elapsed)
+                (status.code().unwrap_or(-1), stdout, stderr, elapsed, false)
             }
         }
         (Err(error), _, _) if timed_out => (
             -1,
             String::new(),
             format!(
-                "Command timed out after {} seconds; failed to reap command: {}",
-                timeout_secs, error
+                "Command timed out after {timeout_secs} seconds; failed to reap command: {error}"
             ),
             elapsed,
+            true,
         ),
         (Err(error), _, _) => (
             -1,
             String::new(),
             format!("Failed to wait for command: {error}"),
             elapsed,
+            false,
         ),
         (_, Err(error), _) | (_, _, Err(error)) => (
             -1,
             String::new(),
             format!("Failed to collect command output: {error}"),
             elapsed,
+            timed_out,
         ),
     }
 }

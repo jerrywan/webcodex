@@ -427,7 +427,7 @@ async fn dispatch_with_managed_worktree_runner(
         let auth = auth_context(None, true);
         async move { runtime.dispatch_with_auth(call, Some(&auth)).await }
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     let mut prepare_payloads = Vec::new();
     let mut sent_indeterminate = false;
     loop {
@@ -436,7 +436,7 @@ async fn dispatch_with_managed_worktree_runner(
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "managed-worktree coding call did not finish within 10 seconds for client {client_id}"
+            "managed-worktree coding call did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?} for client {client_id}"
         );
         if let Some(request) = probe_patch_agent_request(runtime, client_id).await {
             if request.kind == "prepare_managed_worktree" {
@@ -598,7 +598,7 @@ async fn record_startup_requests(
     client_id: &str,
     task: tokio::task::JoinHandle<ToolResult>,
 ) -> (ToolResult, Vec<String>) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     let mut request_kinds = Vec::new();
     loop {
         if task.is_finished() {
@@ -606,7 +606,7 @@ async fn record_startup_requests(
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "coding startup did not finish within 10 seconds; serviced requests: {request_kinds:?}"
+            "coding startup did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?}; serviced requests: {request_kinds:?}"
         );
         let Some(request) = probe_patch_agent_request(runtime, client_id).await else {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -649,12 +649,12 @@ async fn dispatch_startup_with_plugin_catalog(
         let auth = auth.clone();
         async move { runtime.dispatch_with_auth(call, Some(&auth)).await }
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     let mut request_kinds = Vec::new();
     while !task.is_finished() {
         assert!(
             std::time::Instant::now() < deadline,
-            "Plugin-aware startup did not finish within 10 seconds: {request_kinds:?}"
+            "Plugin-aware startup did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?}: {request_kinds:?}"
         );
         let Some(request) = probe_agent_request_for_instance(runtime, client_id, "inst").await
         else {
@@ -702,12 +702,12 @@ async fn dispatch_startup_with_configured_skill_catalog(
         let auth = auth.clone();
         async move { runtime.dispatch_with_auth(call, Some(&auth)).await }
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     let mut request_kinds = Vec::new();
     while !task.is_finished() {
         assert!(
             std::time::Instant::now() < deadline,
-            "configured-Skill startup did not finish within 10 seconds: {request_kinds:?}"
+            "configured-Skill startup did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?}: {request_kinds:?}"
         );
         let Some(request) = probe_patch_agent_request(runtime, client_id).await else {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -790,11 +790,11 @@ async fn dispatch_startup_without_window(
                 .await
         }
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     while !task.is_finished() {
         assert!(
             std::time::Instant::now() < deadline,
-            "coding startup without window did not finish within 10 seconds for client {client_id}"
+            "coding startup without window did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?} for client {client_id}"
         );
         if let Some(request) = probe_patch_agent_request(runtime, client_id).await {
             complete_agent_request_by_running_locally(runtime, client_id, request).await;
@@ -819,14 +819,14 @@ async fn dispatch_with_path_runner(
         let auth = auth_context(None, true);
         async move { runtime.dispatch_with_auth(call, Some(&auth)).await }
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     loop {
         if task.is_finished() {
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "path-based coding call did not finish within 10 seconds for client {client_id}"
+            "path-based coding call did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?} for client {client_id}"
         );
         if let Some(request) = probe_patch_agent_request(runtime, client_id).await {
             if request.kind == "resolve_or_register_project" {
@@ -2959,14 +2959,14 @@ async fn path_source_cross_project_recording_session_fails_before_registration()
         }
     });
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     loop {
         if task.is_finished() {
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "kernel path bootstrap did not finish within 10 seconds for client {target_client}"
+            "kernel path bootstrap did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?} for client {target_client}"
         );
         if let Some(request) = probe_patch_agent_request(&runtime, target_client).await {
             if request.kind == "resolve_or_register_project" {
@@ -4144,12 +4144,12 @@ async fn coding_workflow_standard_repository_overview_timeout_is_nonblocking() {
     });
 
     // Service the git/instruction probes but never the overview request.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     let mut overview_request = None;
     while !task.is_finished() {
         assert!(
             std::time::Instant::now() < deadline,
-            "overview-timeout startup did not finish within 10 seconds"
+            "overview-timeout startup did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?}"
         );
         let Some(request) = probe_patch_agent_request(&runtime, "wop-timeout").await else {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -4257,12 +4257,12 @@ async fn dispatch_coding_workflow_diagnostic_with_overview_stdout(
         }
     });
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
     let mut overview_request_id = None;
     while !task.is_finished() {
         assert!(
             std::time::Instant::now() < deadline,
-            "overview startup did not finish within 10 seconds for client {client_id}"
+            "overview startup did not finish within {CODING_WORKFLOW_FIXTURE_TIMEOUT:?} for client {client_id}"
         );
         let Some(request) = probe_patch_agent_request(runtime, client_id).await else {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;

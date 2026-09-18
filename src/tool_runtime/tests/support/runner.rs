@@ -20,6 +20,8 @@ use webcodex_core::runner_skill::{
     RunnerSkillExecutionRequest, RUNNER_SKILL_EXECUTION_REQUEST_KIND,
 };
 
+const RUNNER_TEST_COMMAND_TIMEOUT_SECS: u64 = 45;
+
 pub(in crate::tool_runtime::tests) async fn register_runner_project_at_path(
     runtime: &ToolRuntime,
     client_id: &str,
@@ -219,25 +221,17 @@ pub(in crate::tool_runtime::tests) fn run_runner_skill_resource_request_locally(
     if let Some(cwd) = req.cwd.as_deref() {
         command.current_dir(cwd);
     }
-    let mut child = command
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn test Skill execution");
-    use std::io::Write as _;
-    child
-        .stdin
-        .take()
-        .expect("piped test Skill stdin")
-        .write_all(script.as_bytes())
-        .expect("write test Skill stdin");
-    let output = child.wait_with_output().expect("wait test Skill execution");
-    (
-        output.status.code().unwrap_or(1),
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
+    let (exit_code, stdout, stderr, _elapsed_ms, timed_out) =
+        crate::tool_runtime::helpers::run_test_command_with_timeout(
+            command,
+            Some(script.as_bytes()),
+            RUNNER_TEST_COMMAND_TIMEOUT_SECS,
+        );
+    assert!(
+        !timed_out,
+        "Runner Skill fixture command exceeded {RUNNER_TEST_COMMAND_TIMEOUT_SECS}s: {stderr}"
+    );
+    (exit_code, stdout, stderr)
 }
 
 pub(in crate::tool_runtime::tests) fn run_runner_shell_request_locally(
@@ -318,35 +312,19 @@ pub(in crate::tool_runtime::tests) fn run_runner_shell_request_locally(
     if let Some(cwd) = req.cwd.as_deref() {
         command.current_dir(cwd);
     }
-    if stdin_payload.is_some() {
-        command.stdin(std::process::Stdio::piped());
-    }
-    let mut child = command
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn agent shell request");
-    if let Some(stdin) = stdin_payload.as_deref() {
-        use std::io::Write;
-        let write_result = child
-            .stdin
-            .take()
-            .expect("agent shell request stdin")
-            .write_all(stdin.as_bytes());
-        if let Err(error) = write_result {
-            assert_eq!(
-                error.kind(),
-                std::io::ErrorKind::BrokenPipe,
-                "agent shell request stdin write failed: {error}"
-            );
-        }
-    }
-    let output = child.wait_with_output().unwrap();
-    (
-        output.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
+    let stdin_payload = stdin_payload.as_deref().map(str::as_bytes);
+    let (exit_code, stdout, stderr, _elapsed_ms, timed_out) =
+        crate::tool_runtime::helpers::run_test_command_with_timeout(
+            command,
+            stdin_payload,
+            RUNNER_TEST_COMMAND_TIMEOUT_SECS,
+        );
+    assert!(
+        !timed_out,
+        "Runner fixture command kind={} exceeded {RUNNER_TEST_COMMAND_TIMEOUT_SECS}s: {stderr}",
+        req.kind
+    );
+    (exit_code, stdout, stderr)
 }
 
 fn run_runner_file_list_request_locally(req: &RunnerRequest) -> (i32, String, String) {

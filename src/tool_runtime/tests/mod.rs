@@ -42,6 +42,7 @@ mod permission_gate;
 mod process;
 mod read_files;
 mod reconnect;
+mod runner_fixtures;
 mod schema;
 mod script;
 mod search_project_texts;

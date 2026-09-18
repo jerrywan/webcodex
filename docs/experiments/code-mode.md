@@ -139,6 +139,10 @@ if (hits.success && shouldReadMore(hits.output)) {
 
 Host/protocol failures such as an unsupported nested tool, a forbidden target override, or failure to form a canonical ToolResult reject the Promise.
 
+Each callable `tools.<name>` attempt receives a 1-based ordinal in the V8 frontend before host admission. The ordinal follows JavaScript call-attempt order, so concurrent completion order cannot change it; it is diagnostic correlation only, not authority, retry identity, or durable Job identity. When a child fails before a canonical business `ToolResult` exists, the Promise rejection and outer failure retain a bounded `child_call_failed` projection with that ordinal, tool name, a stable host failure kind, and bounded detail. Canonical `ToolResult.success=false` remains an ordinary JavaScript value.
+
+Frontend/runtime failures remain distinct from child-host failures. Syntax/JavaScript errors are `runtime_error`; the nested-call, text-byte, and text-item hard limits expose their actual limit kind and counters when known. The outer `recovery` object contains deterministic actions rather than requiring callers to parse prose.
+
 `text(value)` appends model-facing output. Strings are emitted directly; JSON-safe objects and arrays are compact-JSON encoded. Nested raw results are not automatically copied into the outer result.
 
 Use `Promise.all` only for observations that are independent. Result-dependent follow-ups remain sequential JavaScript control flow. For one simple observation, call the ordinary tool directly; Code Mode is useful only when local orchestration removes meaningful model/tool round trips.
@@ -372,6 +376,8 @@ Frontend admission remains a separate explicit policy. A tool becoming `Parallel
 
 For E2a only, validators whose canonical execution continuation is `observe_jobs` get a frontend handoff preference cap of five seconds: omitted values become 5, values above 5 are clamped, 1..5 are preserved, and invalid values such as 0 remain invalid for the canonical parser. `timeout_secs` is never shortened by this policy. E2a does not add a second Job lifecycle or restart a validation.
 
+A structured validation that has started but is not terminal is exposed only after its canonical Job has materialized, with the exact `job_id` and parser-ready `observe_jobs` continuation for that same execution. A validation that has already completed with a validation failure is terminal, has no active continuation, and is reported as such instead of merely saying that the command was started. Terminal timeout, outcome-unknown delivery, and active Job handoff remain separate states.
+
 ### Frontend termination and effect truth
 
 E2a treats `timeout_ms` as the JavaScript/frontend decision deadline, not as a promise that the model-facing response is handed off at that exact millisecond. On frontend timeout or termination the host first closes a monotonic nested-call admission gate, then V8 is terminated and runtime-queued requests are discarded. A child still waiting for a Sequential fence sees the closed gate when it wakes and never crosses canonical dispatch. Already-started host work gets a separate bounded five-second reconciliation window; work that finishes in that window reaches a canonical result or same-execution Job handoff, while any still-stuck host task is cancelled and an already-dispatched consequential child remains conservatively `outcome_unknown`. Completed child results are not sent back into an already terminated isolate. The process-wide V8 execution permit is released when the frontend decision phase ends, before this post-frontend reconciliation.
@@ -403,6 +409,12 @@ Composition performance telemetry is not effect truth. E2a therefore has a separ
 Consequential classification comes from canonical `ToolDefinition.effect != Observe`. A completed failing test is a `known_result`, not uncertainty. Parse/scope/admission rejection before dispatch is not an effect. A normal active validation Job preserves only the canonical `job_id` and parser-ready continuation; the receipt does not copy command text, argv, paths, stdout/stderr, raw ToolResult, validation payload, credentials, or secrets. The durable outer Action/Session audit retains only the four counters (plus ordinary bounded failure metadata), not child Job identities or continuation tokens.
 
 If JavaScript throws or times out after consequential dispatch, the parent failure keeps the receipt and explicitly warns against blindly rerunning the whole JavaScript program. E2a provides no `retry_same`, rollback fiction, or whole-program retry authority.
+
+Outer recovery metadata never duplicates durable execution identity. If `effect_receipt.job_handoffs > 0`, recovery directs the caller to observe the continuations already present in `effect_receipt.children`; if any consequential child is `outcome_unknown`, recovery requires effect-state reconciliation before any retry. `effect_receipt.children` remains the sole Code Mode projection of child `job_id` and continuation.
+
+### WebCodex / external Host boundary
+
+WebCodex can make the ToolResult it produces structurally distinguish child-host failure, frontend/runtime failure, proven hard limits, and consequential effect state; it can preserve already-materialized Job receipts through frontend timeout/JavaScript failure, keep continuations parser-ready, and avoid blind-retry claims. Those guarantees stop at the WebCodex response boundary. An external Host may still time out or close the request before delivering the final ToolResult to the model, and external safety systems may deny a shell/process mutation without exposing their classifier reason. Code Mode does not infer, copy, or emulate those Host safety policies.
 
 ### Session and Job continuation
 
