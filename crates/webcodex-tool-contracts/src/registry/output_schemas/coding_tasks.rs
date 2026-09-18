@@ -600,7 +600,8 @@ fn startup_instructions_schema() -> Value {
             "changed_sources": {
                 "type": "array",
                 "uniqueItems": true,
-                "maxItems": 21,
+                // Old and new Runner identities (16 + 16), plus five fixed Project sources.
+                "maxItems": 37,
                 "items": instruction_source_path_schema()
             },
             "content_included": {"type": "boolean"},
@@ -1174,7 +1175,8 @@ fn work_on_project_output_schema() -> Value {
             "changed_sources": {
                 "type": "array",
                 "uniqueItems": true,
-                "maxItems": 21,
+                // Old and new Runner identities (16 + 16), plus five fixed Project sources.
+                "maxItems": 37,
                 "items": instruction_source_path_schema()
             },
             "content_included": {"type": "boolean", "description": "Emitted only when bounded instruction bodies are included for this call; omission means false. This is independent of status=reused."},

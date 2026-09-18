@@ -193,6 +193,13 @@ Configured instruction 文件只通过 narrow Runner-owned instruction runtime �
 filesystem authority，Runner native absolute path 也不会投影给模型；model-facing source
 只使用 sanitized logical identity。
 
+配置来源必须是普通 UTF-8 文件，每个文件最多 1 MiB。文件及其父目录组件不能是
+symbolic link 或 Windows reparse point（包括目录 junction）；此时应配置解析后的
+物理路径。Windows verbatim disk/UNC 长路径仍受支持。读取时检查已打开的文件句柄，
+并在读取过程中强制限制字节数，而不只依赖读取前的 metadata。无法读取、被重定向、
+超限或 UTF-8 无效的来源会将 instruction scan 标记为 incomplete，但不会暴露原生路径
+或令整个 Project bootstrap 失败。
+
 修改 `[instructions].files` 路径列表时，按正式流程编辑 `runner.toml`，先
 `runner_config_check`，再携带当前 generation 执行 `runner_config_reload`；无需重启
 Runner。文件内容本身始终是 live 的：直接修改 configured `AGENTS.md` 后，下一次

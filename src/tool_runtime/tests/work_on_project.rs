@@ -4340,13 +4340,15 @@ async fn work_on_project_sizes_and_runner_request_reduction_are_stable() {
     // current validation/finalization guidance included, this fixture stays within
     // the dedicated sparse budgets below. Keep the default tightly
     // bounded and still far below the standard startup hard cap while leaving
-    // only modest protocol headroom.
+    // only modest protocol headroom. Explicit instruction source_scope adds
+    // 25 bytes for this one-source fixture; reserve 32 bytes without changing
+    // the hard cap or the workflow-omitted 1 KiB budget above.
     assert!(
-        fresh_bytes <= 4800,
+        fresh_bytes <= 4832,
         "fresh work_on_project projection regressed above the sparse context budget: {fresh_bytes} bytes"
     );
     assert!(
-        reused_bytes <= 4900,
+        reused_bytes <= 4932,
         "unchanged work_on_project projection regressed above the sparse continuation budget: {reused_bytes} bytes"
     );
 }

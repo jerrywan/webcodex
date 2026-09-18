@@ -215,6 +215,15 @@ ordinary Project file/shell/process tools do not gain access to them, and native
 absolute paths are not projected to the model. Model-facing sources use sanitized
 logical identities instead.
 
+Configured sources must be ordinary UTF-8 files, at most 1 MiB each. The file and
+its parent components must not be symbolic links or Windows reparse points
+(including directory junctions); configure the resolved physical path instead.
+Supported Windows verbatim disk/UNC paths remain valid. The reader checks the
+opened file handle and enforces the byte bound during reading, not only through
+a prior metadata check. Unreadable, redirected, oversized, or invalid-UTF-8
+sources make the instruction scan incomplete without exposing their native paths
+or failing the entire Project bootstrap.
+
 Changing `[instructions].files` is hot-reloadable: edit `runner.toml`, run
 `runner_config_check`, then `runner_config_reload` with the current generation.
 No Runner restart is required. The files themselves remain live: editing a

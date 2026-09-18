@@ -1857,6 +1857,44 @@ mod tests {
     }
 
     #[test]
+    fn instruction_delta_schema_accepts_replaced_runner_sources_and_project_changes() {
+        use webcodex_core::project_instructions::InstructionSourceScope;
+        let snapshot = |version: &str| {
+            let mut candidates = (0..16)
+                .map(|index| LoadedInstructionCandidate {
+                    source_scope: InstructionSourceScope::Runner,
+                    path: format!("runner/{index}/{version}.md"),
+                    content: version.to_string(),
+                    total_lines: 1,
+                    full_sha256: None,
+                })
+                .collect::<Vec<_>>();
+            candidates.extend(INSTRUCTION_CANDIDATE_PATHS.iter().map(|path| {
+                LoadedInstructionCandidate {
+                    source_scope: InstructionSourceScope::Project,
+                    path: (*path).to_string(),
+                    content: version.to_string(),
+                    total_lines: 1,
+                    full_sha256: None,
+                }
+            }));
+            ProjectInstructionsSnapshot::from_candidates(candidates, true)
+        };
+        let previous = snapshot("old").to_summary();
+        let current = snapshot("new");
+        let changed = changed_instruction_sources(&current, Some(&previous));
+        assert_eq!(changed.len(), 37);
+        let schema = crate::tool_runtime::registry::output_schema_for_tool("work_on_project");
+        let changed_schema = &schema["properties"]["output"]["properties"]["instructions"]
+            ["properties"]["changed_sources"];
+        assert!(
+            changed_schema.is_object(),
+            "work_on_project instruction delta schema"
+        );
+        validate_schema_instance_for_test(&json!(changed), changed_schema).unwrap();
+    }
+
+    #[test]
     fn reused_instruction_status_and_body_projection_are_independent() {
         let current = instruction_snapshot();
         let previous = current.to_summary();

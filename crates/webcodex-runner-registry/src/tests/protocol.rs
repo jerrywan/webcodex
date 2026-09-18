@@ -517,7 +517,7 @@ async fn runner_supports_recognizes_all_protocol_capability_names() {
                 native_tool_plugins: true,
                 managed_ssh_resources: true,
                 runner_config_control: true,
-                instruction_runtime: false,
+                instruction_runtime: true,
             },
             policy: Some(crate::runner_protocol::RunnerPolicySummary {
                 ..Default::default()

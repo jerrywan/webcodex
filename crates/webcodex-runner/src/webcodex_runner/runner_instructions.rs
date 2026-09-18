@@ -3,6 +3,9 @@ use super::configured_skills::metadata_is_link_like;
 use super::CommandResult;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read};
+use std::path::Path;
 use std::time::Instant;
 use webcodex_core::project_instructions::{
     InstructionSourceScope, LoadedInstructionCandidate, ProjectInstructionsSnapshot,
@@ -34,13 +37,13 @@ fn snapshot(generation: u64, config: &InstructionsConfig, started: Instant) -> C
     let mut scan_complete = true;
 
     for (index, configured) in config.files.iter().enumerate() {
-        match std::fs::symlink_metadata(configured) {
-            Ok(metadata) if metadata.is_file() && !metadata_is_link_like(&metadata) => {}
-            _ => {
+        let file = match open_instruction_file(configured) {
+            Ok(file) => file,
+            Err(_) => {
                 scan_complete = false;
                 continue;
             }
-        }
+        };
         let canonical = match std::fs::canonicalize(configured) {
             Ok(path) if path.is_file() => path,
             _ => {
@@ -53,14 +56,14 @@ fn snapshot(generation: u64, config: &InstructionsConfig, started: Instant) -> C
             scan_complete = false;
             continue;
         }
-        let metadata = match std::fs::metadata(&canonical) {
+        let metadata = match file.metadata() {
             Ok(metadata) if metadata.len() <= MAX_CONFIGURED_INSTRUCTION_FILE_BYTES => metadata,
             _ => {
                 scan_complete = false;
                 continue;
             }
         };
-        let bytes = match std::fs::read(&canonical) {
+        let bytes = match read_instruction_bytes(file) {
             Ok(bytes) if bytes.len() as u64 == metadata.len() => bytes,
             _ => {
                 scan_complete = false;
@@ -117,6 +120,60 @@ fn snapshot(generation: u64, config: &InstructionsConfig, started: Instant) -> C
     }
 }
 
+// Instruction authority names ordinary files, not redirectable filesystem
+// trees. Check every component, not only the final AGENTS.md entry. Open the
+// leaf without following links and keep that handle for metadata and content.
+fn open_instruction_file(path: &Path) -> io::Result<File> {
+    for component in path.ancestors() {
+        let metadata = std::fs::symlink_metadata(component)?;
+        if metadata_is_link_like(&metadata)
+            || (component == path && !metadata.is_file())
+            || (component != path && !metadata.is_dir())
+        {
+            return Err(io::Error::other(
+                "instruction path is not an ordinary file path",
+            ));
+        }
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        };
+        options
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .share_mode(FILE_SHARE_READ);
+    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata_is_link_like(&metadata) {
+        return Err(io::Error::other(
+            "instruction handle is not an ordinary file",
+        ));
+    }
+    Ok(file)
+}
+
+fn read_instruction_bytes(reader: impl Read) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    // A pre-read metadata length is not a resource bound: the file can grow.
+    reader
+        .take(MAX_CONFIGURED_INSTRUCTION_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_CONFIGURED_INSTRUCTION_FILE_BYTES {
+        return Err(io::Error::other("instruction file exceeds the byte limit"));
+    }
+    Ok(bytes)
+}
+
 fn line_count(content: &str) -> usize {
     if content.is_empty() {
         0
@@ -135,6 +192,10 @@ fn error_result(started: Instant, code: &str) -> CommandResult {
         error: Some(code.to_string()),
     }
 }
+
+#[cfg(test)]
+#[path = "runner_instruction_tests.rs"]
+mod safety_tests;
 
 #[cfg(test)]
 mod tests {
@@ -157,7 +218,7 @@ mod tests {
     #[test]
     fn snapshot_uses_logical_sources_and_live_content() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("AGENTS.md");
+        let path = tmp.path().canonicalize().unwrap().join("AGENTS.md");
         std::fs::write(&path, "first\n").unwrap();
         let config = InstructionsConfig {
             files: vec![path.clone()],
@@ -207,7 +268,7 @@ mod tests {
     #[test]
     fn snapshot_does_not_require_project_allowed_roots() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("global.md");
+        let path = tmp.path().canonicalize().unwrap().join("global.md");
         std::fs::write(&path, "runner only").unwrap();
         let config = InstructionsConfig {
             files: vec![PathBuf::from(&path)],

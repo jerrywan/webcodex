@@ -1687,12 +1687,38 @@ mod instruction_windows_path_tests {
             .unwrap_err()
             .contains("without parent traversal"));
 
-        let namespace = InstructionsConfig {
-            files: vec![PathBuf::from(r"\\?\C:\Users\alice\.codex\AGENTS.md")],
+        // Canonical Windows paths use the supported verbatim disk/UNC forms.
+        // Only device and generic verbatim namespaces are outside the contract.
+        for path in [
+            r"\\?\C:\Users\alice\.codex\AGENTS.md",
+            r"\\server\share\AGENTS.md",
+            r"\\?\UNC\server\share\AGENTS.md",
+        ] {
+            let config = InstructionsConfig {
+                files: vec![PathBuf::from(path)],
+            };
+            assert!(validate_instructions_config(&config).is_ok(), "{path}");
+        }
+        for path in [r"\\.\device\AGENTS.md", r"\\?\GLOBALROOT\Device\AGENTS.md"] {
+            let config = InstructionsConfig {
+                files: vec![PathBuf::from(path)],
+            };
+            assert!(
+                validate_instructions_config(&config)
+                    .unwrap_err()
+                    .contains("unsupported Windows path namespace"),
+                "{path}"
+            );
+        }
+        let aliases = InstructionsConfig {
+            files: vec![
+                PathBuf::from(r"C:\Users\alice\.codex\AGENTS.md"),
+                PathBuf::from(r"\\?\C:\Users\alice\.codex\AGENTS.md"),
+            ],
         };
-        assert!(validate_instructions_config(&namespace)
+        assert!(validate_instructions_config(&aliases)
             .unwrap_err()
-            .contains("unsupported Windows path namespace"));
+            .contains("duplicate"));
     }
 }
 
