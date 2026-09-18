@@ -249,8 +249,21 @@ impl BrowserSupervisor {
         let mut nodes = Vec::new();
         let mut aggregate_bytes = 0usize;
         let mut truncated = snapshot.truncated;
+        let mut group_ids = HashMap::<String, String>::new();
+        let mut next_group_id = 1usize;
         for node in snapshot.nodes.into_iter().take(MAX_SNAPSHOT_NODES) {
-            let projected = runtime.project_node(page_id, &snapshot.document_id, generation, node);
+            let group_id = node.group_key.as_ref().map(|key| {
+                group_ids
+                    .entry(key.clone())
+                    .or_insert_with(|| {
+                        let id = format!("group_{next_group_id}");
+                        next_group_id = next_group_id.saturating_add(1);
+                        id
+                    })
+                    .clone()
+            });
+            let projected =
+                runtime.project_node(page_id, &snapshot.document_id, generation, node, group_id);
             let projected_bytes = serde_json::to_vec(&projected)
                 .map(|value| value.len())
                 .unwrap_or(MAX_SNAPSHOT_BYTES);
@@ -643,6 +656,7 @@ impl BrowserRuntime {
         document_id: &str,
         snapshot_generation: u64,
         node: BackendNode,
+        group_id: Option<String>,
     ) -> SemanticNode {
         let mut element_id = None;
         if node.actionable {
@@ -666,9 +680,22 @@ impl BrowserRuntime {
             name: node
                 .name
                 .map(|value| clip_bytes(&value, MAX_NODE_TEXT_BYTES)),
+            description: node
+                .description
+                .map(|value| clip_bytes(&value, MAX_NODE_TEXT_BYTES)),
             value: node
                 .value
                 .map(|value| clip_bytes(&value, MAX_NODE_TEXT_BYTES)),
+            group_id,
+            group_role: node.group_role.map(|value| clip_chars(&value, 64)),
+            group_label: node
+                .group_label
+                .map(|value| clip_bytes(&value, MAX_NODE_TEXT_BYTES)),
+            checked: node.checked.map(|value| clip_chars(&value, 32)),
+            selected: node.selected,
+            required: node.required,
+            disabled: node.disabled,
+            read_only: node.read_only,
             element_id,
             actionable: node.actionable,
         }
@@ -863,7 +890,16 @@ mod tests {
                 .map(|index| BackendNode {
                     role: "button".to_string(),
                     name: Some(format!("Go {index}")),
+                    description: None,
                     value: Some("x".repeat(MAX_NODE_TEXT_BYTES * 2)),
+                    group_key: None,
+                    group_role: None,
+                    group_label: None,
+                    checked: None,
+                    selected: None,
+                    required: None,
+                    disabled: None,
+                    read_only: None,
                     backend_node_id: Some(index as i64 + 7),
                     actionable: true,
                 })

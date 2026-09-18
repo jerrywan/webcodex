@@ -3,6 +3,7 @@ use crate::types::{
     MAX_PAGES_PER_BROWSER, MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_NODES, REQUEST_TIMEOUT,
 };
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::io::Read;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -69,7 +70,16 @@ pub(crate) struct BackendPage {
 pub(crate) struct BackendNode {
     pub(crate) role: String,
     pub(crate) name: Option<String>,
+    pub(crate) description: Option<String>,
     pub(crate) value: Option<String>,
+    pub(crate) group_key: Option<String>,
+    pub(crate) group_role: Option<String>,
+    pub(crate) group_label: Option<String>,
+    pub(crate) checked: Option<String>,
+    pub(crate) selected: Option<bool>,
+    pub(crate) required: Option<bool>,
+    pub(crate) disabled: Option<bool>,
+    pub(crate) read_only: Option<bool>,
     pub(crate) backend_node_id: Option<i64>,
     pub(crate) actionable: bool,
 }
@@ -564,23 +574,45 @@ impl BrowserBackend for CdpBackend {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        let raw_by_id = raw_nodes
+            .iter()
+            .filter_map(|node| {
+                node.get("nodeId")
+                    .and_then(Value::as_str)
+                    .map(|id| (id.to_string(), node))
+            })
+            .collect::<HashMap<_, _>>();
         let mut nodes = Vec::new();
         let mut truncated = raw_nodes.len() > MAX_SNAPSHOT_NODES;
         let mut estimated_bytes = 0usize;
-        for raw in raw_nodes.into_iter().take(MAX_SNAPSHOT_NODES) {
-            let role = ax_value(&raw, "role").unwrap_or_else(|| "generic".to_string());
+        for raw in raw_nodes.iter().take(MAX_SNAPSHOT_NODES) {
+            let role = ax_value(raw, "role").unwrap_or_else(|| "generic".to_string());
             if role == "RootWebArea" {
                 continue;
             }
-            let name = ax_value(&raw, "name");
-            let value = ax_value(&raw, "value");
+            let name = ax_value(raw, "name");
+            let description = ax_value(raw, "description");
+            let value = ax_value(raw, "value");
+            let group = ax_group_context(raw, &raw_by_id);
+            let checked = ax_property_string(raw, "checked");
+            let selected = ax_property_bool(raw, "selected");
+            let required = ax_property_bool(raw, "required");
+            let disabled = ax_property_bool(raw, "disabled");
+            let read_only = ax_property_bool(raw, "readonly");
             let backend_node_id = raw.get("backendDOMNodeId").and_then(Value::as_i64);
             let actionable = is_actionable(&role) && backend_node_id.is_some();
             estimated_bytes = estimated_bytes
                 .saturating_add(role.len())
                 .saturating_add(name.as_deref().map(str::len).unwrap_or(0))
+                .saturating_add(description.as_deref().map(str::len).unwrap_or(0))
                 .saturating_add(value.as_deref().map(str::len).unwrap_or(0))
-                .saturating_add(64);
+                .saturating_add(
+                    group
+                        .as_ref()
+                        .map(|(_, role, label)| role.len() + label.len())
+                        .unwrap_or(0),
+                )
+                .saturating_add(128);
             if estimated_bytes > MAX_SNAPSHOT_BYTES {
                 truncated = true;
                 break;
@@ -588,7 +620,16 @@ impl BrowserBackend for CdpBackend {
             nodes.push(BackendNode {
                 role,
                 name,
+                description,
                 value,
+                group_key: group.as_ref().map(|(key, _, _)| key.clone()),
+                group_role: group.as_ref().map(|(_, role, _)| role.clone()),
+                group_label: group.map(|(_, _, label)| label),
+                checked,
+                selected,
+                required,
+                disabled,
+                read_only,
                 backend_node_id,
                 actionable,
             });
@@ -954,6 +995,55 @@ fn ax_value(node: &Value, key: &str) -> Option<String> {
         .get("value")?
         .as_str()
         .map(|value| clip_bytes(value, MAX_NODE_TEXT_BYTES))
+}
+
+fn ax_property<'a>(node: &'a Value, name: &str) -> Option<&'a Value> {
+    node.get("properties")?
+        .as_array()?
+        .iter()
+        .find(|property| property.get("name").and_then(Value::as_str) == Some(name))?
+        .get("value")?
+        .get("value")
+}
+
+fn ax_property_bool(node: &Value, name: &str) -> Option<bool> {
+    match ax_property(node, name)? {
+        Value::Bool(value) => Some(*value),
+        Value::String(value) if value == "true" => Some(true),
+        Value::String(value) if value == "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn ax_property_string(node: &Value, name: &str) -> Option<String> {
+    match ax_property(node, name)? {
+        Value::String(value) => Some(clip_bytes(value, MAX_NODE_TEXT_BYTES)),
+        Value::Bool(value) => Some(value.to_string()),
+        value if value.is_number() => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn ax_group_context(
+    node: &Value,
+    by_id: &HashMap<String, &Value>,
+) -> Option<(String, String, String)> {
+    let mut parent_id = node.get("parentId").and_then(Value::as_str);
+    for _ in 0..8 {
+        let id = parent_id?;
+        let parent = by_id.get(id)?;
+        let role = ax_value(parent, "role").unwrap_or_default();
+        let name = ax_value(parent, "name").unwrap_or_default();
+        if matches!(
+            role.as_str(),
+            "group" | "radiogroup" | "combobox" | "listbox"
+        ) && !name.trim().is_empty()
+        {
+            return Some((id.to_string(), role, name));
+        }
+        parent_id = parent.get("parentId").and_then(Value::as_str);
+    }
+    None
 }
 
 fn is_actionable(role: &str) -> bool {
@@ -1384,6 +1474,54 @@ Connection: close
             crate::types::ExecutionState::OutcomeUnknown
         );
         assert_eq!(partial.recovery_action, Some("snapshot"));
+    }
+
+    #[test]
+    fn ax_form_metadata_extracts_group_and_control_state() {
+        let raw_nodes = vec![
+            json!({
+                "nodeId":"group-1",
+                "role":{"value":"group"},
+                "name":{"value":"是否接受岗位调剂"},
+                "parentId":"form-1"
+            }),
+            json!({
+                "nodeId":"wrapper-1",
+                "role":{"value":"none"},
+                "parentId":"group-1"
+            }),
+            json!({
+                "nodeId":"radio-1",
+                "role":{"value":"radio"},
+                "name":{"value":"否"},
+                "parentId":"wrapper-1",
+                "properties":[
+                    {"name":"checked","value":{"value":"false"}},
+                    {"name":"required","value":{"value":true}},
+                    {"name":"disabled","value":{"value":false}}
+                ]
+            }),
+        ];
+        let by_id = raw_nodes
+            .iter()
+            .filter_map(|node| {
+                node.get("nodeId")
+                    .and_then(Value::as_str)
+                    .map(|id| (id.to_string(), node))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let group = ax_group_context(&raw_nodes[2], &by_id).unwrap();
+        assert_eq!(group.0, "group-1");
+        assert_eq!(group.1, "group");
+        assert_eq!(group.2, "是否接受岗位调剂");
+        assert_eq!(
+            ax_property_string(&raw_nodes[2], "checked").as_deref(),
+            Some("false")
+        );
+        assert_eq!(ax_property_bool(&raw_nodes[2], "required"), Some(true));
+        assert_eq!(ax_property_bool(&raw_nodes[2], "disabled"), Some(false));
+        assert_eq!(ax_property_bool(&raw_nodes[2], "readonly"), None);
     }
 
     #[test]

@@ -66,7 +66,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             super::ToolSessionEvidencePolicy::NONE,
         ),
-        "Guaranteed read-only Browser observation gateway with a closed action vocabulary: targets, browsers, pages, semantic snapshot, and screenshot. Browser/Page/Element identities are opaque and process-local; semantic snapshots are bounded and navigation makes older element identities stale. Screenshots use the shared native-image delivery contract at the MCP boundary. Exact Runner capability and browser:read authority are checked before dispatch. No effect, process launch, arbitrary protocol input, script execution, profile attachment, or shell fallback is available here.",
+        "Guaranteed read-only Browser observation gateway with a closed action vocabulary: targets, browsers, pages, semantic snapshot, and screenshot. Browser/Page/Element identities are opaque and process-local; semantic snapshots are bounded, expose typed form-control state and snapshot-local group context when Chromium provides it, and navigation makes older element identities stale. Screenshots use the shared native-image delivery contract at the MCP boundary. Exact Runner capability and browser:read authority are checked before dispatch. No effect, process launch, arbitrary protocol input, script execution, profile attachment, or shell fallback is available here.",
     ),
     require_any_scopes(
         permission_risk(
