@@ -32,7 +32,7 @@
         "required": false,
         "expectation": "No code validation is required; final workspace must remain unchanged."
       },
-      "code_mode_surface": "e1"
+      "code_mode_surface": "read_only"
     },
     {
       "id": "focused_edit_validation",
@@ -52,7 +52,7 @@
         "command": "cargo check",
         "expected_exit_code": 0
       },
-      "code_mode_surface": "e2b"
+      "code_mode_surface": "guarded_edit"
     },
     {
       "id": "failed_validation_recovery",
@@ -75,7 +75,7 @@
           "success"
         ]
       },
-      "code_mode_surface": "e2b"
+      "code_mode_surface": "guarded_edit"
     },
     {
       "id": "long_validation_handoff",
@@ -94,14 +94,14 @@
         "sync_wait_secs": 1,
         "expected_terminal_result": "success"
       },
-      "code_mode_surface": "e2a"
+      "code_mode_surface": "validation"
     },
     {
       "id": "independent_observations",
       "title": "Independent read-only observations",
       "target": "webcodex_repository",
       "prompt": "Perform a read-only readiness check for the Agent Loop baseline. Report whether the workspace is clean, whether the current worktree diff contains changes, where CODE_MODE_TOOLS is defined, and the documented meaning of observed_span_ms. Inspect the relevant repository sources and report only those facts. Do not modify files.",
-      "code_mode_surface": "e1",
+      "code_mode_surface": "read_only",
       "dogfood_focus": [
         "independent_observations",
         "model_round_trips",
@@ -127,7 +127,7 @@
       "title": "Adaptive search then targeted read",
       "target": "webcodex_repository",
       "prompt": "Locate the repository references that define outside_webcodex_gap_ms, then inspect the most relevant matched ranges and explain when a serial gap is measured versus unavailable. Keep the workspace unchanged.",
-      "code_mode_surface": "e1",
+      "code_mode_surface": "read_only",
       "dogfood_focus": [
         "adaptive_search_read",
         "result_field_usage",
@@ -152,7 +152,7 @@
       "title": "Related multi-file and multi-query observations",
       "target": "webcodex_repository",
       "prompt": "Cross-check the Agent Loop protocol across AGENTS.md, docs/experiments/agent-loop-baseline.md, and scripts/agent_loop_cases.json. Also locate references to model_round_trips and nested_raw_result_bytes_total. Report the protocol rule for clean paired runs, the wall-time caveat, and where the two metrics are represented. Do not modify files.",
-      "code_mode_surface": "e1",
+      "code_mode_surface": "read_only",
       "dogfood_focus": [
         "native_batching",
         "related_reads",
@@ -180,7 +180,7 @@
       "title": "Layered search-result follow-up",
       "target": "webcodex_repository",
       "prompt": "Find same_case_requires_same_base_revision in the repository, report the first matching file and line, then read the surrounding manifest protocol and the corresponding Agent Loop documentation. State whether the two sources agree about paired-run base revisions. Do not modify files.",
-      "code_mode_surface": "e1",
+      "code_mode_surface": "read_only",
       "dogfood_focus": [
         "result_shape",
         "search_match_projection",
@@ -205,7 +205,7 @@
       "title": "Expected missing-file business failure with fallback",
       "target": "coding_loop_eval_fixture",
       "prompt": "Inspect docs/task-notes.md in the disposable coding-loop eval project. That optional note may be absent; if the read reports it missing, treat that as the expected business result and continue by reading README.md. Report the README title and the stable phrase describing why the project exists. Do not modify files.",
-      "code_mode_surface": "e1",
+      "code_mode_surface": "read_only",
       "dogfood_focus": [
         "known_business_failure",
         "failed_child_calls",
@@ -228,7 +228,7 @@
       "title": "Large read evidence with compact final projection",
       "target": "webcodex_repository",
       "prompt": "Read the relevant guidance in AGENTS.md, docs/agent/tool-contract-guidelines.md, and docs/experiments/agent-loop-baseline.md. Return exactly three concise facts: the rule for independent versus adaptive observations, what observed_span_ms does not mean, and the authorization rule for deploy/restart. Do not quote long passages and do not modify files.",
-      "code_mode_surface": "e1",
+      "code_mode_surface": "read_only",
       "dogfood_focus": [
         "compact_projection",
         "nested_raw_result_bytes",

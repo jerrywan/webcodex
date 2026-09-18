@@ -25,8 +25,8 @@ decision-relevant only when both runs use the same exact case definition and
 40-hex Git base and both satisfy the case correctness/validation gate. The report
 never emits a winner, score, or overall ranking.
 
-Code Mode samples must identify the actual experimental surface as `e1`,
-`e2a`, or `e2b`. They are not pooled under a generic `code_mode` surface.
+Code Mode samples must identify the actual experimental surface as `read_only`,
+`validation`, or `guarded_edit`. They are not pooled under a generic `code_mode` surface.
 
 ## Evidence contract
 
@@ -96,7 +96,7 @@ The sidecar schema is version 1 and rejects unknown fields. Example:
   "schema_version": 1,
   "case_id": "<case-id>",
   "variant": "<direct-or-code_mode>",
-  "surface": "<direct-or-e1-or-e2a-or-e2b>",
+  "surface": "<direct-or-read_only-or-validation-or-guarded_edit>",
   "base_revision": "<40-hex-base>",
   "case_fingerprint": "<64-hex-case-sha256>",
   "repair_turns": {
@@ -200,11 +200,11 @@ by `eval_coding_loop.sh`; this protocol does not create a second runtime harness
 Read-only WebCodex-repository cases must leave the workspace clean.
 
 The corpus records an expected `code_mode_surface` for every current case:
-read-only cases use E1, the long validation/Job case uses E2a, and edit-oriented
-cases use E2b with validation outside the mutating cell where needed. The parser
-keeps `code_mode_surface` and `dogfood_focus` optional for historical schema-v1
-manifest compatibility, but a current case that declares a surface rejects a
-Code Mode run labeled with another surface.
+read-only cases use `read_only`, the long validation/Job case uses `validation`,
+and edit-oriented cases use `guarded_edit` with validation outside the mutating
+cell where needed. The parser keeps `code_mode_surface` and `dogfood_focus`
+optional for historical schema-v1 manifest compatibility, but a current case that
+declares a surface rejects a Code Mode run labeled with another surface.
 
 ## Paired run protocol
 
@@ -215,13 +215,46 @@ For one case, the Direct and Code Mode runs must satisfy all of these constraint
 - same user task prompt and correctness expectations;
 - Direct uses `guidance_profile=direct`;
 - Code Mode uses `guidance_profile=code_mode`;
-- Code Mode records `surface=e1`, `e2a`, or `e2b` explicitly;
+- Code Mode records `surface=read_only`, `validation`, or `guarded_edit` explicitly;
 - the only intended experimental variable is the guidance/surface behavior being
   evaluated.
 
 Runtime Project, Workflow Session, Window, tunnel, and host-internal identifiers
 may be used transiently to select authoritative evidence. They must not be written
 into the manifest, docs, tests, run annotation, or durable benchmark result.
+
+## Typed Surface v1 observed dogfood — 2026-09-18
+
+A real self-hosted dogfood build from the Typed Surface v1 branch ran the three
+fixed acceptance tasks below. Each pair used the same task definition and Git
+base, and the bounded annotation recorded zero contract-repair turns. These are
+observations from this run, not a general speed claim.
+
+The exact Code Mode callable contracts measured 9,209 bytes for `read_only`,
+12,108 bytes for `validation`, and 11,766 bytes for `guarded_edit`. All stayed
+below the 16 KiB hard cap; ordinary Direct discovery did not carry the sidecar.
+
+| Task | Direct outer / meaningful | Code Mode outer / meaningful | Nested evidence | Result bytes | Outcome |
+| --- | ---: | ---: | --- | ---: | --- |
+| A — bounded repository review | 4 / 4 | 3 / 2 | 3 children, `max_in_flight=3`; 86,298 raw bytes → 1,930 returned bytes | 90,987 → 19,773 | Both runs reached the same clean-worktree, no-diff, timing-contract, and search-location conclusions with zero repairs. |
+| B — adaptive read → one guarded edit | 5 / 5 | 4 / 3 | 4 children, `max_in_flight=2`; 3,262 raw bytes → 295 returned bytes | 8,274 → 21,304 | Both edits succeeded on the first attempt, produced the same one-file change, preserved the unrelated function, and passed `cargo check`. The Code Mode result-byte total was larger because one progressive-discovery contract cost about 12 KiB on this tiny task. |
+| C — validation launch → Job continuation | 11 / 11* | 5 / 4* | `validation` launched one validator child plus one independent read; `job_handoffs=1`; 46,882 raw bytes → 918 returned bytes | 70,722 → 29,326* | Both runs launched validation exactly once, retained the same execution/continuation identity through terminal success, and did not redispatch validation. |
+
+`*` Task C's raw outer-call and result-byte counts are not a clean throughput
+comparison. The client/tool wrapper used short waits while a roughly 50-second
+validation ran, producing eight Direct and two Code Mode `observe_jobs` polls of
+their respective same-execution continuations. That cadence is Host/tooling
+behavior, not model reasoning. The decision-relevant correctness fact is that
+both paths launched one validation execution, received one canonical Job
+continuation identity, and followed that same execution to terminal success.
+
+Across A and B, the observed `model_round_trip_proxy` fell by two meaningful
+outer calls in each pair, with no invalid-argument, wrong-result-shape, or child
+call repair. Task A also materially reduced model-visible result bytes. Task B
+shows the opposite byte tradeoff for a very small edit: progressive typed
+discovery can cost more bytes than it saves when the task itself has little raw
+evidence. That is a reason to keep the contract progressive rather than preload it
+into every startup response.
 
 ## Capture and summarize a run
 
@@ -259,7 +292,7 @@ python3 scripts/agent_loop_report.py summarize \
   --workflow-session-id <workflow-session-id> \
   --case-id <case-id> \
   --variant code_mode \
-  --surface <e1-or-e2a-or-e2b> \
+  --surface <read_only-or-validation-or-guarded_edit> \
   --base-revision <40-hex-base> \
   --run-annotation <code-mode-run-annotation.json> \
   --output <code-mode-report.json>
@@ -359,7 +392,8 @@ output includes at least:
 
 `case_compatibility` requires the same case id, exact base revision, and exact
 case fingerprint. `pair_compatibility` additionally requires Direct as the
-baseline and Code Mode with explicit E1/E2a/E2b as the candidate.
+baseline and Code Mode with an explicit `read_only`, `validation`, or
+`guarded_edit` surface as the candidate.
 `correctness_compatibility` requires both runs to pass the case correctness gate
 and any required validation. `throughput_compatibility` is true only when both
 the pair and correctness gates pass.

@@ -22,7 +22,7 @@ from typing import Any, Iterable
 SCHEMA_VERSION = 1
 DEFAULT_CASE_MANIFEST = Path(__file__).with_name("agent_loop_cases.json")
 CODE_MODE_TOOLS = frozenset(("code_mode_exec", "code_mode_exec_effectful", "code_mode_exec_mutating"))
-CODE_MODE_SURFACES = frozenset(("e1", "e2a", "e2b"))
+CODE_MODE_SURFACES = frozenset(("read_only", "validation", "guarded_edit"))
 RUN_ANNOTATION_SCHEMA_VERSION = 1
 REPAIR_REASONS = frozenset((
     "invalid_arguments",
@@ -104,7 +104,7 @@ def validate_case_manifest(value: Any) -> dict[str, Any]:
         surface = case.get("code_mode_surface")
         if surface is not None and surface not in CODE_MODE_SURFACES:
             raise ReportError(
-                f"cases[{index}].code_mode_surface must be one of e1, e2a, or e2b"
+                f"cases[{index}].code_mode_surface must be one of read_only, validation, or guarded_edit"
             )
         focus = case.get("dogfood_focus")
         if focus is not None:
@@ -179,7 +179,7 @@ def validate_run_annotation(value: Any) -> dict[str, Any]:
         if surface != "direct":
             raise ReportError("direct run annotation requires surface=direct")
     elif surface not in CODE_MODE_SURFACES:
-        raise ReportError("code_mode run annotation requires surface=e1, e2a, or e2b")
+        raise ReportError("code_mode run annotation requires surface=read_only, validation, or guarded_edit")
     if not _is_exact_git_revision(value.get("base_revision")):
         raise ReportError("run annotation base_revision must be an exact 40-hex Git commit")
     if not _is_exact_sha256(value.get("case_fingerprint")):
@@ -959,9 +959,9 @@ def _benchmark_metadata(*, case_manifest: Path | None, case_id: str | None, vari
             raise ReportError("--variant direct requires --surface direct")
     elif variant == "code_mode":
         if surface is None:
-            raise ReportError("--variant code_mode benchmark runs require --surface e1, e2a, or e2b")
+            raise ReportError("--variant code_mode benchmark runs require --surface read_only, validation, or guarded_edit")
         if surface not in CODE_MODE_SURFACES:
-            raise ReportError("--variant code_mode requires --surface e1, e2a, or e2b")
+            raise ReportError("--variant code_mode requires --surface read_only, validation, or guarded_edit")
     if not _is_exact_git_revision(base_revision):
         raise ReportError("--case-id requires --base-revision as an exact 40-hex Git commit")
     manifest = load_case_manifest(case_manifest or DEFAULT_CASE_MANIFEST)
@@ -1222,7 +1222,7 @@ def _pair_compatibility(
     if right.get("variant") != "code_mode" or right.get("surface") not in CODE_MODE_SURFACES:
         return {
             "comparable": False,
-            "reason": "candidate must be code_mode with explicit surface=e1, e2a, or e2b",
+            "reason": "candidate must be code_mode with explicit surface=read_only, validation, or guarded_edit",
         }
     return {"comparable": True, "reason": None}
 
@@ -1373,7 +1373,7 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize_parser.add_argument("--case-manifest", type=Path)
     summarize_parser.add_argument("--case-id")
     summarize_parser.add_argument("--variant", choices=("direct", "code_mode"))
-    summarize_parser.add_argument("--surface", choices=("direct", "e1", "e2a", "e2b"))
+    summarize_parser.add_argument("--surface", choices=("direct", "read_only", "validation", "guarded_edit"))
     summarize_parser.add_argument("--base-revision")
     summarize_parser.add_argument("--run-annotation", type=Path)
     summarize_parser.add_argument("--output", type=Path)
