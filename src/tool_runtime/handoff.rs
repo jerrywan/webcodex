@@ -1075,6 +1075,13 @@ fn compact_workflow_outcomes(
             push_unique(&mut blocking_reasons, "validation_failed");
             push_unique_action(&mut actions, VALIDATION_IDENTITY_REUSE_ACTION);
         }
+        Some("unproven") => {
+            push_unique(&mut warning_reasons, "validation_inconclusive");
+            push_unique_action(
+                &mut actions,
+                "review source_state and external workspace stability; rerunning validation alone cannot prove current source",
+            );
+        }
         Some("inconclusive") => {
             push_unique(&mut warning_reasons, "validation_inconclusive");
             push_unique_action(

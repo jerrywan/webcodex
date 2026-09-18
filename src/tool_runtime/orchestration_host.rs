@@ -125,6 +125,9 @@ pub(crate) struct OrchestrationPolicy {
     /// comes only from ToolEffect::Mutate; a rejected over-budget call never
     /// crosses canonical business dispatch.
     pub(crate) max_mutation_calls: Option<usize>,
+    /// Require a successful known mutation result before validation; after an
+    /// unknown effect or Job handoff, further consequential calls fail closed.
+    pub(crate) validation_after_mutation: bool,
 }
 
 impl OrchestrationPolicy {
@@ -292,6 +295,11 @@ pub(crate) struct ConsequentialChildReceipt {
     pub(crate) ordinal: usize,
     pub(crate) tool: String,
     pub(crate) outcome: ConsequentialChildOutcome,
+    /// Canonical business success for known results only, never source proof.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) success: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) source_state: Option<webcodex_core::validation_source::ValidationSourceState>,
     /// Authoritative workspace state-change truth for canonical mutation only.
     /// Non-mutations and uncertain mutation outcomes deliberately omit it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -329,6 +337,8 @@ impl OrchestrationEffectAccumulator {
                 // Until canonical ToolRuntime returns trustworthy evidence, an
                 // already-dispatched consequential child is conservatively unknown.
                 outcome: ConsequentialChildOutcome::OutcomeUnknown,
+                success: None,
+                source_state: None,
                 state_changed: None,
                 job_id: None,
                 continuation: None,
@@ -344,6 +354,17 @@ impl OrchestrationEffectAccumulator {
         let output = &result.output;
         let execution_state = output.get("execution_state").and_then(Value::as_str);
         let failure_kind = output.get("failure_kind").and_then(Value::as_str);
+        if let Some(child) = self.children.get_mut(&ordinal) {
+            if matches!(child.tool.as_str(), "cargo_check" | "cargo_test") {
+                child.source_state = Some(
+                    output
+                        .get("source_state")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default(),
+                );
+            }
+        }
         if execution_state == Some("outcome_unknown") || failure_kind == Some("outcome_unknown") {
             if let Some(child) = self.children.get_mut(&ordinal) {
                 child.outcome = ConsequentialChildOutcome::OutcomeUnknown;
@@ -387,6 +408,7 @@ impl OrchestrationEffectAccumulator {
                 if let Some(state_changed) = mutation_state_changed {
                     child.outcome = ConsequentialChildOutcome::KnownResult;
                     child.state_changed = Some(state_changed);
+                    child.success = Some(result.success);
                 } else {
                     // A mutation without authoritative state-change truth is not
                     // a known effect result, even when the business ToolResult
@@ -397,6 +419,7 @@ impl OrchestrationEffectAccumulator {
             } else {
                 child.outcome = ConsequentialChildOutcome::KnownResult;
                 child.state_changed = None;
+                child.success = Some(result.success);
             }
         }
     }
@@ -645,10 +668,23 @@ impl CanonicalOrchestrationHost {
     }
 
     pub(crate) fn effect_receipt(&self) -> OrchestrationEffectReceipt {
-        self.effects
+        let mut receipt = self
+            .effects
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .receipt()
+            .receipt();
+        for child in &mut receipt.children {
+            if let Some(source) = child.source_state.as_mut() {
+                if source.freshness != webcodex_core::validation_source::ValidationFreshness::Stale
+                {
+                    *source = self
+                        .tools
+                        .validation_sources
+                        .observe(&self.project, source.start_fence.as_ref());
+                }
+            }
+        }
+        receipt
     }
 
     fn prepare_arguments(
@@ -743,6 +779,37 @@ impl CanonicalOrchestrationHost {
                     "orchestration frontend is closed; nested call was not dispatched",
                 ));
             }
+            if self.policy.validation_after_mutation
+                && runtime_tool_metadata(&tool_name).effect != ToolEffect::Observe
+            {
+                let effects = self
+                    .effects
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if effects
+                    .children
+                    .values()
+                    .any(|child| child.outcome != ConsequentialChildOutcome::KnownResult)
+                {
+                    return Err(OrchestrationHostError::new(
+                        OrchestrationHostFailureKind::CompositionPolicyDenied,
+                        "a consequential child is unresolved; use its exact outer Job continuation or reconcile unknown effects, never retry the JavaScript program",
+                    ));
+                }
+                if matches!(tool_name.as_str(), "cargo_check" | "cargo_test")
+                    && !effects.children.values().any(|child| {
+                        child.tool == "apply_text_edits"
+                            && child.outcome == ConsequentialChildOutcome::KnownResult
+                            && child.success == Some(true)
+                            && child.state_changed.is_some()
+                    })
+                {
+                    return Err(OrchestrationHostError::new(
+                        OrchestrationHostFailureKind::CompositionPolicyDenied,
+                        "validation requires a successful canonical apply_text_edits result with known state_changed in this cell; rejected or unknown edits cannot be validated",
+                    ));
+                }
+            }
             // The acceptance gate plus scheduling/Project mutation fences establish
             // one linear dispatch boundary with stop_accepting_nested_calls(): once
             // admission closes, a waiter that later acquires either fence cannot start.
@@ -803,8 +870,6 @@ impl CanonicalOrchestrationHost {
         // Both orchestration fences cover exactly the canonical ToolRuntime
         // invocation. Direct mutations never acquire the Project fence, and a
         // returned durable Job owns its own lifecycle after this point.
-        drop(mutation_guard);
-        drop(scheduling_guard);
         {
             let mut effects = self
                 .effects
@@ -816,6 +881,10 @@ impl CanonicalOrchestrationHost {
                 effects.finish(child_ordinal, result);
             }
         }
+        // Publish effect truth before releasing the sequential scheduling fence:
+        // a dependent validator must not race the preceding edit receipt.
+        drop(mutation_guard);
+        drop(scheduling_guard);
         let nested_success = outcome.error_status.is_none()
             && outcome.result.as_ref().is_some_and(|result| result.success);
         let raw_result_bytes = outcome

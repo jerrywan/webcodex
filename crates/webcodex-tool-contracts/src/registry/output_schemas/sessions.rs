@@ -694,10 +694,10 @@ fn validation_evidence_schema() -> Value {
     fn current_validation_evidence_schema() -> Value {
         json!({
             "type": "object",
-            "description": "Current workspace validation evidence for the current attempt after the latest trusted material workspace-content change. Historical ledger failures remain separately visible and are not erased by this projection.",
+            "description": "Current-attempt validation candidates after observed changes. Execution success without current-source proof is unproven, never passed; historical results remain separately visible.",
             "additionalProperties": false,
             "properties": {
-                "status": {"type": "string", "enum": ["passed", "failed", "inconclusive", "expected", "stale", "not_run", "unknown"]},
+                "status": {"type": "string", "enum": ["unproven", "failed", "inconclusive", "expected", "stale", "not_run", "unknown"]},
                 "reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
                 "latest_status": {"type": "string", "enum": ["passed", "failed", "inconclusive", "expected", "not_run", "unknown"]},
                 "events_total": {"type": "integer", "minimum": 0},
@@ -820,6 +820,7 @@ fn validation_event_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+            "source_state": super::common::validation_source_state_schema(),
             "tool_name": { "type": "string", "enum": ["cargo_fmt", "cargo_check", "cargo_test", "go_test", "run_process", "run_script", "run_shell", "run_job"] },
             "identity": { "type": "string", "maxLength": 256 },
             "assertion_name": { "type": "string", "minLength": 1, "maxLength": MAX_MODEL_VALIDATION_ASSERTION_NAME_CHARS },

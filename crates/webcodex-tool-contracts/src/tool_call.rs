@@ -1642,8 +1642,8 @@ pub enum ToolCall {
         timeout_ms: Option<u64>,
     },
 
-    /// Execute one experimental E2b guarded mutation cell. The outer envelope is
-    /// ProjectWrite; nested mutation remains a canonical apply_text_edits call.
+    /// Execute one experimental E2c bounded coding cell. The outer envelope
+    /// requires ProjectWrite and JobRun authority; children remain canonical.
     #[cfg(feature = "experimental-code-mode")]
     CodeModeExecMutating {
         /// Required Project target. Nested JavaScript tool calls cannot select or override Project authority.
@@ -1651,10 +1651,10 @@ pub enum ToolCall {
         /// Required exact Workflow Session. Every nested child remains a canonical ToolRuntime invocation in this same Session.
         #[schemars(regex(pattern = "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"))]
         session_id: String,
-        /// Experimental E2b JavaScript orchestration source. Admitted tools are the E1 read set plus one canonical apply_text_edits mutation attempt. Validation, shell/process, Jobs, other mutations, gateways, and recursive Code Mode are not exposed. Use read_files read_revision for guarded adaptive edits and inspect after mutation.
+        /// Experimental E2c source: E1 reads, at most one canonical apply_text_edits attempt, then cargo_check/cargo_test only after a successful known edit (including no-op). Use read_revision for guarded edits. Inspect source_state independently of execution success. Return Job handoffs to the outer workflow, never wait inside JS. No shell/process, nested Job observation, alternate writes, gateways, recursion or automatic whole-program retry.
         #[schemars(length(max = 65536))]
         source: String,
-        /// Optional orchestration/frontend decision deadline in milliseconds. Defaults to 5000 and is server-clamped to 1..30000. Already-started canonical mutation may be reconciled for at most a short bounded drain so state-change truth is not fabricated.
+        /// Optional frontend decision deadline in milliseconds. Defaults to 5000, clamped to 1..30000. A short bounded drain preserves already-dispatched mutation/validation truth and exact Job continuations; timeout is not rollback or retry authority.
         #[schemars(range(min = 0))]
         #[serde(default)]
         timeout_ms: Option<u64>,

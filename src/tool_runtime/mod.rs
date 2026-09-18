@@ -94,6 +94,7 @@ mod surface;
 pub(crate) use tool_audit::session_log_result_for_tool as audit_safe_result_for_tool;
 mod validation_events;
 pub(crate) mod validation_profile;
+mod validation_source;
 pub(crate) mod window_activity;
 pub(crate) use webcodex_core::{
     project_instructions, project_listing as file_listing, validation_evidence as validation_parser,

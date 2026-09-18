@@ -108,6 +108,23 @@ fn work_result_projection_is_sparse_bounded_and_honest() {
 }
 
 #[test]
+fn work_result_preserves_unproven_source_without_hiding_historical_execution_success() {
+    let projected = build_work_result_projection(
+        "agent:special:demo",
+        "wc_sess_0123456789abcdef",
+        true,
+        &json!({"git_available":true,"clean":true}),
+        &validation("passed", "passed", 1, 0),
+        &current_validation("unproven", 0, 0),
+        &review(0),
+        false,
+    );
+    assert_eq!(projected["validation"]["status"], "passed");
+    assert_eq!(projected["validation"]["successes"], 1);
+    assert_eq!(projected["validation"]["current_status"], "unproven");
+}
+
+#[test]
 fn work_result_state_version_matches_buffered_projection_hash() {
     let projection = build_work_result_projection(
         "agent:special:项目-🦀",
@@ -217,7 +234,7 @@ fn work_result_projection_marks_bounded_history_partial_without_inventing_absenc
     assert_eq!(partial["review"]["history_partial"], true);
     assert_eq!(partial["review"]["total"], 0);
 
-    for current in ["passed", "failed", "stale"] {
+    for current in ["unproven", "failed", "stale"] {
         let projected = build_work_result_projection(
             "agent:special:demo",
             &session_id,

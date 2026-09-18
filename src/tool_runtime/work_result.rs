@@ -471,7 +471,7 @@ fn validation_latest_status(status: Option<&str>) -> &'static str {
 fn current_validation_status(status: Option<&str>) -> &'static str {
     match status {
         Some("not_run") => "not_run",
-        Some("passed") => "passed",
+        Some("unproven") => "unproven",
         Some("failed") => "failed",
         Some("expected") => "expected",
         Some("inconclusive") => "inconclusive",

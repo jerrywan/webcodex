@@ -6,6 +6,7 @@
 
 use serde_json::{json, Value};
 use webcodex_core::runner_job_lifecycle::RunnerJobLifecycle;
+use webcodex_core::validation_source::{ValidationFreshness, ValidationSourceState};
 use webcodex_tool_runtime_contracts::tool_audit::{
     assertion_validation_identity, is_structured_validation_target_identity,
     is_validation_execution_identity,
@@ -109,6 +110,29 @@ impl ToolRuntime {
         let mut events = refreshed.events.clone();
         self.append_terminal_generic_job_validation_events(&refreshed, &mut events, auth)
             .await;
+        // Refresh a read-time projection, never rewrite durable execution facts.
+        // This also sees canonical writes from other Sessions on this Project.
+        for event in &mut events {
+            let project = event
+                .resolved_project
+                .as_deref()
+                .or(event.project.as_deref());
+            if let (Some(project), Some(output)) =
+                (project, event.validation_output_summary.as_mut())
+            {
+                let source = output
+                    .get("source_state")
+                    .cloned()
+                    .and_then(|value| serde_json::from_value::<ValidationSourceState>(value).ok());
+                if let Some(source) = source {
+                    if source.freshness != ValidationFreshness::Stale {
+                        output["source_state"] = json!(self
+                            .validation_sources
+                            .observe(project, source.start_fence.as_ref()));
+                    }
+                }
+            }
+        }
         events.sort_by_key(|event| {
             (
                 event.timestamp,
@@ -422,6 +446,7 @@ impl ToolRuntime {
                     "no_run",
                     "test_count_assertion",
                     "diagnostics",
+                    "source_state",
                 ] {
                     // A structured terminal count can be independently proven
                     // even when bounded-log component diagnostics are absent.

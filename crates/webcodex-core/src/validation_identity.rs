@@ -1,4 +1,6 @@
-//! Stable validation identity parsing used across audit and Workflow Session layers.
+//! Stable validation target identity parsing used across audit and Workflow Session layers.
+//! These identities cover executable target parameters, NEVER workspace source state.
+//! Source observations are a separate, deliberately weaker `validation_source` contract.
 
 use crate::runner_protocol::{
     normalize_cargo_value, normalize_go_test_packages, normalize_rust_test_filter,

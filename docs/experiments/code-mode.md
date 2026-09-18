@@ -1,4 +1,4 @@
-# Experimental Code Mode — E1 Read-Only, E2a Effectful Foundation, and E2b Guarded Mutation
+# Experimental Code Mode — E1, E2a, and E2c Bounded Coding
 
 > This is an experiment, not a stable compatibility surface.
 
@@ -397,7 +397,7 @@ Frontend admission remains a separate explicit policy. A tool becoming `Parallel
 
 `CanonicalOrchestrationHost` enforces the policy with one composition-local shared/exclusive fence. `Parallel` child invocation intervals may overlap. A `Sequential` child has exclusive access through the canonical ToolRuntime invocation. The lock ends when that invocation returns, including when structured validation returns its existing same-execution Job handoff; it does not remain held for the durable Job's lifetime. Consequently two predetermined validators can enter canonical dispatch sequentially, hand off as two ordinary Jobs, and later run concurrently under existing Job ownership.
 
-For E2a only, validators whose canonical execution continuation is `observe_jobs` get a frontend handoff preference cap of five seconds: omitted values become 5, values above 5 are clamped, 1..5 are preserved, and invalid values such as 0 remain invalid for the canonical parser. `timeout_secs` is never shortened by this policy. E2a does not add a second Job lifecycle or restart a validation.
+For E2a and E2c, validators whose canonical execution continuation is `observe_jobs` get an explicit frontend handoff preference cap of five seconds: omission stays omitted and uses the canonical default, explicit values above 5 are clamped, 1..5 are preserved, and invalid values such as 0 remain invalid for the canonical parser. `timeout_secs` is never shortened by this policy. E2a does not add a second Job lifecycle or restart a validation.
 
 A structured validation that has started but is not terminal is exposed only after its canonical Job has materialized, with the exact `job_id` and parser-ready `observe_jobs` continuation for that same execution. A validation that has already completed with a validation failure is terminal, has no active continuation, and is reported as such instead of merely saying that the command was started. Terminal timeout, outcome-unknown delivery, and active Job handoff remain separate states.
 
@@ -447,7 +447,9 @@ Unlike re-observable E1, consequential E2a participates in normal Session checkp
 
 `observe_jobs` remains intentionally outside nested E2a. A validator uses a short sync grace, may return its existing Job handoff, and Code Mode returns. The model then observes that exact Job through ordinary `observe_jobs`, including `wake_on=all_terminal` for a predetermined set when later work genuinely depends on all of them.
 
-### E2b — Guarded structured mutation
+### E2b foundation — Guarded structured mutation
+
+This section records the original E2b boundary. E2c below evolves the same experimental `code_mode_exec_mutating` entry point, superseding its validation exclusion and single-scope outer envelope while retaining its canonical mutation mechanics.
 
 E2b adds a third experimental entry point, `code_mode_exec_mutating`, without replacing E1 or E2a. Its outer contract is conservatively `Mutate / ProjectWrite / Standard / NonIdempotent / project:write` and requires an explicit business Workflow Session. That outer envelope grants no child authority and does not itself become edit provenance.
 
@@ -467,13 +469,81 @@ Mutation effect receipts preserve canonical state-change truth. A known mutation
 
 Frozen final-change eligibility remains owned by canonical Session evidence. The outer E2b call has no generic top-level `state_changed` and does not itself set `repository_edit_observed`. A successful nested canonical `apply_text_edits` event with `state_changed=true` is the first-class `Edit` provenance; no-op, dry-run, pre-start failure, and outcome uncertainty do not become successful edit evidence. Once eligible, `present_work_result` still freezes the complete Session Git baseline → final workspace tree, including later or otherwise independently produced workspace changes; it is not a Code Mode provenance diff.
 
-### E2b live dogfood protocol
+### Original E2b live dogfood protocol (historical)
 
 Live E2b dogfood must run in an isolated managed worktree rather than the source checkout. First verify the three model-facing manifests still expose the intended stage controls: E1 as read-only `Observe / Read / PureRead / project:read`, E2a as `Execute / JobRun / NonIdempotent / job:run`, and E2b as `Mutate / ProjectWrite / NonIdempotent / project:write`.
 
 The minimum mutation cases are: one real `read_files -> read_revision -> apply_text_edits -> read_files` cell; a canonical no-op/dry-run with `state_changed=false`; a stale revision rejection that leaves newer workspace state intact; JavaScript failure after a successful write with a preserved `known_result/state_changed=true` receipt; two mutation calls proving only one crosses canonical dispatch; `finish_coding_task` / `present_work_result` proving real Session edit eligibility and full baseline-to-final workspace presentation; and denials for shell, validation, alternate mutation primitives, and recursive Code Mode.
 
 Capture both call economy and effect truth: outer model-facing calls, nested calls, canonical edit calls, Runner file-write requests, Code Mode duration, `slot_wait_ms`, nested raw result bytes, returned bytes, consequential-call counters, known results, outcome uncertainty, and mutation `state_changed`. The value hypothesis is specifically whether one adaptive E2b call can replace the direct sequence `read_files -> model decision -> apply_text_edits -> model decision -> read/show_changes` without weakening canonical authority or evidence. Do not infer generic mutation safety or model-level speedup from local runtime tests alone.
+
+### E2c v1 — Source observation before bounded coding
+
+**Target identity is not source identity.** `validation_target_id` still correlates Cargo/test arguments; no Git HEAD, Session event order, or endpoint content equality establishes what source was used throughout a mutable-workspace validation. A passing executable and a current-source proof are different facts.
+
+V1 introduces a small source-observation primitive, not an immutable workspace. A shared live-Control registry assigns one epoch and a monotonic, JavaScript-safe generation to each exact resolved Project. At the canonical dispatch boundary, potentially source-affecting Project write, shell/execution, and checkpoint operations advance the generation at both entry and exit. This includes direct calls and other Workflow Sessions, not just Code Mode calls. Active dispatches prevent a quiescent observation. Cancellation, unknown delivery, or a handed-off potentially mutating Job leaves the epoch conservatively uncertain. No-op, dry-run, rejected-after-admission, and reverted mutations can also advance the generation: it counts potential mutation attempts, not content versions.
+
+The registry is bounded to 4096 Projects and never evicts an active/uncertain entry to manufacture a clean baseline. Missing capacity, poisoned state, counter exhaustion, missing legacy metadata, or a lost/restarted epoch produces an unknown observation. `quiescent` means only that this registry has no outstanding/uncertain tracked dispatch; it is not filesystem quiescence.
+
+The observation does **not** cover arbitrary external filesystem/process writes, build scripts or tests changing source, another Control process, aliases of the same physical root, or Runner root retargeting. Code Mode's existing per-Project mutation serialization fence is independent and still excludes direct writes. Neither primitive grants global workspace authority or proves a snapshot. Consequently v1 deliberately has no `fresh` or `current` source state:
+
+```json
+{
+  "passed": true,
+  "source_state": {
+    "freshness": "unproven",
+    "observed_mutation_fence": "uncrossed",
+    "start_fence": {
+      "epoch": "0123456789abcdef0123456789abcdef",
+      "generation": 2,
+      "quiescent": true
+    }
+  }
+}
+```
+
+The JSON above illustrates a validation projection (for example, terminal Job validation). Direct successful validators retain their existing sparse output and may omit `passed`; do not reconstruct terminal proof from a running call's `success`. The canonical known-result receipt distinguishes terminal business success from a Job handoff.
+
+`source_state` is a bounded observation, not a reusable currentness certificate:
+
+| Observation | Freshness | Meaning |
+| --- | --- | --- |
+| `uncrossed` | `unproven` | Same live Project epoch and generation, with no active/uncertain tracked dispatch at capture or observation; external stability is not proven. |
+| `crossed` | `stale` | The monotonic generation advanced; even a write followed by byte-for-byte restoration cannot hide the crossing. |
+| `unknown` | `unproven` | Missing, invalid, active, exhausted, restarted, or incomparable evidence cannot prove the scoped fence. |
+
+The launch marker travels in the **existing** structured validation Job metadata. Synchronous completion, handoff, terminal Job observation, and current Session evidence compare it through this same primitive. Later observations refresh a projection; they do not rewrite durable historical execution facts or start another Job. Historical successful/failed validations remain visible. Current-attempt successful execution without a source proof is `unproven`, with zero successful current-source proofs; a detected crossing is `stale`. Closeout cannot turn that historical execution success back into current validation evidence. Source uncertainty does not turn a known compiler/test failure into `outcome_unknown`.
+
+### E2c public entry and ordering
+
+E2c evolves `code_mode_exec_mutating` rather than adding a fourth entry point. Its canonical envelope is `Mutate / ProjectWrite / Standard / NonIdempotent`, explicitly process-capable, with **RequireAll(project:write, job:run)**. Even an edit-only use of this experimental entry requires both scopes; direct `apply_text_edits` remains the narrower choice. Each child separately retains its canonical OAuth, permission, Project/Runner, Session, validation and Job checks. The outer envelope does not grant or synthesize child authority and still is not Edit provenance.
+
+Admission is exactly the E1 read set plus `apply_text_edits`, `cargo_check`, and `cargo_test`. At most one mutation attempt crosses the canonical boundary. Validators require a preceding successful, `known_result` canonical edit with boolean `state_changed`; failed or stale guards cannot be ignored by JavaScript to dispatch a validator. A successful no-op/dry-run (`state_changed=false`) permits validation of the unchanged mutable workspace, still with unproven source freshness. Receipt publication remains inside the sequential scheduling fence so a dependent validator cannot race it. The guarded-edit callable projection retains its existing stage key and derives the expanded tool set, input constraints, output fields, and ordering constraints from canonical ToolSpecs and the exact host policy.
+
+A Job handoff or unknown consequential outcome closes further consequential work in that cell. The cell must return; the outer workflow continues only the exact `effect_receipt.children[].job_id / continuation`. No Job terminal wait runs in JavaScript. A terminal validation failure is `known_result` with `success=false`; a successful execution may have `success=true` and `source_state.freshness=unproven` or `stale`. Receipt `success` is canonical business truth, not current-source proof. The outer ToolResult's success denotes JavaScript completion, not an aggregate assertion that all children passed or the source is current.
+
+A typical cell is:
+
+```javascript
+const read = await tools.read_files({items:[{path:"src/example.rs"}]});
+const revision = read.output.items[0].output.read_revision;
+const edit = await tools.apply_text_edits({changes:[{
+  path:"src/example.rs", expected_read_revision:revision,
+  old_text:"old", new_text:"new"
+}]});
+if (!edit.success || typeof edit.output?.state_changed !== "boolean") {
+  throw new Error("Inspect the edit recovery; do not validate a rejected edit");
+}
+const check = await tools.cargo_check({sync_wait_secs:1});
+text({state_changed:edit.output.state_changed, call_success:check.success,
+      source_state:check.output?.source_state, job_handoff:!!check.output?.job_id});
+```
+
+On JS throw or frontend timeout, already-dispatched edit/validation truth survives in the same effect receipt. The existing bounded drain and actionable recovery remain; unknown outcomes fail closed and **the entire JavaScript program is never automatically retried**. A receipt continuation, not a copied or reconstructed identity in `text`, is authoritative.
+
+Still denied: generic `run_shell`/`run_process`, `observe_jobs`, `wait_for_job_terminal`, second mutation, alternate write tools, Git mutation, Plugin/MCP gateways, Computer Use, recursive Code Mode, persistent cells/globals, and rollback/transaction fiction. No V8 startup, worker pool, isolate persistence, or concurrency optimization is part of E2c.
+
+The deterministic E2c tests exercise real canonical dispatch/guard paths and controlled Runner/Job lifecycle replies. They cover success/no-op/terminal failure, stale pre-dispatch guards, post-edit throw and second-mutation rejection (retained E2b tests), exact handoff/no redispatch, timeout reconciliation, cross-Session concurrent and later writes, byte restoration, unobserved external writes remaining unproven, combined outer scope requirements, denied children, and canonical typed/schema projection. Stronger current-source proof would require an independently trustworthy source isolation/snapshot mechanism; E2c v1 does not pretend to supply it.
 
 ### E3 v1 + H1: generic asynchronous Job terminal attention with an explicit Host carrier
 
@@ -485,16 +555,16 @@ Durable wait/event state survives Store reopen and can be reconciled from the sa
 
 The App is a bounded pull bridge, not Server push. It privately observes the exact wait, prepares through the existing durable `pending -> prepared` fence, calls `ui/message` at one dispatch site, then records `dispatch_accepted` or `delivery_unknown`. Response loss or teardown after prepare never reopens pending for a retry. The automatic Host message is sparse and payload-free; logs/details stay behind `observe_jobs`. Deterministic Rust and JavaScript Host-harness tests prove this topology without model-facing completion polling, but they are not live ChatGPT auto-resume proof.
 
-E3/H1 are not added to any Code Mode allowlist. E1 remains read-only, E2a still hands off the same canonical validation Job, and E2b remains one guarded mutation with no validation/Job access. `wait_for_job_terminal`, the presentation tool, the five App-only coordination operations, and `observe_jobs` all remain outside child allowlists. Nested Job waiting and E2c remain out of scope. The remaining H1 verification boundary is a separately authorized 0916 candidate deployment from the then-current `main` plus H1, followed by a real long-Job test with no model `observe_jobs` call before the Host-generated continuation turn.
+E3/H1 are not added to any Code Mode allowlist. E1 remains read-only; E2a and E2c hand off the same canonical validation Job, and E2c retains at most one guarded mutation. `wait_for_job_terminal`, the presentation tool, the five App-only coordination operations, and `observe_jobs` all remain outside child allowlists. Nested Job waiting remains out of scope; E2c does not depend on the H1 Host carrier. The remaining H1 verification boundary is a separately authorized 0916 candidate deployment from the then-current `main` plus H1, followed by a real long-Job test with no model `observe_jobs` call before the Host-generated continuation turn.
 
 ### Current stage sequence
 
 ```text
 E1   read-only orchestration
 E2a  structured validation + Job/effect foundation
-E2b  guarded structured mutation: E1 reads + one apply_text_edits attempt
-E2c  decide whether validation and mutation should coexist in one cell;
-     consider selective process/shell only with telemetry
+E2b  retained guarded mutation foundation: one apply_text_edits attempt
+E2c  bounded adaptive read -> one guarded edit -> structured validation;
+     scoped source observation, never a fabricated current-source proof
 E3   implemented generic asynchronous Job terminal attention v1
 H1   source-complete Job-native MCP App Host carrier; live candidate deployment pending
 E4   product/stability decision

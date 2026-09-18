@@ -818,7 +818,7 @@ fn current_validation_window_excludes_pre_mutation_failure_from_attempt_activity
 
     let feedback = feedback_for(&runtime, &summary, "continued");
     assert_eq!(feedback["attempt"]["activity"]["unresolved_failures"], 0);
-    assert_eq!(feedback["attempt"]["validation"]["status"], "passed");
+    assert_eq!(feedback["attempt"]["validation"]["status"], "unproven");
     assert_eq!(
         feedback["attempt"]["validation"]["unresolved_failure_count"],
         0

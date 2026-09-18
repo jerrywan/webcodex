@@ -4257,6 +4257,7 @@ mod filter_canonical_tests {
         step: ShellJobValidationStep,
     ) -> ShellJobValidationMetadata {
         ShellJobValidationMetadata {
+            source_fence: None,
             tool: tool.to_string(),
             kind: kind.to_string(),
             steps: vec![step],

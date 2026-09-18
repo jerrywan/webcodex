@@ -2216,7 +2216,10 @@ async fn mcp_validation_run_and_summary_use_real_canonical_contracts() {
     let summary_result = &summary["result"];
     let canonical_validation = &summary_result["structuredContent"]["output"]["validation"];
     assert_eq!(canonical_validation["status"], "passed");
-    assert_eq!(canonical_validation["current_evidence"]["status"], "passed");
+    assert_eq!(
+        canonical_validation["current_evidence"]["status"],
+        "unproven"
+    );
     assert_eq!(presentation(summary_result)["kind"], "validation_summary");
     assert_eq!(
         presentation(summary_result)["validation"]["status"],

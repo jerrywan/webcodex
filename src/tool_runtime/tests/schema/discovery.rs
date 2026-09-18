@@ -1808,6 +1808,14 @@ async fn code_mode_exact_manifest_projects_canonical_stage_callable_contracts() 
         let stage =
             code_mode_callable_stage_for_entry_tool(entry_tool).expect("Code Mode entry stage");
         let policy = code_mode_orchestration_policy(stage);
+        assert_eq!(
+            projection["constraints"]["max_mutation_calls"],
+            json!(policy.max_mutation_calls)
+        );
+        assert_eq!(
+            projection["constraints"]["validation_after_successful_known_mutation"],
+            policy.validation_after_mutation
+        );
         let projected_names = projection["tools"]
             .as_array()
             .expect("projected callable tools")
@@ -1866,7 +1874,10 @@ async fn code_mode_exact_manifest_projects_canonical_stage_callable_contracts() 
         println!("code_mode_callable_projection stage={expected_stage} bytes={bytes}");
         let soft_max_bytes = match expected_stage {
             "read_only" => 10 * 1024,
-            "validation" | "guarded_edit" => 13 * 1024,
+            "validation" => 13 * 1024,
+            // E2c adds both canonical validators to the guarded-edit projection;
+            // the shared 16 KiB hard transport bound remains unchanged.
+            "guarded_edit" => 15 * 1024,
             _ => unreachable!(),
         };
         assert!(
@@ -1964,6 +1975,9 @@ async fn code_mode_callable_projection_preserves_key_input_constraints_and_outpu
         "output.execution_state",
         "output.terminal",
         "output.passed",
+        "output.source_state",
+        "output.source_state.freshness",
+        "output.source_state.observed_mutation_fence",
         "output.failure_kind",
         "output.job_id",
         "output.continuation",
@@ -1985,6 +1999,15 @@ async fn code_mode_callable_projection_preserves_key_input_constraints_and_outpu
         })
         .await;
     assert!(guarded.success, "{:?}", guarded.error);
+    assert_eq!(
+        guarded.output["code_mode_callable_contract"]["constraints"]
+            ["validation_after_successful_known_mutation"],
+        true
+    );
+    assert_eq!(
+        guarded.output["code_mode_callable_contract"]["constraints"]["max_mutation_calls"],
+        1
+    );
     let guarded_tools = guarded.output["code_mode_callable_contract"]["tools"]
         .as_array()
         .unwrap();

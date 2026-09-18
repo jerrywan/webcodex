@@ -1045,6 +1045,9 @@ pub fn validation_output_summary_for_tool_result(tool_name: &str, output: &Value
         "execution_state": output.get("execution_state").cloned().unwrap_or(Value::Null),
         "validation_tool": output.get("validation_tool").cloned().unwrap_or(Value::Null),
     });
+    if let Some(source) = sanitized_validation_source(output.get("source_state")) {
+        summary["source_state"] = source;
+    }
     if matches!(
         execution_policy.detail,
         webcodex_tool_contracts::ToolAuditExecutionDetail::TestCounts
@@ -1155,6 +1158,9 @@ pub(super) fn sanitize_persisted_validation_output_summary(
         "execution_state": object.get("execution_state").and_then(Value::as_str),
         "validation_tool": object.get("validation_tool").and_then(Value::as_str),
     });
+    if let Some(source) = sanitized_validation_source(object.get("source_state")) {
+        summary["source_state"] = source;
+    }
     if matches!(
         execution_policy.detail,
         webcodex_tool_contracts::ToolAuditExecutionDetail::TestCounts
@@ -1190,6 +1196,19 @@ pub(super) fn sanitize_persisted_validation_output_summary(
         }
     }
     Some(summary)
+}
+
+fn sanitized_validation_source(value: Option<&Value>) -> Option<Value> {
+    let source: webcodex_core::validation_source::ValidationSourceState =
+        serde_json::from_value(value?.clone()).ok()?;
+    if source
+        .start_fence
+        .as_ref()
+        .is_some_and(|fence| !fence.is_valid())
+    {
+        return None;
+    }
+    serde_json::to_value(source).ok()
 }
 
 fn sanitized_test_count_assertion(value: Option<&Value>) -> Option<Value> {

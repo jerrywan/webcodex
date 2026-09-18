@@ -44,6 +44,7 @@ pub struct ValidationEvent {
     /// Semantic validator/correctness result, independent from request-scoped
     /// evidence assertions such as cargo_test min_tests/require_tests.
     pub validation_passed: bool,
+    pub source_state: webcodex_core::validation_source::ValidationSourceState,
     /// Canonical closeout class derived from immutable execution/evidence facts.
     pub failure_class: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -263,10 +264,9 @@ fn current_validation_evidence_for_events(
         };
     }
 
-    // Attempt and mutation boundaries are durable ledger-order fences. A
-    // validation can prove the current workspace only when its exact execution
-    // start is after the effective fence; completing after the fence is not
-    // sufficient because the execution may have overlapped a content change.
+    // Ledger ordering selects candidates in this attempt, NOT current source
+    // proof. A source fence can reject a candidate, but v1 cannot rule out
+    // external/other-Control writes even when no canonical mutation crossed it.
     let canonical_finished_ids = canonical_tool_call_finished_events(&summary.events)
         .into_iter()
         .map(|event| event.event_id.as_str())
@@ -302,14 +302,18 @@ fn current_validation_evidence_for_events(
         let started_after_boundary = start_index.is_some_and(|index| {
             started_in_attempt && effective_boundary_index.is_none_or(|boundary| index > boundary)
         });
-        if started_after_boundary {
+        let source_stale = record.event.source_state.freshness
+            == webcodex_core::validation_source::ValidationFreshness::Stale;
+        if started_after_boundary && !source_stale {
             current_source_event_ids.insert(record.source_event_id.clone());
             if validation_event_is_failure(&record.event) {
                 current_failure_ids.insert(record.source_event_id.clone());
             }
-        } else if reset_index.is_some_and(|boundary| {
-            start_index.is_some_and(|index| index >= attempt.attempt_start && index <= boundary)
-        }) {
+        } else if (started_in_attempt && source_stale)
+            || reset_index.is_some_and(|boundary| {
+                start_index.is_some_and(|index| index >= attempt.attempt_start && index <= boundary)
+            })
+        {
             stale_validation_count += 1;
             if validation_event_is_failure(&record.event) {
                 stale_failure_count += 1;
@@ -328,7 +332,7 @@ fn current_validation_evidence_for_events(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let current_validation = validation_summary_from_events(&current_events, limit);
+    let mut current_validation = validation_summary_from_events(&current_events, limit);
     let current_events_total = current_validation
         .get("events_total")
         .and_then(Value::as_u64)
@@ -364,7 +368,7 @@ fn current_validation_evidence_for_events(
     let (status, reason) = if current_events_total > 0 && unresolved_failure_count > 0 {
         ("failed", Some("current_validation_failures"))
     } else if current_events_total > 0 && successes > 0 {
-        ("passed", None)
+        ("unproven", Some("validation_source_unproven"))
     } else if current_events_total > 0 && expected_results > 0 {
         (
             "expected",
@@ -378,13 +382,36 @@ fn current_validation_evidence_for_events(
                 .and_then(Value::as_str)
                 .or(Some("validation_evidence_inconclusive")),
         )
-    } else if reset_index.is_some() && stale_validation_count > 0 {
-        ("stale", Some("validation_stale_after_changes"))
+    } else if stale_validation_count > 0 {
+        (
+            "stale",
+            Some(if reset_index.is_some() {
+                "validation_stale_after_changes"
+            } else {
+                "validation_source_fence_crossed"
+            }),
+        )
     } else if current_events_total == 0 {
         ("not_run", Some("no_validation_in_current_attempt"))
     } else {
         ("unknown", Some("current_validation_evidence_unknown"))
     };
+    let reason = reason.map(str::to_string);
+    // Historical execution successes remain in the ledger. They must not leak
+    // back into a current-workspace proof through the closeout projection.
+    if successes > 0 {
+        current_validation["successes"] = json!(0);
+        if status == "unproven" {
+            current_validation["status"] = json!("inconclusive");
+            current_validation["reason"] = json!("validation_source_unproven");
+        }
+        if current_validation["latest_status"] == "passed" {
+            current_validation["latest_status"] = json!("inconclusive");
+        }
+        if let Some(object) = current_validation.as_object_mut() {
+            object.remove("latest_success");
+        }
+    }
     let latest_status = current_validation
         .get("latest_status")
         .and_then(Value::as_str)
@@ -414,7 +441,7 @@ fn current_validation_evidence_for_events(
             "reason": reason,
             "latest_status": latest_status,
             "events_total": current_events_total,
-            "successes": successes,
+            "successes": 0,
             "failures": failures,
             "resolved_failure_count": resolved_failure_count,
             "expected_results": expected_results,
@@ -1158,6 +1185,12 @@ fn validation_event_from_finished(
         success,
         validation_passed,
         failure_class: "none",
+        source_state: finished
+            .validation_output_summary
+            .as_ref()
+            .and_then(|summary| summary.get("source_state"))
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or_default(),
         expectation_satisfied,
         failure_kind,
         unresolved_failure: false,

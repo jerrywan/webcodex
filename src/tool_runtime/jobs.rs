@@ -1424,6 +1424,10 @@ impl ToolRuntime {
                         {
                             validation["validation_target_id"] = json!(target_id);
                         }
+                        validation["source_state"] = json!(self.validation_sources.observe(
+                            job.project_id.as_deref().unwrap_or_default(),
+                            validation_metadata.and_then(|metadata| metadata.source_fence.as_ref()),
+                        ));
                         output["validation"] = validation;
                     }
                 }
@@ -1529,6 +1533,14 @@ impl ToolRuntime {
                         .and_then(|metadata| metadata.require_tests),
                     job.validation.as_ref().and_then(|metadata| metadata.no_run),
                 );
+                if let Some(validation) = validation.as_mut() {
+                    validation["source_state"] = json!(self.validation_sources.observe(
+                        job.project_id.as_deref().unwrap_or_default(),
+                        job.validation
+                            .as_ref()
+                            .and_then(|metadata| metadata.source_fence.as_ref()),
+                    ));
+                }
                 if let (Some(validation), Some(target_id)) = (
                     validation.as_mut(),
                     job.validation

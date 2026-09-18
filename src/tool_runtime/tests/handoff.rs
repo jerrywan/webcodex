@@ -2608,7 +2608,7 @@ async fn session_handoff_historical_mixed_current_pass_does_not_block_closeout()
     );
     assert_eq!(
         result.output["validation"]["current_evidence"]["status"],
-        "passed"
+        "unproven"
     );
     assert_eq!(
         result.output["validation"]["current_evidence"]["unresolved_failure_count"],
@@ -2623,7 +2623,7 @@ async fn session_handoff_historical_mixed_current_pass_does_not_block_closeout()
         result.output["tool_failures"]["actionable_unexpected_count"],
         0
     );
-    assert_eq!(result.output["task_outcome"]["status"], "pass");
+    assert_eq!(result.output["task_outcome"]["status"], "warn");
     assert_eq!(result.output["task_outcome"]["blocking"], false);
     assert_eq!(
         result.output["evidence_history"]["status"],
@@ -2900,7 +2900,7 @@ async fn session_handoff_keeps_real_proof_after_later_zero_test_event() {
     assert_eq!(result.output["validation"]["latest_status"], "inconclusive");
     assert_eq!(
         result.output["validation"]["current_evidence"]["status"],
-        "passed"
+        "unproven"
     );
     assert_eq!(
         result.output["validation"]["current_evidence"]["unresolved_failure_count"],
@@ -2918,7 +2918,7 @@ async fn session_handoff_keeps_real_proof_after_later_zero_test_event() {
         result.output["validation"]["cargo_test_zero_tests_run"],
         true
     );
-    assert_eq!(result.output["task_outcome"]["status"], "pass");
+    assert_eq!(result.output["task_outcome"]["status"], "warn");
     assert_eq!(
         result.output["evidence_history"]["status"],
         "mixed_resolved"

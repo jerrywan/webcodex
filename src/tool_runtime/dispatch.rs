@@ -1675,6 +1675,13 @@ impl ToolRuntime {
                     .and_then(|resolved| resolved.as_ref().ok()),
             )
             .await;
+        let source_mutation = if super::validation_source::observes_potential_mutation(&call) {
+            activity_project
+                .as_deref()
+                .and_then(|project| self.validation_sources.begin(project))
+        } else {
+            None
+        };
         let mut result = self
             .dispatch_authorized_inner(
                 call,
@@ -1691,6 +1698,9 @@ impl ToolRuntime {
                 correlation,
             )
             .await;
+        if let Some(observation) = source_mutation {
+            observation.finish(&result);
+        }
         if !result.success
             && result.output["command_started"] == false
             && result.output["execution_state"] == "not_started"

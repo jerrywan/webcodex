@@ -77,7 +77,7 @@ pub(crate) const E2A_NESTED_TOOLS: &[&str] = &[
     "cargo_test",
 ];
 
-pub(crate) const E2B_NESTED_TOOLS: &[&str] = &[
+pub(crate) const E2C_NESTED_TOOLS: &[&str] = &[
     "read_files",
     "search_project_texts",
     "project_overview",
@@ -88,6 +88,8 @@ pub(crate) const E2B_NESTED_TOOLS: &[&str] = &[
     "git_review_summary",
     "show_changes",
     "apply_text_edits",
+    "cargo_check",
+    "cargo_test",
 ];
 
 const RECURSIVE_CODE_MODE_TOOLS: &[&str] = &[
@@ -104,6 +106,7 @@ const CODE_MODE_E1_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     additional_forbidden_argument_fields: &[],
     nested_sync_wait_max_secs: None,
     max_mutation_calls: None,
+    validation_after_mutation: false,
 };
 
 const CODE_MODE_E2A_POLICY: OrchestrationPolicy = OrchestrationPolicy {
@@ -114,16 +117,18 @@ const CODE_MODE_E2A_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     additional_forbidden_argument_fields: &[],
     nested_sync_wait_max_secs: Some(5),
     max_mutation_calls: None,
+    validation_after_mutation: false,
 };
 
-const CODE_MODE_E2B_POLICY: OrchestrationPolicy = OrchestrationPolicy {
+const CODE_MODE_E2C_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     frontend: "code_mode_v8_mutating",
-    policy_name: "Code Mode E2b",
-    admitted_tools: E2B_NESTED_TOOLS,
+    policy_name: "Code Mode E2c",
+    admitted_tools: E2C_NESTED_TOOLS,
     denied_tools: RECURSIVE_CODE_MODE_TOOLS,
     additional_forbidden_argument_fields: &[],
-    nested_sync_wait_max_secs: None,
+    nested_sync_wait_max_secs: Some(5),
     max_mutation_calls: Some(1),
+    validation_after_mutation: true,
 };
 
 pub(crate) const fn code_mode_orchestration_policy(
@@ -132,7 +137,7 @@ pub(crate) const fn code_mode_orchestration_policy(
     match stage {
         CodeModeCallableStage::ReadOnly => CODE_MODE_E1_POLICY,
         CodeModeCallableStage::Validation => CODE_MODE_E2A_POLICY,
-        CodeModeCallableStage::GuardedEdit => CODE_MODE_E2B_POLICY,
+        CodeModeCallableStage::GuardedEdit => CODE_MODE_E2C_POLICY,
     }
 }
 
@@ -192,6 +197,19 @@ fn code_mode_recovery(error: &CodeModeError, job_handoffs: usize, outcome_unknow
         "retry_same_call_unchanged": false,
         "actions": actions,
     })
+}
+
+fn attach_effect_follow_up(output: &mut Value, job_handoffs: usize, outcome_unknown: usize) {
+    let mut actions = Vec::new();
+    if job_handoffs > 0 {
+        actions.push("observe_existing_job_continuations");
+    }
+    if outcome_unknown > 0 {
+        actions.push("reconcile_effect_state_before_retry");
+    }
+    if !actions.is_empty() {
+        output["recovery"] = json!({"retry_same_call_unchanged": false, "actions": actions});
+    }
 }
 
 fn code_mode_failure_output(
@@ -399,6 +417,11 @@ impl ToolRuntime {
                 });
                 if has_consequential_work {
                     output["effect_receipt"] = json!(effect_receipt);
+                    attach_effect_follow_up(
+                        &mut output,
+                        effect_receipt.job_handoffs,
+                        effect_receipt.outcome_unknown,
+                    );
                 }
                 (ToolResult::ok(output), stats)
             }
@@ -511,6 +534,11 @@ impl ToolRuntime {
                 });
                 if has_consequential_work {
                     output["effect_receipt"] = json!(effect_receipt);
+                    attach_effect_follow_up(
+                        &mut output,
+                        effect_receipt.job_handoffs,
+                        effect_receipt.outcome_unknown,
+                    );
                 }
                 (ToolResult::ok(output), stats)
             }
@@ -608,12 +636,12 @@ mod tests {
             ["cargo_check", "cargo_test"]
         );
         assert_eq!(
-            &E2B_NESTED_TOOLS[..READ_ONLY_NESTED_TOOLS.len()],
+            &E2C_NESTED_TOOLS[..READ_ONLY_NESTED_TOOLS.len()],
             READ_ONLY_NESTED_TOOLS
         );
         assert_eq!(
-            &E2B_NESTED_TOOLS[READ_ONLY_NESTED_TOOLS.len()..],
-            ["apply_text_edits"]
+            &E2C_NESTED_TOOLS[READ_ONLY_NESTED_TOOLS.len()..],
+            ["apply_text_edits", "cargo_check", "cargo_test"]
         );
         for stage in [
             CodeModeCallableStage::ReadOnly,

@@ -26,6 +26,9 @@ use webcodex_workflow_session::{
     SessionGuards, SessionPathHint, SessionStore, SessionToolContract, SessionTransport,
 };
 
+#[path = "source_evidence_tests.rs"]
+mod source_evidence;
+
 fn validation_summary_for_session(summary: &sessions::SessionSummary) -> Value {
     validation_summary_for_session_events(summary, &summary.events, 10)
 }
@@ -799,7 +802,7 @@ fn successful_cargo_test_with_executed_tests_is_proven_validation() {
     assert_eq!(validation["successes"], 1);
     assert_eq!(validation["latest_status"], "passed");
     assert_eq!(validation["latest_success"]["tests_run_count"], 2);
-    assert_eq!(validation["current_evidence"]["status"], "passed");
+    assert_eq!(validation["current_evidence"]["status"], "unproven");
 }
 
 #[test]
@@ -833,7 +836,7 @@ fn explicit_require_tests_false_accepts_zero_test_validation_proof() {
     assert_eq!(validation["latest_status"], "passed");
     assert_eq!(validation["latest_success"]["require_tests"], false);
     assert_eq!(validation["latest_success"]["zero_tests_run"], true);
-    assert_eq!(validation["current_evidence"]["status"], "passed");
+    assert_eq!(validation["current_evidence"]["status"], "unproven");
 }
 
 #[test]
@@ -950,12 +953,12 @@ fn later_zero_test_event_does_not_replace_previous_real_validation_proof() {
     assert_eq!(validation["latest_status"], "inconclusive");
     assert_eq!(validation["latest"]["zero_tests_run"], true);
     assert_eq!(validation["latest_success"]["tests_run_count"], 2);
-    assert_eq!(validation["current_evidence"]["status"], "passed");
+    assert_eq!(validation["current_evidence"]["status"], "unproven");
     assert_eq!(
         validation["current_evidence"]["latest_status"],
         "inconclusive"
     );
-    assert_eq!(validation["current_evidence"]["successes"], 1);
+    assert_eq!(validation["current_evidence"]["successes"], 0);
 }
 
 #[test]
@@ -2452,7 +2455,7 @@ fn later_sufficient_same_target_evidence_closes_prior_minimum_not_met_without_re
         validation["events"][0]["identity"],
         validation["events"][1]["identity"]
     );
-    assert_eq!(validation["current_evidence"]["status"], "passed");
+    assert_eq!(validation["current_evidence"]["status"], "unproven");
     assert_eq!(
         validation["current_evidence"]["unresolved_failure_count"],
         0
@@ -2742,7 +2745,7 @@ fn successful_validation_followed_by_failure_marks_historical_failure_unresolved
 }
 
 #[test]
-fn current_evidence_failure_then_content_change_then_different_success_passes() {
+fn current_evidence_failure_then_change_then_success_retains_history_without_source_proof() {
     let store = SessionStore::default();
     let session = store.start_session(Some("agent:eval:demo".to_string()), None);
     record_validation_failure(&store, &session.session_id, "cargo_test");
@@ -2754,7 +2757,7 @@ fn current_evidence_failure_then_content_change_then_different_success_passes() 
     assert_eq!(validation["status"], "mixed");
     assert_eq!(validation["historical_failures"]["count"], 1);
     assert_eq!(validation["unresolved_failures"]["count"], 1);
-    assert_eq!(validation["current_evidence"]["status"], "passed");
+    assert_eq!(validation["current_evidence"]["status"], "unproven");
     assert_eq!(
         validation["current_evidence"]["unresolved_failure_count"],
         0
@@ -2824,7 +2827,7 @@ fn current_evidence_validation_started_before_content_change_then_fail_is_stale(
 }
 
 #[test]
-fn current_evidence_validation_started_after_content_change_can_pass() {
+fn current_evidence_validation_started_after_content_change_is_still_source_unproven() {
     let store = SessionStore::default();
     let session = store.start_session(Some("agent:eval:demo".to_string()), None);
     record_content_mutation(&store, &session.session_id, true);
@@ -2832,7 +2835,7 @@ fn current_evidence_validation_started_after_content_change_can_pass() {
 
     let summary = store.summary(&session.session_id, Some(50)).unwrap();
     let validation = validation_summary_for_session(&summary);
-    assert_eq!(validation["current_evidence"]["status"], "passed");
+    assert_eq!(validation["current_evidence"]["status"], "unproven");
     assert_eq!(validation["current_evidence"]["events_total"], 1);
     assert_eq!(
         validation["current_evidence"]["evidence_after_latest_content_change"],
@@ -2922,7 +2925,7 @@ fn unknown_job_handoff_reconciles_only_authoritative_same_execution() {
         );
         if same_execution {
             assert_eq!(result["status"], "passed");
-            assert_eq!(result["current_evidence"]["status"], "passed");
+            assert_eq!(result["current_evidence"]["status"], "unproven");
             for mismatch in ["project", "session", "tool", "target"] {
                 let mut mismatched = reconciled.clone();
                 let terminal = mismatched
@@ -3347,7 +3350,7 @@ fn current_evidence_same_identity_failure_success_resolves_inside_window() {
     assert_eq!(validation["status"], "mixed");
     assert_eq!(validation["resolved_failures"]["count"], 1);
     assert_eq!(validation["unresolved_failures"]["count"], 0);
-    assert_eq!(validation["current_evidence"]["status"], "passed");
+    assert_eq!(validation["current_evidence"]["status"], "unproven");
     assert_eq!(validation["current_evidence"]["resolved_failure_count"], 1);
     assert_eq!(
         validation["current_evidence"]["unresolved_failure_count"],

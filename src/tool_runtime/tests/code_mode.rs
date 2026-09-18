@@ -1057,6 +1057,7 @@ async fn canonical_orchestration_host_distinguishes_child_scope_denial_from_inva
         additional_forbidden_argument_fields: &[],
         nested_sync_wait_max_secs: Some(5),
         max_mutation_calls: None,
+        validation_after_mutation: false,
     };
     let host = CanonicalOrchestrationHost::new(
         runtime.clone(),
@@ -1112,6 +1113,7 @@ async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
         additional_forbidden_argument_fields: &[],
         nested_sync_wait_max_secs: None,
         max_mutation_calls: None,
+        validation_after_mutation: false,
     };
     let host = Arc::new(CanonicalOrchestrationHost::new(
         runtime.clone(),
@@ -1212,6 +1214,7 @@ async fn canonical_orchestration_host_rejects_server_owned_metadata_without_fron
         additional_forbidden_argument_fields: &[],
         nested_sync_wait_max_secs: None,
         max_mutation_calls: None,
+        validation_after_mutation: false,
     };
     let host = CanonicalOrchestrationHost::new(
         runtime,

@@ -369,7 +369,7 @@ async fn handoff_cargo_test_authoritative_count_passes_session_validation() {
         .validation_summary_for_session_with_jobs(&summary, 50, Some(&auth))
         .await;
     assert_eq!(validation["status"], "passed", "{validation:#}");
-    assert_eq!(validation["current_evidence"]["status"], "passed");
+    assert_eq!(validation["current_evidence"]["status"], "unproven");
     assert_eq!(
         validation["current_evidence"]["evidence_gap_event_count"],
         0
@@ -529,7 +529,7 @@ async fn cargo_test_minimum_misassertion_then_sufficient_same_target_is_non_bloc
     assert_eq!(handoff.output["validation"]["status"], "passed");
     assert_eq!(
         handoff.output["validation"]["current_evidence"]["status"],
-        "passed"
+        "unproven"
     );
     assert_eq!(
         handoff.output["validation"]["current_evidence"]["evidence_gap_event_count"],

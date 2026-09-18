@@ -27,6 +27,7 @@ use crate::runner_protocol::{
 };
 use webcodex_core::runner_job_lifecycle::RunnerJobLifecycle;
 use webcodex_core::runtime_contract::STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS;
+use webcodex_core::validation_source::ValidationSourceFence;
 use webcodex_core::workflow_session_contract::ExecutionPurpose;
 use webcodex_validation::execution_purpose_for_validation_kind;
 pub(crate) use webcodex_validation::parse_cargo_test_run_metadata;
@@ -994,7 +995,7 @@ impl ToolRuntime {
         // Pre-execution validation happens before any execution is created, so
         // a rejection never leaves a Job or a running process behind.
         let resolved = match self
-            .resolve_project_for_auth(&request.project, request.auth)
+            .resolve_project_input_for_auth(&request.project, request.auth)
             .await
         {
             Ok(config) => config,
@@ -1003,6 +1004,8 @@ impl ToolRuntime {
                 "verify the project id with list_projects, then retry with a registered project.",
             )),
         };
+        let source_project = resolved.resolved_id;
+        let resolved = resolved.config;
         let purpose = execution_purpose_for_validation_kind(adapter.validation_kind());
         let timeout_secs = budget.effective_timeout_secs;
         let sync_wait_secs = budget.sync_wait_secs;
@@ -1015,7 +1018,8 @@ impl ToolRuntime {
         if let Some(result) = reject_structured_validation_ssh_resource(ssh_resource.as_deref()) {
             return result;
         }
-        if tool_name == "go_test" || sync_wait_secs < timeout_secs {
+        let source_fence = self.validation_sources.capture(&source_project);
+        let mut result = if tool_name == "go_test" || sync_wait_secs < timeout_secs {
             // The effective synchronous grace is shorter than the total
             // validation budget, so there is headroom to expose the same
             // execution as a Job. The agent path enqueues exactly one
@@ -1023,7 +1027,7 @@ impl ToolRuntime {
             // hands off if it is still running.
             self.run_readonly_validation_agent(
                 tool_name,
-                &request.project,
+                &source_project,
                 &resolved,
                 cwd.as_deref(),
                 &command,
@@ -1034,6 +1038,7 @@ impl ToolRuntime {
                 sync_wait_secs,
                 session_id,
                 validation_target_id,
+                source_fence.clone(),
                 request.minimum_tests,
                 request.require_tests,
                 request.no_run,
@@ -1081,7 +1086,11 @@ impl ToolRuntime {
                 request.no_run,
             )
             .await
-        }
+        };
+        result.output["source_state"] = json!(self
+            .validation_sources
+            .observe(&source_project, source_fence.as_ref()));
+        result
     }
 
     /// Agent-backed read-only validation. Enqueues exactly one validation
@@ -1103,6 +1112,7 @@ impl ToolRuntime {
         sync_wait_secs: u64,
         session_id: Option<String>,
         validation_target_id: Option<String>,
+        source_fence: Option<ValidationSourceFence>,
         minimum_tests: Option<u64>,
         require_tests: Option<bool>,
         no_run: Option<bool>,
@@ -1178,6 +1188,7 @@ impl ToolRuntime {
                         sync_wait_secs,
                         adapter: adapter.tool_identity().to_string(),
                         validation_target_id: validation_target_id.clone(),
+                        source_fence,
                         minimum_tests,
                         require_tests,
                         no_run,

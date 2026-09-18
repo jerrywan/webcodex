@@ -611,6 +611,9 @@ pub struct ShellJobValidationMetadata {
     pub adapter: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_target_id: Option<String>,
+    /// Launch observation in the existing Control Project epoch. Not a source snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_fence: Option<crate::validation_source::ValidationSourceFence>,
     /// Effective caller-requested minimum Cargo test count. This is an
     /// observation postcondition, not part of the executable argv.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -641,6 +644,10 @@ impl ShellJobValidationMetadata {
                 };
                 suffix.len() != 24 || !suffix.as_bytes().iter().all(u8::is_ascii_hexdigit)
             })
+            || self
+                .source_fence
+                .as_ref()
+                .is_some_and(|fence| !fence.is_valid())
             || self
                 .minimum_tests
                 .is_some_and(|minimum| !(1..=CARGO_TEST_MIN_TESTS_MAX).contains(&minimum))

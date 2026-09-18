@@ -67,6 +67,9 @@ const CODE_MODE_USEFUL_OUTPUT_FIELD_NAMES: &[&str] = &[
     "execution_state",
     "terminal",
     "passed",
+    "source_state",
+    "freshness",
+    "observed_mutation_fence",
     "failure_kind",
     "job_id",
     "job_status",
@@ -302,12 +305,14 @@ if (!check.output?.terminal && check.output?.job_id) {
 }"#,
         })),
         CodeModeCallableStage::GuardedEdit => examples.push(json!({
-            "name": "guarded_edit",
+            "name": "guarded_edit_then_validation",
             "source": r#"const path = "src/example.rs";
 const read = await tools.read_files({items:[{path,start_line:1,limit:120}]});
 const revision = read.output.items?.[0]?.output?.read_revision;
 const edit = await tools.apply_text_edits({changes:[{path,old_text:"old",new_text:"new",expected_read_revision:revision}]});
-text({success:edit.success,state_changed:edit.output?.state_changed,execution_state:edit.output?.execution_state,error_kind:edit.output?.error_kind,recovery:edit.output?.recovery});"#,
+if (!edit.success || typeof edit.output?.state_changed !== "boolean") throw new Error("inspect edit recovery before validating");
+const check = await tools.cargo_check({sync_wait_secs:1});
+text({state_changed:edit.output.state_changed,call_success:check.success,source_state:check.output?.source_state,job_handoff:!!check.output?.job_id});"#,
         })),
     }
     examples
@@ -351,6 +356,11 @@ fn code_mode_callable_contract(
         "stage": stage.as_str(),
         "entry_tool": stage.entry_tool(),
         "authority": "presentation_only",
+        "constraints": {
+            "max_mutation_calls": policy.max_mutation_calls,
+            "validation_after_successful_known_mutation": policy.validation_after_mutation,
+            "nested_sync_wait_max_secs": policy.nested_sync_wait_max_secs,
+        },
         "tool_count": tools.len(),
         "tools": tools,
         "examples": code_mode_usage_examples(stage),

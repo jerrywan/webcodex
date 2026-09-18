@@ -37,4 +37,5 @@ pub mod validation_evidence;
 #[cfg(test)]
 mod validation_evidence_tests;
 pub mod validation_identity;
+pub mod validation_source;
 pub mod workflow_session_contract;

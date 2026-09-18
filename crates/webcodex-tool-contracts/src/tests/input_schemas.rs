@@ -1020,8 +1020,12 @@ fn code_mode_mutating_schema_keeps_authority_outer_bound_and_mutation_scope_narr
     let source_description = properties["source"]["description"]
         .as_str()
         .unwrap_or_default();
-    assert!(source_description.contains("one canonical apply_text_edits mutation attempt"));
-    assert!(source_description.contains("Validation"));
+    assert!(source_description.contains("at most one canonical apply_text_edits attempt"));
+    assert!(
+        source_description.contains("cargo_check/cargo_test only after a successful known edit")
+    );
+    assert!(source_description.contains("source_state"));
+    assert!(source_description.contains("never wait inside JS"));
 }
 
 #[test]

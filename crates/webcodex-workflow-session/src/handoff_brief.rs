@@ -442,7 +442,7 @@ fn project_validation(requested: bool, validation: Option<&Value>) -> Validation
         match status {
             "passed" => "passed",
             "failed" => "failed",
-            "inconclusive" => "inconclusive",
+            "unproven" | "inconclusive" => "inconclusive",
             "stale" => "stale",
             "not_run" => "not_run",
             _ => "unavailable",

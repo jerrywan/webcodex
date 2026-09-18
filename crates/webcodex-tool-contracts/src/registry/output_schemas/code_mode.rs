@@ -46,6 +46,8 @@ fn effect_receipt_schema() -> Value {
                         "ordinal": {"type": "integer", "minimum": 1, "maximum": 32},
                         "tool": {"type": "string", "maxLength": 128},
                         "outcome": {"type": "string", "enum": ["known_result", "job_handoff", "outcome_unknown"]},
+                        "success": {"type": "boolean", "description": "Canonical business success for a known result; false is a known failure, not outcome_unknown. Never proves current source."},
+                        "source_state": super::common::validation_source_state_schema(),
                         "state_changed": {"type": "boolean", "description": "Authoritative canonical state-change truth, present only for a known mutation result."},
                         "job_id": {"type": "string", "description": "Canonical Job identity, present only for a normal same-execution Job handoff."},
                         "continuation": {"type": "object", "description": "Parser-ready canonical Job continuation, present only when returned by the child ToolResult."}

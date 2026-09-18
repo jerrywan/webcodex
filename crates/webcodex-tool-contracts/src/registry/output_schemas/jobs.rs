@@ -22,6 +22,7 @@ fn validation_job_projection_schema() -> Value {
                 ]
             },
             "truncated": {"type": "boolean"},
+            "source_state": super::common::validation_source_state_schema(),
             "test_count_assertion": cargo_test_count_assertion_schema()
         }
     })

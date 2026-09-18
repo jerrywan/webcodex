@@ -119,7 +119,7 @@ fn experimental_code_mode_effectful_has_conservative_e2a_envelope() {
 
 #[cfg(feature = "experimental-code-mode")]
 #[test]
-fn experimental_code_mode_mutating_has_conservative_e2b_envelope() {
+fn experimental_code_mode_mutating_has_conservative_e2c_combined_authority_envelope() {
     let definition = lookup_tool_definition("code_mode_exec_mutating")
         .expect("code_mode_exec_mutating definition");
     let metadata = definition.metadata();
@@ -130,11 +130,15 @@ fn experimental_code_mode_mutating_has_conservative_e2b_envelope() {
     assert_eq!(metadata.idempotency, ToolIdempotency::NonIdempotent);
     assert!(
         metadata.destructive,
-        "E2b can create/edit/delete/rename through apply_text_edits"
+        "E2c can create/edit/delete/rename through canonical apply_text_edits"
     );
     assert_eq!(
         metadata.authority,
-        ToolAuthorityPolicy::Require(PROJECT_WRITE)
+        ToolAuthorityPolicy::RequireAll(&[PROJECT_WRITE, JOB_RUN])
+    );
+    assert!(
+        metadata.shell_like,
+        "structured validation executes project build/test code"
     );
     assert_eq!(definition.permission_risk(), PERMISSION_RISK_WRITE);
     assert_eq!(definition.adaptive_runtime_direct_rank(), Some(65));

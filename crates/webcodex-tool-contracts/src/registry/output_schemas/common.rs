@@ -13,6 +13,28 @@ use crate::input_property_schema_for_tool;
 use crate::schema_generation::typed_host_schema;
 use crate::tool_definition::exploration_tool_names;
 
+pub(super) fn validation_source_state_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Source freshness is independent of execution pass/fail. V1 never proves current source: uncrossed covers only canonical potential mutation dispatches in one live Control Project epoch, not external/process writes or an immutable snapshot. This is an observation, not a reusable currentness certificate.",
+        "properties": {
+            "freshness": {"type": "string", "enum": ["unproven", "stale"]},
+            "observed_mutation_fence": {"type": "string", "enum": ["uncrossed", "crossed", "unknown"]},
+            "start_fence": {
+                "type": "object", "additionalProperties": false,
+                "properties": {
+                    "epoch": {"type": "string", "pattern": "^[0-9a-fA-F]{32}$", "maxLength": 32},
+                    "generation": {"type": "integer", "minimum": 0, "maximum": webcodex_core::validation_source::MAX_SOURCE_GENERATION},
+                    "quiescent": {"type": "boolean"}
+                },
+                "required": ["epoch", "generation", "quiescent"]
+            }
+        },
+        "required": ["freshness", "observed_mutation_fence"]
+    })
+}
+
 pub fn schema_type(kind: &str, description: &str) -> Value {
     json!({
         "type": kind,
@@ -1123,12 +1145,12 @@ fn attempt_exploration_schema() -> Value {
 fn attempt_validation_schema() -> Value {
     json!({
         "type": "object",
-        "description": "Current-attempt validation evidence after the latest trusted material workspace-content change. Historical validation remains separate.",
+        "description": "Current-attempt validation evidence. Successful execution with unproven source is unproven, never a current-source pass. Historical execution results remain separate.",
         "additionalProperties": false,
         "properties": {
             "status": {
                 "type": "string",
-                "enum": ["passed", "failed", "inconclusive", "stale", "not_run", "unknown"]
+                "enum": ["unproven", "failed", "inconclusive", "stale", "not_run", "unknown"]
             },
             "latest_status": {
                 "type": "string",

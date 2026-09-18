@@ -15,6 +15,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
 
 fn cargo_output_schema(tool_name: &str) -> Value {
     let mut fields = vec![
+            ("source_state", super::common::validation_source_state_schema()),
             ("project", schema_type("string", "Runtime project id.")),
             ("command_summary", schema_type("string", "Bounded structured validation command summary.")),
             (
@@ -43,7 +44,7 @@ fn cargo_output_schema(tool_name: &str) -> Value {
             ),
             (
                 "passed",
-                nullable_schema("boolean", "Whether command execution succeeded and every requested structured validation postcondition was proven. Absent while a promoted Job is still running."),
+                nullable_schema("boolean", "Whether execution and requested validator postconditions passed; NOT proof of current workspace source. Inspect source_state independently. Absent while a Job is running."),
             ),
             (
                 "command_started",

@@ -15,6 +15,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
+#[path = "code_mode_e2c.rs"]
+mod e2c;
+
 const E2B_MUTATION_ONLY_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     frontend: "code_mode_e2b_test",
     policy_name: "Code Mode E2b test",
@@ -23,6 +26,7 @@ const E2B_MUTATION_ONLY_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     additional_forbidden_argument_fields: &[],
     nested_sync_wait_max_secs: None,
     max_mutation_calls: Some(1),
+    validation_after_mutation: false,
 };
 
 const READ_ONLY_TEST_POLICY: OrchestrationPolicy = OrchestrationPolicy {
@@ -33,6 +37,7 @@ const READ_ONLY_TEST_POLICY: OrchestrationPolicy = OrchestrationPolicy {
     additional_forbidden_argument_fields: &[],
     nested_sync_wait_max_secs: None,
     max_mutation_calls: None,
+    validation_after_mutation: false,
 };
 
 #[derive(Debug, Clone)]
@@ -1427,13 +1432,19 @@ async fn e2b_parent_omits_retired_continuity_overlays_after_nested_edit() {
 }
 
 #[tokio::test]
-async fn e2b_denies_validation_shell_other_mutation_and_recursion_before_business_dispatch() {
+async fn e2b_denies_shell_other_mutation_nested_jobs_and_recursion_before_business_dispatch() {
     let (_root, runtime, project, session_id) = e2b_fixture("e2b-denials", "x\n").await;
     for tool in [
-        "cargo_check",
-        "cargo_test",
         "run_shell",
+        "run_process",
+        "observe_jobs",
+        "wait_for_job_terminal",
         "apply_patch",
+        "write_file",
+        "git_commit",
+        "plugin_tool",
+        "code_mode_exec",
+        "code_mode_exec_effectful",
         "code_mode_exec_mutating",
     ] {
         let source =

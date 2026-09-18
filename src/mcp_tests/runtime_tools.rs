@@ -84,7 +84,14 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
     assert_eq!(work_props["include_project_instructions"]["default"], true);
     assert_eq!(work_props["include_workflow_guidance"]["default"], true);
     assert_eq!(work_props["guidance_profile"]["default"], "direct");
-    assert_eq!(work_props["guidance_profile"]["enum"], json!(["direct"]));
+    assert_eq!(
+        work_props["guidance_profile"]["enum"],
+        if cfg!(feature = "experimental-code-mode") {
+            json!(["direct", "code_mode"])
+        } else {
+            json!(["direct"])
+        }
+    );
     assert_eq!(work_props["include_extension_catalog"]["default"], true);
     assert_eq!(work_props["mode"]["enum"], json!(["checkout", "worktree"]));
     assert_eq!(work_props["mode"]["default"], "checkout");

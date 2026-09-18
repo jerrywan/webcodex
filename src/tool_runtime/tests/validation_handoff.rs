@@ -210,6 +210,7 @@ async fn seed_retained_terminal_validation_job(
                 shell: Some("bash".to_string()),
                 validation_steps: vec![step.clone()],
                 validation: Some(ShellJobValidationMetadata {
+                    source_fence: None,
                     tool: "cargo_check".to_string(),
                     kind: "check".to_string(),
                     steps: vec![step],
