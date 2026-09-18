@@ -145,6 +145,8 @@ pub(crate) enum RouteId {
     OAuthClientsCreate,
     OAuthClientsList,
     OAuthClientsUpdateScopes,
+    OAuthClientsAddRedirectUri,
+    OAuthClientsRemoveRedirectUri,
     OAuthClientsRevoke,
     OAuthSharedKeyClientProvision,
     UsersCreate,

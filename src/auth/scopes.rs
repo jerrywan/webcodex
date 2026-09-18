@@ -270,6 +270,8 @@ mod tests {
             "/api/oauth/clients/create",
             "/api/oauth/clients/list",
             "/api/oauth/clients/update_scopes",
+            "/api/oauth/clients/add_redirect_uri",
+            "/api/oauth/clients/remove_redirect_uri",
             "/api/oauth/clients/revoke",
         ] {
             assert_eq!(

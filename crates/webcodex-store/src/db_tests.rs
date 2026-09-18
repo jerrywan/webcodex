@@ -1089,6 +1089,39 @@ fn can_insert_and_get_oauth_client() {
 }
 
 #[test]
+fn oauth_client_redirect_uri_update_is_compare_and_swap_guarded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open(&tmp.path().join("oauth.db")).unwrap();
+    let user = oauth_seed_user(&db, "alice");
+    let (client, _) = oauth_seed_client(&db, &user, "Test App");
+    let original = client.redirect_uris.clone();
+    let updated = "https://example.com/new-callback";
+
+    assert!(db
+        .update_oauth_client_redirect_uris(&client.client_id, &original, updated)
+        .unwrap());
+    assert!(!db
+        .update_oauth_client_redirect_uris(
+            &client.client_id,
+            &original,
+            "https://example.com/stale-callback",
+        )
+        .unwrap());
+    assert_eq!(
+        db.get_oauth_client_by_client_id(&client.client_id)
+            .unwrap()
+            .unwrap()
+            .redirect_uris,
+        updated
+    );
+
+    db.revoke_oauth_client(&client.id, 100).unwrap();
+    assert!(!db
+        .update_oauth_client_redirect_uris(&client.client_id, updated, &original)
+        .unwrap());
+}
+
+#[test]
 fn revoked_oauth_client_not_returned_by_lookup() {
     let tmp = tempfile::tempdir().unwrap();
     let db = Database::open(&tmp.path().join("oauth.db")).unwrap();
