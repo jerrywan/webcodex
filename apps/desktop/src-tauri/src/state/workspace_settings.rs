@@ -14,7 +14,7 @@ impl AppState {
             .clone()
             .ok_or_else(|| desktop_state_unavailable("Configure a Runner first"))?;
         let can_restart = core
-            .process_snapshot(ProcessKind::LocalRunner)
+            .process_snapshot(ProcessKey::LocalRunner)
             .await
             .is_some_and(|p| p.owned_by_desktop && p.phase == ProcessPhase::Running);
         tokio::task::spawn_blocking(move || {
@@ -58,7 +58,7 @@ impl AppState {
             .await?;
         let result = async {
             if !core
-                .process_snapshot(ProcessKind::LocalRunner)
+                .process_snapshot(ProcessKey::LocalRunner)
                 .await
                 .is_some_and(|p| p.owned_by_desktop && p.phase == ProcessPhase::Running)
             {
@@ -84,12 +84,12 @@ impl AppState {
             core.supervisor
                 .lock()
                 .await
-                .stop_checked(ProcessKind::LocalRunner)
+                .stop_checked(ProcessKey::LocalRunner)
                 .await?;
             core.snapshot.readiness.runner = RunnerReadiness::Connecting;
             core.snapshot.readiness.runtime_ready = false;
             core.publish_snapshot();
-            core.spawn_owned(ProcessKind::LocalRunner, command, false, &cancellation)
+            core.spawn_owned(ProcessKey::LocalRunner, command, false, &cancellation)
                 .await?;
             core.wait_for_runner(
                 &identity,

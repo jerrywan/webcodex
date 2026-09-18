@@ -4,4 +4,4 @@ mod supervisor;
 mod tests;
 
 pub(crate) use supervisor::MachineEventReceiver;
-pub use supervisor::{ProcessKind, ProcessPhase, ProcessSnapshot, ProcessSupervisor};
+pub use supervisor::{ProcessKey, ProcessPhase, ProcessSnapshot, ProcessSupervisor};

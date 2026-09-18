@@ -60,7 +60,7 @@ async fn saved_project_inventory_survives_selection_and_reload() {
 async fn credential_save_and_failed_tunnel_replacement_preserve_server_runner_pids() {
     let data = dir();
     let state = AppState::new(data.clone(), data.join("resources")).unwrap();
-    let kinds = [ProcessKind::LocalServer, ProcessKind::LocalRunner];
+    let kinds = [ProcessKey::LocalServer, ProcessKey::LocalRunner];
     let mut pids = Vec::new();
     for kind in kinds {
         let mut supervisor = state.supervisor.lock().await;
@@ -78,7 +78,7 @@ async fn credential_save_and_failed_tunnel_replacement_preserve_server_runner_pi
         .lock()
         .await
         .spawn_owned(
-            ProcessKind::RegularTunnel,
+            ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT),
             std::process::Command::new("/bin/cat"),
             false,
         )
@@ -97,7 +97,7 @@ async fn credential_save_and_failed_tunnel_replacement_preserve_server_runner_pi
         .supervisor
         .lock()
         .await
-        .snapshot(ProcessKind::RegularTunnel)
+        .snapshot(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
         .is_none();
     state.shutdown().await;
     std::fs::remove_dir_all(data).unwrap();

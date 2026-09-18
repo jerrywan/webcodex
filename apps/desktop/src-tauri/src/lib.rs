@@ -1,5 +1,6 @@
 mod activity;
 mod commands;
+mod connection_id;
 mod deadline;
 mod desktop_shell;
 mod error;

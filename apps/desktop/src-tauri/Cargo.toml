@@ -27,6 +27,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 url = "2"
+uuid = { version = "1", features = ["v4"] }
 webcodex-core = { path = "../../../crates/webcodex-core" }
 webcodex-process = { path = "../../../crates/webcodex-process" }
 webcodex-runner-config = { path = "../../../crates/webcodex-runner-config" }

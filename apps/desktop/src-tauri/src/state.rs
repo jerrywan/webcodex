@@ -17,7 +17,7 @@ use crate::operation::{
     cancelled_error, CancellationContext, CancellationSignal, OperationAdmission,
     OperationController,
 };
-use crate::process::{MachineEventReceiver, ProcessKind, ProcessPhase, ProcessSupervisor};
+use crate::process::{MachineEventReceiver, ProcessKey, ProcessPhase, ProcessSupervisor};
 use crate::tunnel_config::{TunnelConfig, TunnelConfigRequest};
 use crate::webcodex::{
     inspect_project_path, ProjectRuntimeIdentity, QuickShareReadyEvent, RegularTunnelReadyEvent,
@@ -94,7 +94,7 @@ impl AppState {
             if let Ok(mut supervisor) = self.supervisor.try_lock() {
                 let active =
                     supervisor
-                        .snapshot(ProcessKind::RegularTunnel)
+                        .snapshot(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
                         .is_some_and(|process| {
                             matches!(
                                 process.phase,
@@ -216,7 +216,7 @@ impl AppState {
             // Only replace a tunnel for which this Desktop holds a live process lease.
             // Saving credentials never adopts or stops an independently running stack.
             if core
-                .process_snapshot(ProcessKind::RegularTunnel)
+                .process_snapshot(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
                 .await
                 .is_some_and(|p| {
                     p.owned_by_desktop
@@ -228,7 +228,7 @@ impl AppState {
                 core.supervisor
                     .lock()
                     .await
-                    .stop_checked(ProcessKind::RegularTunnel)
+                    .stop_checked(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
                     .await
                     .map_err(tunnel_apply_error)?;
                 core.snapshot.regular_tunnel = None;
@@ -456,10 +456,10 @@ impl AppState {
             .clone();
         let mut supervisor = self.supervisor.lock().await;
         ProcessBaseline {
-            local_server: process_is_active(supervisor.snapshot(ProcessKind::LocalServer)),
-            local_runner: process_is_active(supervisor.snapshot(ProcessKind::LocalRunner)),
-            quick_share: process_is_active(supervisor.snapshot(ProcessKind::QuickShare)),
-            regular_tunnel: process_is_active(supervisor.snapshot(ProcessKind::RegularTunnel)),
+            local_server: process_is_active(supervisor.snapshot(ProcessKey::LocalServer)),
+            local_runner: process_is_active(supervisor.snapshot(ProcessKey::LocalRunner)),
+            quick_share: process_is_active(supervisor.snapshot(ProcessKey::QuickShare)),
+            regular_tunnel: process_is_active(supervisor.snapshot(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))),
             snapshot,
         }
     }
@@ -468,10 +468,10 @@ impl AppState {
         let mut supervisor = self.supervisor.lock().await;
         let mut cleanup = ProcessCleanup::default();
         for (kind, existed) in [
-            (ProcessKind::QuickShare, baseline.quick_share),
-            (ProcessKind::RegularTunnel, baseline.regular_tunnel),
-            (ProcessKind::LocalRunner, baseline.local_runner),
-            (ProcessKind::LocalServer, baseline.local_server),
+            (ProcessKey::QuickShare, baseline.quick_share),
+            (ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT), baseline.regular_tunnel),
+            (ProcessKey::LocalRunner, baseline.local_runner),
+            (ProcessKey::LocalServer, baseline.local_server),
         ] {
             if !existed && supervisor.snapshot(kind).is_some() {
                 supervisor.stop(kind).await;
@@ -541,12 +541,12 @@ struct ProcessCleanup {
 }
 
 impl ProcessCleanup {
-    fn mark_stopped(&mut self, kind: ProcessKind) {
+    fn mark_stopped(&mut self, kind: ProcessKey) {
         match kind {
-            ProcessKind::LocalServer => self.local_server = true,
-            ProcessKind::LocalRunner => self.local_runner = true,
-            ProcessKind::QuickShare => self.quick_share = true,
-            ProcessKind::RegularTunnel => self.regular_tunnel = true,
+            ProcessKey::LocalServer => self.local_server = true,
+            ProcessKey::LocalRunner => self.local_runner = true,
+            ProcessKey::QuickShare => self.quick_share = true,
+            ProcessKey::RegularTunnel(_) => self.regular_tunnel = true,
         }
     }
 }
@@ -640,7 +640,7 @@ impl DesktopCore {
         apply_config_projection(&mut self.snapshot, &self.config);
         if self.snapshot.regular_tunnel.is_some() {
             let active = self
-                .process_snapshot(ProcessKind::RegularTunnel)
+                .process_snapshot(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
                 .await
                 .is_some_and(|process| {
                     matches!(
@@ -715,7 +715,7 @@ impl DesktopCore {
         if self.snapshot.quick_share.is_some() {
             self.snapshot.chatgpt_activity = None;
             let active = self
-                .process_snapshot(ProcessKind::QuickShare)
+                .process_snapshot(ProcessKey::QuickShare)
                 .await
                 .is_some_and(|process| {
                     matches!(
@@ -806,7 +806,7 @@ impl DesktopCore {
             };
         cancellation.check()?;
         let tunnel_active = self
-            .process_snapshot(ProcessKind::RegularTunnel)
+            .process_snapshot(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
             .await
             .is_some_and(|process| {
                 matches!(
@@ -1211,7 +1211,7 @@ impl DesktopCore {
                 ));
             }
             let command = self.adapter.local_server_command(&env_file)?;
-            self.spawn_owned(ProcessKind::LocalServer, command, false, cancellation)
+            self.spawn_owned(ProcessKey::LocalServer, command, false, cancellation)
                 .await?;
             true
         } else {
@@ -1273,14 +1273,14 @@ impl DesktopCore {
             };
 
         let replacing_owned_runner = identity_replaced
-            && process_is_active(self.process_snapshot(ProcessKind::LocalRunner).await);
+            && process_is_active(self.process_snapshot(ProcessKey::LocalRunner).await);
         let runner_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
         let activation: DesktopResult<bool> = async {
             if replacing_owned_runner {
                 // A Desktop-owned Runner can only serve the exact config it was
                 // started with. Replace that owned process transactionally while
                 // keeping the local Server alive; never broad-kill unrelated Runners.
-                self.stop_process_until(ProcessKind::LocalRunner, runner_deadline)
+                self.stop_process_until(ProcessKey::LocalRunner, runner_deadline)
                     .await;
                 if runner_deadline.is_elapsed() {
                     return Err(readiness_timeout_error(
@@ -1315,7 +1315,7 @@ impl DesktopCore {
                 self.snapshot.readiness.runner = RunnerReadiness::Connecting;
                 self.publish_snapshot();
                 let command = self.adapter.local_runner_command(&identity.runner_config)?;
-                self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
+                self.spawn_owned(ProcessKey::LocalRunner, command, false, cancellation)
                     .await?;
                 true
             } else {
@@ -1339,7 +1339,7 @@ impl DesktopCore {
                     ) =>
                 {
                     if !can_refresh_legacy_runner(
-                        self.process_snapshot(ProcessKind::LocalRunner).await,
+                        self.process_snapshot(ProcessKey::LocalRunner).await,
                     ) {
                         return Err(DesktopError::new(
                             "project_activation_legacy_runner",
@@ -1357,7 +1357,7 @@ impl DesktopCore {
                         )
                         .await?;
                     let legacy_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
-                    self.stop_process_until(ProcessKind::LocalRunner, legacy_deadline)
+                    self.stop_process_until(ProcessKey::LocalRunner, legacy_deadline)
                         .await;
                     if legacy_deadline.is_elapsed() {
                         return Err(readiness_timeout_error(
@@ -1369,7 +1369,7 @@ impl DesktopCore {
                     let command = self
                         .adapter
                         .local_runner_command(&legacy_identity.runner_config)?;
-                    self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
+                    self.spawn_owned(ProcessKey::LocalRunner, command, false, cancellation)
                         .await?;
                     self.wait_for_runner(&legacy_identity, cancellation, legacy_deadline, true)
                         .await?;
@@ -1388,7 +1388,7 @@ impl DesktopCore {
             Err(error) => {
                 if replacing_owned_runner {
                     self.stop_process_until(
-                        ProcessKind::LocalRunner,
+                        ProcessKey::LocalRunner,
                         Deadline::after(READINESS_CLEANUP_SLACK),
                     )
                     .await;
@@ -1434,14 +1434,14 @@ impl DesktopCore {
             self.snapshot.project = project_snapshot(&self.config);
             if runner_started || replacing_owned_runner {
                 self.stop_process_until(
-                    ProcessKind::LocalRunner,
+                    ProcessKey::LocalRunner,
                     Deadline::after(READINESS_CLEANUP_SLACK),
                 )
                 .await;
             }
             if server_started {
                 self.stop_process_until(
-                    ProcessKind::LocalServer,
+                    ProcessKey::LocalServer,
                     Deadline::after(READINESS_CLEANUP_SLACK),
                 )
                 .await;
@@ -1629,9 +1629,9 @@ impl DesktopCore {
         }
         let runner_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
         let replacing_owned_runner = identity_replaced
-            && process_is_active(self.process_snapshot(ProcessKind::LocalRunner).await);
+            && process_is_active(self.process_snapshot(ProcessKey::LocalRunner).await);
         if replacing_owned_runner {
-            self.stop_process_until(ProcessKind::LocalRunner, runner_deadline)
+            self.stop_process_until(ProcessKey::LocalRunner, runner_deadline)
                 .await;
             cancellation.check()?;
         }
@@ -1653,7 +1653,7 @@ impl DesktopCore {
                 ));
             }
             let command = self.adapter.local_runner_command(&identity.runner_config)?;
-            self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
+            self.spawn_owned(ProcessKey::LocalRunner, command, false, cancellation)
                 .await?;
             true
         } else {
@@ -1674,7 +1674,7 @@ impl DesktopCore {
                         | "project_activation_restart_required"
                 ) =>
             {
-                if !can_refresh_legacy_runner(self.process_snapshot(ProcessKind::LocalRunner).await)
+                if !can_refresh_legacy_runner(self.process_snapshot(ProcessKey::LocalRunner).await)
                 {
                     return Err(DesktopError::new(
                         "project_activation_legacy_runner",
@@ -1687,7 +1687,7 @@ impl DesktopCore {
                     .legacy_register_project(&identity, &runner_client_id, &project, cancellation)
                     .await?;
                 let legacy_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
-                self.stop_process_until(ProcessKind::LocalRunner, legacy_deadline)
+                self.stop_process_until(ProcessKey::LocalRunner, legacy_deadline)
                     .await;
                 if legacy_deadline.is_elapsed() {
                     return Err(readiness_timeout_error(
@@ -1699,7 +1699,7 @@ impl DesktopCore {
                 let command = self
                     .adapter
                     .local_runner_command(&legacy_identity.runner_config)?;
-                self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
+                self.spawn_owned(ProcessKey::LocalRunner, command, false, cancellation)
                     .await?;
                 self.wait_for_runner(&legacy_identity, cancellation, legacy_deadline, true)
                     .await?;
@@ -1746,7 +1746,7 @@ impl DesktopCore {
         let binaries = self.adapter.ensure_binaries(cancellation).await?.clone();
         self.snapshot.binaries = Some(binaries.info());
         if self
-            .process_snapshot(ProcessKind::QuickShare)
+            .process_snapshot(ProcessKey::QuickShare)
             .await
             .is_some_and(|process| {
                 matches!(
@@ -1779,7 +1779,7 @@ impl DesktopCore {
             ));
         }
         let mut events = self
-            .spawn_owned(ProcessKind::QuickShare, command, true, cancellation)
+            .spawn_owned(ProcessKey::QuickShare, command, true, cancellation)
             .await?
             .expect("machine stdout requested");
         self.snapshot.topology = Some(RuntimeTopology {
@@ -1823,7 +1823,7 @@ impl DesktopCore {
             biased;
             _ = cancellation.cancelled() => {
                 self.stop_process_until(
-                    ProcessKind::QuickShare,
+                    ProcessKey::QuickShare,
                     Deadline::at(deadline.cleanup_deadline(READINESS_CLEANUP_SLACK)),
                 ).await;
                 return Err(cancelled_error());
@@ -1836,7 +1836,7 @@ impl DesktopCore {
             Ok(Ok(Some(value))) => value,
             Ok(Err(overflow)) => {
                 self.stop_process_until(
-                    ProcessKind::QuickShare,
+                    ProcessKey::QuickShare,
                     Deadline::at(deadline.cleanup_deadline(READINESS_CLEANUP_SLACK)),
                 )
                 .await;
@@ -1844,7 +1844,7 @@ impl DesktopCore {
             }
             Ok(Ok(None)) | Err(_) => {
                 self.stop_process_until(
-                    ProcessKind::QuickShare,
+                    ProcessKey::QuickShare,
                     Deadline::at(deadline.cleanup_deadline(READINESS_CLEANUP_SLACK)),
                 )
                 .await;
@@ -1861,7 +1861,7 @@ impl DesktopCore {
         let event: QuickShareReadyEvent = match serde_json::from_value(event_value) {
             Ok(event) => event,
             Err(_) => {
-                self.stop_process(ProcessKind::QuickShare).await;
+                self.stop_process(ProcessKey::QuickShare).await;
                 return Err(DesktopError::new(
                     "webcodex_contract_invalid",
                     "Quick Share returned an invalid readiness event",
@@ -1875,7 +1875,7 @@ impl DesktopCore {
             || event.project.trim().is_empty()
             || event.exposure.kind.trim().is_empty()
         {
-            self.stop_process(ProcessKind::QuickShare).await;
+            self.stop_process(ProcessKey::QuickShare).await;
             return Err(DesktopError::new(
                 "webcodex_contract_invalid",
                 "Quick Share readiness identity is incomplete",
@@ -1925,7 +1925,7 @@ impl DesktopCore {
         &mut self,
         cancellation: &CancellationContext,
     ) -> DesktopResult<DesktopStateSnapshot> {
-        self.stop_process(ProcessKind::QuickShare).await;
+        self.stop_process(ProcessKey::QuickShare).await;
         self.snapshot.quick_share = None;
         self.snapshot.topology = self.config.topology.clone();
         self.snapshot.project = self.config.project.clone();
@@ -1979,7 +1979,7 @@ impl DesktopCore {
             ));
         }
         if self
-            .process_snapshot(ProcessKind::RegularTunnel)
+            .process_snapshot(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
             .await
             .is_some_and(|process| {
                 matches!(
@@ -2034,7 +2034,7 @@ impl DesktopCore {
             ));
         }
         let mut events = self
-            .spawn_owned(ProcessKind::RegularTunnel, command, true, cancellation)
+            .spawn_owned(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT), command, true, cancellation)
             .await?
             .expect("regular tunnel machine stdout requested");
         self.snapshot.regular_tunnel = Some(RegularTunnelState {
@@ -2072,7 +2072,7 @@ impl DesktopCore {
             biased;
             _ = cancellation.cancelled() => {
                 self.stop_process_until(
-                    ProcessKind::RegularTunnel,
+                    ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT),
                     Deadline::at(deadline.cleanup_deadline(READINESS_CLEANUP_SLACK)),
                 ).await;
                 return Err(cancelled_error());
@@ -2085,7 +2085,7 @@ impl DesktopCore {
             Ok(Ok(Some(value))) => value,
             Ok(Err(overflow)) => {
                 self.stop_process_until(
-                    ProcessKind::RegularTunnel,
+                    ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT),
                     Deadline::at(deadline.cleanup_deadline(READINESS_CLEANUP_SLACK)),
                 )
                 .await;
@@ -2094,7 +2094,7 @@ impl DesktopCore {
             }
             Ok(Ok(None)) | Err(_) => {
                 self.stop_process_until(
-                    ProcessKind::RegularTunnel,
+                    ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT),
                     Deadline::at(deadline.cleanup_deadline(READINESS_CLEANUP_SLACK)),
                 )
                 .await;
@@ -2125,7 +2125,7 @@ impl DesktopCore {
         let event: RegularTunnelReadyEvent = match serde_json::from_value(event_value) {
             Ok(event) => event,
             Err(_) => {
-                self.stop_process(ProcessKind::RegularTunnel).await;
+                self.stop_process(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT)).await;
                 self.snapshot.regular_tunnel = None;
                 return Err(DesktopError::new(
                     "webcodex_contract_invalid",
@@ -2144,7 +2144,7 @@ impl DesktopCore {
                 "copied" | "unavailable" | "failed" | "not_copied"
             )
         {
-            self.stop_process(ProcessKind::RegularTunnel).await;
+            self.stop_process(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT)).await;
             self.snapshot.regular_tunnel = None;
             return Err(DesktopError::new(
                 "webcodex_contract_invalid",
@@ -2200,7 +2200,7 @@ impl DesktopCore {
         self.supervisor
             .lock()
             .await
-            .stop_checked(ProcessKind::RegularTunnel)
+            .stop_checked(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
             .await?;
         self.snapshot.regular_tunnel = None;
         self.snapshot.topology = self.config.topology.clone();
@@ -2223,12 +2223,12 @@ impl DesktopCore {
         &mut self,
         _cancellation: &CancellationContext,
     ) -> DesktopResult<DesktopStateSnapshot> {
-        self.stop_process(ProcessKind::RegularTunnel).await;
+        self.stop_process(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT)).await;
         self.snapshot.regular_tunnel = None;
-        self.stop_process(ProcessKind::LocalRunner).await;
+        self.stop_process(ProcessKey::LocalRunner).await;
         self.config.runtime_autostart = Some(false);
         self.save_config().await?;
-        self.stop_process(ProcessKind::LocalServer).await;
+        self.stop_process(ProcessKey::LocalServer).await;
         self.snapshot.topology = self.config.topology.clone();
         let exposure = exposure_readiness(self.config.topology.as_ref());
         self.snapshot.readiness = aggregate_readiness(
@@ -2250,13 +2250,13 @@ impl DesktopCore {
         self.get_state().await
     }
 
-    async fn process_snapshot(&self, kind: ProcessKind) -> Option<crate::process::ProcessSnapshot> {
+    async fn process_snapshot(&self, kind: ProcessKey) -> Option<crate::process::ProcessSnapshot> {
         self.supervisor.lock().await.snapshot(kind)
     }
 
     async fn spawn_owned(
         &self,
-        kind: ProcessKind,
+        kind: ProcessKey,
         command: std::process::Command,
         machine_stdout: bool,
         cancellation: &CancellationContext,
@@ -2267,11 +2267,11 @@ impl DesktopCore {
         supervisor.spawn_owned(kind, command, machine_stdout).await
     }
 
-    async fn stop_process(&self, kind: ProcessKind) {
+    async fn stop_process(&self, kind: ProcessKey) {
         self.supervisor.lock().await.stop(kind).await;
     }
 
-    async fn stop_process_until(&self, kind: ProcessKind, deadline: Deadline) {
+    async fn stop_process_until(&self, kind: ProcessKey, deadline: Deadline) {
         self.supervisor
             .lock()
             .await
@@ -2292,7 +2292,7 @@ impl DesktopCore {
             cancellation.check()?;
             if deadline.is_elapsed() {
                 self.cleanup_readiness_process(
-                    ProcessKind::LocalServer,
+                    ProcessKey::LocalServer,
                     deadline,
                     cleanup_owned_process,
                 )
@@ -2303,10 +2303,10 @@ impl DesktopCore {
                     "Check the local Service diagnostics and retry.",
                 ));
             }
-            if let Some(process) = self.process_snapshot(ProcessKind::LocalServer).await {
+            if let Some(process) = self.process_snapshot(ProcessKey::LocalServer).await {
                 if matches!(process.phase, ProcessPhase::Exited | ProcessPhase::Failed) {
                     self.cleanup_readiness_process(
-                        ProcessKind::LocalServer,
+                        ProcessKey::LocalServer,
                         deadline,
                         cleanup_owned_process,
                     )
@@ -2335,7 +2335,7 @@ impl DesktopCore {
             cancellation.check()?;
             if deadline.is_elapsed() {
                 self.cleanup_readiness_process(
-                    ProcessKind::LocalServer,
+                    ProcessKey::LocalServer,
                     deadline,
                     cleanup_owned_process,
                 )
@@ -2361,7 +2361,7 @@ impl DesktopCore {
             cancellation.check()?;
             if deadline.is_elapsed() {
                 self.cleanup_readiness_process(
-                    ProcessKind::LocalRunner,
+                    ProcessKey::LocalRunner,
                     deadline,
                     cleanup_owned_process,
                 )
@@ -2372,10 +2372,10 @@ impl DesktopCore {
                     "Check Server reachability and Runner diagnostics, then retry.",
                 ));
             }
-            if let Some(process) = self.process_snapshot(ProcessKind::LocalRunner).await {
+            if let Some(process) = self.process_snapshot(ProcessKey::LocalRunner).await {
                 if matches!(process.phase, ProcessPhase::Exited | ProcessPhase::Failed) {
                     self.cleanup_readiness_process(
-                        ProcessKind::LocalRunner,
+                        ProcessKey::LocalRunner,
                         deadline,
                         cleanup_owned_process,
                     )
@@ -2398,7 +2398,7 @@ impl DesktopCore {
             cancellation.check()?;
             if deadline.is_elapsed() {
                 self.cleanup_readiness_process(
-                    ProcessKind::LocalRunner,
+                    ProcessKey::LocalRunner,
                     deadline,
                     cleanup_owned_process,
                 )
@@ -2442,7 +2442,7 @@ impl DesktopCore {
 
     async fn cleanup_readiness_process(
         &self,
-        kind: ProcessKind,
+        kind: ProcessKey,
         deadline: Deadline,
         cleanup_owned_process: bool,
     ) {
@@ -3383,7 +3383,7 @@ mod tests {
         assert!(!can_refresh_legacy_runner(None));
         assert!(!can_refresh_legacy_runner(Some(
             crate::process::ProcessSnapshot {
-                kind: ProcessKind::LocalRunner,
+                kind: ProcessKey::LocalRunner,
                 phase: ProcessPhase::Running,
                 pid: Some(42),
                 exit_code: None,
@@ -3392,7 +3392,7 @@ mod tests {
         )));
         assert!(!can_refresh_legacy_runner(Some(
             crate::process::ProcessSnapshot {
-                kind: ProcessKind::LocalRunner,
+                kind: ProcessKey::LocalRunner,
                 phase: ProcessPhase::Exited,
                 pid: Some(43),
                 exit_code: Some(0),
@@ -3401,7 +3401,7 @@ mod tests {
         )));
         assert!(can_refresh_legacy_runner(Some(
             crate::process::ProcessSnapshot {
-                kind: ProcessKind::LocalRunner,
+                kind: ProcessKey::LocalRunner,
                 phase: ProcessPhase::Running,
                 pid: Some(44),
                 exit_code: None,
@@ -3917,7 +3917,7 @@ mod tests {
             .supervisor
             .lock()
             .await
-            .spawn_owned(ProcessKind::LocalServer, long_command, false)
+            .spawn_owned(ProcessKey::LocalServer, long_command, false)
             .await
             .expect("start long-lived Desktop-owned fixture");
 
@@ -3984,7 +3984,7 @@ mod tests {
             .supervisor
             .lock()
             .await
-            .snapshot(ProcessKind::LocalServer)
+            .snapshot(ProcessKey::LocalServer)
             .is_none());
         tokio::time::timeout(Duration::from_millis(250), state.shutdown())
             .await
@@ -4108,11 +4108,11 @@ mod tests {
         assert_eq!(stopped.readiness.server, ServerReadiness::Stopped);
         assert_eq!(stopped.readiness.runner, RunnerReadiness::Stopped);
         assert!(core
-            .process_snapshot(ProcessKind::LocalServer)
+            .process_snapshot(ProcessKey::LocalServer)
             .await
             .is_none());
         assert!(core
-            .process_snapshot(ProcessKind::LocalRunner)
+            .process_snapshot(ProcessKey::LocalRunner)
             .await
             .is_none());
 
@@ -4141,11 +4141,11 @@ mod tests {
         let first_runner_client_id =
             stored_runner_client_id(&core.config).expect("stored Runner client identity");
         let server_before_switch = core
-            .process_snapshot(ProcessKind::LocalServer)
+            .process_snapshot(ProcessKey::LocalServer)
             .await
             .expect("Desktop owns local Server before project switch");
         let runner_before_switch = core
-            .process_snapshot(ProcessKind::LocalRunner)
+            .process_snapshot(ProcessKey::LocalRunner)
             .await
             .expect("Desktop owns local Runner before project switch");
         assert!(server_before_switch.owned_by_desktop);
@@ -4180,11 +4180,11 @@ mod tests {
             &expected_project.path,
         ));
         let server_after_switch = core
-            .process_snapshot(ProcessKind::LocalServer)
+            .process_snapshot(ProcessKey::LocalServer)
             .await
             .expect("Desktop still owns local Server after project switch");
         let runner_after_switch = core
-            .process_snapshot(ProcessKind::LocalRunner)
+            .process_snapshot(ProcessKey::LocalRunner)
             .await
             .expect("Desktop still owns the same Runner after project switch");
         assert_eq!(
@@ -4241,7 +4241,7 @@ mod tests {
             .expect("reselecting Project B is idempotent");
         assert_eq!(repeated.readiness.project, ProjectReadiness::Ready);
         let runner_after_repeat = core
-            .process_snapshot(ProcessKind::LocalRunner)
+            .process_snapshot(ProcessKey::LocalRunner)
             .await
             .expect("Desktop still owns Runner after idempotent activation");
         assert_eq!(
@@ -4306,7 +4306,7 @@ mod tests {
         assert!(snapshot.readiness.runtime_ready);
         assert!(!snapshot.readiness.ready_for_chatgpt);
         assert!(core
-            .process_snapshot(ProcessKind::QuickShare)
+            .process_snapshot(ProcessKey::QuickShare)
             .await
             .is_some());
 
@@ -4314,7 +4314,7 @@ mod tests {
             .await
             .expect("stop Quick Share");
         assert!(core
-            .process_snapshot(ProcessKind::QuickShare)
+            .process_snapshot(ProcessKey::QuickShare)
             .await
             .is_none());
         drop(core);
@@ -4357,7 +4357,7 @@ mod tests {
             .adapter
             .local_server_command(&env_file)
             .expect("build remote dogfood Server command");
-        host.spawn_owned(ProcessKind::LocalServer, command, false, &cancellation)
+        host.spawn_owned(ProcessKey::LocalServer, command, false, &cancellation)
             .await
             .expect("start remote dogfood Server");
 
@@ -4382,7 +4382,7 @@ mod tests {
                     .configure_remote_setup(&server_url, &pairing_code, &project, &cancellation)
                     .await?;
                 let first_started_server = client
-                    .process_snapshot(ProcessKind::LocalServer)
+                    .process_snapshot(ProcessKey::LocalServer)
                     .await
                     .is_some();
                 client.stop_local_runtime(&cancellation).await?;
@@ -4391,7 +4391,7 @@ mod tests {
                     .configure_remote_setup(&server_url, "", &project, &cancellation)
                     .await?;
                 let second_started_server = client
-                    .process_snapshot(ProcessKind::LocalServer)
+                    .process_snapshot(ProcessKey::LocalServer)
                     .await
                     .is_some();
                 client.stop_local_runtime(&cancellation).await?;
@@ -4543,7 +4543,7 @@ mod tests {
         core.supervisor
             .lock()
             .await
-            .spawn_owned(ProcessKind::RegularTunnel, command, false)
+            .spawn_owned(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT), command, false)
             .await
             .expect("start failing tunnel fixture");
 
