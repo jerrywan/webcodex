@@ -151,10 +151,6 @@ pub struct SessionRecord {
     /// than are retained now". The persisted counterpart carries the additive
     /// serde default; the in-memory record is always constructed explicitly.
     pub events_observed: u64,
-    /// Durable Server-owned checkpoint ordering watermark. This advances
-    /// once for each consequential model-facing result selected by tool policy;
-    /// generic/background Session events never advance it.
-    pub context_revision: u64,
     /// Git tree captured exactly once when a fresh coding Workflow Session is
     /// created. `None` means startup was not a Git repository; continuation
     /// never retroactively creates or replaces this baseline.
@@ -216,7 +212,6 @@ pub struct ColdSessionRecord {
     pub lifecycle: SessionLifecycle,
     pub updated_at: i64,
     pub project_instructions: Option<ProjectInstructionsSummarySnapshot>,
-    pub context_revision: u64,
     pub raw: Arc<RawValue>,
 }
 
@@ -260,13 +255,6 @@ impl StoredSession {
         match self {
             Self::Hot(record) => record.updated_at,
             Self::Cold(record) => record.updated_at,
-        }
-    }
-
-    pub fn context_revision(&self) -> u64 {
-        match self {
-            Self::Hot(record) => record.context_revision,
-            Self::Cold(record) => record.context_revision,
         }
     }
 
@@ -485,7 +473,12 @@ pub struct PersistedSessionRecord {
     pub completion_assignment_fence_fingerprints: BTreeMap<String, String>,
     pub completion_assignment_fence_tracking_complete: bool,
     pub events_observed: u64,
-    pub context_revision: u64,
+    /// Persistence compatibility only: accepts the retired current-v2 field.
+    /// The value is inert, never restored into live Session semantics, and current
+    /// writers always omit it.
+    #[allow(dead_code)]
+    #[serde(default, rename = "context_revision", skip_serializing)]
+    pub legacy_context_revision: Option<u64>,
     /// Omit this bounded list when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materialized_validation_job_ids: Vec<String>,
@@ -546,7 +539,6 @@ pub struct ToolCallStart {
     pub started_instant: Instant,
     pub permission: Option<PermissionDecision>,
     pub expectation: ToolCallExpectation,
-    pub advances_context_checkpoint: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -659,11 +651,10 @@ pub struct SessionEvent {
     pub logical_invocation_role: Option<String>,
     pub session_id: String,
     pub kind: String,
-    /// Model-facing context checkpoint revision assigned atomically only when the
-    /// finished ToolResult advances model knowledge. Non-checkpoint results and
-    /// started/background/system events leave this unset.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_revision: Option<u64>,
+    /// Persistence compatibility only: accepts the retired current-v2 event field.
+    /// The value is inert and current writers always omit it.
+    #[serde(default, rename = "context_revision", skip_serializing)]
+    pub legacy_context_revision: Option<u64>,
     /// Closed, bounded durable consequence evidence for diagnostic recovery. It never stores arbitrary ToolResult bodies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_result_summary: Option<Value>,

@@ -1240,7 +1240,7 @@ impl ToolRuntime {
         if model_facing {
             let session_output =
                 super::tool_audit::session_log_result_for_tool(tool_name, &result.output);
-            self.sessions.record_model_facing_tool_call_finished(
+            self.sessions.record_tool_call_finished(
                 start,
                 success,
                 &session_output,

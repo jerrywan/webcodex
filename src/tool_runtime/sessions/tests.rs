@@ -13,44 +13,6 @@ use std::path::PathBuf;
 
 mod audit_policy;
 
-fn record_model_facing_result(
-    store: &SessionStore,
-    session_id: &str,
-    tool_name: &str,
-
-    success: bool,
-    output: Value,
-) -> u64 {
-    let arguments = match tool_name {
-        "read_files" => read_files_input("proj", "src/lib.rs"),
-        "search_project_texts" => search_project_texts_input("proj", "needle", Some("src")),
-        _ => json!({"project": "proj"}),
-    };
-    let start = store
-        .record_tool_call_started_with_metadata(
-            Some(session_id),
-            SessionTransport::Mcp,
-            tool_name,
-            &arguments,
-            Some("proj".to_string()),
-            ToolCallRecorderMetadata {
-                ..Default::default()
-            },
-            crate::tool_runtime::sessions::session_tool_contract(tool_name),
-        )
-        .expect("recorded call start");
-    let session_output = super::super::tool_audit::session_log_result_for_tool(tool_name, &output);
-    store
-        .record_model_facing_tool_call_finished(
-            Some(start),
-            success,
-            &session_output,
-            (!success).then_some("business failure"),
-            (!success).then_some("business_failure"),
-        )
-        .expect("recorded model-facing result")
-}
-
 fn persistent_store(path: PathBuf) -> SessionStore {
     SessionStore::with_persistence(path, 10, 10)
 }
@@ -707,7 +669,7 @@ fn skill_read_body_and_catalog_descriptions_never_enter_durable_session_ledger()
         &json!({"project": project, "query_present": false, "limit": 20}),
         crate::tool_runtime::sessions::session_tool_contract("skill_list"),
     );
-    store.record_model_facing_tool_call_finished(
+    store.record_tool_call_finished(
         list_start,
         true,
         &json!({
@@ -737,7 +699,7 @@ fn skill_read_body_and_catalog_descriptions_never_enter_durable_session_ledger()
         }),
         crate::tool_runtime::sessions::session_tool_contract("skill_read_file"),
     );
-    store.record_model_facing_tool_call_finished(
+    store.record_tool_call_finished(
         read_start,
         true,
         &json!({
@@ -820,7 +782,7 @@ fn memory_body_summary_query_and_tags_never_enter_durable_session_ledger_or_reco
         &set_args,
         crate::tool_runtime::sessions::session_tool_contract("memory_set"),
     );
-    store.record_model_facing_tool_call_finished(
+    store.record_tool_call_finished(
         set_start,
         true,
         &json!({
@@ -856,7 +818,7 @@ fn memory_body_summary_query_and_tags_never_enter_durable_session_ledger_or_reco
         &search_args,
         crate::tool_runtime::sessions::session_tool_contract("memory_search"),
     );
-    store.record_model_facing_tool_call_finished(
+    store.record_tool_call_finished(
         search_start,
         true,
         &json!({
@@ -892,7 +854,7 @@ fn memory_body_summary_query_and_tags_never_enter_durable_session_ledger_or_reco
         }),
         crate::tool_runtime::sessions::session_tool_contract("memory_read"),
     );
-    store.record_model_facing_tool_call_finished(
+    store.record_tool_call_finished(
         read_start,
         true,
         &json!({
@@ -925,7 +887,7 @@ fn memory_body_summary_query_and_tags_never_enter_durable_session_ledger_or_reco
         &json!({"offset": 0, "limit": 50}),
         crate::tool_runtime::sessions::session_tool_contract("memory_scope_list"),
     );
-    store.record_model_facing_tool_call_finished(
+    store.record_tool_call_finished(
         scope_list_start,
         true,
         &json!({
@@ -966,7 +928,7 @@ fn memory_body_summary_query_and_tags_never_enter_durable_session_ledger_or_reco
         &purge_args,
         crate::tool_runtime::sessions::session_tool_contract("memory_scope_purge"),
     );
-    store.record_model_facing_tool_call_finished(
+    store.record_tool_call_finished(
         purge_start,
         true,
         &json!({
@@ -2925,129 +2887,4 @@ fn post_message(
             priority: SessionMessagePriority::Normal,
         })
         .unwrap()
-}
-
-#[test]
-fn raw_model_facing_events_do_not_consume_context_revisions() {
-    let store = SessionStore::new(10, 100);
-    let session = store.start_session(
-        Some("proj".to_string()),
-        Some("checkpoint loop".to_string()),
-    );
-
-    for tool in ["read_files", "search_project_texts", "show_changes"] {
-        let observed = record_model_facing_result(
-            &store,
-            &session.session_id,
-            tool,
-            true,
-            json!({"observed": true}),
-        );
-        assert_eq!(observed, 0, "{tool}");
-    }
-
-    let edit = record_model_facing_result(
-        &store,
-        &session.session_id,
-        "apply_text_edits",
-        true,
-        json!({"state_changed": true}),
-    );
-    assert_eq!(edit, 1);
-
-    let read_batch = record_model_facing_result(
-        &store,
-        &session.session_id,
-        "read_files",
-        true,
-        json!({"observed": true}),
-    );
-    assert_eq!(read_batch, 1);
-
-    let process = record_model_facing_result(
-        &store,
-        &session.session_id,
-        "run_process",
-        true,
-        json!({"command_started": true, "command_completed": true, "exit_code": 0}),
-    );
-    assert_eq!(process, 2);
-    assert_eq!(store.context_revision(&session.session_id), Some(2));
-
-    let summary = store.summary(&session.session_id, Some(100)).unwrap();
-    let finished = summary
-        .events
-        .iter()
-        .filter(|event| event.kind == "tool_call_finished")
-        .collect::<Vec<_>>();
-    for event in &finished {
-        let expected = match event.tool_name.as_str() {
-            "apply_text_edits" => Some(1),
-            "run_process" => Some(2),
-            "read_files" | "search_project_texts" | "show_changes" => None,
-            other => panic!("unexpected finished tool {other}"),
-        };
-        assert_eq!(event.context_revision, expected, "{}", event.tool_name);
-    }
-}
-
-#[test]
-fn simultaneous_model_facing_results_allocate_unique_ordered_revisions() {
-    let store = SessionStore::new(10, 100);
-    let session = store.start_session(Some("proj".to_string()), Some("concurrent".to_string()));
-    let first = record_model_facing_result(
-        &store,
-        &session.session_id,
-        "apply_text_edits",
-        true,
-        json!({"state_changed": true}),
-    );
-    assert_eq!(first, 1);
-
-    let make_start = || {
-        store
-            .record_tool_call_started_with_metadata(
-                Some(&session.session_id),
-                SessionTransport::Mcp,
-                "apply_text_edits",
-                &json!({"project": "proj"}),
-                Some("proj".to_string()),
-                ToolCallRecorderMetadata {
-                    ..Default::default()
-                },
-                crate::tool_runtime::sessions::session_tool_contract("apply_text_edits"),
-            )
-            .unwrap()
-    };
-    let start_a = make_start();
-    let start_b = make_start();
-
-    let a_store = store.clone();
-    let b_store = store.clone();
-    let a = std::thread::spawn(move || {
-        a_store
-            .record_model_facing_tool_call_finished(
-                Some(start_a),
-                true,
-                &json!({"content": "a"}),
-                None,
-                None,
-            )
-            .unwrap()
-    });
-    let b = std::thread::spawn(move || {
-        b_store
-            .record_model_facing_tool_call_finished(
-                Some(start_b),
-                true,
-                &json!({"content": "b"}),
-                None,
-                None,
-            )
-            .unwrap()
-    });
-    let mut outcomes = vec![a.join().unwrap(), b.join().unwrap()];
-    outcomes.sort_unstable();
-    assert_eq!(outcomes, vec![2, 3]);
-    assert_eq!(store.context_revision(&session.session_id), Some(3));
 }

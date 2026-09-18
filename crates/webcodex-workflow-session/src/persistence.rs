@@ -99,7 +99,7 @@ impl PersistedSessionRecord {
             events,
             messages,
             events_observed: record.events_observed,
-            context_revision: record.context_revision,
+            legacy_context_revision: None,
             git_baseline_tree: record.git_baseline_tree.clone(),
             repository_edit_observed: record.repository_edit_observed,
             materialized_validation_job_ids: record
@@ -138,7 +138,6 @@ impl PersistedSessionRecord {
             && self.created_at == record.created_at
             && self.updated_at == record.updated_at
             && self.events_observed == record.events_observed
-            && self.context_revision == record.context_revision
             && self.git_baseline_tree == record.git_baseline_tree
             && self.repository_edit_observed == record.repository_edit_observed
             && self
@@ -369,11 +368,6 @@ impl PersistedSessionRecord {
         // retained. A live ledger that exceeded the cap has the true cumulative
         // count persisted.
         let retained_events = events.len() as u64;
-        let retained_context_revision = events
-            .iter()
-            .filter_map(|event| event.context_revision)
-            .max()
-            .unwrap_or(0);
         let project = self.project.map(|value| bound_summary_string(value.trim()));
         let execution_context = if project.is_some() {
             self.execution_context.sanitized_for_restore()
@@ -393,7 +387,6 @@ impl PersistedSessionRecord {
             updated_at: self.updated_at.max(self.created_at),
             events,
             events_observed: self.events_observed.max(retained_events),
-            context_revision: self.context_revision.max(retained_context_revision),
             git_baseline_tree: self.git_baseline_tree.filter(|tree| {
                 matches!(tree.len(), 40 | 64) && tree.bytes().all(|byte| byte.is_ascii_hexdigit())
             }),
@@ -473,7 +466,6 @@ pub fn cold_session_from_persisted(
         guards: persisted.guards,
         lifecycle,
         updated_at: persisted.updated_at,
-        context_revision: persisted.context_revision,
         project_instructions,
         raw,
     })

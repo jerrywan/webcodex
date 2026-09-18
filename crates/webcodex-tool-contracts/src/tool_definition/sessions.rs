@@ -1,9 +1,8 @@
 use super::RunnerCapabilityRequirement::{GitOrShell, InternalPosixScript, OwnerOnly};
 use super::ToolVisibility::{ModelHidden, ModelVisible};
 use super::{
-    adaptive_runtime_direct, context_reobservable, def, model_spec, permission_risk,
-    requires_explicit_business_session, ToolDefinition, PERMISSION_RISK_WRITE,
-    TOOL_CATEGORY_SESSION, TOOL_CATEGORY_VALIDATION,
+    adaptive_runtime_direct, def, model_spec, permission_risk, requires_explicit_business_session,
+    ToolDefinition, PERMISSION_RISK_WRITE, TOOL_CATEGORY_SESSION, TOOL_CATEGORY_VALIDATION,
 };
 use crate::metadata::{
     ToolPathHint::None as NoPath, ToolRisk::Read, PROJECT_READ, PROJECT_WRITE, RUNTIME_READ,
@@ -32,7 +31,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         super::ToolSessionEvidencePolicy::NONE,
     ),
     adaptive_runtime_direct(
-        context_reobservable(model_spec(
+        model_spec(
             def(
                 "work_on_project",
                 super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -58,7 +57,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolActivityInteraction::Meaningful,
             ),
             "Canonical bootstrap for ordinary coding/review. Use project or client_id+path. Omit session_id for a fresh Workflow Session; a fresh Workflow Session does not imply a fresh model context. Use exact resume only for an active accessible Session and never guesses prior Session. Defaults return project instructions, workflow guidance, and Skills/Plugin selection metadata. If the current model context retains instructions/guidance, set the matching include_* false; use defaults for a fresh or uncertain model context. Session/window/transport identity never proves retention; Runtime still re-observes instruction files. Skill bodies require skill_read_file; Plugin calls require plugin_tool describe. Checkout does not require Git; mode=worktree uses an exact Git base for an isolated worktree without bypassing Project authority.",
-        ).with_gpt_action_description("Start or resume exact project work. Use project or client_id+path; omit session_id for a fresh Workflow Session. Defaults return project/workflow/extension context. worktree mode creates an isolated Runner-managed Git worktree without widening authority.")),
+        ).with_gpt_action_description("Start or resume exact project work. Use project or client_id+path; omit session_id for a fresh Workflow Session. Defaults return project/workflow/extension context. worktree mode creates an isolated Runner-managed Git worktree without widening authority."),
         10,
     ),
     adaptive_runtime_direct(
@@ -215,7 +214,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         super::ToolActivityPresentation::Transport,
         super::ToolActivityInteraction::NonMeaningful,
     ),
-    requires_explicit_business_session(context_reobservable(model_spec(
+    requires_explicit_business_session(model_spec(
         def(
             "session_summary",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -237,7 +236,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE,
         ),
         "Return a bounded structured summary from the session ledger for an explicit session_id: recorded events, message-board summary, task mode, guards, and lifecycle. Uses durable ledger data where session persistence is configured.",
-    ))),
+    )),
     requires_explicit_business_session(permission_risk(
         model_spec(
             def(
@@ -290,7 +289,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ),
         PERMISSION_RISK_WRITE,
     )),
-    requires_explicit_business_session(context_reobservable(model_spec(
+    requires_explicit_business_session(model_spec(
         def(
             "validation_summary",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -316,7 +315,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolActivityInteraction::Meaningful,
         ),
         "Read bounded structured validation evidence already recorded in an explicit project-scoped session ledger. Does not run Cargo or shell commands, enqueue a Runner request, read project files, mutate the workspace, or replace finish_coding_task.",
-    ))),
+    )),
     requires_explicit_business_session(model_spec(
         def(
             "post_session_message",
@@ -565,7 +564,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         15,
     ),
     adaptive_runtime_direct(
-        requires_explicit_business_session(context_reobservable(model_spec(
+        requires_explicit_business_session(model_spec(
             def(
                 "session_handoff_summary",
             super::ToolAuditPolicy::typed_fields(&[
@@ -601,7 +600,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolActivityInteraction::Meaningful,
         ),
             "Explicit read-only recovery for genuinely missing task context or an explicit handoff; requires the exact session_id. Do not use as routine progress/status polling or to establish a Session baseline when current context is coherent. Defaults to identity plus deterministic handoff_brief, hard-bounded at 8 KiB: task instructions, workspace, progress, validation, jobs, collaboration attention, next actions and basis completeness. Omitted project uses the authorized Session Project. diagnostic=true adds detailed ledger and closeout evidence. A concurrent Session change marks the basis incomplete; re-observe before dependent work. No checkpoint allocation, ACK token, or authority grant.",
-        ).with_gpt_action_description("Recover missing task context or perform an explicit handoff for an exact session_id. Do not use for routine progress/status polling or to establish a baseline. Returns a bounded handoff_brief; diagnostic=true adds detailed evidence. Check basis completeness before dependent work. Read-only."))),
+        ).with_gpt_action_description("Recover missing task context or perform an explicit handoff for an exact session_id. Do not use for routine progress/status polling or to establish a baseline. Returns a bounded handoff_brief; diagnostic=true adds detailed evidence. Check basis completeness before dependent work. Read-only.")),
         16,
     ),
 ];

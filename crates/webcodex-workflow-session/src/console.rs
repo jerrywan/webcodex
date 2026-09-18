@@ -1152,7 +1152,7 @@ mod tests {
             logical_invocation_role: None,
             session_id: "wc_sess_legacy".to_string(),
             kind: "tool_call_finished".to_string(),
-            context_revision: None,
+            legacy_context_revision: None,
             context_result_summary: None,
             timestamp: 1,
             transport: "api".to_string(),

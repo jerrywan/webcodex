@@ -567,7 +567,6 @@ pub struct SessionToolContract {
     pub change_summary_like: bool,
     pub project_write: bool,
     pub path_hint: SessionPathHint,
-    pub advances_context_checkpoint: bool,
 }
 
 pub fn changed_paths_for_tool(contract: SessionToolContract, arguments: &Value) -> Vec<String> {

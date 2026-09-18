@@ -221,15 +221,14 @@ pub(in crate::tool_runtime::tests) fn required_fields(spec: &ToolSpec) -> Vec<St
         .unwrap_or_default()
 }
 
-pub(in crate::tool_runtime::tests) fn seed_checkpoint_events(
+pub(in crate::tool_runtime::tests) fn seed_recovery_events(
     runtime: &ToolRuntime,
     session_id: &str,
     project: &str,
     count: usize,
-) -> u64 {
+) {
     use crate::tool_runtime::sessions::{SessionTransport, ToolCallRecorderMetadata};
 
-    let mut revision = 0u64;
     for index in 0..count {
         let start = runtime.sessions.record_tool_call_started_with_metadata(
             Some(session_id),
@@ -237,15 +236,13 @@ pub(in crate::tool_runtime::tests) fn seed_checkpoint_events(
             "run_process",
             &json!({"project": project, "executable": "true"}),
             Some(project.to_string()),
-            ToolCallRecorderMetadata {
-                ..Default::default()
-            },
+            ToolCallRecorderMetadata::default(),
             crate::tool_runtime::sessions::session_tool_contract("run_process"),
         );
         let evidence = format!("event-{index:02}-{}", "x".repeat(760));
-        let recorded = runtime
+        runtime
             .sessions
-            .record_model_facing_tool_call_finished(
+            .record_tool_call_finished(
                 start,
                 true,
                 &json!({
@@ -265,10 +262,8 @@ pub(in crate::tool_runtime::tests) fn seed_checkpoint_events(
                 None,
                 None,
             )
-            .expect("seeded model-facing recovery event");
-        revision = recorded;
+            .expect("seeded recovery event");
     }
-    revision
 }
 
 pub(in crate::tool_runtime::tests) fn seed_large_changed_path_events(
@@ -276,10 +271,9 @@ pub(in crate::tool_runtime::tests) fn seed_large_changed_path_events(
     session_id: &str,
     project: &str,
     count: usize,
-) -> u64 {
+) {
     use crate::tool_runtime::sessions::{SessionTransport, ToolCallRecorderMetadata};
 
-    let mut revision = runtime.sessions.context_revision(session_id).unwrap_or(0);
     for index in 0..count {
         let paths = (0..8)
             .map(|path_index| {
@@ -295,24 +289,14 @@ pub(in crate::tool_runtime::tests) fn seed_large_changed_path_events(
             "delete_project_files",
             &json!({"project": project, "paths": paths}),
             Some(project.to_string()),
-            ToolCallRecorderMetadata {
-                ..Default::default()
-            },
+            ToolCallRecorderMetadata::default(),
             crate::tool_runtime::sessions::session_tool_contract("delete_project_files"),
         );
-        let recorded = runtime
+        runtime
             .sessions
-            .record_model_facing_tool_call_finished(
-                start,
-                true,
-                &json!({"deleted_count": 8}),
-                None,
-                None,
-            )
+            .record_tool_call_finished(start, true, &json!({"deleted_count": 8}), None, None)
             .expect("seeded large changed-path recovery event");
-        revision = recorded;
     }
-    revision
 }
 
 pub(in crate::tool_runtime::tests) fn local_project_config(path: &str) -> ProjectConfig {

@@ -59,8 +59,7 @@ pub use super::tool_policy::{
     is_adaptive_runtime_direct_tool, is_model_visible_tool_name, lookup_tool_definition,
     model_visible_tool_definitions, model_visible_tool_names_csv,
     runtime_tool_activity_interaction, runtime_tool_activity_semantics,
-    runtime_tool_advances_context_checkpoint, runtime_tool_approval_policy,
-    runtime_tool_captures_validation_output, runtime_tool_category,
+    runtime_tool_approval_policy, runtime_tool_captures_validation_output, runtime_tool_category,
     runtime_tool_effect_annotations, runtime_tool_execution_contract,
     runtime_tool_is_change_summary_like, runtime_tool_is_git_like, runtime_tool_is_read_like,
     runtime_tool_is_shell_like, runtime_tool_is_write_like, runtime_tool_metadata,
@@ -71,7 +70,7 @@ pub use super::tool_policy::{
 #[cfg(any(test, feature = "root-test-support"))]
 pub use super::tool_policy::{
     is_model_hidden_tool_name, known_tool_names, model_hidden_tool_names,
-    runtime_tool_context_continuity_policy, runtime_tool_requires_explicit_business_session,
+    runtime_tool_requires_explicit_business_session,
 };
 use webcodex_core::runner_protocol::{
     RUNNER_CAPABILITY_APPLY_PATCH_MATCH_METADATA, RUNNER_CAPABILITY_ASYNC_JOBS,
@@ -1042,37 +1041,7 @@ pub struct ToolEffectAnnotations {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContextCheckpointPolicy {
-    Never,
-    OnModelFacingResult,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ToolContextContinuityPolicy {
-    pub checkpoint: ContextCheckpointPolicy,
-}
-
-impl ToolContextContinuityPolicy {
-    pub const CONSERVATIVE: Self = Self {
-        checkpoint: ContextCheckpointPolicy::OnModelFacingResult,
-    };
-
-    /// Ordinary re-observable results do not advance the internal checkpoint.
-    pub const REOBSERVABLE: Self = Self {
-        checkpoint: ContextCheckpointPolicy::Never,
-    };
-
-    pub const fn advances_context_checkpoint(self) -> bool {
-        matches!(
-            self.checkpoint,
-            ContextCheckpointPolicy::OnModelFacingResult
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolDefinitionPolicy {
-    pub context_continuity: ToolContextContinuityPolicy,
     pub change_summary_like: bool,
     pub captures_validation_output: bool,
     pub git_like: bool,
@@ -1084,7 +1053,6 @@ pub struct ToolDefinitionPolicy {
 
 impl ToolDefinitionPolicy {
     const DEFAULT: Self = Self {
-        context_continuity: ToolContextContinuityPolicy::CONSERVATIVE,
         change_summary_like: false,
         captures_validation_output: false,
         git_like: false,
@@ -1224,23 +1192,6 @@ bool_policy_modifier!(change_summary_like, change_summary_like);
 
 bool_policy_modifier!(git_like, git_like);
 
-const fn context_continuity(
-    definition: ToolDefinition,
-    context_continuity: ToolContextContinuityPolicy,
-) -> ToolDefinition {
-    ToolDefinition {
-        policy: ToolDefinitionPolicy {
-            context_continuity,
-            ..definition.policy
-        },
-        ..definition
-    }
-}
-
-const fn context_reobservable(definition: ToolDefinition) -> ToolDefinition {
-    context_continuity(definition, ToolContextContinuityPolicy::REOBSERVABLE)
-}
-
 const fn permission_risk(
     definition: ToolDefinition,
     permission_risk: &'static str,
@@ -1310,7 +1261,7 @@ const TOOL_DEFINITION_GROUPS: &[&[ToolDefinition]] = &[
     edits::DEFINITIONS,
 ];
 
-const TOOL_DEFINITION_HEAD: &[ToolDefinition] = &[context_reobservable(model_spec(
+const TOOL_DEFINITION_HEAD: &[ToolDefinition] = &[model_spec(
     def(
         "list_tools",
         ToolAuditPolicy::TYPED_CANONICAL,
@@ -1336,4 +1287,4 @@ const TOOL_DEFINITION_HEAD: &[ToolDefinition] = &[context_reobservable(model_spe
         ToolActivityInteraction::NonMeaningful,
     ),
     "List runtime tools. Full output includes schemas and may be large; use summary_only with category, features, or limit for bounded GPT Action discovery.",
-))];
+)];

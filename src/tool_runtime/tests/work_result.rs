@@ -400,7 +400,7 @@ async fn work_result_state_marks_truncated_session_evidence_partial_without_reco
         Some(project.clone()),
         Some("Work Result bounded evidence".to_string()),
     );
-    seed_checkpoint_events(&runtime, &session.session_id, &project, 110);
+    seed_recovery_events(&runtime, &session.session_id, &project, 110);
     let bounded = runtime
         .sessions
         .summary(&session.session_id, Some(200))

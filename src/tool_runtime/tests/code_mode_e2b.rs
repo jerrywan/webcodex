@@ -1348,15 +1348,11 @@ async fn e1_and_e2a_remain_unable_to_dispatch_apply_text_edits_after_e2b() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn e2b_parent_continuity_projects_latest_session_revision_after_nested_edit() {
+async fn e2b_parent_omits_retired_continuity_overlays_after_nested_edit() {
     use crate::tool_runtime::kernel::{ToolInvocationMetadata, ToolProtocolCapabilities};
 
     let (root, runtime, project, session_id) =
         e2b_fixture("e2b-session-continuity", "before\n").await;
-    let initial_revision = runtime
-        .sessions
-        .context_revision(&session_id)
-        .expect("initial Session revision");
     let runtime_for_call = runtime.clone();
     let project_for_call = project.clone();
     let session_for_call = session_id.clone();
@@ -1400,11 +1396,6 @@ async fn e2b_parent_continuity_projects_latest_session_revision_after_nested_edi
     assert!(outcome.success, "{outcome:?}");
     let result = outcome.result.expect("E2b continuity ToolResult");
     assert!(result.success, "{result:?}");
-    let latest_revision = runtime
-        .sessions
-        .context_revision(&session_id)
-        .expect("latest Session revision");
-    assert!(latest_revision > initial_revision);
     assert!(result.output.get("session_context_revision").is_none());
     assert!(result.output.get("session_continuity").is_none());
     assert_eq!(

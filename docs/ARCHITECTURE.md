@@ -169,8 +169,8 @@ Runtime Console -----------------------> canonical Server HTTP/kernel paths abov
   forwards separately to workspace. Default builds omit the implementation,
   tools, schemas, and checkpoint handoff projection. `include_checkpoints`
   remains accepted and is ignored when disabled; dormant Runner checkpoint
-  wire operations fail closed. Workflow Session context revisions, ACK,
-  recovery, collaboration, validation evidence, and Jobs remain always active.
+  wire operations fail closed. Workflow Session explicit handoff recovery,
+  collaboration ACK/message observation, validation evidence, and Jobs remain always active.
   The shared workspace path policy stays compiled for `project_overview`.
 - `auth` / `oauth_http` / `db` — authentication, OAuth endpoints, and
   persistence.

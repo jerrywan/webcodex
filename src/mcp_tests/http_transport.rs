@@ -1555,8 +1555,6 @@ async fn http_mcp_2026_explicit_handoff_without_context_ack_body() {
     ] {
         assert!(posted.get(field).is_none(), "{field}: {posted}");
     }
-    let revision = runtime.sessions.context_revision(&session_id).unwrap();
-    assert!(revision > 0);
     let (status, body) = stateless_2026_tool_call(
         &service,
         "secret",
@@ -1580,10 +1578,6 @@ async fn http_mcp_2026_explicit_handoff_without_context_ack_body() {
     assert_eq!(
         output["session_attention"]["messages"][0]["message"],
         "Keep the exact target"
-    );
-    assert_eq!(
-        runtime.sessions.context_revision(&session_id),
-        Some(revision)
     );
     let (status, body) = stateless_2026_tool_call(
         &service,

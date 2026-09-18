@@ -1,8 +1,7 @@
 use super::ToolVisibility::ModelVisible;
 use super::{
-    adaptive_runtime_direct, context_reobservable, def, model_spec, permission_risk,
-    requires_explicit_business_session, ToolDefinition, PERMISSION_RISK_WRITE,
-    TOOL_CATEGORY_RUNTIME,
+    adaptive_runtime_direct, def, model_spec, permission_risk, requires_explicit_business_session,
+    ToolDefinition, PERMISSION_RISK_WRITE, TOOL_CATEGORY_RUNTIME,
 };
 use crate::metadata::{
     ToolPathHint::None as NoPath,
@@ -31,7 +30,7 @@ const EFFECTFUL_RESULT_AUDIT_FIELDS: &[super::ToolAuditResultField] = &[
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[
     adaptive_runtime_direct(
-        context_reobservable(requires_explicit_business_session(model_spec(
+        requires_explicit_business_session(model_spec(
             def(
                 "code_mode_exec",
                 super::ToolAuditPolicy::typed_fields(RESULT_AUDIT_FIELDS),
@@ -54,7 +53,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     .review(super::ToolReviewEvidence::ReadOnlyInspection),
             ),
             "Experimental read-only JavaScript orchestration for related/adaptive inspections. tools.<name>(args) re-enters canonical ToolRuntime under the outer-bound Project/Session; text(value) emits bounded output. Prefer a direct tool for one simple observation. No shell/fs/network/mutation/Jobs.",
-        ))),
+        )),
         45,
     ),
     adaptive_runtime_direct(

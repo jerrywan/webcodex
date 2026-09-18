@@ -3,9 +3,8 @@ use super::RunnerCapabilityRequirement::{
 };
 use super::ToolVisibility::{ModelHidden, ModelVisible};
 use super::{
-    adaptive_runtime_direct, context_reobservable, def, model_spec, permission_risk,
-    require_all_scopes, requires_explicit_business_session, ToolDefinition, PERMISSION_RISK_JOB,
-    TOOL_CATEGORY_JOB,
+    adaptive_runtime_direct, def, model_spec, permission_risk, require_all_scopes,
+    requires_explicit_business_session, ToolDefinition, PERMISSION_RISK_JOB, TOOL_CATEGORY_JOB,
 };
 use crate::metadata::{
     ToolPathHint::None as NoPath,
@@ -227,7 +226,7 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
         super::ToolExecutionStart::ExistingSession,
         super::ToolExecutionContinuation::SessionShell,
     ))),
-    requires_explicit_business_session(context_reobservable(model_spec(
+    requires_explicit_business_session(model_spec(
         def(
             "session_shell_status",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -249,7 +248,7 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.persistent_shell(super::PersistentShellEvidenceAction::Status),
         ),
         "Read Runner-authoritative state for an explicit Session persistent shell. This never sends input to the process.",
-    ))),
+    )),
     requires_explicit_business_session(permission_risk(
         model_spec(
             def(
@@ -404,7 +403,7 @@ pub(super) const EXECUTION_DEFINITIONS: &[ToolDefinition] = &[
 
 pub(super) const LISTING_DEFINITIONS: &[ToolDefinition] = &[
     adaptive_runtime_direct(
-        context_reobservable(model_spec(
+        model_spec(
             def(
                 "list_jobs",
                 super::ToolAuditPolicy::TYPED_CANONICAL.session_input(
@@ -432,7 +431,7 @@ pub(super) const LISTING_DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolActivityInteraction::Meaningful,
             ),
             "Recovery and inventory primitive for caller-visible Jobs, not the normal continuation step. Do not call list_jobs when the initiating tool or current context already provides an exact job_id; continue that Job with observe_jobs instead. Use list_jobs when exact Job identity was lost, unknown_job explicitly requests inventory recovery, the user asks to enumerate background work, or multiple historical/parallel Jobs must be inspected. Exact project/session_id filters are preferred when known and combine with status using AND semantics. stdout/stderr bodies are never included; exact Job logs and continuation belong to observe_jobs.",
-        ).with_gpt_action_description("Inventory caller-visible Jobs when exact identity is lost or enumeration is requested. Prefer exact project/session/status filters. If job_id is already known, continue with observe_jobs instead.")),
+        ).with_gpt_action_description("Inventory caller-visible Jobs when exact identity is lost or enumeration is requested. Prefer exact project/session/status filters. If job_id is already known, continue with observe_jobs instead."),
         85,
     ),
     adaptive_runtime_direct(

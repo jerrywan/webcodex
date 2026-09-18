@@ -2358,10 +2358,7 @@ async fn search_project_texts_outer_recording_session_keeps_final_response_under
         Some(project.clone()),
         Some("search final response cap".to_string()),
     );
-    assert_eq!(
-        seed_checkpoint_events(&runtime, &session.session_id, &project, 20),
-        20
-    );
+    seed_recovery_events(&runtime, &session.session_id, &project, 20);
     let auth = auth_context(None, true);
     let arguments = json!({
         "project": project,

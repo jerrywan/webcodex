@@ -678,7 +678,7 @@ impl ToolRuntime {
                 &mut result,
                 session_context::SESSION_PROJECT_MISMATCH_KIND,
             );
-            self.sessions.record_model_facing_tool_call_finished(
+            self.sessions.record_tool_call_finished(
                 session_event,
                 false,
                 &result.output,
@@ -810,7 +810,7 @@ impl ToolRuntime {
                     &mut result,
                     "session_message_resolution_failed",
                 );
-                self.sessions.record_model_facing_tool_call_finished(
+                self.sessions.record_tool_call_finished(
                     session_event,
                     false,
                     &result.output,
@@ -903,7 +903,7 @@ impl ToolRuntime {
             }
         }
         let session_log_result = session_log_result_for_tool(&request.tool_name, &result.output);
-        self.sessions.record_model_facing_tool_call_finished(
+        self.sessions.record_tool_call_finished(
             session_event,
             result.success,
             &session_log_result,

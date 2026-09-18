@@ -1928,10 +1928,6 @@ async fn session_handoff_defaults_to_bounded_recovery_brief() {
         assert!(brief.get(field).is_some(), "missing {field}");
     }
     assert!(serde_json::to_vec(brief).unwrap().len() <= 8192);
-    assert_eq!(
-        runtime.sessions.context_revision(&session.session_id),
-        Some(0)
-    );
     let diagnostic = handoff_summary(&runtime, &session.session_id).await;
     assert!(diagnostic.success);
     assert_eq!(diagnostic.output["diagnostic"], true);
@@ -4398,13 +4394,13 @@ async fn workspace_checkpoints_disabled_handoff_ignores_requested_projection() {
 
 #[tokio::test]
 async fn handoff_marks_basis_incomplete_when_session_changes_during_workspace_read() {
-    for checkpoint in [false, true] {
+    for event_mutation in [false, true] {
         let tmp = tempfile::tempdir().unwrap();
         init_git_repo(tmp.path());
         commit_file(tmp.path(), "README.md", "hello\n", "initial");
         let runtime = test_runtime();
-        let client = if checkpoint {
-            "handoff-checkpoint-race"
+        let client = if event_mutation {
+            "handoff-event-race"
         } else {
             "handoff-message-race"
         };
@@ -4428,7 +4424,7 @@ async fn handoff_marks_basis_incomplete_when_session_changes_during_workspace_re
         });
         // This request proves construction has passed its first Session snapshot.
         let request = wait_for_patch_agent_request(&runtime, client).await;
-        if checkpoint {
+        if event_mutation {
             let start = runtime.sessions.record_tool_call_started(
                 Some(&sid),
                 SessionTransport::Mcp,
@@ -4438,13 +4434,7 @@ async fn handoff_marks_basis_incomplete_when_session_changes_during_workspace_re
             );
             runtime
                 .sessions
-                .record_model_facing_tool_call_finished(
-                    start,
-                    true,
-                    &json!({"state_changed": true}),
-                    None,
-                    None,
-                )
+                .record_tool_call_finished(start, true, &json!({"state_changed": true}), None, None)
                 .unwrap();
         } else {
             runtime.dispatch(ToolCall::from_tool_name("post_session_message", json!({

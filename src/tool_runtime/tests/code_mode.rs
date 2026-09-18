@@ -736,15 +736,11 @@ async fn e2a_denies_mutation_shell_recursion_and_invalid_validator_before_busine
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn e2a_parent_and_child_advance_internal_checkpoints_without_overlays() {
+async fn e2a_parent_and_child_complete_without_retired_continuity_overlays() {
     use crate::tool_runtime::kernel::{ToolInvocationMetadata, ToolProtocolCapabilities};
 
     let client_id = "code-mode-e2a-session-continuity";
     let (runtime, project, session_id) = e2a_validation_runtime(client_id).await;
-    let initial_revision = runtime
-        .sessions
-        .context_revision(&session_id)
-        .expect("initial Session context revision");
     let runtime_for_call = runtime.clone();
     let project_for_call = project.clone();
     let session_for_call = session_id.clone();
@@ -800,11 +796,6 @@ async fn e2a_parent_and_child_advance_internal_checkpoints_without_overlays() {
     assert!(outcome.success, "{outcome:?}");
     let result = outcome.result.expect("E2a result");
     assert!(result.success, "{result:?}");
-    let latest_revision = runtime
-        .sessions
-        .context_revision(&session_id)
-        .expect("latest Session context revision");
-    assert!(latest_revision > initial_revision);
     assert!(result.output.get("session_context_revision").is_none());
     assert!(result.output.get("session_continuity").is_none());
     assert_eq!(result.output["effect_receipt"]["job_handoffs"], 1);

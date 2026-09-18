@@ -122,24 +122,23 @@ Workflow Session targeting is explicit in 0.4. Canonical external `work_on_proje
 
 Project scope is fail-closed. An explicit project-scoped business Session or recorder must match the canonical resolved request project before business execution or Session mutation. There is no cross-project warning/escape mode. `complete_session_message` records an answer author only from an explicitly authorized recorder; without one, author Session provenance is absent rather than inferred.
 
-The JSON ledger restores only the current version-2 top-level shape and canonical current Session rows. Pre-current ledger versions are rejected rather than migrated. Within v2, fields explicitly declared optional/default may be absent and restore conservatively; retired or unknown row members fail that row closed and are not reconstructed, counted, or rewritten. General `ClientWindow` support remains available to explicitly designed non-Workflow observations; Workflow Sessions do not use it for selection or authority.
+The JSON ledger restores only the current version-2 top-level shape and canonical current Session rows. Pre-current ledger versions are rejected rather than migrated. Within v2, fields explicitly declared optional/default may be absent and restore conservatively. The retired `context_revision` members are accepted only through explicit read-only compatibility sinks and are never restored into live Session state or re-emitted; other unknown row members still fail that row closed. General `ClientWindow` support remains available to explicitly designed non-Workflow observations; Workflow Sessions do not use it for selection or authority.
 ### Assignment-fenced todo completion
 
 Executable todo completion is assignment-fenced in 0.4. A worker first calls `get_session_assignment` for the exact coordinator `session_id + message_id`; one atomic store snapshot returns the open todo, every retained direct reply within the bound, and an opaque Session/todo-bound `assignment_fence`. Current `complete_session_message` requests require that exact token as `expected_assignment_fence` together with the independent caller `completion_key`. Assignment-local semantic changes stale the fence before mutation; unrelated Session traffic and ACK bookkeeping do not. A stale result has `state_changed=false` and includes the current assignment plus a fresh durable fence only when that exact current state remains provable. Retention loss or an oversized direct-reply set is non-completable from stale context.
 
 The fence and completion key are different identity domains: the fence proves the semantic assignment snapshot, while the completion key correlates one accepted intent across uncertain retries. `ack_session_message_ids` and message-observation tokens are separate continuity/cursor domains and cannot substitute for either. Business `session_id` remains the independently authorized target; `recording_session_id` remains provenance only and never supplies business guards or execution defaults. Current persisted rows must carry the assignment-history and completion-fence tracking metadata required by the v2 format; restore never invents a missing fence, fingerprint, or tracking state, and a row that cannot prove the current shape is discarded rather than admitted for replay.
 
-### Server-owned checkpoints and explicit handoff recovery
+### Explicit handoff recovery and internal snapshot fencing
 
-Each Workflow Session keeps a durable monotonic `context_revision` for ordering
-checkpoint evidence. `ToolDefinition` policy advances it atomically with a
-consequential model-facing finished event, including edits, execution, and Job
-observation. Concurrent completions receive unique ordered revisions. Ordinary
-read/search/discovery/review results, `work_on_project`, and
-`session_handoff_summary` remain ledger evidence without advancing checkpoints.
-Background bookkeeping does not advance checkpoints either. Retention and
-restart preserve the high-water even when older events are no longer retained.
-The revision is Server-owned state, never a model-facing token to echo.
+Workflow Sessions no longer maintain a model-context checkpoint revision, ACK
+baseline, or ToolDefinition checkpoint classification. Finished tool calls use the
+same canonical ledger append path regardless of whether their ToolResult is
+model-facing. Durable consequence evidence remains in Session events, including
+bounded `context_result_summary`, validation/effect evidence, observed/changed
+paths, repository-edit sticky state, and Job evidence. `events_observed` remains
+the cumulative Session event count, including events later removed by retention;
+it is not a model-context token or cursor.
 
 Normal continuous work has no context-revision ACK input, automatic recovery
 delta, or handoff suggestion on unrelated tool results. When task context is
@@ -158,19 +157,23 @@ evidence. `include_workspace`, `include_validation`, `include_checkpoints`, and
 `limit` continue to select bounded observations; omitted/unavailable evidence is
 reported truthfully in the brief. There is no implicit handoff or ACK baseline.
 
-Handoff assembly checks an internal Session fence before and after gathering
-snapshots: checkpoint revision, total ledger events, and message-observation
-revision. If that state changes or disappears, the brief reports
-`basis.complete=false` and `session_changed_during_snapshot`. The caller can
-explicitly re-observe before dependent work. This detects Session evidence races;
-it does not claim atomicity across independent Runner workspace and Job reads.
-No internal revision is returned as a recovery token.
+Handoff assembly captures an internal Session snapshot fence before gathering
+workspace/Job/Session evidence and compares it again afterwards. The fence has
+exactly two independent Session mutation dimensions: `events_observed` for ledger
+event mutations and `message_observation_revision` for collaboration/message
+mutations. If either changes, or the Session disappears, the brief reports
+`basis.complete=false` and `session_changed_during_snapshot`; the caller can
+explicitly re-observe before dependent work. This detects Session evidence races
+without claiming atomicity across independent Runner workspace or Job reads. No
+handoff generation or replacement model-context revision is introduced or
+returned.
 
 Collaboration is independent: `ack_session_message_ids` still proves that the
 current request retains specific ACK-required Session/Peer messages.
 `session_attention` suppression/re-projection, message resolution, assignment
-fences, completion keys, and observation tokens keep their existing semantics.
-A handoff neither ACKs nor resolves a message and grants no authority.
+fences, completion keys, message-observation tokens, and their durable revision
+keep their existing semantics. A handoff neither ACKs nor resolves a message and
+grants no authority.
 
 Stateless MCP 2026 tools also accept an explicit bounded `context_request` wrapper sidecar request. It is independent of collaboration ACKs and handoff recovery and is removed before concrete `ToolCall` parsing. A static canonical material registry authorizes every requested material before its provider is read: `webcodex.workflow` is public; `project.instructions` requires the resolved Project plus `project:read`; `skills.catalog` additionally requires the admitted Skill runtime protocol capability; `plugins.catalog` requires the resolved Project plus both `project:read` and `plugin:inspect`; and `memory.bootstrap` requires the admitted Memory protocol capability plus both `project:read` and `memory:read`. Scope or material-capability denial is nonfatal to the main ToolResult and returns a bounded unavailable material without provider content. Unknown material keys are nonfatal and remain open-ended at the MCP schema layer. Sidecar material is projected only after the main tool effect or observation has completed, never grants authority, never retroactively makes requested guidance a precondition of that effect, never records caller-read state, and never infers a Project or model-memory state from a Workflow Session, connection, credential, `Mcp-Session-Id`, or hidden window identity. A model that has lost Project rules or durable Memory guidance must recover `project.instructions` and/or `memory.bootstrap` on an observation call, use `memory_read` when detailed Memory content is needed, reason over that context, and only then issue a later mutation that must obey it. Legacy MCP and generic REST/GPT Actions/OpenAPI do not expose this sidecar request contract.
 

@@ -70,8 +70,6 @@ fn synthetic_read_contract() -> SessionToolContract {
         change_summary_like: false,
         project_write: false,
         path_hint: SessionPathHint::SinglePath,
-
-        advances_context_checkpoint: false,
     }
 }
 
@@ -85,8 +83,6 @@ fn synthetic_write_contract() -> SessionToolContract {
         change_summary_like: false,
         project_write: true,
         path_hint: SessionPathHint::PathList,
-
-        advances_context_checkpoint: false,
     }
 }
 

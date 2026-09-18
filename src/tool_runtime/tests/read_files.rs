@@ -1499,10 +1499,7 @@ async fn read_files_direct_session_overlay_pressure_keeps_final_response_under_h
     let session = runtime
         .sessions
         .start_session(Some(project.clone()), Some("direct final cap".to_string()));
-    assert_eq!(
-        seed_checkpoint_events(&runtime, &session.session_id, &project, 20),
-        20
-    );
+    seed_recovery_events(&runtime, &session.session_id, &project, 20);
     let auth = auth_context(None, true);
 
     let task = tokio::spawn({
@@ -1613,10 +1610,6 @@ async fn read_files_outer_recording_session_preserves_complete_sparse_shape() {
     assert!(result.output.get("session_context_revision").is_none());
     assert!(result.output.get("session_continuity").is_none());
     assert!(result.output.get("session_recovery").is_none());
-    assert_eq!(
-        runtime.sessions.context_revision(&session.session_id),
-        Some(0)
-    );
     for omitted in [
         "project",
         "requested_count",
@@ -1748,14 +1741,8 @@ async fn read_files_ignores_context_ack_and_preserves_bounded_attention() {
         Some(project.clone()),
         Some("bounded recovery overlays".to_string()),
     );
-    assert_eq!(
-        seed_checkpoint_events(&runtime, &session.session_id, &project, 50),
-        50
-    );
-    assert_eq!(
-        seed_large_changed_path_events(&runtime, &session.session_id, &project, 50,),
-        100
-    );
+    seed_recovery_events(&runtime, &session.session_id, &project, 50);
+    seed_large_changed_path_events(&runtime, &session.session_id, &project, 50);
     for kind in [
         SessionMessageKind::Guidance,
         SessionMessageKind::Question,
@@ -1931,10 +1918,7 @@ async fn read_files_outer_recording_session_keeps_final_response_under_hard_cap(
         Some(project.clone()),
         Some("final response cap".to_string()),
     );
-    assert_eq!(
-        seed_checkpoint_events(&runtime, &session.session_id, &project, 20),
-        20
-    );
+    seed_recovery_events(&runtime, &session.session_id, &project, 20);
     let auth = auth_context(None, true);
     let arguments = json!({
         "project": project,

@@ -1,6 +1,6 @@
 use super::RunnerCapabilityRequirement::{LspCallHierarchy, LspReadOnlyNavigation};
 use super::ToolVisibility::ModelVisible;
-use super::{context_reobservable, def, model_spec, ToolDefinition, TOOL_CATEGORY_LSP};
+use super::{def, model_spec, ToolDefinition, TOOL_CATEGORY_LSP};
 use crate::metadata::{
     ToolPathHint::{None as NoPath, SinglePath},
     ToolRisk::Read,
@@ -8,7 +8,7 @@ use crate::metadata::{
 };
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[
-    context_reobservable(model_spec(
+    model_spec(
         def(
             "lsp_status",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -31,8 +31,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         )
         .with_activity_kind(super::ToolActivityKind::Navigate),
         "Read-only probe of configured Runner-side language-server availability for a Project. Does not start a language server, run checks, or execute Project code. Returns detected languages and availability/running status without absolute executable paths.",
-    )),
-    context_reobservable(model_spec(
+    ),
+    model_spec(
         def(
             "document_symbols",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -54,8 +54,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.exploration(super::ToolExplorationEvidence::Navigation(super::ToolNavigationEvidenceKind::DocumentSymbols)),
         ),
         "Read-only hierarchical document symbols for a Project-relative supported source file via its configured Runner-side language server. Returns Project-relative paths, 1-based Unicode scalar columns, and bounded pre-order results. External or invalid ranges are omitted.",
-    )),
-    context_reobservable(model_spec(
+    ),
+    model_spec(
         def(
             "document_diagnostics",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -77,8 +77,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.exploration(super::ToolExplorationEvidence::Navigation(super::ToolNavigationEvidenceKind::DocumentDiagnostics)),
         ),
         "Read-only bounded diagnostics for a Project-relative supported source file via Runner-side publishDiagnostics. Returns normalized 1-based Unicode scalar ranges and explicit freshness/timeout state; it does not run a Project check.",
-    )),
-    context_reobservable(model_spec(
+    ),
+    model_spec(
         def(
             "hover",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -100,8 +100,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.exploration(super::ToolExplorationEvidence::Navigation(super::ToolNavigationEvidenceKind::Hover)),
         ),
         "Read-only hover for a Project-relative supported source file at a 1-based Unicode scalar position via its configured Runner-side language server. MarkupContent and MarkedString forms are normalized to bounded markdown/plaintext; invalid optional ranges are omitted.",
-    )),
-    context_reobservable(model_spec(
+    ),
+    model_spec(
         def(
             "workspace_symbols",
             super::ToolAuditPolicy::TYPED_CANONICAL.session_input(
@@ -125,8 +125,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.exploration(super::ToolExplorationEvidence::Navigation(super::ToolNavigationEvidenceKind::WorkspaceSymbols)),
         ),
         "Read-only bounded workspace/symbol query via configured Runner-side language servers. Requires a non-empty 1..200 character query; results are workspace-filtered, sorted, deduplicated, and use Project-relative paths only.",
-    )),
-    context_reobservable(model_spec(
+    ),
+    model_spec(
         def(
             "goto_definition",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -148,8 +148,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.exploration(super::ToolExplorationEvidence::Navigation(super::ToolNavigationEvidenceKind::Locations)),
         ),
         "Read-only goto-definition for a Project-relative supported source file at a 1-based Unicode scalar position via its configured Runner-side language server. Supports Location, Location[], and LocationLink[]; external dependency results are omitted.",
-    )),
-    context_reobservable(model_spec(
+    ),
+    model_spec(
         def(
             "find_references",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -171,8 +171,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.exploration(super::ToolExplorationEvidence::Navigation(super::ToolNavigationEvidenceKind::Locations)),
         ),
         "Read-only find-references for a Project-relative supported source file at a 1-based Unicode scalar position via its configured Runner-side language server. Results are deduplicated and truncated on the Runner; external/invalid locations are counted separately.",
-    )),
-    context_reobservable(model_spec(
+    ),
+    model_spec(
         def(
             "call_hierarchy",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -194,5 +194,5 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolSessionEvidencePolicy::NONE.exploration(super::ToolExplorationEvidence::Navigation(super::ToolNavigationEvidenceKind::CallHierarchy)),
         ),
         "Read-only bounded call hierarchy for a project-relative supported source position. The Runner performs prepare plus incoming/outgoing breadth-first traversal to depth 1 or 2, returning only normalized project-local symbols and globally bounded edges.",
-    )),
+    ),
 ];

@@ -11,10 +11,10 @@ use webcodex_core::{
     runner_protocol::JOB_INVENTORY_MAX_TERMINAL_JOBS, workflow_session_contract::is_safe_job_id,
 };
 use webcodex_tool_contracts::{
-    runtime_tool_advances_context_checkpoint, runtime_tool_is_change_summary_like,
-    runtime_tool_is_git_like, runtime_tool_is_read_like, runtime_tool_is_shell_like,
-    runtime_tool_is_write_like, runtime_tool_metadata, runtime_tool_session_risk_class,
-    SessionMode, ToolPathHint, ToolRisk, ToolValidationIdentityKind,
+    runtime_tool_is_change_summary_like, runtime_tool_is_git_like, runtime_tool_is_read_like,
+    runtime_tool_is_shell_like, runtime_tool_is_write_like, runtime_tool_metadata,
+    runtime_tool_session_risk_class, SessionMode, ToolPathHint, ToolRisk,
+    ToolValidationIdentityKind,
 };
 use webcodex_tool_runtime_contracts::tool_audit::{
     assertion_validation_identity, session_log_arguments_for_tool_request,
@@ -47,8 +47,6 @@ fn session_tool_contract(tool_name: &str) -> SessionToolContract {
             ToolPathHint::Patch => SessionPathHint::Patch,
             ToolPathHint::Artifact => SessionPathHint::Artifact,
         },
-
-        advances_context_checkpoint: runtime_tool_advances_context_checkpoint(tool_name),
     }
 }
 

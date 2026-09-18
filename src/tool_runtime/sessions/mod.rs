@@ -33,9 +33,9 @@ pub(crate) use webcodex_workflow_session::{
 
 use super::metadata::{ToolPathHint, ToolRisk};
 use super::tool_definition::{
-    runtime_tool_advances_context_checkpoint, runtime_tool_is_change_summary_like,
-    runtime_tool_is_git_like, runtime_tool_is_read_like, runtime_tool_is_shell_like,
-    runtime_tool_is_write_like, runtime_tool_metadata, runtime_tool_session_risk_class,
+    runtime_tool_is_change_summary_like, runtime_tool_is_git_like, runtime_tool_is_read_like,
+    runtime_tool_is_shell_like, runtime_tool_is_write_like, runtime_tool_metadata,
+    runtime_tool_session_risk_class,
 };
 
 /// Project the canonical root tool declaration into the protocol-neutral facts
@@ -57,7 +57,6 @@ pub(crate) fn session_tool_contract(tool_name: &str) -> SessionToolContract {
             ToolPathHint::Patch => SessionPathHint::Patch,
             ToolPathHint::Artifact => SessionPathHint::Artifact,
         },
-        advances_context_checkpoint: runtime_tool_advances_context_checkpoint(tool_name),
     }
 }
 

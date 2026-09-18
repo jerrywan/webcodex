@@ -6,12 +6,11 @@ use super::metadata::{
 use super::tool_definition::{
     tool_definitions, RunnerCapabilityRequirement, ToolActivityInteraction, ToolActivityKind,
     ToolActivityPresentation, ToolActivitySemantics, ToolAuditPolicy, ToolCompositionPolicy,
-    ToolContextContinuityPolicy, ToolDefinition, ToolDiffReviewEvidence, ToolEffectAnnotations,
-    ToolExecutionContract, ToolExecutionForm, ToolExplorationEvidence, ToolGptActionExposure,
-    ToolOperatorExtensionFamily, ToolReviewEvidence, ToolSessionEvidencePolicy,
-    ToolValidationIdentityKind, PERMISSION_RISK_ARTIFACT_WRITE, PERMISSION_RISK_DESTRUCTIVE,
-    PERMISSION_RISK_PATCH, PERMISSION_RISK_SHELL, PERMISSION_RISK_VALIDATION,
-    PERMISSION_RISK_WRITE, TOOL_CATEGORY_JOB,
+    ToolDefinition, ToolDiffReviewEvidence, ToolEffectAnnotations, ToolExecutionContract,
+    ToolExecutionForm, ToolExplorationEvidence, ToolGptActionExposure, ToolOperatorExtensionFamily,
+    ToolReviewEvidence, ToolSessionEvidencePolicy, ToolValidationIdentityKind,
+    PERMISSION_RISK_ARTIFACT_WRITE, PERMISSION_RISK_DESTRUCTIVE, PERMISSION_RISK_PATCH,
+    PERMISSION_RISK_SHELL, PERMISSION_RISK_VALIDATION, PERMISSION_RISK_WRITE, TOOL_CATEGORY_JOB,
 };
 
 impl ToolDefinition {
@@ -83,10 +82,6 @@ impl ToolDefinition {
     pub fn gpt_action_description(self) -> Option<&'static str> {
         self.model_spec
             .map(|spec| spec.gpt_action_description.unwrap_or(spec.description))
-    }
-
-    pub fn context_continuity_policy(self) -> ToolContextContinuityPolicy {
-        self.policy.context_continuity
     }
 
     pub fn session_evidence_policy(self) -> ToolSessionEvidencePolicy {
@@ -300,21 +295,6 @@ pub fn runtime_tool_metadata(name: &str) -> ToolMetadata {
         Ok(definition) => definition.metadata(),
         Err(metadata) => metadata,
     }
-}
-
-fn tool_context_continuity_policy(name: &str) -> ToolContextContinuityPolicy {
-    lookup_tool_definition(name)
-        .map(|definition| definition.context_continuity_policy())
-        .unwrap_or(ToolContextContinuityPolicy::CONSERVATIVE)
-}
-
-#[cfg(any(test, feature = "root-test-support"))]
-pub fn runtime_tool_context_continuity_policy(name: &str) -> ToolContextContinuityPolicy {
-    tool_context_continuity_policy(name)
-}
-
-pub fn runtime_tool_advances_context_checkpoint(name: &str) -> bool {
-    tool_context_continuity_policy(name).advances_context_checkpoint()
 }
 
 pub fn runtime_tool_effect_annotations(name: &str) -> ToolEffectAnnotations {

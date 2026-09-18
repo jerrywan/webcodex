@@ -1,8 +1,7 @@
 use super::RunnerCapabilityRequirement::{GitOrShell, Shell, StructuredProcess};
 use super::ToolVisibility::ModelVisible;
 use super::{
-    adaptive_runtime_direct, context_reobservable, def, git_like, model_spec, ToolDefinition,
-    TOOL_CATEGORY_CLEANUP,
+    adaptive_runtime_direct, def, git_like, model_spec, ToolDefinition, TOOL_CATEGORY_CLEANUP,
 };
 use crate::metadata::{
     ToolPathHint::{None as NoPath, PathList},
@@ -11,7 +10,7 @@ use crate::metadata::{
 };
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[adaptive_runtime_direct(
-    context_reobservable(model_spec(
+    model_spec(
         def(
             "workspace_hygiene_check",
             super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -33,7 +32,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[adaptive_runtime_direct(
             super::ToolSessionEvidencePolicy::NONE.review(super::ToolReviewEvidence::HygieneReview),
         ),
         "Default pre-final workspace hygiene review; read-only. Detects dirty worktree, untracked temp/smoke files, cache dirs, secret-like names, and large untracked files before validation or handoff. Never reads file contents.",
-    )),
+    ),
     140,
 )];
 

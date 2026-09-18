@@ -1934,11 +1934,6 @@ async fn mcp_tools_call_records_event_with_recording_session_id() {
         .unwrap();
     assert_eq!(finished.transport, "mcp");
     assert_eq!(finished.status.as_deref(), Some("succeeded"));
-    assert_eq!(finished.context_revision, None);
-    assert_eq!(
-        runtime.sessions.context_revision(&session.session_id),
-        Some(0)
-    );
     assert_eq!(finished.risk_class, "read_only");
 }
 

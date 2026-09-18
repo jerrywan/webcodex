@@ -374,8 +374,6 @@ impl SpecializedOperationPolicy {
             change_summary_like: false,
             project_write: false,
             path_hint: SessionPathHint::None,
-
-            advances_context_checkpoint: false,
         }
     }
 
@@ -489,7 +487,7 @@ impl ToolRuntime {
                 let mut result =
                     session_lifecycle_denied_result(session_id, external_tool_name, denial);
                 result.output["dispatch_certainty"] = Value::String("not_started".to_string());
-                self.sessions.record_model_facing_tool_call_finished(
+                self.sessions.record_tool_call_finished(
                     session_start,
                     false,
                     &denial_terminal_projection(policy, "session_lifecycle_denied"),
@@ -502,7 +500,7 @@ impl ToolRuntime {
                 let mut result =
                     session_guard_denied_result(session_id, external_tool_name, denial);
                 result.output["dispatch_certainty"] = Value::String("not_started".to_string());
-                self.sessions.record_model_facing_tool_call_finished(
+                self.sessions.record_tool_call_finished(
                     session_start,
                     false,
                     &denial_terminal_projection(policy, "session_guard_denied"),
@@ -527,7 +525,7 @@ impl ToolRuntime {
                 let mut result = permission_execution_denied_result(&decision);
                 add_permission_to_result(&mut result, &decision);
                 result.output["dispatch_certainty"] = Value::String("not_started".to_string());
-                self.sessions.record_model_facing_tool_call_finished(
+                self.sessions.record_tool_call_finished(
                     session_start,
                     false,
                     &denial_terminal_projection(policy, "permission_denied"),
@@ -565,7 +563,7 @@ impl ToolRuntime {
             "failure_kind": failure_kind,
             "permission_status": permit.permission.as_ref().map(|decision| decision.status.as_str()),
         });
-        self.sessions.record_model_facing_tool_call_finished(
+        self.sessions.record_tool_call_finished(
             permit.session_start,
             success,
             &terminal,

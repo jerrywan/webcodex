@@ -1,7 +1,7 @@
 use super::ToolVisibility::ModelVisible;
 use super::{
-    adaptive_runtime_direct, context_reobservable, def, model_spec, ToolDefinition,
-    TOOL_CATEGORY_PROJECT, TOOL_CATEGORY_RUNTIME,
+    adaptive_runtime_direct, def, model_spec, ToolDefinition, TOOL_CATEGORY_PROJECT,
+    TOOL_CATEGORY_RUNTIME,
 };
 use crate::metadata::{
     ToolPathHint::None as NoPath,
@@ -10,7 +10,7 @@ use crate::metadata::{
 };
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[
-    context_reobservable(model_spec(
+    model_spec(
         def(
             "list_projects",
             super::ToolAuditPolicy::TYPED_CANONICAL.session_input(
@@ -42,7 +42,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolActivityInteraction::NonMeaningful,
         ),
         "List caller-visible Projects. When Runner/Project identity is known, pass exact client_id/project; use bounded query and summary_only instead of reading the full registry.",
-    )),
+    ),
     model_spec(
         def(
             "register_project",
@@ -112,7 +112,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ),
         "Create a directory on one Runner and register it as a Project. Use this for a new workspace; existing directories belong on the registration path.",
     ),
-    context_reobservable(model_spec(
+    model_spec(
         def(
             "list_runners",
             super::ToolAuditPolicy::TYPED_CANONICAL.session_input(
@@ -140,9 +140,9 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolActivityInteraction::NonMeaningful,
         ),
         "List caller-visible Runners; use exact client_id/client_ids if known, summary_only + include_projects=false for health. Full mode includes shared Job concurrency and host_context advisory metadata; never authority.",
-    )),
+    ),
     adaptive_runtime_direct(
-        context_reobservable(model_spec(
+        model_spec(
             def(
                 "runtime_status",
                 super::ToolAuditPolicy::TYPED_CANONICAL.session_input(
@@ -170,11 +170,11 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolActivityInteraction::NonMeaningful,
             ),
             "Read runtime status; pass exact client_id for one Runner deployment/source alignment, omit for fleet-wide. Reports shared Job concurrency; global mode includes bounded host_context advisory metadata, never authority.",
-        )),
+        ),
         20,
     ),
     adaptive_runtime_direct(
-        context_reobservable(model_spec(
+        model_spec(
             def(
                 "tool_manifest",
                 super::ToolAuditPolicy::TYPED_CANONICAL,
@@ -200,7 +200,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolActivityInteraction::NonMeaningful,
             ),
             "Global runtime discovery; do not pass project. Filter by category/intent for sparse selection entries, or pass exact tool_name for one compact contract with description, preferred route, input schema, and safety/authority hints but no output schema. availability=direct means the direct callable is the preferred model route; if that callable is unavailable or not loaded, call_runtime_tool may be used as a fallback for an otherwise admitted target. availability never changes behavior, authority, permissions, execution, or verdicts. Unfiltered discovery retains the global category inventory.",
-        ).with_gpt_action_description("Discover model-visible runtime tools. Filter by category/intent or pass exact tool_name for one compact contract. availability=direct is preferred; long-tail tools use call_runtime_tool. Discovery never changes authority.")),
+        ).with_gpt_action_description("Discover model-visible runtime tools. Filter by category/intent or pass exact tool_name for one compact contract. availability=direct is preferred; long-tail tools use call_runtime_tool. Discovery never changes authority."),
         30,
     ),
 ];
