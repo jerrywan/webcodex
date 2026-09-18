@@ -102,3 +102,51 @@ A cross-call read cache was intentionally not added. After the other optimizatio
 - real loopback A/B calls for search, compound inspection, fallback behavior, output budgeting, and task-level dry-run edit workflow
 
 Warnings observed during validation were pre-existing unrelated warnings in the baseline tree; the optimization work introduced no known compile errors.
+
+## Follow-up review: compound output and recovery
+
+The Windows timings above are the contributor's original local measurements,
+not new timings measured during the Linux review. They are not a claim that
+end-to-end model response latency, directory searches, or Linux/macOS workflows
+improve by the same percentage.
+
+The follow-up review found that preserving member ranges for byte-ceiling
+fallback had inadvertently re-expanded successful compound reads into duplicate
+source blocks. The read core now retains the original member fallback while
+returning each successful union once for `search_and_read`. Ordinary `read_files`
+still preserves the caller's per-item ranges and order.
+
+The compound read phase now also applies canonical actionable continuation and
+sparse projection. `reads.suggested_call` carries the exact resolved Project,
+explicit business Session, and observed read revision for a continued range.
+Output indexes and `coalesced_read_count` follow the actual ranges, including
+member ranges used after a merged read exceeds the byte ceiling, rather than
+reporting an optimistic pre-execution plan.
+
+Compound inspection also has an explicit ToolDefinition-owned exploration
+projection for its nested search result. Session records retain sanitized,
+deduplicated matched paths for handoff instead of treating the compound output
+as an ordinary `items`-based search batch and silently losing those paths.
+
+Runner-boundary regression fixtures exercise:
+
+- Four overlapping matches produce one `6..136` source block, with all four
+  match positions preserved.
+- Read-budget truncation provides a parser-ready continuation; changing the file
+  before that continuation rejects the stale revision without returning new text.
+- A merged range that exceeds the raw-byte ceiling falls back to the original
+  independently valid ranges and retains correct continuation indexes.
+- Removing duplicate members does not drop a later deferred coalesced group.
+- No matches finish without a file read.
+
+Run the focused cross-platform checks with:
+
+```bash
+cargo test --locked -p webcodex --lib search_and_read
+cargo test --locked -p webcodex --lib read_files
+```
+
+These fixtures validate correctness and the `4 -> 1` source-block reduction,
+not native Windows process execution or the original latency percentages.
+Native Windows execution and an exact-head Windows A/B benchmark remain separate
+validation evidence.

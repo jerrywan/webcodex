@@ -30,7 +30,8 @@ fn tool_definitions_are_session_evidence_policy_ssot() {
             ToolExplorationEvidence::Read
             | ToolExplorationEvidence::ReadBatch
             | ToolExplorationEvidence::Search
-            | ToolExplorationEvidence::SearchBatch => {
+            | ToolExplorationEvidence::SearchBatch
+            | ToolExplorationEvidence::SearchCompound => {
                 assert_eq!(
                     definition.category, TOOL_CATEGORY_FILE,
                     "{}",

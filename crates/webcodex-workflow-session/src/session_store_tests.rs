@@ -45,6 +45,29 @@ fn session_tool_contract(tool_name: &str) -> SessionToolContract {
 }
 
 #[test]
+fn compound_search_observation_uses_nested_successful_matches() {
+    let paths = crate::events::observed_paths_for_successful_result(
+        "search_and_read",
+        Vec::new(),
+        &json!({
+            "search": {"matches": [
+                {"path": "src/lib.rs", "line": 2},
+                {"path": "src/lib.rs", "line": 4},
+                {"path": "../outside.rs", "line": 1}
+            ]},
+            "reads": {"items": []}
+        }),
+    );
+    assert_eq!(paths, vec!["src/lib.rs"]);
+    let empty = crate::events::observed_paths_for_successful_result(
+        "search_and_read",
+        Vec::new(),
+        &json!({"search": {"matches": []}, "reads": []}),
+    );
+    assert!(empty.is_empty());
+}
+
+#[test]
 fn session_store_bounds_event_limit() {
     let store = SessionStore::new(10, 3);
     let summary = store.start_session(None, None);

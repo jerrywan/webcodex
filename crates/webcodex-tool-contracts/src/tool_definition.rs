@@ -587,6 +587,8 @@ pub enum ToolExplorationEvidence {
     ReadBatch,
     Search,
     SearchBatch,
+    /// Successful search records nested under `search` in compound inspection.
+    SearchCompound,
     Navigation(ToolNavigationEvidenceKind),
 }
 

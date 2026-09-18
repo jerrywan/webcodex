@@ -49,6 +49,7 @@ impl ToolRuntime {
         &self,
         project: String,
         query: SearchProjectTextsQuery,
+        session_id: Option<String>,
         read_before: Option<usize>,
         read_after: Option<usize>,
         max_reads: Option<usize>,
@@ -61,6 +62,7 @@ impl ToolRuntime {
         self.search_and_read_resolved(
             &resolved,
             query,
+            session_id,
             read_before,
             read_after,
             max_reads,
@@ -73,6 +75,7 @@ impl ToolRuntime {
         &self,
         resolved: &ResolvedProject,
         mut query: SearchProjectTextsQuery,
+        session_id: Option<String>,
         read_before: Option<usize>,
         read_after: Option<usize>,
         max_reads: Option<usize>,
@@ -128,26 +131,28 @@ impl ToolRuntime {
         }
 
         let requested_reads = items.len();
-        let coalesced_reads = super::read_files::coalesce_read_files_items(items.clone()).len();
+        // Keep original members for canonical byte-ceiling fallback, but return
+        // each successful physical union only once. Continuations must follow
+        // the actual output ranges, not the optimistic pre-execution plan.
+        let (mut reads, output_items) = self
+            .read_files_coalesced_resolved(resolved, items, with_line_numbers)
+            .await;
+        let coalesced_reads = output_items.len();
         let projection = super::read_files::ReadModelProjection::Batch {
             project: resolved.resolved_id.clone(),
-            items: items.clone(),
-            session_id: None,
+            items: output_items,
+            session_id,
             with_line_numbers,
             max_result_bytes: Some(super::read_files::DEFAULT_READ_FILES_RESULT_BYTES),
         };
-        // Keep the original member ranges here. read_files_resolved performs the
-        // physical coalescing itself and can safely fall back to those members if
-        // a merged range crosses the canonical byte ceiling.
-        let mut reads = self
-            .read_files_resolved(resolved, items, with_line_numbers)
-            .await;
         super::read_files::apply_model_facing_output_budget(
             &mut reads,
             Some(super::read_files::DEFAULT_READ_FILES_RESULT_BYTES),
             &projection,
         );
         super::read_files::enforce_final_model_facing_hard_cap(&mut reads, &projection);
+        super::read_files::add_actionable_read_continuations(&projection, &mut reads);
+        super::dispatch::sparsify_complete_read_success("read_files", &mut reads);
         ToolResult::ok(json!({
             "project": resolved.resolved_id,
             "search": search_output,

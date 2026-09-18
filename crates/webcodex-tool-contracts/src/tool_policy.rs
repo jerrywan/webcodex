@@ -97,7 +97,9 @@ impl ToolDefinition {
                 ToolExplorationEvidence::Read | ToolExplorationEvidence::ReadBatch => {
                     return ToolActivityKind::Read;
                 }
-                ToolExplorationEvidence::Search | ToolExplorationEvidence::SearchBatch => {
+                ToolExplorationEvidence::Search
+                | ToolExplorationEvidence::SearchBatch
+                | ToolExplorationEvidence::SearchCompound => {
                     return ToolActivityKind::Search;
                 }
                 ToolExplorationEvidence::Navigation(_) => return ToolActivityKind::Navigate,

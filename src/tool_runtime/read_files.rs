@@ -98,11 +98,8 @@ fn plan_read_files(items: Vec<ReadFilesItem>) -> Vec<PlannedRead> {
     planned
 }
 
-/// Collapse duplicate, overlapping, and nearby ranges into the same bounded
-/// physical read plan used by `read_files`, but expose only the resulting
-/// unique ranges. Compound inspection tools use this when returning source to
-/// the model so one physical merge does not get expanded back into duplicate
-/// overlapping text blocks.
+/// Inspect the unique ranges of the canonical physical read plan in tests.
+#[cfg(test)]
 pub(crate) fn coalesce_read_files_items(items: Vec<ReadFilesItem>) -> Vec<ReadFilesItem> {
     plan_read_files(items)
         .into_iter()
@@ -916,22 +913,52 @@ impl ToolRuntime {
         items: Vec<ReadFilesItem>,
         with_line_numbers: Option<bool>,
     ) -> ToolResult {
+        self.read_files_planned_resolved(resolved, items, with_line_numbers, false)
+            .await
+            .0
+    }
+
+    /// Return successful union ranges once, while retaining the original member
+    /// fallback. The accompanying items describe the actual output order/ranges
+    /// so compound inspection can use canonical budget and continuation logic.
+    pub(crate) async fn read_files_coalesced_resolved(
+        &self,
+        resolved: &ResolvedProject,
+        items: Vec<ReadFilesItem>,
+        with_line_numbers: Option<bool>,
+    ) -> (ToolResult, Vec<ReadFilesItem>) {
+        self.read_files_planned_resolved(resolved, items, with_line_numbers, true)
+            .await
+    }
+
+    async fn read_files_planned_resolved(
+        &self,
+        resolved: &ResolvedProject,
+        items: Vec<ReadFilesItem>,
+        with_line_numbers: Option<bool>,
+        coalesced_output: bool,
+    ) -> (ToolResult, Vec<ReadFilesItem>) {
         if !(1..=MAX_READ_FILES_ITEMS).contains(&items.len())
             || items.iter().any(|item| item.path.trim().is_empty())
         {
-            return ToolResult::err("read_files requires 1 to 8 items with non-empty paths");
+            return (
+                ToolResult::err("read_files requires 1 to 8 items with non-empty paths"),
+                Vec::new(),
+            );
         }
 
         let runtime_project_id = resolved.resolved_id.clone();
         let Some(runner_project_id) =
             crate::tool_runtime::runner_local_project_id(&resolved.resolved_id).map(str::to_string)
         else {
-            return ToolResult::err(
-                "read_files could not bind the resolved Project to a Runner-local project id",
+            return (
+                ToolResult::err(
+                    "read_files could not bind the resolved Project to a Runner-local project id",
+                ),
+                Vec::new(),
             );
         };
-        let requested_count = items.len();
-        let planned_reads = plan_read_files(items);
+        let planned_reads = plan_read_files(items.clone());
         let with_line_numbers = with_line_numbers.unwrap_or(false);
         let deadline = Instant::now() + self.read_files_deadline;
         // Capture the active Runner process before dispatch. A replacement that
@@ -944,14 +971,17 @@ impl ToolRuntime {
         {
             Some(view) => view.runner_instance_id,
             None => {
-                return ToolResult::err_with_output(
-                    "read_files could not bind the read snapshot to an active Runner process; retry after the Runner is available",
-                    json!({
-                        "project": runtime_project_id,
-                        "state_changed": false,
-                        "error_kind": "runner_unavailable",
-                        "retry_guidance": "retry read_files after the owning Runner is available"
-                    }),
+                return (
+                    ToolResult::err_with_output(
+                        "read_files could not bind the read snapshot to an active Runner process; retry after the Runner is available",
+                        json!({
+                            "project": runtime_project_id,
+                            "state_changed": false,
+                            "error_kind": "runner_unavailable",
+                            "retry_guidance": "retry read_files after the owning Runner is available"
+                        }),
+                    ),
+                    Vec::new(),
                 )
             }
         };
@@ -1040,6 +1070,21 @@ impl ToolRuntime {
                         return fallback;
                     }
 
+                    // Only a successful physical union can replace its members.
+                    // Ordinary read_files and all failures retain caller ranges.
+                    let members = if coalesced_output && result.success {
+                        vec![PlannedReadMember {
+                            index: members
+                                .iter()
+                                .map(|member| member.index)
+                                .min()
+                                .expect("planned read has at least one member"),
+                            start_line: item.start_line,
+                            limit: item.limit,
+                        }]
+                    } else {
+                        members
+                    };
                     let success = result.success;
                     let error = result.error.clone();
                     let output = result.output;
@@ -1111,14 +1156,44 @@ impl ToolRuntime {
         let mut completed: Vec<Value> = completed_groups.into_iter().flatten().collect();
         completed.sort_by_key(|item| item["index"].as_u64().unwrap_or(u64::MAX));
 
-        ToolResult::ok(batch_output(
-            &runtime_project_id,
-            requested_count,
-            completed,
-            false,
-            None,
-            None,
-        ))
+        let output_items = if coalesced_output {
+            completed
+                .iter_mut()
+                .enumerate()
+                .map(|(index, entry)| {
+                    let original_index = entry["index"]
+                        .as_u64()
+                        .expect("planned result retains its member index")
+                        as usize;
+                    let mut item = items[original_index].clone();
+                    if entry["success"].as_bool() == Some(true) {
+                        let output = &entry["output"];
+                        item.start_line =
+                            Some(output["start_line"].as_u64().expect("canonical read start")
+                                as usize);
+                        item.limit =
+                            Some(output["limit"].as_u64().expect("canonical read limit") as usize);
+                    }
+                    // Budget continuation indexes must refer to this actual plan,
+                    // including original ranges returned by byte-ceiling fallback.
+                    entry["index"] = json!(index);
+                    item
+                })
+                .collect::<Vec<_>>()
+        } else {
+            items
+        };
+        (
+            ToolResult::ok(batch_output(
+                &runtime_project_id,
+                output_items.len(),
+                completed,
+                false,
+                None,
+                None,
+            )),
+            output_items,
+        )
     }
 }
 

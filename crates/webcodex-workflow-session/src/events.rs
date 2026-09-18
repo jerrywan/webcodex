@@ -660,9 +660,9 @@ pub fn exploration_tool_kind(tool_name: &str) -> Option<ExplorationToolKind> {
         ToolExplorationEvidence::Read | ToolExplorationEvidence::ReadBatch => {
             Some(ExplorationToolKind::Read)
         }
-        ToolExplorationEvidence::Search | ToolExplorationEvidence::SearchBatch => {
-            Some(ExplorationToolKind::Search)
-        }
+        ToolExplorationEvidence::Search
+        | ToolExplorationEvidence::SearchBatch
+        | ToolExplorationEvidence::SearchCompound => Some(ExplorationToolKind::Search),
         ToolExplorationEvidence::Navigation(_) => Some(ExplorationToolKind::Navigation),
     }
 }
@@ -678,7 +678,8 @@ pub fn observed_input_paths_for_tool(
     match runtime_tool_session_evidence_policy(tool_name).exploration {
         ToolExplorationEvidence::None
         | ToolExplorationEvidence::Search
-        | ToolExplorationEvidence::SearchBatch => return Vec::new(),
+        | ToolExplorationEvidence::SearchBatch
+        | ToolExplorationEvidence::SearchCompound => return Vec::new(),
         ToolExplorationEvidence::ReadBatch => {
             let mut paths = Vec::new();
             if let Some(items) = arguments.get("items").and_then(Value::as_array) {
@@ -785,20 +786,23 @@ pub fn observed_paths_for_successful_result(
     match exploration {
         ToolExplorationEvidence::None => return Vec::new(),
         ToolExplorationEvidence::Read | ToolExplorationEvidence::ReadBatch => {}
-        ToolExplorationEvidence::Search | ToolExplorationEvidence::SearchBatch => {
-            let search_outputs: Vec<&Value> =
-                if matches!(exploration, ToolExplorationEvidence::SearchBatch) {
-                    output
-                        .get("items")
-                        .and_then(Value::as_array)
-                        .into_iter()
-                        .flatten()
-                        .filter(|item| item.get("success").and_then(Value::as_bool) == Some(true))
-                        .filter_map(|item| item.get("output"))
-                        .collect()
-                } else {
-                    vec![output]
-                };
+        ToolExplorationEvidence::Search
+        | ToolExplorationEvidence::SearchBatch
+        | ToolExplorationEvidence::SearchCompound => {
+            let search_outputs: Vec<&Value> = match exploration {
+                ToolExplorationEvidence::SearchBatch => output
+                    .get("items")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|item| item.get("success").and_then(Value::as_bool) == Some(true))
+                    .filter_map(|item| item.get("output"))
+                    .collect(),
+                ToolExplorationEvidence::SearchCompound => {
+                    output.get("search").into_iter().collect()
+                }
+                _ => vec![output],
+            };
             for search_output in search_outputs {
                 for key in ["matches", "files"] {
                     for record in search_output

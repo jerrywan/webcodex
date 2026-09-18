@@ -130,10 +130,10 @@ pub(super) const SEARCH_DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE
                     .review(super::ToolReviewEvidence::ReadOnlyInspection)
-                    .exploration(super::ToolExplorationEvidence::SearchBatch),
+                    .exploration(super::ToolExplorationEvidence::SearchCompound),
             ),
-            "Compound coding inspection: run one bounded project-text search, then read source ranges around up to eight matches in the same outer call. Use it when locating code will predictably be followed by inspection. Runtime forces match mode with zero search context and reuses canonical read_files planning, snapshot, and fallback semantics. Prefer search_project_texts alone for discovery, count, or files-only tasks.",
-        ).with_gpt_action_description("Search once, then read bounded source around up to eight matches in the same call. Use when matched code will be inspected immediately. Reuses canonical read_files snapshot/fallback semantics. Prefer search_project_texts for discovery/count/files-only work."),
+            "Compound coding inspection: run one bounded project-text search, then read source ranges around up to eight matches in the same outer call. Use it when locating code will predictably be followed by inspection. Runtime forces match mode with zero search context and returns successful coalesced ranges once, retaining canonical read_files snapshot and byte-ceiling fallback semantics. Follow reads.suggested_call for bounded continuation tied to the resolved Project, explicit Session, and observed read revision. Prefer search_project_texts alone for discovery, count, or files-only tasks.",
+        ).with_gpt_action_description("Search once and inspect source around up to eight matches. Coalesced ranges return once; canonical read limits and fallback apply. Follow reads.suggested_call for snapshot-fenced continuation. Prefer search_project_texts for discovery/count/files-only tasks."),
         52,
     ),
 ];

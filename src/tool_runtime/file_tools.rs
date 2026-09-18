@@ -71,7 +71,7 @@ impl ToolRuntime {
             ToolCall::SearchAndRead {
                 project,
                 query,
-                session_id: _,
+                session_id,
                 read_before,
                 read_after,
                 max_reads,
@@ -81,6 +81,7 @@ impl ToolRuntime {
                     self.search_and_read_resolved(
                         &resolved,
                         query,
+                        session_id,
                         read_before,
                         read_after,
                         max_reads,
@@ -93,6 +94,7 @@ impl ToolRuntime {
                     self.search_and_read(
                         project,
                         query,
+                        session_id,
                         read_before,
                         read_after,
                         max_reads,
