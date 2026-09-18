@@ -4086,7 +4086,7 @@ async fn work_on_project_sizes_and_runner_request_reduction_are_stable() {
         "workflow-omitted projection regressed above the context budget: {workflow_omitted_bytes} bytes"
     );
     // The sparse projection itself remains below 1 KiB when static workflow
-    // guidance is omitted. With Session ACK/recording/sidecar guidance plus the
+    // guidance is omitted. With Session recording/sidecar guidance plus the
     // current validation/finalization guidance included, this fixture stays within
     // the dedicated sparse budgets below. Keep the default tightly
     // bounded and still far below the standard startup hard cap while leaving

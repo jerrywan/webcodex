@@ -201,6 +201,7 @@ async fn persistent_shell_handoff(runtime: &ToolRuntime, session_id: &str) -> To
                     "session_id": session_id,
                     "include_workspace": false,
                     "include_checkpoints": false,
+                    "diagnostic": true,
                 }),
             )
             .unwrap(),

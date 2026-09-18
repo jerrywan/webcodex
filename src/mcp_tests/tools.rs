@@ -1521,7 +1521,7 @@ async fn session_tools_stay_registered_and_follow_adaptive_routes() {
     assert!(handoff["description"]
         .as_str()
         .unwrap()
-        .contains("explicit session_id"));
+        .contains("exact session_id"));
 
     let validation_summary = registered("validation_summary");
     assert_eq!(
