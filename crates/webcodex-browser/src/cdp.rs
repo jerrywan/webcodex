@@ -395,15 +395,22 @@ impl CdpBackend {
         argument: &str,
         deadline: Instant,
     ) -> BrowserResult<()> {
-        let resolved = self
-            .page_call_until(
-                target_id,
-                "DOM.resolveNode",
-                json!({ "backendNodeId": backend_node_id }),
-                false,
-                deadline,
-            )
+        // Remote object ids are scoped to the DevTools session that created
+        // them. Keep resolveNode and callFunctionOn on one page websocket.
+        let endpoint = self
+            .page_endpoint_until(target_id, deadline)
             .map_err(pre_dispatch_error)?;
+        let mut websocket =
+            open_loopback_websocket(&endpoint, deadline).map_err(pre_dispatch_error)?;
+        let resolved = cdp_call_on_websocket_until(
+            &mut websocket,
+            &mut self.next_id,
+            "DOM.resolveNode",
+            json!({ "backendNodeId": backend_node_id }),
+            false,
+            deadline,
+        )
+        .map_err(pre_dispatch_error)?;
         let object_id = resolved
             .pointer("/object/objectId")
             .and_then(Value::as_str)
@@ -413,8 +420,9 @@ impl CdpBackend {
                     "CDP could not resolve the current form control",
                 )
             })?;
-        let result = self.page_call_until(
-            target_id,
+        let result = cdp_call_on_websocket_until(
+            &mut websocket,
+            &mut self.next_id,
             "Runtime.callFunctionOn",
             json!({
                 "objectId": object_id,
@@ -1127,11 +1135,22 @@ fn cdp_call_until(
     effect: bool,
     deadline: Instant,
 ) -> BrowserResult<Value> {
+    let mut websocket = open_loopback_websocket(endpoint, deadline)?;
+    cdp_call_on_websocket_until(&mut websocket, next_id, method, params, effect, deadline)
+}
+
+fn cdp_call_on_websocket_until(
+    websocket: &mut WebSocket<TcpStream>,
+    next_id: &mut u64,
+    method: &str,
+    params: Value,
+    effect: bool,
+    deadline: Instant,
+) -> BrowserResult<Value> {
     let id = *next_id;
     *next_id = next_id.saturating_add(1);
-    let mut websocket = open_loopback_websocket(endpoint, deadline)?;
     let request = json!({ "id": id, "method": method, "params": params }).to_string();
-    configure_socket_timeout(&mut websocket, remaining_before_dispatch(deadline)?)?;
+    configure_socket_timeout(websocket, remaining_before_dispatch(deadline)?)?;
     websocket
         .send(Message::Text(request.into()))
         .map_err(|error| {
@@ -1162,7 +1181,7 @@ fn cdp_call_until(
                 )
             });
         }
-        configure_socket_timeout(&mut websocket, remaining)?;
+        configure_socket_timeout(websocket, remaining)?;
         match websocket.read() {
             Ok(Message::Text(text)) => {
                 let Ok(value) = serde_json::from_str::<Value>(&text) else {
@@ -1365,6 +1384,82 @@ Connection: close
             crate::types::ExecutionState::OutcomeUnknown
         );
         assert_eq!(partial.recovery_action, Some("snapshot"));
+    }
+
+    #[test]
+    fn remote_object_sequence_reuses_one_page_websocket() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut websocket = accept(stream).unwrap();
+
+            let first = websocket.read().unwrap();
+            let Message::Text(first) = first else {
+                panic!("expected first CDP text request")
+            };
+            let first: Value = serde_json::from_str(&first).unwrap();
+            assert_eq!(first["method"], "DOM.resolveNode");
+            websocket
+                .send(Message::Text(
+                    json!({
+                        "id": first["id"],
+                        "result": {"object": {"objectId": "remote-object-1"}}
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .unwrap();
+
+            let second = websocket.read().unwrap();
+            let Message::Text(second) = second else {
+                panic!("expected second CDP text request")
+            };
+            let second: Value = serde_json::from_str(&second).unwrap();
+            assert_eq!(second["method"], "Runtime.callFunctionOn");
+            assert_eq!(second["params"]["objectId"], "remote-object-1");
+            websocket
+                .send(Message::Text(
+                    json!({
+                        "id": second["id"],
+                        "result": {"result": {"value": {"ok": true}}}
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .unwrap();
+        });
+
+        let endpoint = Url::parse(&format!(
+            "ws://127.0.0.1:{}/devtools/page/sequence",
+            address.port()
+        ))
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut websocket = open_loopback_websocket(&endpoint, deadline).unwrap();
+        let mut next_id = 1;
+        let resolved = cdp_call_on_websocket_until(
+            &mut websocket,
+            &mut next_id,
+            "DOM.resolveNode",
+            json!({"backendNodeId": 42}),
+            false,
+            deadline,
+        )
+        .unwrap();
+        let object_id = resolved["object"]["objectId"].as_str().unwrap();
+        let result = cdp_call_on_websocket_until(
+            &mut websocket,
+            &mut next_id,
+            "Runtime.callFunctionOn",
+            json!({"objectId": object_id, "functionDeclaration": "function(){return {ok:true};}"}),
+            true,
+            deadline,
+        )
+        .unwrap();
+        assert_eq!(result["result"]["value"]["ok"], true);
+        assert_eq!(next_id, 3);
+        handle.join().unwrap();
     }
 
     #[test]
