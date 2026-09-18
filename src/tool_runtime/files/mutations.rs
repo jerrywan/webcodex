@@ -455,6 +455,7 @@ fn validate_apply_text_edit(
 struct ApplyTextEditsPreflightValidationError {
     message: String,
     edit_index: Option<usize>,
+    reread_required: bool,
 }
 
 impl From<String> for ApplyTextEditsPreflightValidationError {
@@ -462,6 +463,7 @@ impl From<String> for ApplyTextEditsPreflightValidationError {
         Self {
             message,
             edit_index: None,
+            reread_required: false,
         }
     }
 }
@@ -470,7 +472,9 @@ fn validate_apply_file_change(
     index: usize,
     change: &ApplyFileChangeInput,
 ) -> Result<(), ApplyTextEditsPreflightValidationError> {
-    let valid_revision = |required: bool| -> Result<(), ApplyTextEditsPreflightValidationError> {
+    let valid_revision = |required: bool,
+                          required_edit_index: Option<usize>|
+     -> Result<(), ApplyTextEditsPreflightValidationError> {
         match change.expected_read_revision {
             Some(revision) if (1..=MAX_JSON_SAFE_INTEGER).contains(&revision) => Ok(()),
             Some(_) => Err(format!(
@@ -478,21 +482,24 @@ fn validate_apply_file_change(
                 change.kind.as_str()
             )
             .into()),
-            None if required => Err(format!(
-                "change {index} ({}): expected_read_revision is required",
-                change.kind.as_str()
-            )
-            .into()),
+            None if required => Err(ApplyTextEditsPreflightValidationError {
+                message: format!(
+                    "change {index} ({}): expected_read_revision is required",
+                    change.kind.as_str()
+                ),
+                edit_index: required_edit_index,
+                reread_required: true,
+            }),
             None => Ok(()),
         }
     };
     match change.kind {
         ApplyFileChangeKind::Edit => {
-            let positional = change
+            let positional_edit_index = change
                 .edits
                 .iter()
-                .any(|edit| edit.occurrence.is_some() || edit.line_scope.is_some());
-            valid_revision(positional)?;
+                .position(|edit| edit.occurrence.is_some() || edit.line_scope.is_some());
+            valid_revision(positional_edit_index.is_some(), positional_edit_index)?;
             if change.to_path.is_some() || change.content.is_some() {
                 return Err(
                     format!("change {index} (edit): to_path and content are not allowed").into(),
@@ -509,6 +516,7 @@ fn validate_apply_file_change(
                     return Err(ApplyTextEditsPreflightValidationError {
                         message,
                         edit_index: Some(edit_index),
+                        reread_required: false,
                     });
                 }
             }
@@ -534,7 +542,7 @@ fn validate_apply_file_change(
             }
         }
         ApplyFileChangeKind::Delete => {
-            valid_revision(true)?;
+            valid_revision(true, None)?;
             if change.to_path.is_some() || change.content.is_some() || !change.edits.is_empty() {
                 return Err(format!(
                     "change {index} (delete): to_path, content, and edits are not allowed"
@@ -543,7 +551,7 @@ fn validate_apply_file_change(
             }
         }
         ApplyFileChangeKind::Rename => {
-            valid_revision(true)?;
+            valid_revision(true, None)?;
             let to_path = change
                 .to_path
                 .as_deref()
@@ -1691,6 +1699,34 @@ fn sanitize_apply_text_edits_model_recovery(
         .and_then(Value::as_array)
     {
         result.output["conflicting_edit_indices"] = json!(indices);
+    }
+
+    if conflict_kind == "overlapping_edits" {
+        if let Some(ranges) = raw_conflict
+            .get("conflicting_edit_ranges")
+            .and_then(Value::as_array)
+        {
+            let ranges = ranges
+                .iter()
+                .take(2)
+                .filter_map(|range| {
+                    let edit_index = range.get("edit_index")?.as_u64()?;
+                    let start_line = range.get("start_line")?.as_u64()?;
+                    let end_line = range.get("end_line")?.as_u64()?;
+                    if start_line == 0 || end_line < start_line {
+                        return None;
+                    }
+                    Some(json!({
+                        "edit_index": edit_index,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                    }))
+                })
+                .collect::<Vec<_>>();
+            if !ranges.is_empty() {
+                result.output["conflicting_edit_ranges"] = json!(ranges);
+            }
+        }
     }
 
     let guarded = change.is_some_and(|change| change.expected_read_revision.is_some());
@@ -2857,9 +2893,11 @@ impl ToolRuntime {
                     .and_then(|edit_index| change.edits.get(edit_index))
                     .map(|edit| edit.kind.as_str())
                     .unwrap_or_else(|| change.kind.as_str());
-                return compact_apply_text_edits_preflight_rejection(
+                let mut result = compact_apply_text_edits_preflight_rejection(
                     validation_error.message,
-                    if validation_error.edit_index.is_some() {
+                    if validation_error.reread_required {
+                        "missing_read_revision"
+                    } else if validation_error.edit_index.is_some() {
                         "invalid_edit"
                     } else {
                         "invalid_change"
@@ -2869,6 +2907,10 @@ impl ToolRuntime {
                     Some(failed_kind),
                     Some(&change.path),
                 );
+                if validation_error.reread_required {
+                    result.output["recovery"] = read_files_recovery(&project, &change.path);
+                }
+                return result;
             }
         }
 

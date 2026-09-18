@@ -74,6 +74,13 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
         serde_json::json!(["start_line", "end_line"])
     );
     assert_eq!(candidate["properties"]["occurrence"]["minimum"], 1);
+    let conflict_range = &output_properties["conflicting_edit_ranges"]["items"];
+    assert_eq!(
+        conflict_range["required"],
+        serde_json::json!(["edit_index", "start_line", "end_line"])
+    );
+    assert_eq!(conflict_range["additionalProperties"], false);
+    assert_eq!(output_properties["conflicting_edit_ranges"]["maxItems"], 2);
     assert!(output_properties["change_index"]["anyOf"].is_array());
     assert!(output_properties["edit_index"]["anyOf"].is_array());
     assert!(output_properties["state_changed"]["anyOf"].is_array());
@@ -1068,13 +1075,24 @@ async fn apply_text_edits_ambiguous_unguarded_requires_read_before_positional_re
     edit.occurrence = Some(2);
     let retry = runtime
         .apply_text_edits(
-            project,
+            project.clone(),
             vec![edit_change("src/lib.rs", &"a".repeat(64), vec![edit])],
             None,
         )
         .await;
     assert!(!retry.success);
     assert_eq!(retry.output["state_changed"], false);
+    assert_eq!(retry.output["execution_state"], "not_started");
+    assert_eq!(retry.output["error_kind"], "missing_read_revision");
+    assert_eq!(retry.output["change_index"], 0);
+    assert_eq!(retry.output["edit_index"], 0);
+    assert_eq!(retry.output["path"], "src/lib.rs");
+    assert_eq!(retry.output["recovery"]["tool"], "read_files");
+    assert_eq!(retry.output["recovery"]["arguments"]["project"], project);
+    assert_eq!(
+        retry.output["recovery"]["arguments"]["items"],
+        serde_json::json!([{"path":"src/lib.rs"}])
+    );
     assert!(retry
         .error
         .as_deref()
@@ -1211,6 +1229,137 @@ async fn apply_text_edits_without_occurrence_ambiguous_match_fails_closed() {
     assert!(!result.success);
     assert_eq!(result.output["state_changed"], false);
     assert!(result.output.get("conflict_recovery").is_none());
+}
+
+#[tokio::test]
+async fn apply_text_edits_overlap_projects_bounded_resolved_ranges_without_bodies() {
+    let client_id = "ate-overlap-ranges";
+    let runtime = runtime_with_agent_project(client_id);
+    register_agent(
+        &runtime,
+        client_id,
+        None,
+        RunnerCapabilities {
+            file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let project = agent_test_project_id(client_id);
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let project = project.clone();
+        async move {
+            runtime
+                .apply_text_edits(
+                    project,
+                    vec![edit_change(
+                        "src/lib.rs",
+                        &"a".repeat(64),
+                        vec![
+                            text_edit(
+                                ApplyTextEditKind::ReplaceExact,
+                                Some("abc"),
+                                Some("SECRET_A"),
+                                None,
+                            ),
+                            text_edit(
+                                ApplyTextEditKind::ReplaceExact,
+                                Some("cde"),
+                                Some("SECRET_B"),
+                                None,
+                            ),
+                        ],
+                    )],
+                    None,
+                )
+                .await
+        }
+    });
+    let request = wait_for_patch_agent_request(&runtime, client_id).await;
+    runtime
+        .runner_registry
+        .complete(RunnerResultRequest {
+            client_id: client_id.to_string(),
+            runner_instance_id: "inst".to_string(),
+            request_id: request.request_id,
+            exit_code: Some(0),
+            stdout: Some(
+                serde_json::json!({
+                    "changed": false,
+                    "state_changed": false,
+                    "execution_state": "not_started",
+                    "error_kind": "edit_conflict",
+                    "change_index": 0,
+                    "edit_index": 1,
+                    "kind": "replace_exact",
+                    "path": "src/lib.rs",
+                    "conflict_recovery": {
+                        "schema_version": 1,
+                        "conflict_kind": "overlapping_edits",
+                        "occurrence_selector_supported": false,
+                        "direct_retry_safe": true,
+                        "reread_required": false,
+                        "conflicting_edit_indices": [0, 1],
+                        "conflicting_edit_ranges": [
+                            {"edit_index":0,"start_line":492,"end_line":492,"source":"SECRET_SOURCE"},
+                            {"edit_index":1,"start_line":492,"end_line":493,"replacement":"SECRET_REPLACEMENT"}
+                        ],
+                        "recovery_action": "refine_edit_batch"
+                    },
+                    "error": "Runner private overlap detail SECRET_RAW"
+                })
+                .to_string(),
+            ),
+            stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            duration_ms: Some(1),
+            error: None,
+        })
+        .await
+        .unwrap();
+
+    let result = task.await.unwrap();
+    assert!(!result.success);
+    assert_eq!(result.output["state_changed"], false);
+    assert_eq!(result.output["execution_state"], "not_started");
+    assert_eq!(result.output["error_kind"], "overlapping_edits");
+    assert_eq!(
+        result.output["conflicting_edit_indices"],
+        serde_json::json!([0, 1])
+    );
+    assert_eq!(
+        result.output["conflicting_edit_ranges"],
+        serde_json::json!([
+            {"edit_index":0,"start_line":492,"end_line":492},
+            {"edit_index":1,"start_line":492,"end_line":493}
+        ])
+    );
+    let serialized = serde_json::to_string(&result).unwrap();
+    for secret in [
+        "SECRET_A",
+        "SECRET_B",
+        "SECRET_SOURCE",
+        "SECRET_REPLACEMENT",
+        "SECRET_RAW",
+    ] {
+        assert!(
+            !serialized.contains(secret),
+            "leaked {secret}: {serialized}"
+        );
+    }
+    assert!(result
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("planned exact edit ranges overlap")));
+    let output_schema = crate::tool_runtime::registry::output_schema_for_tool("apply_text_edits");
+    crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+        &serde_json::to_value(&result).unwrap(),
+        &output_schema,
+    )
+    .unwrap_or_else(|error| panic!("overlap range projection must match output schema: {error}"));
 }
 
 #[tokio::test]

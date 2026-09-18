@@ -618,7 +618,10 @@ fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
     let expected_gpt_action_direct = derived
         .iter()
         .copied()
-        .filter(|definition| definition.supports_gpt_actions())
+        .filter(|definition| {
+            definition.supports_gpt_actions()
+                && definition.gpt_action_exposure() != ToolGptActionExposure::GatewayOnly
+        })
         .map(|definition| definition.name)
         .collect::<Vec<_>>();
     assert_eq!(
@@ -627,9 +630,22 @@ fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
             .map(|definition| definition.name)
             .collect::<Vec<_>>(),
         expected_gpt_action_direct,
-        "GPT Actions direct exposure must inherit Adaptive Direct ordering minus explicit protocol exceptions"
+        "GPT Actions direct exposure must inherit Adaptive Direct ordering minus definition-owned unsupported/gateway-only exceptions"
     );
     assert!(gpt_action_tool_supported("apply_patch"));
+    #[cfg(feature = "experimental-code-mode")]
+    {
+        assert!(gpt_action_tool_supported("code_mode_exec_effectful"));
+        assert!(gpt_action_tool_supported("code_mode_exec_mutating"));
+        for name in ["code_mode_exec_effectful", "code_mode_exec_mutating"] {
+            assert!(
+                !gpt_action_direct
+                    .iter()
+                    .any(|definition| definition.name == name),
+                "{name} must stay GPT-Action-supported behind call_runtime_tool to preserve the OpenAPI operation budget"
+            );
+        }
+    }
     assert!(
         !gpt_action_direct
             .iter()

@@ -1014,6 +1014,15 @@ async fn long_cargo_test_hands_off_to_queryable_job() {
     assert!(result.output.get("passed").is_none());
     assert!(result.output.get("failure_kind").is_none());
     assert_eq!(result.output["job_id"].as_str().unwrap(), job_id.as_str());
+    assert_eq!(result.output["terminal"], false);
+    assert_eq!(result.output["continuation"]["tool"], "observe_jobs");
+    assert_eq!(
+        result.output["continuation"]["arguments"]["items"][0]["job_id"],
+        job_id
+    );
+    assert!(result.output["continuation"]["arguments"]["items"][0]
+        .get("after_observation_token")
+        .is_some());
     let observation_token = result.output["observation_token"]
         .as_str()
         .expect("cargo_test handoff observation token")

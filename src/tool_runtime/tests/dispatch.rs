@@ -215,14 +215,20 @@ async fn cargo_check_failure_includes_stderr_tail_or_guidance() {
     let result = task.await.unwrap();
     assert!(!result.success);
     let error = result.error.as_deref().unwrap_or("");
-    assert!(error.contains("structured validation command failed"));
-    assert!(error.contains("command was started"));
+    assert!(error.contains("structured validation command completed with validation failure"));
+    assert!(error.contains("terminal"));
+    assert!(error.contains("no active Job continuation"));
+    assert!(!error.contains("command was started"));
     assert!(error.contains("bounded validation evidence"));
     assert_eq!(result.output["passed"], false);
     assert_eq!(result.output["execution_state"], "completed");
     assert_eq!(result.output["command_started"], true);
     assert_eq!(result.output["command_completed"], true);
     assert_eq!(result.output["failure_kind"], "validation_failed");
+    assert_eq!(result.output["terminal"], true);
+    assert_eq!(result.output["promoted_to_job"], false);
+    assert!(result.output.get("job_id").is_none());
+    assert!(result.output.get("continuation").is_none());
     assert!(result.output["stderr_tail"]
         .as_str()
         .unwrap_or("")
@@ -269,8 +275,10 @@ async fn cargo_test_failure_includes_stderr_tail_or_guidance() {
     let result = task.await.unwrap();
     assert!(!result.success);
     let error = result.error.as_deref().unwrap_or("");
-    assert!(error.contains("structured validation command failed"));
-    assert!(error.contains("command was started"));
+    assert!(error.contains("structured validation command completed with validation failure"));
+    assert!(error.contains("terminal"));
+    assert!(error.contains("no active Job continuation"));
+    assert!(!error.contains("command was started"));
     assert!(error.contains("bounded validation evidence"));
     assert_eq!(result.output["passed"], false);
     assert_eq!(result.output["failure_kind"], "validation_failed");
@@ -580,8 +588,10 @@ async fn cargo_fmt_failure_includes_stderr_tail_or_guidance() {
     let result = task.await.unwrap();
     assert!(!result.success);
     let error = result.error.as_deref().unwrap_or("");
-    assert!(error.contains("structured validation command failed"));
-    assert!(error.contains("command was started"));
+    assert!(error.contains("structured validation command completed with validation failure"));
+    assert!(error.contains("terminal"));
+    assert!(error.contains("no active Job continuation"));
+    assert!(!error.contains("command was started"));
     assert!(error.contains("bounded validation evidence"));
     assert_eq!(result.output["passed"], false);
     assert_eq!(result.output["failure_kind"], "validation_failed");

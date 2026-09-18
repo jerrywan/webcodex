@@ -187,19 +187,23 @@ struct OrchestrationCompositionAccumulator {
 }
 
 impl OrchestrationCompositionAccumulator {
-    fn begin_call(&mut self, tool_name: &str) -> usize {
+    fn begin_call(&mut self, tool_name: &str) {
         self.nested_calls = self.nested_calls.saturating_add(1);
-        self.in_flight = self.in_flight.saturating_add(1);
-        self.max_in_flight = self.max_in_flight.max(self.in_flight);
         *self
             .nested_tool_counts
             .entry(tool_name.to_string())
             .or_default() += 1;
-        self.nested_calls
     }
 
-    fn finish_call(&mut self, success: bool, raw_result_bytes: usize) {
-        self.in_flight = self.in_flight.saturating_sub(1);
+    fn begin_dispatch(&mut self) {
+        self.in_flight = self.in_flight.saturating_add(1);
+        self.max_in_flight = self.max_in_flight.max(self.in_flight);
+    }
+
+    fn finish_call(&mut self, success: bool, raw_result_bytes: usize, dispatched: bool) {
+        if dispatched {
+            self.in_flight = self.in_flight.saturating_sub(1);
+        }
         self.nested_raw_result_bytes_total = self
             .nested_raw_result_bytes_total
             .saturating_add(raw_result_bytes);
@@ -238,15 +242,27 @@ impl OrchestrationCompositionAccumulator {
 
 struct NestedCallGuard<'a> {
     composition: &'a Mutex<OrchestrationCompositionAccumulator>,
+    dispatched: bool,
     finished: bool,
 }
 
 impl NestedCallGuard<'_> {
+    fn mark_dispatched(&mut self) {
+        if self.dispatched {
+            return;
+        }
+        self.composition
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .begin_dispatch();
+        self.dispatched = true;
+    }
+
     fn finish(mut self, success: bool, raw_result_bytes: usize) {
         self.composition
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .finish_call(success, raw_result_bytes);
+            .finish_call(success, raw_result_bytes, self.dispatched);
         self.finished = true;
     }
 }
@@ -257,7 +273,7 @@ impl Drop for NestedCallGuard<'_> {
             self.composition
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .finish_call(false, 0);
+                .finish_call(false, 0, self.dispatched);
         }
     }
 }
@@ -433,16 +449,47 @@ pub(crate) struct OrchestrationToolResponse {
     pub(crate) error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OrchestrationHostFailureKind {
+    InvalidArguments,
+    InsufficientScope,
+    ToolNotAdmitted,
+    CompositionPolicyDenied,
+    FrontendClosed,
+    MutationBudgetExceeded,
+    HostFailure,
+}
+
+impl OrchestrationHostFailureKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidArguments => "invalid_arguments",
+            Self::InsufficientScope => "insufficient_scope",
+            Self::ToolNotAdmitted => "tool_not_admitted",
+            Self::CompositionPolicyDenied => "composition_policy_denied",
+            Self::FrontendClosed => "frontend_closed",
+            Self::MutationBudgetExceeded => "mutation_budget_exceeded",
+            Self::HostFailure => "host_failure",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OrchestrationHostError {
+    kind: OrchestrationHostFailureKind,
     message: String,
 }
 
 impl OrchestrationHostError {
-    fn new(message: impl Into<String>) -> Self {
+    fn new(kind: OrchestrationHostFailureKind, message: impl Into<String>) -> Self {
         Self {
+            kind,
             message: message.into(),
         }
+    }
+
+    pub(crate) fn failure_kind(&self) -> OrchestrationHostFailureKind {
+        self.kind
     }
 
     pub(crate) fn into_message(self) -> String {
@@ -500,19 +547,16 @@ impl CanonicalOrchestrationHost {
         }
     }
 
-    fn begin_nested_call(&self, tool_name: &str) -> (usize, NestedCallGuard<'_>) {
-        let ordinal = self
-            .composition
+    fn begin_nested_call(&self, tool_name: &str) -> NestedCallGuard<'_> {
+        self.composition
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .begin_call(tool_name);
-        (
-            ordinal,
-            NestedCallGuard {
-                composition: &self.composition,
-                finished: false,
-            },
-        )
+        NestedCallGuard {
+            composition: &self.composition,
+            dispatched: false,
+            finished: false,
+        }
     }
 
     pub(crate) fn stop_accepting_nested_calls(&self) {
@@ -527,9 +571,10 @@ impl CanonicalOrchestrationHost {
         tool_name: &str,
     ) -> Result<CompositionSchedulingGuard<'_>, OrchestrationHostError> {
         match runtime_tool_composition_policy(tool_name) {
-            ToolCompositionPolicy::Denied => Err(OrchestrationHostError::new(format!(
-                "nested tool `{tool_name}` is denied by canonical composition policy"
-            ))),
+            ToolCompositionPolicy::Denied => Err(OrchestrationHostError::new(
+                OrchestrationHostFailureKind::CompositionPolicyDenied,
+                format!("nested tool `{tool_name}` is denied by canonical composition policy"),
+            )),
             ToolCompositionPolicy::Sequential => Ok(CompositionSchedulingGuard::Sequential(
                 self.scheduling.write().await,
             )),
@@ -610,14 +655,9 @@ impl CanonicalOrchestrationHost {
         tool_name: &str,
         arguments: Value,
     ) -> Result<Value, OrchestrationHostError> {
-        if !self.policy.is_admitted(tool_name) {
-            return Err(OrchestrationHostError::new(format!(
-                "nested tool `{tool_name}` is not admitted by {}",
-                self.policy.policy_name
-            )));
-        }
         let Some(mut arguments) = arguments.as_object().cloned() else {
             return Err(OrchestrationHostError::new(
+                OrchestrationHostFailureKind::InvalidArguments,
                 "nested tool arguments must be a JSON object",
             ));
         };
@@ -625,9 +665,10 @@ impl CanonicalOrchestrationHost {
             .keys()
             .find(|field| is_server_owned_orchestration_argument(field))
         {
-            return Err(OrchestrationHostError::new(format!(
-                "nested tool arguments may not set server-owned field `{field}`"
-            )));
+            return Err(OrchestrationHostError::new(
+                OrchestrationHostFailureKind::InvalidArguments,
+                format!("nested tool arguments may not set server-owned field `{field}`"),
+            ));
         }
         if let Some(field) = self
             .policy
@@ -635,9 +676,10 @@ impl CanonicalOrchestrationHost {
             .iter()
             .find(|field| arguments.contains_key(**field))
         {
-            return Err(OrchestrationHostError::new(format!(
-                "nested tool arguments may not set frontend-reserved field `{field}`"
-            )));
+            return Err(OrchestrationHostError::new(
+                OrchestrationHostFailureKind::InvalidArguments,
+                format!("nested tool arguments may not set frontend-reserved field `{field}`"),
+            ));
         }
         if let Some(max_secs) = self.policy.nested_sync_wait_max_secs {
             if runtime_tool_execution_contract(tool_name).is_some_and(|execution| {
@@ -665,9 +707,23 @@ impl CanonicalOrchestrationHost {
 
     pub(crate) async fn invoke_tool(
         &self,
+        child_ordinal: usize,
         tool_name: String,
         arguments: Value,
     ) -> Result<OrchestrationToolResponse, OrchestrationHostError> {
+        if !self.policy.is_admitted(&tool_name) {
+            return Err(OrchestrationHostError::new(
+                OrchestrationHostFailureKind::ToolNotAdmitted,
+                format!(
+                    "nested tool `{tool_name}` is not admitted by {}",
+                    self.policy.policy_name
+                ),
+            ));
+        }
+        // Keep bounded composition telemetry restricted to the frontend's
+        // explicit admitted tool set. Once admitted, argument/scope failures are
+        // still counted as attempted child calls so diagnostics preserve them.
+        let mut child_guard = self.begin_nested_call(&tool_name);
         let arguments = self.prepare_arguments(&tool_name, arguments)?;
         let scheduling_guard = self.acquire_scheduling_guard(&tool_name).await?;
         let mutation_guard = if runtime_tool_metadata(&tool_name).effect == ToolEffect::Mutate {
@@ -680,13 +736,14 @@ impl CanonicalOrchestrationHost {
         } else {
             None
         };
-        let (child_ordinal, child_guard) = {
+        {
             let accepting = self
                 .accepting_nested_calls
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if !*accepting {
                 return Err(OrchestrationHostError::new(
+                    OrchestrationHostFailureKind::FrontendClosed,
                     "orchestration frontend is closed; nested call was not dispatched",
                 ));
             }
@@ -700,16 +757,19 @@ impl CanonicalOrchestrationHost {
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     if *mutation_calls >= max_mutation_calls {
-                        return Err(OrchestrationHostError::new(format!(
-                            "{} permits at most {max_mutation_calls} mutation attempt per cell; start a new outer Code Mode call for another mutation",
-                            self.policy.policy_name
-                        )));
+                        return Err(OrchestrationHostError::new(
+                            OrchestrationHostFailureKind::MutationBudgetExceeded,
+                            format!(
+                                "{} permits at most {max_mutation_calls} mutation attempt per cell; start a new outer Code Mode call for another mutation",
+                                self.policy.policy_name
+                            ),
+                        ));
                     }
                     *mutation_calls = mutation_calls.saturating_add(1);
                 }
             }
-            self.begin_nested_call(&tool_name)
-        };
+        }
+        child_guard.mark_dispatched();
         self.effects
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -780,14 +840,21 @@ impl CanonicalOrchestrationHost {
             "orchestration_nested_call_finished"
         );
         if let Some(error_status) = outcome.error_status {
-            let message = match error_status {
-                ToolCallErrorStatus::InvalidArguments { message } => message,
-                ToolCallErrorStatus::InsufficientScope { description, .. } => description,
+            let (kind, message) = match error_status {
+                ToolCallErrorStatus::InvalidArguments { message } => {
+                    (OrchestrationHostFailureKind::InvalidArguments, message)
+                }
+                ToolCallErrorStatus::InsufficientScope { description, .. } => {
+                    (OrchestrationHostFailureKind::InsufficientScope, description)
+                }
             };
-            return Err(OrchestrationHostError::new(message));
+            return Err(OrchestrationHostError::new(kind, message));
         }
         let result = outcome.result.ok_or_else(|| {
-            OrchestrationHostError::new("canonical ToolRuntime returned no nested ToolResult")
+            OrchestrationHostError::new(
+                OrchestrationHostFailureKind::HostFailure,
+                "canonical ToolRuntime returned no nested ToolResult",
+            )
         })?;
         Ok(OrchestrationToolResponse {
             success: result.success,

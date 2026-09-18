@@ -5,7 +5,9 @@ use crate::runner_protocol::RunnerCapabilities;
 use crate::tool_runtime::kernel::{
     HostFileImportTrust, ToolCallContext, ToolCallOutcome, ToolCallRequest, ToolTransport,
 };
-use crate::tool_runtime::orchestration_host::{CanonicalOrchestrationHost, OrchestrationPolicy};
+use crate::tool_runtime::orchestration_host::{
+    CanonicalOrchestrationHost, OrchestrationHostFailureKind, OrchestrationPolicy,
+};
 use crate::tool_runtime::{ObserveJobsItem, ObserveJobsWakeOn, ToolRuntime};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -574,6 +576,18 @@ async fn e2a_js_error_after_job_handoff_preserves_effect_receipt_and_no_retry_cl
     assert!(message.contains("E2A_AFTER_CHILD"));
     assert!(message.contains("Do not blindly rerun the whole orchestration"));
     assert!(!message.contains("retry_same"));
+    assert_eq!(
+        result.output["recovery"]["retry_same_call_unchanged"],
+        false
+    );
+    let recovery_actions = result.output["recovery"]["actions"].as_array().unwrap();
+    assert!(recovery_actions.contains(&json!("fix_code_mode_source")));
+    assert!(recovery_actions.contains(&json!("observe_existing_job_continuations")));
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["continuation"]["tool"],
+        "observe_jobs"
+    );
+    assert!(!result.output["recovery"].to_string().contains(&job_id));
 
     runtime
         .runner_registry
@@ -640,6 +654,18 @@ async fn e2a_cpu_timeout_after_child_dispatch_preserves_started_job_truth() {
         .as_str()
         .unwrap_or_default()
         .contains("Do not blindly rerun the whole orchestration"));
+    assert_eq!(
+        result.output["recovery"]["retry_same_call_unchanged"],
+        false
+    );
+    let recovery_actions = result.output["recovery"]["actions"].as_array().unwrap();
+    assert!(recovery_actions.contains(&json!("reduce_or_bound_code_mode_work")));
+    assert!(recovery_actions.contains(&json!("observe_existing_job_continuations")));
+    assert_eq!(
+        result.output["effect_receipt"]["children"][0]["continuation"]["tool"],
+        "observe_jobs"
+    );
+    assert!(!result.output["recovery"].to_string().contains(&job_id));
     assert!(probe_patch_agent_request(&runtime, client_id)
         .await
         .is_none());
@@ -725,7 +751,21 @@ async fn e2a_denies_mutation_shell_recursion_and_invalid_validator_before_busine
     );
     let result = outcome.result.expect("invalid child result");
     assert!(!result.success);
-    assert_eq!(result.output["failure_kind"], "runtime_error");
+    assert_eq!(result.output["failure_kind"], "child_call_failed");
+    assert_eq!(result.output["child_failure"]["ordinal"], 1);
+    assert_eq!(result.output["child_failure"]["tool"], "cargo_check");
+    assert_eq!(
+        result.output["child_failure"]["failure_kind"],
+        "invalid_arguments"
+    );
+    assert_eq!(
+        result.output["recovery"]["retry_same_call_unchanged"],
+        false
+    );
+    assert!(result.output["recovery"]["actions"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("fix_child_arguments")));
     assert!(
         result.output.get("effect_receipt").is_none(),
         "prestart rejection is not an effect"
@@ -885,6 +925,80 @@ async fn e2a_outer_job_run_scope_denial_starts_no_validation_process() {
         .is_none());
 }
 
+#[tokio::test]
+async fn canonical_orchestration_host_distinguishes_child_scope_denial_from_invalid_arguments() {
+    let client_id = "orchestration-host-scope-denied";
+    let shared_key_hash = "orchestration-host-scope-shared-key";
+    let runtime = test_runtime().with_validation_sync_wait(Duration::from_millis(20));
+    let auth = oauth_bridge_auth_context(
+        shared_key_hash,
+        &[
+            crate::auth::SCOPE_RUNTIME_READ,
+            crate::auth::SCOPE_PROJECT_READ,
+            crate::auth::SCOPE_AGENT_REGISTER,
+        ],
+    );
+    register_agent_projects_for_auth(
+        &runtime,
+        client_id,
+        &auth,
+        RunnerCapabilities {
+            async_shell_jobs: true,
+            structured_validation_argv: true,
+            ..Default::default()
+        },
+        vec![registered_project(
+            "agent-proj",
+            "/tmp/orchestration-host-scope-denied",
+        )],
+    )
+    .await;
+    let project = agent_test_project_id(client_id);
+    let session = runtime.sessions.start_session(
+        Some(project.clone()),
+        Some("orchestration child scope denial".to_string()),
+    );
+    let policy = OrchestrationPolicy {
+        frontend: "test_structured_plan",
+        policy_name: "test structured plan",
+        admitted_tools: &["cargo_check"],
+        denied_tools: &[],
+        additional_forbidden_argument_fields: &[],
+        nested_sync_wait_max_secs: Some(5),
+        max_mutation_calls: None,
+    };
+    let host = CanonicalOrchestrationHost::new(
+        runtime.clone(),
+        Some(&auth),
+        project,
+        session.session_id,
+        ToolTransport::Mcp,
+        Some("test-parent".to_string()),
+        policy,
+    );
+
+    let error = host
+        .invoke_tool(
+            1,
+            "cargo_check".to_string(),
+            json!({"sync_wait_secs": 1, "timeout_secs": 600}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.failure_kind(),
+        OrchestrationHostFailureKind::InsufficientScope
+    );
+    assert_eq!(error.failure_kind().as_str(), "insufficient_scope");
+    let composition = host.composition_summary(1, 1, 0, 0);
+    assert_eq!(composition.nested_calls, 1);
+    assert_eq!(composition.nested_failures, 1);
+    assert_eq!(composition.max_in_flight, 1);
+    assert!(probe_agent_request_for_client(&runtime, client_id)
+        .await
+        .is_none());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
     let tmp = tempfile::tempdir().unwrap();
@@ -922,6 +1036,7 @@ async fn canonical_orchestration_host_runs_without_the_v8_frontend() {
     let task = tokio::spawn(async move {
         host_for_task
             .invoke_tool(
+                1,
                 "read_files".to_string(),
                 json!({"items": [{"path": "README.md", "start_line": 1, "limit": 20}]}),
             )
@@ -1017,7 +1132,7 @@ async fn canonical_orchestration_host_rejects_server_owned_metadata_without_fron
         policy,
     );
 
-    for (field, value) in [
+    for (attempt_index, (field, value)) in [
         ("project", json!("agent:other:demo")),
         ("session_id", json!("wc_sess_0000000000000000")),
         ("recording_session_id", json!("wc_sess_0000000000000000")),
@@ -1033,19 +1148,40 @@ async fn canonical_orchestration_host_rejects_server_owned_metadata_without_fron
         ("accepted_exit_codes", json!([0, 1])),
         ("assertion_name", json!("nested-assertion")),
         ("__webcodex_private", json!(true)),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut arguments = serde_json::Map::new();
         arguments.insert(field.to_string(), value);
         arguments.insert("items".to_string(), json!([{"path": "README.md"}]));
         let error = host
-            .invoke_tool("read_files".to_string(), Value::Object(arguments))
+            .invoke_tool(
+                attempt_index + 1,
+                "read_files".to_string(),
+                Value::Object(arguments),
+            )
             .await
             .expect_err("server-owned nested metadata must fail before canonical dispatch");
         assert!(error.into_message().contains(field), "{field}");
     }
     let composition = host.composition_summary(0, 0, 0, 0);
-    assert_eq!(composition.nested_calls, 0);
-    assert!(composition.nested_tool_counts.is_empty());
+    assert_eq!(composition.nested_calls, 12);
+    assert_eq!(composition.nested_failures, 12);
+    assert_eq!(composition.max_in_flight, 0);
+    assert_eq!(composition.nested_tool_counts.get("read_files"), Some(&12));
+
+    let error = host
+        .invoke_tool(13, "cargo_check".to_string(), json!({}))
+        .await
+        .expect_err("frontend-unadmitted tools must fail before composition accounting");
+    assert_eq!(
+        error.failure_kind(),
+        OrchestrationHostFailureKind::ToolNotAdmitted
+    );
+    let composition = host.composition_summary(0, 0, 0, 0);
+    assert_eq!(composition.nested_calls, 12);
+    assert!(composition.nested_tool_counts.get("cargo_check").is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1341,6 +1477,15 @@ async fn code_mode_failure_detail_is_bounded_without_persisting_source_derived_t
     assert!(detail.starts_with("PRIVATE_RUNTIME_DETAIL_"));
     assert!(detail.len() <= super::super::code_mode::MAX_MODEL_ERROR_BYTES);
     assert_eq!(result.output["failure_kind"], "runtime_error");
+    assert!(result.output.get("child_failure").is_none());
+    assert_eq!(
+        result.output["recovery"]["retry_same_call_unchanged"],
+        false
+    );
+    assert!(result.output["recovery"]["actions"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("fix_code_mode_source")));
 
     let summary = runtime
         .sessions

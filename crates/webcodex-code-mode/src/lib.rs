@@ -74,6 +74,10 @@ impl CodeModeTerminationMode {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeModeToolRequest {
+    /// Stable 1-based attempted-call ordinal assigned by the Code Mode frontend
+    /// before host admission. It is diagnostic identity only and grants no
+    /// authority, retry right, or durable execution identity.
+    pub ordinal: usize,
     pub tool_name: String,
     pub arguments: Value,
 }
@@ -88,14 +92,28 @@ pub struct CodeModeToolResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeModeHostError {
+    failure_kind: String,
     message: String,
 }
 
 impl CodeModeHostError {
     pub fn new(message: impl Into<String>) -> Self {
+        Self::with_kind("host_failure", message)
+    }
+
+    pub fn with_kind(failure_kind: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
+            failure_kind: failure_kind.into(),
             message: message.into(),
         }
+    }
+
+    pub fn failure_kind(&self) -> &str {
+        &self.failure_kind
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
 
@@ -106,6 +124,22 @@ impl std::fmt::Display for CodeModeHostError {
 }
 
 impl std::error::Error for CodeModeHostError {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeModeChildFailure {
+    pub ordinal: usize,
+    pub tool: String,
+    pub failure_kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeModeLimit {
+    pub kind: String,
+    pub allowed: usize,
+    pub current: usize,
+    pub attempted: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct CodeModeExecuteRequest {
@@ -130,6 +164,7 @@ pub struct CodeModeStats {
 pub enum CodeModeErrorKind {
     InvalidRequest,
     Runtime,
+    ChildCallFailed,
     Timeout,
     ToolCallBudgetExceeded,
     OutputLimitExceeded,
@@ -140,6 +175,7 @@ impl CodeModeErrorKind {
         match self {
             Self::InvalidRequest => "invalid_request",
             Self::Runtime => "runtime_error",
+            Self::ChildCallFailed => "child_call_failed",
             Self::Timeout => "timeout",
             Self::ToolCallBudgetExceeded => "tool_call_budget_exceeded",
             Self::OutputLimitExceeded => "output_limit_exceeded",
@@ -152,6 +188,8 @@ pub struct CodeModeError {
     pub kind: CodeModeErrorKind,
     pub message: String,
     pub stats: CodeModeStats,
+    pub child_failure: Option<CodeModeChildFailure>,
+    pub limit: Option<CodeModeLimit>,
 }
 
 impl std::fmt::Display for CodeModeError {

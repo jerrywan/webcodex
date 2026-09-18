@@ -295,6 +295,9 @@ pub struct ToolModelSpecDeclaration {
 pub enum ToolGptActionExposure {
     /// Follow the canonical Adaptive Runtime surface automatically.
     Inherit,
+    /// Remain available through the GPT Actions gateway but do not consume a
+    /// dedicated OpenAPI operation. Used only for concrete surface-budget needs.
+    GatewayOnly,
     /// This tool depends on MCP-only protocol semantics and must not be exposed
     /// directly or through the GPT Actions gateway.
     Unsupported,
@@ -929,8 +932,9 @@ pub struct ToolDefinition {
     /// `None` means a model-visible tool belongs to the long tail behind
     /// `call_runtime_tool`.
     pub adaptive_runtime_direct_rank: Option<u16>,
-    /// GPT Actions follows canonical Adaptive routing unless the tool declares
-    /// concrete protocol incompatibility.
+    /// GPT Actions follows canonical Adaptive routing unless this definition
+    /// declares a concrete protocol incompatibility or a gateway-only surface
+    /// budget exception.
     pub gpt_action_exposure: ToolGptActionExposure,
     pub operator_extension_family: Option<ToolOperatorExtensionFamily>,
     /// Optional canonical selection semantics for ordinary execution tools.
@@ -976,6 +980,13 @@ impl ToolDefinition {
             model_spec.gpt_action_description = Some(description);
             self.model_spec = Some(model_spec);
         }
+        self
+    }
+
+    /// Keep a canonical model-visible tool GPT-Action-compatible while routing
+    /// it through call_runtime_tool instead of a dedicated direct operation.
+    pub const fn with_gpt_action_gateway_only(mut self) -> Self {
+        self.gpt_action_exposure = ToolGptActionExposure::GatewayOnly;
         self
     }
 
