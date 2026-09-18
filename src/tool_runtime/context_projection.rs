@@ -199,22 +199,32 @@ impl ToolRuntime {
                             let project =
                                 resolved_project.expect("registry requires project target");
                             let snapshot =
-                                self.load_coding_project_instructions(&project.config).await;
-                            let projection = project_instructions_context_projection(&snapshot);
-                            if snapshot.scan_complete {
-                                json!({
-                                    "key": key,
-                                    "status": "available",
-                                    "projection": projection,
-                                })
+                                self.load_effective_coding_instructions(project, auth).await;
+                            let mut material = if snapshot.scan_complete {
+                                json!({"key": key, "status": "available", "projection": null})
                             } else {
                                 json!({
                                     "key": key,
                                     "status": "unavailable",
                                     "reason_code": "project_instructions_observation_incomplete",
-                                    "projection": projection,
+                                    "projection": null,
                                 })
-                            }
+                            };
+                            // Measure the complete prospective envelope, including
+                            // earlier materials and the unavailable-reason overhead.
+                            materials.push(material.clone());
+                            let reserved = serialized_json_len(&ContextProjectionMeasure {
+                                materials: &materials,
+                                truncated,
+                            })
+                            .unwrap_or(usize::MAX)
+                            .saturating_sub(4); // Replace the literal JSON null.
+                            materials.pop();
+                            material["projection"] = project_instructions_context_projection(
+                                &snapshot,
+                                MAX_CONTEXT_PROJECTION_BYTES.saturating_sub(reserved),
+                            );
+                            material
                         }
                         "jobs.attention" => {
                             let project =

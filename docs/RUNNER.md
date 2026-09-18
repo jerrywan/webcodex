@@ -233,6 +233,40 @@ Runner-global instructions independently; v1 does not retain or suppress them
 across Projects. Truncated Runner-global sources stay bounded and do not create a
 generic arbitrary-file `read_more` authority.
 
+
+An empty configured file or a missing leaf beneath verified ordinary parent
+directories confirms removal. A missing, redirected, or unreadable parent leaves
+the Runner scope unavailable, as do other read failures. Removing an entry from
+`instructions.files` remains an explicit revocation after config reload.
+An explicit Session resume refreshes Runner and
+Project scopes independently, retaining an unavailable scope's last-known rules
+only in memory. A newly observed Runner instance or config generation cannot
+inherit the previous global rules. Within one instance, a higher known config
+generation wins regardless of request start order; an unknown generation cannot
+replace a known generation. Instance replacement uses live-instance verification
+order, so a late retired-instance observation cannot restore old guidance.
+Within one instance/generation, request observation order breaks ties. Project
+reads have their own start-order fence, independent of Runner availability;
+late Project observations retain newer local rules and report an incomplete
+scan. Retention is scope-wide, not per-file within an incomplete scope.
+Instruction bodies and observation fences are not persisted.
+
+Project-local text reserves its share of the 32 Ki-character snapshot before
+global text is shortened; presentation remains global-before-project. Session
+retention selects scopes before applying this shared budget. An independently
+bounded global source copy (at most 32 Ki characters) stays only in Session
+memory, so retaining a short Project scope or later shrinking it can recover
+global text hidden by an earlier aggregate budget. This source copy and all
+observation fences are omitted from public snapshots and summaries. Runner
+sources never receive a Project `read_file` continuation, including during final
+startup byte-budget reduction. `include_project_instructions=false` suppresses
+bodies without skipping observation or change detection. An explicit
+`project.instructions` context request observes current Runner and Project
+sources together, without reusing Session-retained bodies. The instruction
+projection fits the remaining 20 KiB shared sidecar envelope by dropping derived
+headings before shortening text, preserving source identities and Project rules
+instead of discarding the entire material solely because global sources were added.
+
 ## Local MCP providers
 
 The Runner can directly host persistent stdio MCP providers for WebCodex's built-in MCP gateway:

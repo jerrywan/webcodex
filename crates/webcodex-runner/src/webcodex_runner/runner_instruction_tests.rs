@@ -89,6 +89,14 @@ fn instruction_snapshot_rejects_parent_junction_redirection() {
         .expect("create isolated junction fixture");
     assert!(created.status.success(), "junction fixture creation failed");
     let result = observe(&junction.join("AGENTS.md"));
+    std::fs::remove_file(target.join("AGENTS.md")).unwrap();
+    let missing_leaf = observe(&junction.join("AGENTS.md"));
+    assert!(!missing_leaf.scan_complete);
+    assert!(missing_leaf.files.is_empty());
+    std::fs::remove_dir(&target).unwrap();
+    let dangling_parent = observe(&junction.join("AGENTS.md"));
+    assert!(!dangling_parent.scan_complete);
+    assert!(dangling_parent.files.is_empty());
     std::fs::remove_dir(&junction).unwrap();
     assert!(
         !result.scan_complete,
@@ -117,4 +125,74 @@ fn instruction_snapshot_rejects_parent_symlink_redirection() {
     let result = observe(&link.join("AGENTS.md"));
     assert!(!result.scan_complete);
     assert!(result.files.is_empty());
+}
+
+#[test]
+fn instruction_snapshot_observes_confirmed_removal_and_empty_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().canonicalize().unwrap().join("AGENTS.md");
+    std::fs::write(&path, "global guidance").unwrap();
+    assert_eq!(observe(&path).files.len(), 1);
+    std::fs::remove_file(&path).unwrap();
+    let removed = observe(&path);
+    assert!(removed.scan_complete);
+    assert!(removed.files.is_empty());
+    std::fs::write(&path, "").unwrap();
+    let empty = observe(&path);
+    assert!(empty.scan_complete);
+    assert!(empty.files.is_empty());
+}
+
+#[test]
+fn missing_instruction_parent_is_not_a_confirmed_leaf_removal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let missing = root.join("never-created").join("nested").join("AGENTS.md");
+    let result = observe(&missing);
+    assert!(!result.scan_complete);
+    assert!(result.files.is_empty());
+}
+
+#[test]
+fn moved_instruction_parent_recovers_before_confirmed_leaf_removal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let parent = root.join("configured");
+    let moved = root.join("temporarily-unavailable");
+    std::fs::create_dir(&parent).unwrap();
+    let path = parent.join("AGENTS.md");
+    std::fs::write(&path, "retained global guidance").unwrap();
+    let first = observe(&path);
+    assert!(first.scan_complete);
+    assert_eq!(first.files.len(), 1);
+    std::fs::rename(&parent, &moved).unwrap();
+    let unavailable = observe(&path);
+    assert!(!unavailable.scan_complete);
+    assert!(unavailable.files.is_empty());
+    std::fs::rename(&moved, &parent).unwrap();
+    let recovered = observe(&path);
+    assert!(recovered.scan_complete);
+    assert_eq!(recovered.files[0].fingerprint, first.files[0].fingerprint);
+    std::fs::remove_file(&path).unwrap();
+    let removed = observe(&path);
+    assert!(removed.scan_complete);
+    assert!(removed.files.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_leaf_under_redirected_or_dangling_parent_stays_unavailable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let target = root.join("outside");
+    let link = root.join("configured");
+    std::fs::create_dir(&target).unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let missing_leaf = observe(&link.join("AGENTS.md"));
+    assert!(!missing_leaf.scan_complete);
+    assert!(missing_leaf.files.is_empty());
+    std::fs::remove_dir(target).unwrap();
+    let dangling_parent = observe(&link.join("AGENTS.md"));
+    assert!(!dangling_parent.scan_complete);
+    assert!(dangling_parent.files.is_empty());
 }

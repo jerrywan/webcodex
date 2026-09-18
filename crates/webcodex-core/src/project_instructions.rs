@@ -77,6 +77,30 @@ pub struct ProjectInstructionFileSummary {
     pub read_more: Option<ReadMoreHint>,
 }
 
+/// Control-owned observation state. Never serialized into model projections or
+/// durable Session records. Generation is unknown during transport failures when
+/// the Runner has not advertised config status.
+#[derive(Debug, Clone)]
+pub struct RunnerInstructionObservation {
+    pub instance_id: String,
+    pub generation: Option<u64>,
+    pub started_at: std::time::Instant,
+    /// Latest successful live-instance check, independent of request age.
+    pub instance_verified_at: std::time::Instant,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstructionScanState {
+    pub runner_complete: bool,
+    pub project_complete: bool,
+    pub runner: Option<RunnerInstructionObservation>,
+    /// Captured before Project reads, including when Runner discovery fails.
+    pub project_started_at: Option<std::time::Instant>,
+    /// Independently bounded Runner sources before the shared projection budget.
+    /// This state is Session-local and skipped with the rest of `scan`.
+    pub runner_source_files: Vec<ProjectInstructionFile>,
+}
+
 /// Bounded snapshot of loaded project instructions (with content). Stored only
 /// on the in-memory `SessionRecord`; durable persistence deliberately drops it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +115,8 @@ pub struct ProjectInstructionsSnapshot {
     /// the owning runner/capability/read operation was unavailable. Missing
     /// files and empty files are successful observations.
     pub scan_complete: bool,
+    #[serde(skip)]
+    pub scan: Option<InstructionScanState>,
     pub note: String,
 }
 
@@ -140,6 +166,7 @@ impl ProjectInstructionsSnapshot {
             max_total_chars: MAX_TOTAL_CHARS,
             truncated: false,
             scan_complete: true,
+            scan: None,
             note: PROJECT_INSTRUCTIONS_NOTE.to_string(),
         }
     }
@@ -202,6 +229,7 @@ impl ProjectInstructionsSnapshot {
             max_total_chars: MAX_TOTAL_CHARS,
             truncated,
             scan_complete,
+            scan: None,
             note: PROJECT_INSTRUCTIONS_NOTE.to_string(),
         }
     }
@@ -236,6 +264,122 @@ impl ProjectInstructionsSnapshot {
 }
 
 impl ProjectInstructionsSnapshot {
+    pub fn scope_complete(&self, scope: InstructionSourceScope) -> bool {
+        self.scan
+            .as_ref()
+            .map_or(self.scan_complete, |scan| match scope {
+                InstructionSourceScope::Runner => scan.runner_complete,
+                InstructionSourceScope::Project => scan.project_complete,
+            })
+    }
+
+    /// Retain each unavailable scope independently, under the Session store
+    /// lock. A new Runner/config must never inherit the old global rule body.
+    pub fn retain_unavailable_scopes(mut self, previous: Option<&Self>) -> Self {
+        let Some(previous) = previous else {
+            return self;
+        };
+        let incoming_observation = self.scan.as_ref().and_then(|scan| scan.runner.clone());
+        let incoming = incoming_observation.as_ref();
+        let prior = previous.scan.as_ref().and_then(|scan| scan.runner.as_ref());
+        let runner_stale = incoming.zip(prior).is_some_and(|(new, old)| {
+            if new.instance_id != old.instance_id {
+                // A different identity alone cannot prove replacement: an old
+                // process's response can arrive after its successor committed.
+                return new.instance_verified_at <= old.instance_verified_at;
+            }
+            match (new.generation, old.generation) {
+                (Some(new), Some(old)) if new != old => new < old,
+                (None, Some(_)) => true,
+                (Some(_), None) => false,
+                _ => new.started_at < old.started_at,
+            }
+        });
+        let same_runner = incoming
+            .zip(prior)
+            .map_or(incoming.is_none(), |(new, old)| {
+                new.instance_id == old.instance_id
+                    && new
+                        .generation
+                        .map_or(true, |generation| Some(generation) == old.generation)
+            });
+        let retain_runner =
+            runner_stale || (!self.scope_complete(InstructionSourceScope::Runner) && same_runner);
+        let project_started_at = self.scan.as_ref().and_then(|scan| scan.project_started_at);
+        let prior_project_started_at = previous
+            .scan
+            .as_ref()
+            .and_then(|scan| scan.project_started_at);
+        let project_stale = prior_project_started_at
+            .is_some_and(|old| project_started_at.is_none_or(|new| new < old));
+        let retain_project = project_stale || !self.scope_complete(InstructionSourceScope::Project);
+        let runner_files = if retain_runner {
+            previous.runner_source_files()
+        } else {
+            self.runner_source_files()
+        }
+        .iter()
+        .filter(|file| file.source_scope == InstructionSourceScope::Runner)
+        .cloned()
+        .collect();
+        let project_files = if retain_project {
+            &previous.files
+        } else {
+            &self.files
+        }
+        .iter()
+        .filter(|file| file.source_scope == InstructionSourceScope::Project)
+        .cloned()
+        .collect::<Vec<_>>();
+        let mut scan = self.scan.take().unwrap_or(InstructionScanState {
+            runner_complete: self.scan_complete,
+            project_complete: self.scan_complete,
+            runner: None,
+            project_started_at: None,
+            runner_source_files: Vec::new(),
+        });
+        if runner_stale || incoming.is_none() {
+            scan.runner = prior.cloned();
+        }
+        // Even when body/order selection keeps the prior observation, preserve
+        // the latest check of that same live instance for replacement fencing.
+        if let Some(selected) = scan.runner.as_mut() {
+            for observed in [incoming, prior].into_iter().flatten() {
+                if observed.instance_id == selected.instance_id {
+                    selected.instance_verified_at = selected
+                        .instance_verified_at
+                        .max(observed.instance_verified_at);
+                }
+            }
+        }
+        if runner_stale {
+            scan.runner_complete = false;
+        }
+        if project_stale {
+            scan.project_started_at = prior_project_started_at;
+            scan.project_complete = false;
+        }
+        let project = Self {
+            loaded: !project_files.is_empty(),
+            total_chars: project_files.iter().map(|file| file.chars).sum(),
+            truncated: project_files.iter().any(|file| file.truncated),
+            files: project_files,
+            scan_complete: scan.project_complete,
+            ..Self::empty()
+        };
+        let mut combined = Self::with_runner_files(runner_files, project, scan.runner_complete);
+        let combined_scan = combined.scan.as_mut().expect("combined scan");
+        combined_scan.runner = scan.runner;
+        combined_scan.project_started_at = scan.project_started_at;
+        combined
+    }
+
+    fn runner_source_files(&self) -> &[ProjectInstructionFile] {
+        self.scan
+            .as_ref()
+            .map_or(&self.files, |scan| &scan.runner_source_files)
+    }
+
     /// Compose one bounded startup snapshot with Runner-configured sources first,
     /// followed by project-local sources. Runner sources never gain a generic
     /// read-more path; project-local read-more hints remain project-relative.
@@ -244,43 +388,15 @@ impl ProjectInstructionsSnapshot {
         project: Self,
         runner_scan_complete: bool,
     ) -> Self {
-        let mut remaining_chars = MAX_TOTAL_CHARS;
-        let mut files = Vec::with_capacity(runner_files.len() + project.files.len());
-        for mut file in runner_files.into_iter().chain(project.files.into_iter()) {
-            let original_chars = file.content.chars().count();
-            if original_chars > remaining_chars {
-                let mut kept = String::new();
-                let mut chars = 0usize;
-                let mut lines_kept = 0usize;
-                for (index, line) in file.content.lines().enumerate() {
-                    let line_chars = line.chars().count();
-                    let separator = usize::from(index > 0);
-                    if chars + separator + line_chars > remaining_chars {
-                        break;
-                    }
-                    if index > 0 {
-                        kept.push('\n');
-                    }
-                    kept.push_str(line);
-                    chars += separator + line_chars;
-                    lines_kept += 1;
-                }
-                file.content = kept;
-                file.chars = chars;
-                file.truncated = true;
-                if file.source_scope == InstructionSourceScope::Project {
-                    file.read_more = Some(ReadMoreHint {
-                        path: file.path.clone(),
-                        start_line: lines_kept.saturating_add(1),
-                        limit: MAX_LINES_PER_FILE,
-                    });
-                } else {
-                    file.read_more = None;
-                }
-            }
-            remaining_chars = remaining_chars.saturating_sub(file.chars);
-            files.push(file);
-        }
+        // Reserve the already-bounded project body before spending on global
+        // guidance. Presentation order remains global-before-project.
+        let project_chars: usize = project.files.iter().map(|file| file.chars).sum();
+        let runner_source_files = bound_runner_files(runner_files, MAX_TOTAL_CHARS);
+        let mut files = bound_runner_files(
+            runner_source_files.clone(),
+            MAX_TOTAL_CHARS.saturating_sub(project_chars),
+        );
+        files.extend(project.files);
         let total_chars = files.iter().map(|file| file.chars).sum();
         let truncated = files.iter().any(|file| file.truncated);
         Self {
@@ -290,10 +406,51 @@ impl ProjectInstructionsSnapshot {
             total_chars,
             max_total_chars: MAX_TOTAL_CHARS,
             truncated,
+            scan: Some(InstructionScanState {
+                runner_complete: runner_scan_complete,
+                project_complete: project.scan_complete,
+                runner: None,
+                project_started_at: project
+                    .scan
+                    .as_ref()
+                    .and_then(|scan| scan.project_started_at),
+                runner_source_files,
+            }),
             scan_complete: runner_scan_complete && project.scan_complete,
             note: PROJECT_INSTRUCTIONS_NOTE.to_string(),
         }
     }
+}
+
+fn bound_runner_files(
+    mut files: Vec<ProjectInstructionFile>,
+    mut remaining_chars: usize,
+) -> Vec<ProjectInstructionFile> {
+    for file in &mut files {
+        file.read_more = None;
+        let original_chars = file.content.chars().count();
+        if original_chars > remaining_chars {
+            let mut kept = String::new();
+            let mut chars = 0usize;
+            for (index, line) in file.content.lines().enumerate() {
+                let line_chars = line.chars().count();
+                let separator = usize::from(index > 0);
+                if chars + separator + line_chars > remaining_chars {
+                    break;
+                }
+                if index > 0 {
+                    kept.push('\n');
+                }
+                kept.push_str(line);
+                chars += separator + line_chars;
+            }
+            file.content = kept;
+            file.chars = chars;
+            file.truncated = true;
+        }
+        remaining_chars = remaining_chars.saturating_sub(file.chars);
+    }
+    files
 }
 
 /// Apply the per-file line cap (`MAX_LINES_PER_FILE`) and the total char cap
@@ -606,3 +763,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "project_instructions_observation_tests.rs"]
+mod observation_tests;

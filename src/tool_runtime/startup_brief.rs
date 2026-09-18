@@ -679,12 +679,52 @@ fn roots_projection(source: &Value) -> Value {
 
 pub(crate) fn project_instructions_context_projection(
     current: &ProjectInstructionsSnapshot,
+    max_bytes: usize,
 ) -> Value {
-    // Sidecar requests are explicit current observations rather than Session
-    // continuation deltas. Reuse the same bounded source/content/read_more
-    // projection as coding startup, without consulting or mutating Session
-    // instruction-retention state.
-    instructions_projection(current, None, true, true, true, false)
+    // Sidecar requests observe current sources without Session retention. Its
+    // shared envelope is smaller than startup, especially with 16 global files.
+    let mut projection = instructions_projection(current, None, true, true, true, false);
+    if serialized_len(&projection) <= max_bytes {
+        return projection;
+    }
+    // Headings duplicate the body; remove this optional index before losing
+    // actual guidance or source identities.
+    if let Some(sources) = projection["sources"].as_array_mut() {
+        for source in sources {
+            source["headings"] = json!([]);
+        }
+    }
+    while serialized_len(&projection) > max_bytes {
+        let largest = projection["sources"].as_array().and_then(|sources| {
+            sources
+                .iter()
+                .enumerate()
+                .filter_map(|(index, source)| {
+                    source["content"]
+                        .as_str()
+                        .filter(|body| !body.is_empty())
+                        .map(|body| (index, json_string_payload_len(body)))
+                })
+                .max_by_key(|(_, bytes)| *bytes)
+        });
+        let Some((index, bytes)) = largest else {
+            // Essential source metadata itself does not fit. The owning
+            // sidecar envelope will return its existing explicit budget error.
+            break;
+        };
+        let source = &mut projection["sources"][index];
+        let body = source["content"].as_str().unwrap_or_default();
+        let (bounded, _) = bounded_json_string(body, bytes / 2);
+        source["read_more"] = if source["source_scope"] == "project" {
+            projected_read_more(source["path"].as_str().unwrap_or_default(), &bounded)
+        } else {
+            Value::Null
+        };
+        source["content"] = json!(bounded);
+        source["truncated"] = json!(true);
+        projection["truncated"] = json!(true);
+    }
+    projection
 }
 
 fn instructions_projection(
@@ -700,7 +740,7 @@ fn instructions_projection(
         && (matches!(status, "loaded" | "changed")
             || (status == "reused" && include_reused_content)
             || (status == "unavailable" && !current.files.is_empty()));
-    let changed_sources = if status == "changed" {
+    let changed_sources = if matches!(status, "changed" | "unavailable") {
         changed_instruction_sources(current, previous)
     } else {
         Vec::new()
@@ -748,7 +788,7 @@ fn instruction_status(
             "not_found"
         };
     }
-    let Some(previous) = previous.filter(|snapshot| snapshot.scan_complete) else {
+    let Some(previous) = previous else {
         return "loaded";
     };
     if force_load {
@@ -802,6 +842,9 @@ fn changed_instruction_sources(
     identities
         .into_iter()
         .filter_map(|(scope, path)| {
+            if !current.scope_complete(scope) {
+                return None;
+            }
             let current_file = current
                 .files
                 .iter()
@@ -1515,7 +1558,11 @@ fn enforce_hard_size_limit(brief: &mut Value) {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let read_more = projected_read_more(&path, &bounded);
+        let read_more = if source["source_scope"] == "project" {
+            projected_read_more(&path, &bounded)
+        } else {
+            Value::Null
+        };
         source["content"] = json!(bounded);
         source["truncated"] = json!(true);
         source["read_more"] = read_more;
@@ -1614,7 +1661,11 @@ fn enforce_hard_size_limit(brief: &mut Value) {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let read_more = projected_read_more(&path, &bounded);
+        let read_more = if source["source_scope"] == "project" {
+            projected_read_more(&path, &bounded)
+        } else {
+            Value::Null
+        };
         source["content"] = json!(bounded);
         source["truncated"] = json!(true);
         source["read_more"] = read_more;
@@ -2376,3 +2427,7 @@ mod tests {
             .any(|action| action.starts_with("rerun focused target 0")));
     }
 }
+
+#[cfg(test)]
+#[path = "tests/startup_instructions_projection.rs"]
+mod instruction_tests;
