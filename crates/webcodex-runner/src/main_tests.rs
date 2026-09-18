@@ -854,12 +854,20 @@ impl ShellTreeMarkers {
 fn shell_job_native_exe_nonzero_exit_code_is_preserved() {
     let tmp = tempfile::tempdir().unwrap();
     let cwd = tmp.path().to_string_lossy().to_string();
-    let helper = shell_tree_helper();
+    // Use the OS-owned command processor instead of the rustc-built process-tree
+    // fixture. This test only verifies PowerShell native-exit propagation; a freshly
+    // generated EXE can be delayed by Windows malware scanning under parallel CI and
+    // would turn that unrelated startup latency into a false shell timeout.
+    let command_processor = std::env::var_os("ComSpec")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .expect("Windows ComSpec must name the native command processor");
     // No fixture-level `exit $LASTEXITCODE`: the PowerShell command wrapper
     // must propagate the native executable's exit code on its own.
     let command = format!(
-        "& {} sleep 0 3",
-        shell_tree_quote(&helper.to_string_lossy())
+        "& {} /d /c {}",
+        shell_tree_quote(&command_processor.to_string_lossy()),
+        shell_tree_quote("exit /b 3")
     );
     let result = run_shell(
         &unrestricted_test_policy(),
