@@ -1513,6 +1513,26 @@ async fn mcp_compact_preserves_stateless_wrappers_app_metadata_and_exact_manifes
                 for tool in result["tools"].as_array_mut().unwrap() {
                     if compact {
                         assert!(tool.get("outputSchema").is_none());
+                        let properties = &tool["inputSchema"]["properties"];
+                        for (field, hint) in [
+                            ("recording_session_id", "wc_sess_*"),
+                            ("ack_session_message_ids", "wc_msg_*"),
+                            ("session_message_resolution", "wc_msg_*"),
+                            ("context_request", "jobs.attention"),
+                        ] {
+                            if let Some(property) = properties.get(field) {
+                                assert!(property["description"].as_str().unwrap().contains(hint));
+                            }
+                        }
+                        for pointer in [
+                            "/ack_session_message_ids/items",
+                            "/session_message_resolution/properties/message_id",
+                            "/session_message_resolution/properties/resolution",
+                        ] {
+                            if let Some(property) = properties.pointer(pointer) {
+                                assert!(property.get("description").is_none());
+                            }
+                        }
                     }
                     tool.as_object_mut().unwrap().remove("outputSchema");
                     strip_description_text(tool);
@@ -1548,6 +1568,59 @@ async fn mcp_compact_preserves_stateless_wrappers_app_metadata_and_exact_manifes
         .unwrap();
     assert_eq!(output["description"], canonical.description);
     assert_eq!(output["input_schema"], canonical.input_schema);
+}
+
+#[test]
+fn mcp_compact_common_copy_respects_tool_and_argument_boundaries() {
+    use crate::mcp::discovery::{bound_description, compact_tool, INPUT_DESCRIPTION_MAX_CHARS};
+    let full = mcp_tools_list_payload_with_compact(false);
+    let compact = mcp_tools_list_payload_with_compact(true);
+    for (name, field, hints) in [
+        ("run_process", "cwd", vec!["Project-relative", "root", "No named Session SSH"]),
+        ("run_skill_resource", "cwd", vec!["Project-relative", "Skill resolution"]),
+        ("run_detached_process", "timeout_secs", vec!["Total runtime", "604800"]),
+        ("cargo_check", "sync_wait_secs", vec!["Same-execution", "10s", "60s", "timeout", "Never"]),
+        ("run_shell", "assertion_name", vec!["reuse after a fix", "validation-like"]),
+    ] {
+        let property = |payload: &Value| {
+            payload["tools"].as_array().unwrap().iter()
+                .find(|tool| tool["name"] == name).unwrap()["inputSchema"]["properties"][field]
+                ["description"].as_str().unwrap().to_string()
+        };
+        let before = bound_description(&property(&full), INPUT_DESCRIPTION_MAX_CHARS);
+        let after = property(&compact);
+        assert!(after.len() < before.len(), "{name}.{field}");
+        for hint in hints {
+            assert!(after.contains(hint), "{name}.{field}: {after}");
+        }
+    }
+    // These share names, but carry different selection, authority or retry
+    // semantics. They must stay on the existing generic bounding path.
+    for tool in full["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let projected = compact["tools"].as_array().unwrap().iter()
+            .find(|candidate| candidate["name"] == name).unwrap();
+        for field in ["project", "client_id", "idempotency_key", "purpose", "result_expectation"] {
+            if let Some(copy) = tool["inputSchema"]["properties"][field]["description"].as_str() {
+                assert_eq!(projected["inputSchema"]["properties"][field]["description"],
+                    bound_description(copy, INPUT_DESCRIPTION_MAX_CHARS), "{name}.{field}");
+            }
+        }
+        if name == "run_shell" {
+            for field in ["cwd", "timeout_secs", "sync_wait_secs"] {
+                let copy = tool["inputSchema"]["properties"][field]["description"].as_str().unwrap();
+                assert_eq!(projected["inputSchema"]["properties"][field]["description"],
+                    bound_description(copy, INPUT_DESCRIPTION_MAX_CHARS), "{name}.{field}");
+            }
+        }
+    }
+    let mut fixture = json!({"name": "run_process", "inputSchema": {"properties": {
+        "cwd": {"type": "string"},
+        "nested": {"properties": {"cwd": {"description": "A different cwd contract."}}}
+    }}});
+    let original = fixture.clone();
+    compact_tool(&mut fixture);
+    assert_eq!(fixture, original, "do not add copy or rewrite nested business fields");
 }
 
 #[test]

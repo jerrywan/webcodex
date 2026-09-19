@@ -9,9 +9,9 @@ pub(super) const TOOL_DESCRIPTION_MAX_CHARS: usize = 420;
 pub(super) const INPUT_DESCRIPTION_MAX_CHARS: usize = 180;
 
 pub(super) fn compact_tool(tool: &mut Value) {
-    let name = tool["name"].as_str().unwrap_or_default();
+    let name = tool["name"].as_str().unwrap_or_default().to_string();
     if let Some(description) = tool["description"].as_str() {
-        let selection = match name {
+        let selection = match name.as_str() {
             "work_on_project" => "Start ordinary coding/review with project or client_id+path. Omit session_id for a fresh Workflow Session; supply it only for exact resume. Defaults return project instructions, workflow and extension guidance. Use mode=worktree for an isolated Git worktree.",
             "tool_manifest" => "Discover tools by intent/category, or pass tool_name for one exact canonical contract and its direct/gateway route. Use exact lookup when arguments or operational details are not already known.",
             "call_runtime_tool" => "Call one admitted runtime tool with its exact arguments. Use tool_manifest to discover the contract. Prefer an available direct callable; this gateway also supports admitted direct tools when that callable is unavailable. Target validation and authority checks still apply.",
@@ -29,21 +29,57 @@ pub(super) fn compact_tool(tool: &mut Value) {
     }
     if let Some(schema) = tool.get_mut("inputSchema") {
         compact_input_descriptions(schema);
-        // Only these root properties are protocol wrappers. A business
-        // session_id keeps its own canonical-derived copy and requiredness.
-        for (field, description) in [
-            ("recording_session_id", "Optional Workflow Session recorder provenance; never authority or a business Session selector."),
-            ("ack_session_message_ids", "IDs of ACK-required Session/Peer messages retained in current model context. Repeat while retained; never resolves messages or grants authority."),
-            ("session_message_resolution", "Resolve one already-handled non-todo message in the explicit recording Session; ACK if required. Unrelated to main call success."),
-            ("context_request", "Optional context sidecar after the result; never authority. Keys: project.instructions, webcodex.workflow, jobs.attention, skills.catalog, plugins.catalog, memory.bootstrap."),
-        ] {
-            if let Some(property) = schema.pointer_mut(&format!("/properties/{field}")) {
-                if property.get("description").is_some_and(Value::is_string) {
-                    property["description"] = Value::String(description.to_string());
+        if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+            for (field, property) in properties {
+                if let (Some(description), Some(Value::String(copy))) = (
+                    common_input_description(&name, field),
+                    property.get_mut("description"),
+                ) {
+                    *copy = description.to_string();
                 }
             }
         }
+        // Only these root properties are protocol wrappers. A business
+        // session_id keeps its own canonical-derived copy and requiredness.
+        // Nested IDs/resolution have no description; keep their type hints here.
+        for (pointer, description) in [
+            ("/properties/recording_session_id", "Recorder wc_sess_* provenance only; never authority or a business Session target."),
+            ("/properties/ack_session_message_ids", "ACK-required wc_msg_* IDs retained in model context; repeat while retained; never resolves or authorizes."),
+            ("/properties/session_message_resolution", "Resolve one handled non-todo recorder message by exact wc_msg_*; ACK separately if required. Independent of call success."),
+            ("/properties/context_request", "Post-result sidecar keys; no authority: project.instructions, webcodex.workflow, jobs.attention, skills.catalog, plugins.catalog, memory.bootstrap."),
+            ("/properties/context_request/items", "Context key; unsupported keys are nonfatal."),
+        ] {
+            if let Some(Value::String(copy)) = schema
+                .pointer_mut(pointer)
+                .and_then(|property| property.get_mut("description"))
+            {
+                *copy = description.to_string();
+            }
+        }
     }
+}
+
+fn common_input_description(tool: &str, field: &str) -> Option<&'static str> {
+    // Root arguments only, in audited groups with the same semantics. In
+    // particular run_shell cwd/timeouts can refer to a named SSH resource;
+    // project, client_id and idempotency_key also differ between direct tools.
+    Some(match (tool, field) {
+        ("run_process" | "run_detached_process", "cwd") =>
+            "Project-relative cwd; omit, empty or '.' for root. No named Session SSH resources.",
+        ("run_skill_resource", "cwd") =>
+            "Project-relative cwd; omit, empty or '.' for root. Skill resolution does not change cwd.",
+        ("run_process" | "run_detached_process", "timeout_secs") =>
+            "Total runtime seconds; default 60, clamped to 604800 (7 days).",
+        ("run_skill_resource", "timeout_secs") =>
+            "Total runtime seconds; default 60, clamped to 3600.",
+        ("cargo_check" | "cargo_test", "timeout_secs") =>
+            "Total validation runtime seconds, clamped to 3600. Defaults vary per tool.",
+        ("run_process" | "run_skill_resource" | "cargo_check" | "cargo_test", "sync_wait_secs") =>
+            "Same-execution Job handoff grace; default 10s, clamped to 60s and timeout. Never extends runtime or retries.",
+        ("run_process" | "run_shell", "assertion_name") =>
+            "Validation label; reuse after a fix to correlate evidence. Inert unless execution is validation-like.",
+        _ => return None,
+    })
 }
 
 fn compact_input_descriptions(schema: &mut Value) {
