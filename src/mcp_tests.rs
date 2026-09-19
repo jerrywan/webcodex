@@ -155,6 +155,8 @@ mod plugin_check;
 mod plugin_tools;
 #[path = "mcp_tests/protocol.rs"]
 mod protocol;
+#[path = "mcp_tests/response.rs"]
+mod response_tests;
 #[path = "mcp_tests/result_app.rs"]
 mod result_app;
 #[path = "mcp_tests/runtime_tools.rs"]

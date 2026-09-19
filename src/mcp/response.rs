@@ -79,7 +79,7 @@ fn mcp_tool_text_content(structured: &Value, concise: String, text_json_compat: 
     }
 }
 
-fn mcp_runtime_tool_result_fallback_with_compat(
+pub(super) fn mcp_runtime_tool_result_fallback_with_compat(
     result: ToolResult,
     text_json_compat: bool,
     presentation: McpToolResultPresentation,
@@ -155,7 +155,3 @@ pub(super) fn rpc_error_with_data(
         }
     })
 }
-
-#[cfg(test)]
-#[path = "../mcp_tests/response.rs"]
-mod tests;

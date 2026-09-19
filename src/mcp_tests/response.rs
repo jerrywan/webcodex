@@ -1,4 +1,7 @@
-use super::*;
+use crate::mcp::response::{
+    mcp_runtime_tool_result_fallback_with_compat, McpToolResultPresentation,
+};
+use crate::tool_runtime::ToolResult;
 use serde_json::json;
 
 #[test]
