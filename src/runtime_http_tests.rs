@@ -295,43 +295,6 @@ async fn register_import_agent(root: &std::path::Path) -> (Arc<ToolRuntime>, Arc
     register_import_agent_with_capabilities(root, None).await
 }
 
-async fn complete_one_agent_request(
-    registry: Arc<RunnerRegistry>,
-    stdout: impl Into<String>,
-    stderr: impl Into<String>,
-    exit_code: i32,
-) {
-    use crate::runner_protocol::{RunnerPollRequest, RunnerResultRequest};
-    let request = loop {
-        if let Some(request) = registry
-            .poll(RunnerPollRequest {
-                client_id: "importer".to_string(),
-                runner_instance_id: "inst-import".to_string(),
-            })
-            .await
-            .unwrap()
-        {
-            break request;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    };
-    registry
-        .complete(RunnerResultRequest {
-            client_id: "importer".to_string(),
-            runner_instance_id: "inst-import".to_string(),
-            request_id: request.request_id,
-            exit_code: Some(exit_code),
-            stdout: Some(stdout.into()),
-            stderr: Some(stderr.into()),
-            stdout_truncated: false,
-            stderr_truncated: false,
-            duration_ms: Some(1),
-            error: None,
-        })
-        .await
-        .unwrap();
-}
-
 fn spawn_startup_agent_executor(registry: Arc<RunnerRegistry>) -> tokio::task::JoinHandle<()> {
     use crate::runner_protocol::{RunnerPollRequest, RunnerRequest, RunnerResultRequest};
     use std::path::Path;
@@ -412,7 +375,7 @@ fn spawn_startup_agent_executor(registry: Arc<RunnerRegistry>) -> tokio::task::J
 // =========================================================================
 
 #[tokio::test]
-async fn all_project_endpoints_require_bearer_auth() {
+async fn retained_runtime_endpoints_require_bearer_auth() {
     let _env = crate::auth::AuthEnvGuard::auth_required();
     let config = test_config(Some("secret"));
     let (_tmp, db) = test_db();
@@ -422,11 +385,6 @@ async fn all_project_endpoints_require_bearer_auth() {
 
     let endpoints: Vec<(&str, Value)> = vec![
         ("/api/projects/list", json!({})),
-        ("/api/projects/git_status", json!({"project": "demo"})),
-        (
-            "/api/projects/apply_unified_diff",
-            json!({"project": "demo", "diff": "diff"}),
-        ),
         ("/api/tools/list", json!({})),
         ("/api/tools/call", json!({"tool": "list_tools"})),
         ("/api/runtime/status", json!({})),
@@ -455,6 +413,36 @@ async fn all_project_endpoints_require_bearer_auth() {
 // =========================================================================
 // getRuntimeStatus / /api/runtime/status
 // =========================================================================
+
+#[tokio::test]
+async fn retired_dedicated_runtime_routes_are_unmounted() {
+    let config = test_config(Some("secret"));
+    let (_tmp, db) = test_db();
+    let tmp_proj = tempfile::tempdir().unwrap();
+    let runtime = Arc::new(runtime_with_local_project(tmp_proj.path(), "demo"));
+    let service = Service::new(build_projects_router(config, db, runtime));
+
+    for (group, leaf) in [
+        ("projects", "git_status"),
+        ("projects", "list_files"),
+        ("projects", "apply_unified_diff"),
+        ("projects", "run_shell"),
+        ("projects", "run_job"),
+        ("projects", "git_restore_paths"),
+        ("projects", "discard_untracked"),
+        ("jobs", "list"),
+        ("jobs", "tail"),
+        ("jobs", "stop"),
+    ] {
+        let path = format!("/api/{group}/{leaf}");
+        let resp = TestClient::post(format!("http://localhost{path}"))
+            .bearer_auth("secret")
+            .json(&json!({}))
+            .send(&service)
+            .await;
+        assert_eq!(effective_status(&resp), StatusCode::NOT_FOUND, "{path}");
+    }
+}
 
 #[tokio::test]
 async fn http_runtime_status_rejects_wrong_bearer() {
