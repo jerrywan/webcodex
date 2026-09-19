@@ -349,21 +349,29 @@ fn assert_inconclusive_startup(result: &ToolResult, status: &str) {
     assert_eq!(semantic["available"], Value::Null);
     assert_eq!(semantic["status"], status);
     assert_eq!(result.output["startup_verdict"]["status"], "pass");
-    assert!(!result.output["warnings"].as_array().unwrap().iter()
+    assert!(!result.output["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
         .any(|warning| warning == "semantic_navigation_unavailable"));
     let compact = crate::tool_runtime::coding_task::project_work_on_project_output(
-        "demo".to_string(), result.output.clone(),
+        "demo".to_string(),
+        result.output.clone(),
     );
     assert!(compact.success, "{compact:?}");
     assert_eq!(compact.output["semantic_navigation"]["status"], status);
-    assert_eq!(compact.output["semantic_navigation"]["available"], Value::Null);
+    assert_eq!(
+        compact.output["semantic_navigation"]["available"],
+        Value::Null
+    );
     for absent in ["readiness", "warnings", "blockers", "action_required"] {
         assert!(compact.output.get(absent).is_none(), "{compact:?}");
     }
     crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
         &serde_json::to_value(&compact).unwrap(),
         &crate::tool_runtime::registry::output_schema_for_tool("work_on_project"),
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 #[tokio::test]

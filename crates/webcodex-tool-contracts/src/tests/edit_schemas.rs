@@ -210,7 +210,10 @@ fn apply_text_edits_composition_guidance_and_union_stay_unambiguous() {
         "Shorthand path + old_text + new_text is only for one simple exact replacement",
         "put occurrence/line_scope inside each edit, not on the change",
     ] {
-        assert!(spec.description.contains(phrase), "missing guidance: {phrase}");
+        assert!(
+            spec.description.contains(phrase),
+            "missing guidance: {phrase}"
+        );
     }
     let changes = &spec.input_schema["properties"]["changes"];
     assert!(changes["description"].as_str().unwrap().contains("ONE"));

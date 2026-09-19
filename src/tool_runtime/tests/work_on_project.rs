@@ -1913,8 +1913,14 @@ async fn work_on_project_without_session_id_always_creates_fresh_session() {
     // A failed advisory status probe is not an unavailable observation.
     assert!(result.output.get("readiness").is_none());
     assert!(result.output.get("warnings").is_none());
-    assert_eq!(result.output["semantic_navigation"]["status"], "probe_failed");
-    assert_eq!(result.output["semantic_navigation"]["available"], Value::Null);
+    assert_eq!(
+        result.output["semantic_navigation"]["status"],
+        "probe_failed"
+    );
+    assert_eq!(
+        result.output["semantic_navigation"]["available"],
+        Value::Null
+    );
     assert_eq!(
         result.output["workflow"],
         crate::tool_runtime::startup_brief::builtin_coding_workflow_projection(Default::default())
@@ -3524,8 +3530,14 @@ async fn work_on_project_new_task_is_lightweight_and_preserves_startup_context()
     assert!(result.output.get("repository").is_none());
     assert!(result.output.get("readiness").is_none());
     assert!(result.output.get("warnings").is_none());
-    assert_eq!(result.output["semantic_navigation"]["status"], "probe_failed");
-    assert_eq!(result.output["semantic_navigation"]["available"], Value::Null);
+    assert_eq!(
+        result.output["semantic_navigation"]["status"],
+        "probe_failed"
+    );
+    assert_eq!(
+        result.output["semantic_navigation"]["available"],
+        Value::Null
+    );
 
     // Runner request evidence: rules, Git, and LSP probes remain; repository
     // overview is not merely hidden from JSON, it is never enqueued.
@@ -4812,13 +4824,25 @@ async fn coding_workflow_standard_and_full_accept_valid_repository_overview() {
         assert_eq!(semantic["status"], "probe_failed");
         assert_eq!(semantic["available"], Value::Null);
         assert_eq!(semantic["reason_code"], "malformed_agent_result");
-        assert!(!brief["warnings"].as_array().unwrap().iter()
+        assert!(!brief["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
             .any(|warning| warning == "semantic_navigation_unavailable"));
         if detail == StartupDetail::Full {
             // Full diagnostics retain the original probe status and reason.
-            assert_eq!(result.output["semantic_navigation"]["status"], "probe_failed");
-            assert_eq!(result.output["semantic_navigation"]["available"], Value::Null);
-            assert_eq!(result.output["semantic_navigation"]["reason_code"], "malformed_agent_result");
+            assert_eq!(
+                result.output["semantic_navigation"]["status"],
+                "probe_failed"
+            );
+            assert_eq!(
+                result.output["semantic_navigation"]["available"],
+                Value::Null
+            );
+            assert_eq!(
+                result.output["semantic_navigation"]["reason_code"],
+                "malformed_agent_result"
+            );
         }
         let repository = &brief["repository"];
         assert_eq!(
@@ -5150,16 +5174,17 @@ async fn work_on_project_distinguishes_unavailable_from_inconclusive_lsp_probes(
         commit_file(root.path(), "README.md", "# fixture\n", "seed");
         let runtime = ToolRuntime::new_for_tests()
             .with_semantic_navigation_probe_timeout(Duration::from_millis(100));
-        let project = register_runner_project_at_path(
-            &runtime, "wop-probe-state", "demo", root.path(),
-        ).await;
+        let project =
+            register_runner_project_at_path(&runtime, "wop-probe-state", "demo", root.path()).await;
         let task = tokio::spawn({
             let runtime = runtime.clone();
             async move {
-                runtime.dispatch_with_auth(
-                    work_on_project_call(&project, "continue normal coding", None),
-                    Some(&auth_context(None, true)),
-                ).await
+                runtime
+                    .dispatch_with_auth(
+                        work_on_project_call(&project, "continue normal coding", None),
+                        Some(&auth_context(None, true)),
+                    )
+                    .await
             }
         });
         let deadline = Instant::now() + CODING_WORKFLOW_FIXTURE_TIMEOUT;
@@ -5171,7 +5196,8 @@ async fn work_on_project_distinguishes_unavailable_from_inconclusive_lsp_probes(
                 continue;
             };
             if request.kind != AGENT_LSP_REQUEST_KIND {
-                complete_agent_request_by_running_locally(&runtime, "wop-probe-state", request).await;
+                complete_agent_request_by_running_locally(&runtime, "wop-probe-state", request)
+                    .await;
                 continue;
             }
             probe_count += 1;
@@ -5199,9 +5225,14 @@ async fn work_on_project_distinguishes_unavailable_from_inconclusive_lsp_probes(
                 RunnerLspResultEnvelope::err("lsp_protocol_error", "probe did not conclude")
             };
             complete_patch_agent_request(
-                &runtime, "wop-probe-state", &request.request_id,
-                0, &envelope.to_stdout_json(), "",
-            ).await;
+                &runtime,
+                "wop-probe-state",
+                &request.request_id,
+                0,
+                &envelope.to_stdout_json(),
+                "",
+            )
+            .await;
         }
         let result = task.await.unwrap();
         assert!(result.success, "{status}: {result:?}");
@@ -5214,7 +5245,10 @@ async fn work_on_project_distinguishes_unavailable_from_inconclusive_lsp_probes(
             assert_eq!(semantic["available"], false);
             assert_eq!(result.output["readiness"]["status"], "warn");
             assert_eq!(result.output["readiness"]["blocking"], false);
-            assert_eq!(result.output["warnings"], json!(["semantic_navigation_unavailable"]));
+            assert_eq!(
+                result.output["warnings"],
+                json!(["semantic_navigation_unavailable"])
+            );
         } else {
             assert_eq!(semantic["available"], Value::Null);
             assert!(result.output.get("readiness").is_none(), "{result:?}");
@@ -5225,6 +5259,7 @@ async fn work_on_project_distinguishes_unavailable_from_inconclusive_lsp_probes(
         crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
             &serde_json::to_value(&result).unwrap(),
             &crate::tool_runtime::registry::output_schema_for_tool("work_on_project"),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
