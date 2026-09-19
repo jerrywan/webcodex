@@ -743,6 +743,7 @@ fn record_wait_match_in_transaction(
         current_match_count,
         current_match_sequence,
     )?;
+    validate_wait_match_source_membership(transaction, wait_id)?;
 
     let already_matched: i64 = transaction
         .query_row(
@@ -828,6 +829,32 @@ fn record_wait_match_in_transaction(
         next_sequence,
         occurred_at_unix_ms,
     )
+}
+
+fn validate_wait_match_source_membership(
+    conn: &Connection,
+    wait_id: &str,
+) -> Result<(), CommunicationStoreError> {
+    let orphan_match_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM wc_agent_wait_matches m
+             WHERE m.wait_id = ?1
+               AND NOT EXISTS (
+                   SELECT 1 FROM wc_agent_wait_sources s
+                   WHERE s.wait_id = m.wait_id AND s.kind = m.kind AND s.task_id = m.task_id
+               )",
+            [wait_id],
+            |row| row.get(0),
+        )
+        .map_err(store_error)?;
+    if orphan_match_count != 0 {
+        return Err(CommunicationStoreError::new(
+            "agent_wait_match_source_invariant",
+            "Agent Wait contains a durable match that is not one of its registered sources",
+        ));
+    }
+    Ok(())
 }
 
 fn coalesce_wait_wake_in_transaction(
@@ -948,6 +975,7 @@ pub(crate) fn require_agent_wait_for_wake(
     let state = AgentWaitState::from_db(&state_text, 1).map_err(store_error)?;
     let mode = AgentWaitMode::from_db(&mode_text, 2).map_err(store_error)?;
     validate_wait_join_invariants(mode, state, source_count, match_count, match_sequence)?;
+    validate_wait_match_source_membership(conn, wait_id)?;
     if state != AgentWaitState::Triggered {
         return Err(CommunicationStoreError::new(
             "agent_wait_wake_stale",
@@ -1146,6 +1174,7 @@ fn load_owned_agent_wait_detail(
         ));
     }
     let match_sequence = matches.last().map(|entry| entry.sequence).unwrap_or(0);
+    validate_wait_match_source_membership(conn, wait_id)?;
     validate_wait_join_invariants(
         mode,
         state,

@@ -1482,6 +1482,96 @@ fn malformed_wait_match_sequence_fails_closed() {
 }
 
 #[test]
+fn malformed_all_wait_match_must_belong_to_registered_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("wait-all-malformed-source.db")).unwrap();
+    let owner = principal('5');
+    let watcher = agent(&db, &owner, "wait-all-malformed-source-watcher");
+    let worker = agent(&db, &owner, "wait-all-malformed-source-worker");
+    let endpoint = endpoint(&db, &owner, &watcher, "wait-all-malformed-source-view");
+    let task_a = task(&db, &owner, &worker, "wait-all-malformed-source-a");
+    let task_b = task(&db, &owner, &worker, "wait-all-malformed-source-b");
+    let task_c = task(&db, &owner, &worker, "wait-all-malformed-source-c");
+    let a = start(&db, &owner, &task_a, &worker, "wait-all-malformed-source-a");
+    let b = start(&db, &owner, &task_b, &worker, "wait-all-malformed-source-b");
+    let c = start(&db, &owner, &task_c, &worker, "wait-all-malformed-source-c");
+    let wait = db
+        .create_agent_wait(
+            &owner,
+            wait_input_mode(
+                &watcher,
+                &endpoint,
+                &[task_a.clone(), task_b.clone()],
+                "wait-all-malformed-source",
+                AgentWaitMode::All,
+            ),
+        )
+        .unwrap()
+        .agent_wait;
+    complete(
+        &db,
+        &owner,
+        &task_a,
+        &worker,
+        &a,
+        "wait-all-malformed-source-a",
+    );
+    let partial = db.read_agent_wait(&owner, &wait.wait_id).unwrap();
+    assert_eq!(partial.state, AgentWaitState::Waiting);
+    assert_eq!(partial.match_count, 1);
+
+    {
+        let conn = db.conn_for_tests();
+        conn.execute(
+            "INSERT INTO wc_agent_wait_matches (
+                 wait_id, sequence, kind, task_id, task_attempt_id, terminal_task_state, occurred_at_unix_ms
+             ) VALUES (?1, 2, 'agent_task_terminal', ?2, ?3, 'succeeded', ?4)",
+            rusqlite::params![
+                wait.wait_id,
+                task_c,
+                c.attempt.attempt_id,
+                partial.updated_at_unix_ms + 1
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE wc_agent_waits
+             SET state = 'triggered', triggered_at_unix_ms = updated_at_unix_ms
+             WHERE wait_id = ?1",
+            [wait.wait_id.as_str()],
+        )
+        .unwrap();
+    }
+
+    let read_error = db.read_agent_wait(&owner, &wait.wait_id).unwrap_err();
+    assert_eq!(read_error.code(), "agent_wait_match_source_invariant");
+    let cancel_error = db
+        .cancel_agent_wait(&owner, &wait.wait_id, "wait-all-malformed-source-cancel")
+        .unwrap_err();
+    assert_eq!(cancel_error.code(), "agent_wait_match_source_invariant");
+    let wake_error =
+        require_agent_wait_for_wake(&db.conn_for_tests(), &owner, Some(&wait.wait_id), &watcher)
+            .unwrap_err();
+    assert_eq!(wake_error.code(), "agent_wait_match_source_invariant");
+
+    let mut conn = db.conn_for_tests();
+    let transaction = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    let terminal_error = record_agent_task_terminal_wait_matches_in_transaction(
+        &transaction,
+        &owner,
+        &task_b,
+        &b.attempt.attempt_id,
+        super::agent_task::AgentTaskState::Succeeded,
+        partial.updated_at_unix_ms + 2,
+    )
+    .unwrap_err();
+    assert_eq!(terminal_error.code(), "agent_wait_match_source_invariant");
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn source_fanout_is_bounded_at_wait_admission() {
     let temp = tempfile::tempdir().unwrap();
     let db = Database::open(&temp.path().join("wait-fanout.db")).unwrap();
