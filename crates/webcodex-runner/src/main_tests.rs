@@ -1628,10 +1628,11 @@ fn runner_project_cache_invalidate_refreshes_after_project_op() {
     project_ok(handle_project_op(&cfg.policy, &project_registry_dir, &req));
 
     assert!(
-        cache.get(&cfg).is_empty(),
-        "cache should still be stale before invalidation"
+        !cache.needs_refresh(),
+        "project operation must not mutate this cache instance directly"
     );
     cache.invalidate();
+    assert!(cache.needs_refresh());
     let projects = cache.get(&cfg);
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].id, "cached");
