@@ -2025,6 +2025,15 @@ fn mcp_compact_descriptions_preserve_selection_and_schema_literals() {
             ],
         ),
         ("stop_job", vec!["confirm=true", "without stopping"]),
+        (
+            "present_agent_continuation",
+            vec![
+                "create_agent_identity",
+                "yield/end promptly",
+                "not wake readiness",
+                "production_auto_resume_available",
+            ],
+        ),
     ] {
         let description = tools.iter().find(|tool| tool["name"] == name).unwrap()["description"]
             .as_str()

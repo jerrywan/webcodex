@@ -829,6 +829,7 @@ fn bootstrap_agent_conversation_activation_key_is_inbox_only_contract() {
         "OMIT this field",
         "agent_task_attempt",
         "attention_event",
+        "agent_wait_events",
         "Endpoint carrier",
     ] {
         assert!(
@@ -843,6 +844,7 @@ fn bootstrap_agent_conversation_activation_key_is_inbox_only_contract() {
         "Inbox-style Wake",
         "agent_task_attempt",
         "attention_event",
+        "agent_wait_events",
         "omit it",
         "Endpoint carrier",
     ] {

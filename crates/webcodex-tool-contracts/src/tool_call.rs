@@ -3434,9 +3434,9 @@ pub enum ToolCall {
         #[serde(default)]
         wake_id: Option<String>,
         /// Caller-generated key used only to accept/replay an eligible pending Inbox-style Wake through
-        /// explicit activation into this already-active model turn. OMIT this field for agent_task_attempt
-        /// and attention_event continuations already dispatched by an Endpoint carrier; bootstrap those
-        /// exact Wakes directly instead of converting them to explicit activation.
+        /// explicit activation into this already-active model turn. OMIT this field for agent_task_attempt,
+        /// attention_event, and agent_wait_events continuations already dispatched by an Endpoint carrier;
+        /// bootstrap those exact Wakes directly instead of converting them to explicit activation.
         #[schemars(length(min = 1, max = 128))]
         #[serde(default)]
         activation_idempotency_key: Option<String>,
