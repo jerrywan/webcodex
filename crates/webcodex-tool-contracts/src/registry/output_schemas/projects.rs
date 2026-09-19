@@ -23,6 +23,13 @@ fn register_project_fields() -> Vec<(&'static str, Value)> {
             ),
         ),
         (
+            "project_ref",
+            schema_type(
+                "string",
+                "Server-issued short model-facing Project selector such as ~p1. It is scoped to the authenticated caller, grants no authority, and is re-authorized against the canonical Runtime Project on every use.",
+            ),
+        ),
+        (
             "agent_project_id",
             schema_type(
                 "string",

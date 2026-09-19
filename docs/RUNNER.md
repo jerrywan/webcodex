@@ -94,7 +94,7 @@ both old and new locations/fields are configured, WebCodex fails closed instead
 of merging or guessing precedence. Use `--project-registry-dir` in new CLI
 commands.
 
-Runtime project ids take the shape `agent:<client_id>:<project_id>`, for example `agent:workstation:my-repo`. ToolRuntime resolves these ids through the caller-visible Runner registry; ordinary users usually do not type them.
+Runtime Project ids take the canonical shape `agent:<client_id>:<project_id>`, for example `agent:workstation:my-repo`. That canonical identity remains the authorization, persistence, audit, Runner-routing, diagnostic, API and CLI address. Model-facing bootstrap/discovery may additionally return a short Server-issued `project_ref` such as `~p1`. Models should normally reuse that selector on later Project-scoped tool calls instead of copying the canonical id. The mapping is durable and scoped to the authenticated caller, is pinned to the canonical id plus Runner-reported Project root identity, and grants no authority: every use re-runs current Project visibility/authorization. It never depends on Workflow Session, ClientWindow, MCP session, transport connection, recent activity or hidden Host state, and a stale ref is never silently rebound to another Project.
 
 ### Allowed roots
 
@@ -267,10 +267,11 @@ memory, so retaining a short Project scope or later shrinking it can recover
 global text hidden by an earlier aggregate budget. This source copy and all
 observation fences are omitted from public snapshots and summaries. Runner
 sources never receive a Project `read_file` continuation, including during final
-startup byte-budget reduction. `include_project_instructions=false` suppresses
-bodies without skipping observation or change detection. An explicit
-`project.instructions` context request observes current Runner and Project
-sources together, without reusing Session-retained bodies. The instruction
+startup byte-budget reduction. `work_on_project` always re-observes instructions
+and change metadata while keeping instruction bodies out of its primary output.
+An explicit `context_request=["project.instructions"]` observes current Runner
+and Project sources together and projects their bounded bodies without reusing
+Session-retained bodies. The instruction
 projection fits the remaining 20 KiB shared sidecar envelope by dropping derived
 headings before shortening text, preserving source identities and Project rules
 instead of discarding the entire material solely because global sources were added.

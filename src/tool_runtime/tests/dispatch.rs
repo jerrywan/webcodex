@@ -725,7 +725,11 @@ fn project_management_tools_require_expected_fields() {
 
 #[tokio::test]
 async fn register_project_crosses_historical_64_threshold_and_is_immediately_resolvable() {
-    let runtime = test_runtime();
+    let reference_db_dir = tempfile::tempdir().unwrap();
+    let reference_db = std::sync::Arc::new(
+        crate::Database::open(&reference_db_dir.path().join("project-refs.db")).unwrap(),
+    );
+    let runtime = test_runtime().with_project_reference_database(reference_db);
     let client_id = "project-scale-mutation";
     let existing = (0..64)
         .map(|index| {
@@ -772,7 +776,8 @@ async fn register_project_crosses_historical_64_threshold_and_is_immediately_res
         "name": "Project 0064",
         "path": "/tmp/project-0064",
         "allow_patch": true,
-        "revision": format!("sha256:{}", "a".repeat(64))
+        "revision": format!("sha256:{}", "a".repeat(64)),
+        "root_fingerprint": format!("wc_projroot_{}", "7".repeat(64))
     });
     complete_patch_agent_request_for_instance(
         &runtime,
@@ -789,6 +794,20 @@ async fn register_project_crosses_historical_64_threshold_and_is_immediately_res
     assert!(
         result.success,
         "authoritative projection should commit: {result:?}"
+    );
+    let project_ref = result.output["project_ref"]
+        .as_str()
+        .expect("register_project should return a short Project ref")
+        .to_string();
+    assert!(project_ref.starts_with("~p"));
+    let bootstrap = bootstrap_auth_context();
+    assert_eq!(
+        runtime
+            .resolve_project_input_for_auth(&project_ref, Some(&bootstrap))
+            .await
+            .unwrap()
+            .resolved_id,
+        "agent:project-scale-mutation:project-0064"
     );
     let projects = runtime
         .runner_registry

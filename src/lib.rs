@@ -287,6 +287,7 @@ only for local/trusted-network demos."
         tool_runtime::ToolRuntime::new(runner_registry.clone(), runtime_info.clone())
             .with_window_activity_database(db.clone())
             .with_memory_database(db.clone())
+            .with_project_reference_database(db.clone())
             .with_communication_database(db.clone())
             .with_job_terminal_attention(db.clone(), job_terminal_continuations)
             .with_session_ledger(config.session_ledger_path())

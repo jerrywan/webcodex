@@ -369,6 +369,16 @@ impl Database {
                 ON workspace_activity(id DESC);
             CREATE INDEX IF NOT EXISTS idx_workspace_activity_scope
                 ON workspace_activity(scope_kind, scope_id, id DESC);
+
+            CREATE TABLE IF NOT EXISTS project_references (
+                principal_key TEXT NOT NULL,
+                ref_index INTEGER NOT NULL CHECK(ref_index >= 1),
+                canonical_project_id TEXT NOT NULL,
+                root_fingerprint TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(principal_key, ref_index),
+                UNIQUE(principal_key, canonical_project_id, root_fingerprint)
+            );
             ",
         )?;
 

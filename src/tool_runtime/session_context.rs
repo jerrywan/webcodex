@@ -449,15 +449,15 @@ fn bound_utf8_bytes(value: &str, max_bytes: usize) -> (String, bool) {
     (value[..end].to_string(), true)
 }
 
-pub(crate) fn workflow_session_authority_fingerprint(
+fn stable_caller_authority_identity(
     auth: Option<&AuthContext>,
-) -> Result<String, String> {
+) -> Result<(&'static str, String), String> {
     let (authority_kind, authority_id) = match auth {
         None => ("local-dev", "local-dev".to_string()),
         Some(auth) if auth.is_bootstrap => ("bootstrap", "server-bootstrap".to_string()),
         Some(auth) if auth.is_oauth_shared_key_subject() || auth.is_shared_key() => (
             "shared-key-group",
-            stable_workflow_authority_id(
+            stable_authority_id(
                 auth.shared_key_hash.as_deref(),
                 "shared-key authority has no stable group identity",
             )?,
@@ -469,7 +469,7 @@ pub(crate) fn workflow_session_authority_fingerprint(
         {
             (
                 "project-grant",
-                stable_workflow_authority_id(
+                stable_authority_id(
                     auth.project_grant_id.as_deref(),
                     "project-grant authority has no stable grant identity",
                 )?,
@@ -491,27 +491,42 @@ pub(crate) fn workflow_session_authority_fingerprint(
         {
             (
                 "managed-user",
-                stable_workflow_authority_id(
+                stable_authority_id(
                     auth.user_id.as_deref(),
                     "managed caller has no stable user identity",
                 )?,
             )
         }
         Some(_) => {
-            return Err(
-                "authenticated caller has no canonical Workflow Session authority identity"
-                    .to_string(),
-            );
+            return Err("authenticated caller has no canonical authority identity".to_string());
         }
     };
-    Ok(hash_workflow_session_authority(
+    Ok((authority_kind, authority_id))
+}
+
+pub(crate) fn workflow_session_authority_fingerprint(
+    auth: Option<&AuthContext>,
+) -> Result<String, String> {
+    let (authority_kind, authority_id) = stable_caller_authority_identity(auth)?;
+    Ok(hash_authority_identity(
         b"webcodex.workflow-session-authority.v1\0",
         authority_kind,
         &authority_id,
     ))
 }
 
-fn stable_workflow_authority_id(value: Option<&str>, error: &str) -> Result<String, String> {
+pub(crate) fn project_reference_principal_fingerprint(
+    auth: Option<&AuthContext>,
+) -> Result<String, String> {
+    let (authority_kind, authority_id) = stable_caller_authority_identity(auth)?;
+    Ok(hash_authority_identity(
+        b"webcodex.project-reference-principal.v1\0",
+        authority_kind,
+        &authority_id,
+    ))
+}
+
+fn stable_authority_id(value: Option<&str>, error: &str) -> Result<String, String> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -519,7 +534,7 @@ fn stable_workflow_authority_id(value: Option<&str>, error: &str) -> Result<Stri
         .ok_or_else(|| error.to_string())
 }
 
-fn hash_workflow_session_authority(domain: &[u8], kind: &str, id: &str) -> String {
+fn hash_authority_identity(domain: &[u8], kind: &str, id: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(domain);
     hasher.update(kind.as_bytes());

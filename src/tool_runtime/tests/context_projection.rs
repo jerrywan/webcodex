@@ -238,6 +238,115 @@ async fn private_context_marker_requires_explicit_sidecar_capability() {
 }
 
 #[tokio::test]
+async fn work_on_project_static_context_is_explicit_and_primary_output_stays_compact() {
+    let root = tempfile::tempdir().unwrap();
+    init_git_repo(root.path());
+    std::fs::write(
+        root.path().join("AGENTS.md"),
+        "# Project rules\n\nWORK_ON_PROJECT_CONTEXT_RULE\n",
+    )
+    .unwrap();
+    let runtime = ToolRuntime::new_for_tests();
+    let client_id = "context-work-on-project";
+    let project = register_runner_project_at_path(&runtime, client_id, "demo", root.path()).await;
+
+    let omitted = dispatch_with_context_and_local_agent(
+        &runtime,
+        client_id,
+        ToolCall::from_tool_name(
+            "work_on_project",
+            json!({
+                "project": project,
+                "instruction": "inspect without repeated static context",
+                "include_extension_catalog": false
+            }),
+        )
+        .unwrap(),
+        Vec::new(),
+    )
+    .await;
+    assert!(omitted.success, "{:?}", omitted.error);
+    assert!(omitted.output.get("context_projection").is_none());
+    assert!(omitted.output.get("workflow").is_none());
+    assert!(omitted.output["instructions"]
+        .get("content_included")
+        .is_none());
+    assert!(omitted.output["instructions"]["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|source| source.get("content").is_none()));
+
+    let requested = dispatch_with_context_and_local_agent(
+        &runtime,
+        client_id,
+        ToolCall::from_tool_name(
+            "work_on_project",
+            json!({
+                "project": project,
+                "instruction": "inspect with requested static context",
+                "include_extension_catalog": false
+            }),
+        )
+        .unwrap(),
+        vec![
+            "project.instructions".to_string(),
+            "webcodex.workflow".to_string(),
+        ],
+    )
+    .await;
+    assert!(requested.success, "{:?}", requested.error);
+    assert!(requested.output.get("workflow").is_none());
+    assert!(requested.output["instructions"]
+        .get("content_included")
+        .is_none());
+
+    let instructions = context_material(&requested, "project.instructions");
+    assert_eq!(instructions["status"], "available");
+    assert_eq!(instructions["projection"]["content_included"], true);
+    assert!(instructions["projection"]
+        .to_string()
+        .contains("WORK_ON_PROJECT_CONTEXT_RULE"));
+
+    let workflow = context_material(&requested, "webcodex.workflow");
+    assert_eq!(workflow["status"], "available");
+    assert_eq!(workflow["projection"]["tool_strategy"]["profile"], "direct");
+}
+
+#[cfg(feature = "experimental-code-mode")]
+#[tokio::test]
+async fn work_on_project_workflow_context_uses_request_local_code_mode_profile() {
+    let root = tempfile::tempdir().unwrap();
+    init_git_repo(root.path());
+    let runtime = ToolRuntime::new_for_tests();
+    let client_id = "context-work-on-project-code-mode";
+    let project = register_runner_project_at_path(&runtime, client_id, "demo", root.path()).await;
+
+    let result = dispatch_with_context_and_local_agent(
+        &runtime,
+        client_id,
+        ToolCall::from_tool_name(
+            "work_on_project",
+            json!({
+                "project": project,
+                "instruction": "inspect with code mode guidance",
+                "guidance_profile": "code_mode",
+                "include_extension_catalog": false
+            }),
+        )
+        .unwrap(),
+        vec!["webcodex.workflow".to_string()],
+    )
+    .await;
+    assert!(result.success, "{:?}", result.error);
+    assert!(result.output.get("workflow").is_none());
+    assert_eq!(
+        context_material(&result, "webcodex.workflow")["projection"]["tool_strategy"]["profile"],
+        "code_mode"
+    );
+}
+
+#[tokio::test]
 async fn project_instructions_context_projection_is_authorized_scoped_and_bounded() {
     let alpha_root = tempfile::tempdir().unwrap();
     let bravo_root = tempfile::tempdir().unwrap();

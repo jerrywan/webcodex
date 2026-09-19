@@ -323,7 +323,7 @@ mod tests {
             .expect("register_project spec");
         let expected = tool_spec(
             "register_project",
-            "Register an existing directory, including a non-Git or ad-hoc workspace, as a Project on one Runner. Use this when the directory already exists; policy still bounds allowed paths.",
+            "Register an existing directory, including a non-Git or ad-hoc workspace, as a Project on one Runner. Successful onboarding returns the canonical Runtime Project id and a Server-issued project_ref when a stable root identity is available. Use this when the directory already exists; policy still bounds allowed paths.",
         );
         assert_eq!(
             serde_json::to_value(actual).unwrap(),

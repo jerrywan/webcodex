@@ -299,8 +299,6 @@ async fn http_mcp_work_on_project_preferences_persist_without_private_request_va
                     "base_ref": private_base_ref,
                     "instruction": private_instruction,
                     "session_id": private_session,
-                    "include_project_instructions": false,
-                    "include_workflow_guidance": true,
                     "include_extension_catalog": false
                 }
             }
@@ -328,10 +326,6 @@ async fn http_mcp_work_on_project_preferences_persist_without_private_request_va
     assert_eq!(facts["mode"], "worktree");
     assert_eq!(facts["mode_explicit"], true);
     assert_eq!(facts["base_ref_present"], true);
-    assert_eq!(facts["include_project_instructions"], false);
-    assert_eq!(facts["include_project_instructions_explicit"], true);
-    assert_eq!(facts["include_workflow_guidance"], true);
-    assert_eq!(facts["include_workflow_guidance_explicit"], true);
     assert_eq!(facts["guidance_profile"], "direct");
     assert_eq!(facts["guidance_profile_explicit"], false);
     assert_eq!(facts["include_extension_catalog"], false);

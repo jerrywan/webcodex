@@ -15,6 +15,7 @@ use super::files::{
     key_file_schema, path_kind_schema, project_type_schema, scan_schema, suggested_read_schema,
     top_level_entry_schema,
 };
+#[cfg(any(test, feature = "root-test-support"))]
 use webcodex_core::runtime_contract::{
     BUILTIN_CODING_WORKFLOW_CONTRACT, BUILTIN_CODING_WORKFLOW_MAX_GUIDANCE_ITEMS,
     BUILTIN_CODING_WORKFLOW_VERSION,
@@ -436,6 +437,7 @@ fn startup_project_schema() -> Value {
         "properties": {
             "requested": {"type": "string"},
             "resolved_id": {"type": "string"},
+            "project_ref": {"type": "string", "pattern": "^~p[1-9][0-9]*$"},
             "repository_identity": {
                 "type": "string",
                 "pattern": "^repository:v1:[0-9a-f]{64}$",
@@ -493,6 +495,7 @@ fn startup_workspace_schema() -> Value {
     })
 }
 
+#[cfg(any(test, feature = "root-test-support"))]
 fn startup_workflow_schema() -> Value {
     json!({
         "type": "object",
@@ -564,6 +567,7 @@ fn startup_workflow_schema() -> Value {
     })
 }
 
+#[cfg(any(test, feature = "root-test-support"))]
 fn startup_workflow_role_schema() -> Value {
     json!({
         "type": "object",
@@ -1234,11 +1238,15 @@ fn work_on_project_output_schema() -> Value {
         ),
         (
             "project",
-            schema_type("string", "Canonical runtime project id used for this task. For Runner path input it is the resolved full project id."),
+            schema_type("string", "Project selector used to start or resume this task. For direct Project input this preserves the caller's accepted selector, including a Server-issued project_ref; for Runner path input it is the resolved canonical runtime Project id."),
         ),
         (
             "resolved_project",
             schema_type("string", "Resolved full runtime project id from the permission check and exact project resolution."),
+        ),
+        (
+            "project_ref",
+            schema_type("string", "Server-issued short Project selector scoped to the authenticated caller. Convenience only: every use re-resolves and re-authorizes the canonical Runtime Project."),
         ),
         (
             "project_resolution",
@@ -1292,14 +1300,6 @@ fn work_on_project_output_schema() -> Value {
             {
                 let mut schema = compact_repository;
                 schema["description"] = json!("Unexpected or noteworthy repository-overview state. Omitted for work_on_project's normal intentional no-overview path.");
-                schema
-            },
-        ),
-        (
-            "workflow",
-            {
-                let mut schema = startup_workflow_schema();
-                schema["description"] = json!("Shared coding workflow plus the selected guidance_profile tool strategy (default direct). Included when include_workflow_guidance=true; false omits the entire workflow. Session or transport identity never selects or suppresses guidance.");
                 schema
             },
         ),

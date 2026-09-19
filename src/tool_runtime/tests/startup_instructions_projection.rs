@@ -76,14 +76,8 @@ fn incomplete_global_scan_reports_confirmed_project_changes_without_false_global
         false,
     )
     .retain_unavailable_scopes(Some(&previous));
-    let projection = instructions_projection(
-        &current,
-        Some(&previous.to_summary()),
-        false,
-        false,
-        false,
-        false,
-    );
+    let projection =
+        instructions_projection(&current, Some(&previous.to_summary()), false, false, false);
     assert_eq!(projection["status"], "unavailable");
     assert_eq!(projection["changed_sources"], json!(["AGENTS.md"]));
     assert_eq!(projection["content_included"], false);

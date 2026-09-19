@@ -136,6 +136,12 @@ preserving an unused historical shape. Durable persisted truth, mixed-version
 Server/Runner protocol, published artifacts, and named external consumers are
 separate compatibility domains and must be handled explicitly.
 
+### Project selectors: canonical identity, short model reference
+
+Runtime Project identity remains canonical as `agent:<client_id>:<project_id>`. Keep that form for authorization, persistence, audit, Runner routing, diagnostics and explicit API/CLI addressing. A Server-issued `project_ref` is a model-facing selector only: the Server owns a durable mapping scoped to the authenticated caller and pins it to one canonical Project incarnation, including stable root identity. The model may reuse the short ref across windows for the same principal, but no Workflow Session, ClientWindow, MCP session, transport connection, recent activity or Host rewrite participates.
+
+Resolving a `project_ref` must always look up the pinned canonical identity and then run the ordinary current Project resolution/authorization path again. The ref is not a credential, bearer token or capability. If the canonical Project disappears, becomes invisible, loses stable identity, or the same canonical address is later registered for a different root, the old ref fails closed. Never recycle or silently retarget an issued ref. Discovery/bootstrap may expose both `project_ref` and canonical identity; ordinary hot-path results should not repeat them when no model decision depends on that duplication.
+
 ### Model-projection deletion test
 
 A model-facing result field should normally survive only when it can change at

@@ -367,7 +367,12 @@ impl ToolRuntime {
                 .get(&runtime_id)
                 .copied()
                 .unwrap_or(0);
-            let value = if options.summary_only {
+            let project_ref = self.project_reference_for_identity(
+                &runtime_id,
+                project.root_fingerprint.as_deref(),
+                auth,
+            );
+            let mut value = if options.summary_only {
                 json!({
                     "id": runtime_id,
                     "agent_project_id": project.id,
@@ -413,6 +418,9 @@ impl ToolRuntime {
                     "capabilities": capabilities,
                 })
             };
+            if let Some(project_ref) = project_ref {
+                value["project_ref"] = json!(project_ref);
+            }
             list.push(value);
         }
         let recommended_for_smoke: Vec<Value> = list
@@ -841,7 +849,7 @@ impl ToolRuntime {
         if stdout.is_empty() {
             return ToolResult::err("Runner returned empty project op result");
         }
-        let result: Value = match serde_json::from_str::<Value>(stdout) {
+        let mut result: Value = match serde_json::from_str::<Value>(stdout) {
             Ok(value) => value,
             Err(error) => {
                 return ToolResult::err(format!(
@@ -872,6 +880,8 @@ impl ToolRuntime {
                 "authoritative_project_summary_missing",
             );
         };
+        let resolved_project = runner_project_runtime_id(&client_id, &project.id);
+        let root_fingerprint = project.root_fingerprint.clone();
         if let Err(error) = self
             .runner_registry
             .upsert_runner_project_for_instance(&client_id, &expected_runner_instance_id, project)
@@ -889,6 +899,13 @@ impl ToolRuntime {
             );
         }
 
+        if let Some(project_ref) = self.project_reference_for_identity(
+            &resolved_project,
+            root_fingerprint.as_deref(),
+            auth,
+        ) {
+            result["project_ref"] = json!(project_ref);
+        }
         ToolResult::ok(result)
     }
 }

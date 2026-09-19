@@ -111,7 +111,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
         "list_projects" => Some(wrapped_output_schema(vec![
             (
                 "projects",
-                array_schema(open_object_schema("Project summary including capabilities.git_available, supports_cleanup_verification, and recommended_for_smoke."), "Runtime projects."),
+                array_schema(open_object_schema("Project summary including canonical id, Server-issued project_ref when a stable Project root identity is available, and capabilities.git_available/supports_cleanup_verification/recommended_for_smoke."), "Runtime projects."),
             ),
             ("count", schema_type("integer", "Project count.")),
             (

@@ -307,6 +307,7 @@ pub(crate) struct StartupBriefInput<'a> {
     pub(crate) requested_project: &'a str,
     pub(crate) project_resolution: &'a Value,
     pub(crate) resolved: &'a ResolvedProject,
+    pub(crate) project_ref: Option<&'a str>,
     pub(crate) knowledge_association: Option<&'a Value>,
     pub(crate) session: &'a SessionSummary,
     pub(crate) continuation_kind: &'a str,
@@ -315,8 +316,7 @@ pub(crate) struct StartupBriefInput<'a> {
     pub(crate) instructions: &'a ProjectInstructionsSnapshot,
     pub(crate) previous_instructions: Option<&'a ProjectInstructionsSummarySnapshot>,
     pub(crate) force_instruction_load: bool,
-    pub(crate) include_project_instructions: bool,
-    pub(crate) include_reused_instruction_content: bool,
+    pub(crate) include_instruction_content: bool,
     pub(crate) extensions: Option<&'a StartupExtensions>,
     pub(crate) git: &'a Value,
     pub(crate) semantic_navigation: &'a Value,
@@ -335,8 +335,7 @@ pub(crate) fn build_startup_brief(input: StartupBriefInput<'_>) -> Value {
         input.instructions,
         input.previous_instructions,
         input.force_instruction_load,
-        !minimal && input.include_project_instructions,
-        input.include_reused_instruction_content,
+        !minimal && input.include_instruction_content,
         minimal,
     );
     let continuation = continuation_projection(
@@ -391,6 +390,9 @@ pub(crate) fn build_startup_brief(input: StartupBriefInput<'_>) -> Value {
     });
     if let Some(association) = input.knowledge_association {
         brief["project"]["knowledge_association"] = association.clone();
+    }
+    if let Some(project_ref) = input.project_ref {
+        brief["project"]["project_ref"] = json!(project_ref);
     }
     if let Some(extensions) = input.extensions {
         debug_assert!(extensions.serialized_len() <= STARTUP_EXTENSION_CATALOG_HARD_MAX_BYTES);
@@ -683,7 +685,7 @@ pub(crate) fn project_instructions_context_projection(
 ) -> Value {
     // Sidecar requests observe current sources without Session retention. Its
     // shared envelope is smaller than startup, especially with 16 global files.
-    let mut projection = instructions_projection(current, None, true, true, true, false);
+    let mut projection = instructions_projection(current, None, true, true, false);
     if serialized_len(&projection) <= max_bytes {
         return projection;
     }
@@ -732,13 +734,11 @@ fn instructions_projection(
     previous: Option<&ProjectInstructionsSummarySnapshot>,
     force_load: bool,
     allow_content: bool,
-    include_reused_content: bool,
     minimal: bool,
 ) -> Value {
     let status = instruction_status(current, previous, force_load);
     let include_content = allow_content
         && (matches!(status, "loaded" | "changed")
-            || (status == "reused" && include_reused_content)
             || (status == "unavailable" && !current.files.is_empty()));
     let changed_sources = if matches!(status, "changed" | "unavailable") {
         changed_instruction_sources(current, previous)
@@ -1946,29 +1946,18 @@ mod tests {
     }
 
     #[test]
-    fn reused_instruction_status_and_body_projection_are_independent() {
+    fn reused_instruction_status_never_reprojects_body() {
         let current = instruction_snapshot();
         let previous = current.to_summary();
 
-        let advanced =
-            instructions_projection(&current, Some(&previous), false, true, false, false);
-        assert_eq!(advanced["status"], "reused");
-        assert_eq!(advanced["content_included"], false);
-        assert!(advanced["sources"]
+        let projection = instructions_projection(&current, Some(&previous), false, true, false);
+        assert_eq!(projection["status"], "reused");
+        assert_eq!(projection["content_included"], false);
+        assert!(projection["sources"]
             .as_array()
             .unwrap()
             .iter()
             .all(|source| source["content"].is_null()));
-
-        let canonical =
-            instructions_projection(&current, Some(&previous), false, true, true, false);
-        assert_eq!(canonical["status"], "reused");
-        assert_eq!(canonical["content_included"], true);
-        assert!(canonical["sources"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|source| source["content"].is_string()));
     }
 
     fn delta_feedback(new_total: usize, resolved_total: usize, still_total: usize) -> Value {
@@ -2293,6 +2282,7 @@ mod tests {
                 requested_project: "agent:size:demo",
                 project_resolution: &project_resolution,
                 resolved: &resolved,
+                project_ref: None,
                 knowledge_association: None,
                 session: &session,
                 continuation_kind: "continued",
@@ -2301,8 +2291,7 @@ mod tests {
                 instructions: &instructions,
                 previous_instructions: None,
                 force_instruction_load: true,
-                include_project_instructions: true,
-                include_reused_instruction_content: false,
+                include_instruction_content: true,
                 extensions: Some(&extensions),
                 git: &git,
                 semantic_navigation: &semantic_navigation,

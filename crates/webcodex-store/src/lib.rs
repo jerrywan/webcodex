@@ -28,6 +28,7 @@ mod memory;
 pub mod models;
 mod oauth;
 mod peer_collaboration;
+mod project_reference;
 mod schema;
 mod server_instance;
 mod window_activity;
@@ -104,6 +105,7 @@ pub use self::peer_collaboration::{
     NewPeerMessage, PeerAttentionBatch, PeerMessageRecord, PeerProjectionRollback,
     RecentProjectPeerRecord, MAX_PEER_DISCOVERY_LIMIT, MAX_PEER_MESSAGE_LIMIT,
 };
+pub use self::project_reference::{ProjectReferenceRecord, ProjectReferenceStoreError};
 pub use self::server_instance::ServerInstanceGuard;
 pub use self::window_activity::{MAX_WINDOW_ACTIVITY_LIMIT, MAX_WINDOW_LINK_LIMIT};
 
@@ -167,6 +169,8 @@ mod db_tests;
 mod goal_tests;
 #[cfg(test)]
 mod memory_tests;
+#[cfg(test)]
+mod project_reference_tests;
 
 #[cfg(test)]
 mod job_receipts_tests;

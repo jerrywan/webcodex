@@ -41,7 +41,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             super::ToolActivityPresentation::Support,
             super::ToolActivityInteraction::NonMeaningful,
         ),
-        "List caller-visible Projects. When Runner/Project identity is known, pass exact client_id/project; use bounded query and summary_only instead of reading the full registry.",
+        "List caller-visible Projects. Results keep canonical Runtime Project ids and, when stable root identity is available, also issue a short principal-scoped project_ref for later model calls. project_ref is convenience only and grants no authority. When Runner/Project identity is known, pass exact client_id/project filters; use bounded query and summary_only instead of reading the full registry.",
     ),
     model_spec(
         def(
@@ -64,7 +64,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             super::ToolSessionEvidencePolicy::NONE,
         ),
-        "Register an existing directory, including a non-Git or ad-hoc workspace, as a Project on one Runner. Use this when the directory already exists; policy still bounds allowed paths.",
+        "Register an existing directory, including a non-Git or ad-hoc workspace, as a Project on one Runner. Successful onboarding returns the canonical Runtime Project id and a Server-issued project_ref when a stable root identity is available. Use this when the directory already exists; policy still bounds allowed paths.",
     ),
     model_spec(
         def(
@@ -110,7 +110,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             super::ToolSessionEvidencePolicy::NONE,
         ),
-        "Create a directory on one Runner and register it as a Project. Use this for a new workspace; existing directories belong on the registration path.",
+        "Create a directory on one Runner and register it as a Project. Successful onboarding returns the canonical Runtime Project id and a Server-issued project_ref when a stable root identity is available. Use this for a new workspace; existing directories belong on the registration path.",
     ),
     model_spec(
         def(

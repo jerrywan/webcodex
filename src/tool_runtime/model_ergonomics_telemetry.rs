@@ -46,10 +46,6 @@ pub(crate) struct WorkOnProjectErgonomicsFacts {
     mode: WorkOnProjectMode,
     mode_explicit: bool,
     base_ref_present: bool,
-    include_project_instructions: Option<bool>,
-    include_project_instructions_explicit: bool,
-    include_workflow_guidance: Option<bool>,
-    include_workflow_guidance_explicit: bool,
     guidance_profile: WorkOnProjectGuidanceProfile,
     guidance_profile_explicit: bool,
     include_extension_catalog: Option<bool>,
@@ -279,10 +275,6 @@ fn work_on_project_facts(
         Some(Value::String(mode)) if mode == "worktree" => WorkOnProjectMode::Worktree,
         _ => WorkOnProjectMode::Invalid,
     };
-    let (include_project_instructions, include_project_instructions_explicit) =
-        effective_default_true_boolean(object, "include_project_instructions");
-    let (include_workflow_guidance, include_workflow_guidance_explicit) =
-        effective_default_true_boolean(object, "include_workflow_guidance");
     let guidance_profile_explicit = object.contains_key("guidance_profile");
     let guidance_profile = match object.get("guidance_profile") {
         None => WorkOnProjectGuidanceProfile::Direct,
@@ -302,10 +294,6 @@ fn work_on_project_facts(
         mode,
         mode_explicit,
         base_ref_present: object.contains_key("base_ref"),
-        include_project_instructions,
-        include_project_instructions_explicit,
-        include_workflow_guidance,
-        include_workflow_guidance_explicit,
         guidance_profile,
         guidance_profile_explicit,
         include_extension_catalog,
@@ -512,10 +500,6 @@ mod tests {
         assert_eq!(facts.mode, WorkOnProjectMode::Checkout);
         assert!(!facts.mode_explicit);
         assert!(!facts.base_ref_present);
-        assert_eq!(facts.include_project_instructions, Some(true));
-        assert!(!facts.include_project_instructions_explicit);
-        assert_eq!(facts.include_workflow_guidance, Some(true));
-        assert!(!facts.include_workflow_guidance_explicit);
         assert_eq!(facts.guidance_profile, WorkOnProjectGuidanceProfile::Direct);
         assert!(!facts.guidance_profile_explicit);
         assert_eq!(facts.include_extension_catalog, Some(true));
@@ -523,22 +507,16 @@ mod tests {
     }
 
     #[test]
-    fn work_on_project_explicit_resume_and_false_preferences_are_queryable() {
+    fn work_on_project_explicit_resume_and_remaining_preferences_are_queryable() {
         let record = work_on_project_record(json!({
             "project": "agent:private:project",
             "instruction": "private instruction",
             "session_id": "wc_sess_private",
-            "include_project_instructions": false,
-            "include_workflow_guidance": false,
             "guidance_profile": "direct",
             "include_extension_catalog": false
         }));
         let facts = record.work_on_project.expect("work_on_project facts");
         assert!(facts.resume_requested);
-        assert_eq!(facts.include_project_instructions, Some(false));
-        assert!(facts.include_project_instructions_explicit);
-        assert_eq!(facts.include_workflow_guidance, Some(false));
-        assert!(facts.include_workflow_guidance_explicit);
         assert_eq!(facts.guidance_profile, WorkOnProjectGuidanceProfile::Direct);
         assert!(facts.guidance_profile_explicit);
         assert_eq!(facts.include_extension_catalog, Some(false));
@@ -588,8 +566,6 @@ mod tests {
             "session_id": 7,
             "mode": 9,
             "base_ref": {"private": true},
-            "include_project_instructions": "false",
-            "include_workflow_guidance": null,
             "guidance_profile": {"invalid": true},
             "include_extension_catalog": []
         }));
@@ -599,10 +575,6 @@ mod tests {
         assert_eq!(facts.mode, WorkOnProjectMode::Invalid);
         assert!(facts.mode_explicit);
         assert!(facts.base_ref_present);
-        assert_eq!(facts.include_project_instructions, None);
-        assert!(facts.include_project_instructions_explicit);
-        assert_eq!(facts.include_workflow_guidance, None);
-        assert!(facts.include_workflow_guidance_explicit);
         assert_eq!(
             facts.guidance_profile,
             WorkOnProjectGuidanceProfile::Invalid
@@ -630,8 +602,6 @@ mod tests {
             "session_id": sentinels[4],
             "base_ref": sentinels[5],
             "mode": "worktree",
-            "include_project_instructions": false,
-            "include_workflow_guidance": true,
             "include_extension_catalog": false
         }));
         let serialized = serde_json::to_string(&record).unwrap();

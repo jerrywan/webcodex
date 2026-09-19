@@ -175,6 +175,9 @@ pub struct ToolRuntime {
     /// the server from the existing webcodex.db handle; Runner-native project
     /// filesystems never own Memory v1 persistence.
     pub(crate) memory_db: Option<Arc<crate::Database>>,
+    /// Durable Server-owned mapping from authenticated caller + short Project ref
+    /// to one exact canonical Project incarnation. It grants no authority.
+    pub(crate) project_reference_db: Option<Arc<crate::Database>>,
     /// Optional Control-owned durable user-domain store. Durable Agent, Conversation,
     /// AgentTask, and Goal state share this Server SQLite handle while remaining
     /// independent tables, lifecycles, and authority domains.
@@ -243,6 +246,7 @@ impl ToolRuntime {
             metrics: Arc::new(super::runtime_metrics::TracingRuntimeMetrics),
             window_activity_db: None,
             memory_db: None,
+            project_reference_db: None,
             communication_db: None,
             job_terminal_db: None,
             job_terminal_continuations: None,
@@ -271,6 +275,11 @@ impl ToolRuntime {
 
     pub(crate) fn with_memory_database(mut self, db: Arc<crate::Database>) -> Self {
         self.memory_db = Some(db);
+        self
+    }
+
+    pub(crate) fn with_project_reference_database(mut self, db: Arc<crate::Database>) -> Self {
+        self.project_reference_db = Some(db);
         self
     }
 

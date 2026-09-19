@@ -2,6 +2,7 @@ use super::project_resolution::ResolvedProject;
 use super::startup_brief::{
     builtin_coding_workflow_projection, project_instructions_context_projection,
 };
+use super::tool_inputs::CodingGuidanceProfile;
 use super::{ToolResult, ToolRuntime};
 use crate::auth::AuthContext;
 use crate::json_measurement::serialized_json_len;
@@ -164,6 +165,7 @@ fn scope_unavailable_reason(key: &str) -> &'static str {
 }
 
 impl ToolRuntime {
+    #[cfg(test)]
     pub(crate) async fn add_requested_context_projection(
         &self,
         result: &mut ToolResult,
@@ -171,6 +173,26 @@ impl ToolRuntime {
         resolved_project: Option<&ResolvedProject>,
         auth: Option<&AuthContext>,
         capabilities: ContextMaterialCapabilities,
+    ) {
+        self.add_requested_context_projection_with_guidance(
+            result,
+            requested,
+            resolved_project,
+            auth,
+            capabilities,
+            CodingGuidanceProfile::default(),
+        )
+        .await;
+    }
+
+    pub(crate) async fn add_requested_context_projection_with_guidance(
+        &self,
+        result: &mut ToolResult,
+        requested: &[String],
+        resolved_project: Option<&ResolvedProject>,
+        auth: Option<&AuthContext>,
+        capabilities: ContextMaterialCapabilities,
+        guidance_profile: CodingGuidanceProfile,
     ) {
         if requested.is_empty() {
             return;
@@ -286,7 +308,7 @@ impl ToolRuntime {
                         "webcodex.workflow" => json!({
                             "key": key,
                             "status": "available",
-                            "projection": builtin_coding_workflow_projection(Default::default()),
+                            "projection": builtin_coding_workflow_projection(guidance_profile),
                         }),
                         _ => unreachable!("context material registry/provider match drifted"),
                     }

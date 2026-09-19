@@ -158,8 +158,6 @@ async fn trusted_agent_smoke_full_chain_has_zero_approval_interruptions() {
             base_ref: None,
             instruction: "trusted agent smoke".to_string(),
             session_id: None,
-            include_project_instructions: true,
-            include_workflow_guidance: true,
             guidance_profile: Default::default(),
             include_extension_catalog: false,
         },

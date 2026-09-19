@@ -899,8 +899,6 @@ fn coding_start_call(project: &str, instruction: &str) -> ToolCall {
         base_ref: None,
         instruction: instruction.to_string(),
         session_id: None,
-        include_project_instructions: true,
-        include_workflow_guidance: true,
         guidance_profile: Default::default(),
         include_extension_catalog: false,
     }
@@ -915,8 +913,6 @@ fn coding_resume_call(project: &str, instruction: &str, session_id: &str) -> Too
         base_ref: None,
         instruction: instruction.to_string(),
         session_id: Some(session_id.to_string()),
-        include_project_instructions: true,
-        include_workflow_guidance: true,
         guidance_profile: Default::default(),
         include_extension_catalog: false,
     }

@@ -9,6 +9,7 @@ use super::{permissions, session_context, sessions, ToolCall, ToolResult, ToolRu
 use crate::auth::AuthContext;
 use crate::tool_runtime::project_resolution::{ProjectResolverError, ResolvedProject};
 use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
+use crate::tool_runtime::tool_inputs::CodingGuidanceProfile;
 use serde_json::Value;
 
 /// Add the Phase A lifecycle tuple to a definite pre-execution structured
@@ -1126,6 +1127,15 @@ impl ToolRuntime {
     /// plan after the same authoritative Project resolution used for execution.
     /// The returned ToolResult is still canonical with respect to domain-local
     /// budgeting and sparse projection so an outer recorder can consume it first.
+    fn context_guidance_profile(call: &ToolCall) -> CodingGuidanceProfile {
+        match call {
+            ToolCall::WorkOnProject {
+                guidance_profile, ..
+            } => *guidance_profile,
+            _ => CodingGuidanceProfile::default(),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn dispatch_with_auth_transport_options_and_metadata_with_recording_mode_and_context_with_result_projection(
         &self,
@@ -1144,6 +1154,7 @@ impl ToolRuntime {
         super::window_activity::ToolCallCorrelation,
     ) {
         let mut result_projection = ModelFacingProjectionPlan::capture(&call);
+        let context_guidance_profile = Self::context_guidance_profile(&call);
         let immediate_tool_name = call.tool_name();
         let immediate_expectation = recorder_metadata.expectation.clone();
         let mut correlation = super::window_activity::ToolCallCorrelation::default();
@@ -1177,12 +1188,13 @@ impl ToolRuntime {
         // answering the explicit sidecar request conservatively: static material
         // remains available, but project-scoped material must not guess a target.
         if !context_request.is_empty() && result.output.get("context_projection").is_none() {
-            self.add_requested_context_projection(
+            self.add_requested_context_projection_with_guidance(
                 &mut result,
                 &context_request,
                 None,
                 auth,
                 material_capabilities,
+                context_guidance_profile,
             )
             .await;
         }
@@ -1394,6 +1406,7 @@ impl ToolRuntime {
         } else {
             resolved_project.cloned()
         };
+        let context_guidance_profile = Self::context_guidance_profile(&call);
         // work_on_project.session_id is explicit coding-resume business input,
         // never a generic tool recorder. Its implementation delegates exact
         // Session/project/lifecycle/authority handling to the coding workflow
@@ -1640,7 +1653,7 @@ impl ToolRuntime {
         let permission = super::permissions::evaluate_permission_for_tool(
             &self.permission_evaluator,
             call.tool_name(),
-            call.project(),
+            activity_project.as_deref().or_else(|| call.project()),
         );
         if let Some(decision) = permission.as_ref() {
             if !decision.allows_execution() {
@@ -1795,12 +1808,13 @@ impl ToolRuntime {
                 );
             }
         }
-        self.add_requested_context_projection(
+        self.add_requested_context_projection_with_guidance(
             &mut result,
             &context_request,
             context_projection_project.as_ref(),
             auth,
             material_capabilities,
+            context_guidance_profile,
         )
         .await;
         sparsify_terminal_structured_execution_success(tool_name, &mut result);

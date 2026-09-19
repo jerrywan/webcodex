@@ -4,6 +4,8 @@ use crate::projects::ProjectConfig;
 use crate::runner_protocol::{RunnerProjectLineage, RunnerProjectSummary, RunnerView};
 use serde_json::{json, Value};
 
+const MODEL_PROJECT_REFERENCE_PREFIX: &str = "~p";
+
 #[derive(Debug, Clone)]
 pub(crate) struct ProjectResolverCandidate {
     pub(crate) id: String,
@@ -113,14 +115,14 @@ impl ProjectResolverError {
         json!({
             "error_kind": self.kind.as_str(),
             "project": self.project,
-            "hint": "Use a full runtime project id in the form agent:<client_id>:<project_id> from list_projects.",
+            "hint": "Reuse a Server-issued project_ref from list_projects/work_on_project, or use the full runtime project id agent:<client_id>:<project_id>.",
             "candidates": candidates,
         })
     }
 
     pub(crate) fn to_message(&self) -> String {
         let mut message = format!(
-            "{} '{}'. Use a full runtime project id in the form agent:<client_id>:<project_id> from list_projects.",
+            "{} '{}'. Reuse a Server-issued project_ref from list_projects/work_on_project, or use the full runtime project id agent:<client_id>:<project_id>.",
             match self.kind {
                 ProjectResolverErrorKind::UnknownProject => "unknown_project",
                 ProjectResolverErrorKind::AmbiguousProject => "ambiguous_project",
@@ -168,7 +170,76 @@ pub(crate) fn runner_project_runtime_id(client_id: &str, project_id: &str) -> St
     format!("agent:{}:{}", client_id, project_id)
 }
 
+fn project_reference_index(raw: &str) -> Option<Result<u64, ()>> {
+    let digits = raw.strip_prefix(MODEL_PROJECT_REFERENCE_PREFIX)?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if digits.len() > 1 && digits.starts_with('0') {
+        return Some(Err(()));
+    }
+    Some(
+        digits
+            .parse::<u64>()
+            .ok()
+            .filter(|index| *index > 0)
+            .ok_or(()),
+    )
+}
+
+fn format_project_reference(ref_index: u64) -> String {
+    format!("{MODEL_PROJECT_REFERENCE_PREFIX}{ref_index}")
+}
+
+fn project_reference_principal_key(auth: Option<&AuthContext>) -> Option<String> {
+    super::session_context::project_reference_principal_fingerprint(auth).ok()
+}
+
 impl ToolRuntime {
+    pub(crate) fn project_reference_for_identity(
+        &self,
+        canonical_project_id: &str,
+        root_fingerprint: Option<&str>,
+        auth: Option<&AuthContext>,
+    ) -> Option<String> {
+        let db = self.project_reference_db.as_ref()?;
+        let principal_key = project_reference_principal_key(auth)?;
+        let root_fingerprint = root_fingerprint?;
+        let record = db
+            .get_or_create_project_reference(
+                &principal_key,
+                canonical_project_id,
+                root_fingerprint,
+                chrono::Utc::now().timestamp(),
+            )
+            .ok()?;
+        Some(format_project_reference(record.ref_index))
+    }
+
+    pub(crate) fn project_reference_for_resolved(
+        &self,
+        project: &ResolvedProject,
+        auth: Option<&AuthContext>,
+    ) -> Option<String> {
+        self.project_reference_for_identity(
+            &project.resolved_id,
+            project.root_fingerprint.as_deref(),
+            auth,
+        )
+    }
+
+    fn lookup_project_reference(
+        &self,
+        ref_index: u64,
+        auth: Option<&AuthContext>,
+    ) -> Option<crate::db::ProjectReferenceRecord> {
+        let db = self.project_reference_db.as_ref()?;
+        let principal_key = project_reference_principal_key(auth)?;
+        db.lookup_project_reference(&principal_key, ref_index)
+            .ok()
+            .flatten()
+    }
+
     fn project_candidate_from_view(
         client: &RunnerView,
         project: &RunnerProjectSummary,
@@ -253,6 +324,38 @@ impl ToolRuntime {
         }
 
         let all_candidates = self.agent_project_candidates_for_auth(auth).await;
+
+        if let Some(reference_index) = project_reference_index(raw) {
+            let reference_index = match reference_index {
+                Ok(reference_index) => reference_index,
+                Err(()) => {
+                    return Err(ProjectResolverError {
+                        kind: ProjectResolverErrorKind::UnknownProject,
+                        project: raw.to_string(),
+                        candidates: all_candidates,
+                    });
+                }
+            };
+            let Some(reference) = self.lookup_project_reference(reference_index, auth) else {
+                return Err(ProjectResolverError {
+                    kind: ProjectResolverErrorKind::UnknownProject,
+                    project: raw.to_string(),
+                    candidates: all_candidates,
+                });
+            };
+            if let Some(candidate) = all_candidates.iter().find(|candidate| {
+                candidate.id == reference.canonical_project_id
+                    && candidate.root_fingerprint.as_deref()
+                        == Some(reference.root_fingerprint.as_str())
+            }) {
+                return Ok(Self::resolved_from_candidate(project, candidate));
+            }
+            return Err(ProjectResolverError {
+                kind: ProjectResolverErrorKind::UnknownProject,
+                project: raw.to_string(),
+                candidates: all_candidates,
+            });
+        }
 
         if raw.starts_with("agent:") {
             let Some(rest) = raw.strip_prefix("agent:") else {

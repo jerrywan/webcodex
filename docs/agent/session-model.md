@@ -421,22 +421,25 @@ explicit lifecycle operation says otherwise.
 identity, a client-window key, credentials, project identity, or Server lifetime
 as evidence that the current model still retains static bootstrap content. The
 same `wc_sess_*` may be explicitly resumed by multiple independent ChatGPT
-conversations. Its `include_workflow_guidance`, `include_project_instructions`, and
-`include_extension_catalog` flags are caller-explicit model-facing projection
-preferences only: their defaults are true, and false is appropriate only when
-the caller's current model context already retains the corresponding content.
-`guidance_profile` is a separate request-local presentation enum: `direct` by
-default, or `code_mode` only in Experimental Code Mode builds. It selects only
-`workflow.tool_strategy` in workflow contract v14. Exact resume may choose either
+conversations. Its primary result therefore stays compact: static Project
+instruction bodies and WebCodex workflow guidance are projected only when the
+caller explicitly requests `project.instructions` and/or `webcodex.workflow`
+through `context_request`. Omission means no static material, not an inferred
+retention state. `include_extension_catalog` remains a separate caller-explicit
+selection-metadata preference.
+
+`guidance_profile` is a request-local presentation enum: `direct` by default, or
+`code_mode` only in Experimental Code Mode builds. Exact resume may choose either
 without a Session transition; omission always selects `direct`, never a remembered
 choice. It is not persisted in Session state or event arguments and changes no
 admission, authority, effects, validation or Job semantics. An unavailable profile
-fails parsing even with `include_workflow_guidance=false`; that flag still omits
-the whole workflow. The independent `webcodex.workflow` context sidecar continues
-to project the explicit default, with no Session inference.
+fails parsing. When `work_on_project` explicitly requests `webcodex.workflow`, its
+sidecar uses that request-local profile; unrelated tools without profile context
+continue to project the canonical default `direct`.
 
 Repository instruction files are still re-observed and Session metadata/delta
-status still update when instruction bodies are suppressed. The default bounded
+status still update even though instruction bodies are absent from the primary
+output. The default bounded
 extension catalog contains selection metadata only: Skills are drawn from the
 same canonical union as `skill_list` (project `.agents/skills`, Runner-configured
 live `skills.roots`, and active Runner-managed Skill Store packages), while

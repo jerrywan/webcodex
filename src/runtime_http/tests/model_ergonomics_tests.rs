@@ -197,8 +197,6 @@ async fn api_work_on_project_preferences_persist_as_privacy_bounded_action_audit
             "tool": "work_on_project",
             "project": project,
             "instruction": private_instruction,
-            "include_project_instructions": false,
-            "include_workflow_guidance": false,
             "include_extension_catalog": false
         }))
         .send(&service)
@@ -217,10 +215,6 @@ async fn api_work_on_project_preferences_persist_as_privacy_bounded_action_audit
     assert_eq!(facts["mode"], "checkout");
     assert_eq!(facts["mode_explicit"], false);
     assert_eq!(facts["base_ref_present"], false);
-    assert_eq!(facts["include_project_instructions"], false);
-    assert_eq!(facts["include_project_instructions_explicit"], true);
-    assert_eq!(facts["include_workflow_guidance"], false);
-    assert_eq!(facts["include_workflow_guidance_explicit"], true);
     assert_eq!(facts["guidance_profile"], "direct");
     assert_eq!(facts["guidance_profile_explicit"], false);
     assert_eq!(facts["include_extension_catalog"], false);

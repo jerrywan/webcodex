@@ -1892,12 +1892,10 @@ fn guidance_profile_defaults_and_schema_follow_compiled_availability() {
         profiles.push("code_mode");
     }
     assert_eq!(property["enum"], json!(profiles));
-    let workflow_schema = output_schema_for_tool("work_on_project");
-    assert_eq!(
-        workflow_schema["properties"]["output"]["properties"]["workflow"]["properties"]
-            ["tool_strategy"]["properties"]["profile"]["enum"],
-        property["enum"]
-    );
+    let output_schema = output_schema_for_tool("work_on_project");
+    assert!(output_schema["properties"]["output"]["properties"]
+        .as_object()
+        .is_some_and(|properties| !properties.contains_key("workflow")));
     for profile in profiles {
         let mut args = base.clone();
         args["guidance_profile"] = json!(profile);
@@ -1910,26 +1908,21 @@ fn guidance_profile_defaults_and_schema_follow_compiled_availability() {
             profile
         );
     }
-    for include in [false, true] {
-        for invalid in [json!("unknown"), json!(""), json!(null), json!(1)] {
-            let mut args = base.clone();
-            args["guidance_profile"] = invalid;
-            args["include_workflow_guidance"] = json!(include);
-            assert!(ToolCall::from_tool_name("work_on_project", args).is_err());
-        }
+    for invalid in [json!("unknown"), json!(""), json!(null), json!(1)] {
+        let mut args = base.clone();
+        args["guidance_profile"] = invalid;
+        assert!(ToolCall::from_tool_name("work_on_project", args).is_err());
     }
 }
 
 #[cfg(not(feature = "experimental-code-mode"))]
 #[test]
-fn guidance_profile_code_mode_fails_closed_even_when_guidance_is_omitted() {
-    for include in [false, true] {
-        let error = ToolCall::from_tool_name("work_on_project", json!({
-            "project": "agent:profile:demo", "instruction": "inspect", "guidance_profile": "code_mode", "include_workflow_guidance": include
-        })).unwrap_err();
-        assert!(
-            error.contains("code_mode") && error.contains("direct"),
-            "{error}"
-        );
-    }
+fn guidance_profile_code_mode_fails_closed_when_feature_is_unavailable() {
+    let error = ToolCall::from_tool_name("work_on_project", json!({
+        "project": "agent:profile:demo", "instruction": "inspect", "guidance_profile": "code_mode"
+    })).unwrap_err();
+    assert!(
+        error.contains("code_mode") && error.contains("direct"),
+        "{error}"
+    );
 }

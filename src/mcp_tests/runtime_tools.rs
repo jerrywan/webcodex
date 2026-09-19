@@ -43,7 +43,10 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
         "exact git base",
         "fresh workflow session",
         "exact resume",
-        "current model context",
+        "primary result stays compact",
+        "context_request",
+        "project.instructions",
+        "webcodex.workflow",
         "skills",
         "plugin",
         "without bypassing project authority",
@@ -62,6 +65,8 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
     let work_props = work_schema["properties"]
         .as_object()
         .expect("work_on_project MCP properties");
+    assert!(!work_props.contains_key("include_project_instructions"));
+    assert!(!work_props.contains_key("include_workflow_guidance"));
     assert!(
         !work_props.contains_key("role"),
         "work_on_project must not grow a role wire field"
@@ -73,16 +78,12 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
         "mode",
         "base_ref",
         "instruction",
-        "include_project_instructions",
-        "include_workflow_guidance",
         "guidance_profile",
         "include_extension_catalog",
         "session_id",
     ] {
         assert!(work_props.contains_key(field), "MCP schema missing {field}");
     }
-    assert_eq!(work_props["include_project_instructions"]["default"], true);
-    assert_eq!(work_props["include_workflow_guidance"]["default"], true);
     assert_eq!(work_props["guidance_profile"]["default"], "direct");
     assert_eq!(
         work_props["guidance_profile"]["enum"],

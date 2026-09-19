@@ -10,6 +10,7 @@ fn tool_specs_describe_default_coding_loop_preferences() {
     for phrase in [
         "canonical bootstrap",
         "ordinary coding/review",
+        "project_ref",
         "omit session_id",
         "fresh workflow session",
         "does not imply a fresh model context",
@@ -18,16 +19,15 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         "exact resume",
         "active accessible session",
         "never guesses prior session",
-        "project instructions",
-        "workflow guidance",
-        "skills",
-        "plugin",
-        "selection metadata",
-        "current model context",
-        "does not require git",
-        "never proves retention",
-        "skill_read_file",
-        "plugin_tool describe",
+        "context_request",
+        "project.instructions",
+        "webcodex.workflow",
+        "guidance_profile",
+        "no authority",
+        "principal-scoped",
+        "reauthorizes",
+        "include_extension_catalog",
+        "skills/plugins",
         "mode=worktree",
         "exact git base",
         "project authority",
@@ -990,11 +990,7 @@ fn session_tool_specs_describe_explicit_targeting() {
         .as_str()
         .expect("work_on_project session_id description")
         .to_lowercase();
-    for phrase in [
-        "does not prove",
-        "fresh model context",
-        "include_* defaults true",
-    ] {
+    for phrase in ["does not prove", "fresh model context", "context_request"] {
         assert!(
             session_id_description.contains(phrase),
             "work_on_project session_id description should mention {phrase}: {session_id_description}"

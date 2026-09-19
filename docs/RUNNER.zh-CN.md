@@ -85,7 +85,7 @@ allow_patch = true
 会 fail closed，而不是 merge 或猜 precedence。新的 CLI 命令使用
 `--project-registry-dir`。
 
-Runtime project id 形如 `agent:<client_id>:<project_id>`，例如 `agent:workstation:my-repo`。ToolRuntime 通过调用方可见的 Runner registry 解析这些 id；普通用户通常不需要输入。
+Runtime Project 的 canonical id 仍形如 `agent:<client_id>:<project_id>`，例如 `agent:workstation:my-repo`。该 canonical identity 继续用于 authorization、persistence、audit、Runner routing、diagnostic、API 与 CLI 显式 addressing。Model-facing bootstrap/discovery 还可以返回很短的 Server-issued `project_ref`（例如 `~p1`）；后续 Project-scoped tool call 应优先复用它，而不是反复复制 canonical id。映射由 Server 持久维护并按 authenticated caller 隔离，同时钉住 canonical id 与 Runner 报告的 Project root identity；它不是 credential/capability，每次使用都会重新执行当前 Project visibility/authorization。该 ref 不依赖 Workflow Session、ClientWindow、MCP session、transport connection、recent activity 或 Host hidden state；失效 ref 绝不会静默重绑到另一个 Project。
 
 ### 允许根目录
 
@@ -233,9 +233,10 @@ Runner scope 暂时不可用。从 `instructions.files` 移除条目并 reload �
 较短的 Project scope，或后续本地正文缩短时，都能恢复之前被共享预算隐藏的全局正文。
 此来源副本与所有 observation fence 均不进入 public snapshot 或 summary。
 即使最终 startup byte budget 再次截断，Runner
-source 也不会获得 Project `read_file` continuation。`include_project_instructions=false`
-只省略正文，不跳过 observation/change detection。显式 `project.instructions` context
-请求同时观察当前 Runner 与 Project source，不复用 Session 中保留的正文。
+source 也不会获得 Project `read_file` continuation。`work_on_project` 始终重新观察
+instructions 与 change metadata，但 primary output 不投影 instruction 正文。显式
+`context_request=["project.instructions"]` 会同时观察当前 Runner 与 Project source
+并投影有界正文，不复用 Session 中保留的正文。
 Instruction projection 按共享 sidecar 的 20 KiB 剩余预算裁剪：先移除由正文派生的
 heading 索引，再缩短正文；保留 source identity 和 Project 规则，避免仅因新增全局
 source 就丢弃整份 context material。

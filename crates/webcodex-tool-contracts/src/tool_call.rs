@@ -1156,8 +1156,9 @@ pub enum ToolCall {
     /// `session_id` is explicit business input for the exact Workflow Session
     /// to continue; omission always creates a fresh Session.
     WorkOnProject {
-        /// Existing runtime project id. Use project + instruction for an existing project; do not combine
-        /// project with client_id or path.
+        /// Existing Runtime Project selector. Prefer a Server-issued project_ref from prior bootstrap or
+        /// discovery; canonical agent:<client_id>:<project_id>, client_id:project_id, and existing human
+        /// convenience forms remain accepted. Use project + instruction; do not combine with client_id/path.
         #[schemars(length(min = 1))]
         #[serde(default)]
         project: String,
@@ -1191,31 +1192,10 @@ pub enum ToolCall {
         /// title.
         #[schemars(length(min = 1, max = 4000))]
         instruction: String,
-        #[schemars(extend("default" = true))]
-        /// Whether this bootstrap response should include bounded project-instruction bodies such as
-        /// AGENTS.md. Defaults to true. A fresh Workflow Session does not imply a fresh model context:
-        /// explicitly set false even for a new Session when the current model context already retains the
-        /// applicable repository instructions; keep true for a fresh or uncertain model context. WebCodex
-        /// never infers retention from Session id, Window, transport, credential, or Server identity.
-        /// Instruction files are still re-observed for fingerprint/change detection and Workflow Session
-        /// metadata is still updated; false controls only redundant model-facing instruction-body
-        /// projection.
-        #[serde(default = "default_true")]
-        include_project_instructions: bool,
-        #[schemars(extend("default" = true))]
-        /// Whether this bootstrap response should include the built-in WebCodex coding-workflow and selected tool-strategy
-        /// guidance. Defaults to true. A fresh Workflow Session does not imply a fresh model context:
-        /// explicitly set false even for a new Session when the current model context already retains this
-        /// guidance; keep true for a fresh or uncertain model context. WebCodex never infers retention from
-        /// Session id, Window, transport, credential, or Server identity. False controls only redundant
-        /// model-facing workflow projection; it does not change Workflow Session state, authority, role
-        /// selection, or execution semantics.
-        #[serde(default = "default_true")]
-        include_workflow_guidance: bool,
         /// Model guidance only: direct (default) or code_mode for read-only orchestration strategy.
         /// No tool admission, authority, effects, or Session state changes; explicit resume may choose
-        /// again. code_mode is invalid when Experimental Code Mode is not compiled. Guidance remains
-        /// omitted when include_workflow_guidance=false.
+        /// again. code_mode is invalid when Experimental Code Mode is not compiled. Request
+        /// `context_request=["webcodex.workflow"]` when the current model context needs that guidance.
         #[serde(default)]
         guidance_profile: CodingGuidanceProfile,
         #[schemars(extend("default" = true))]
@@ -1230,9 +1210,9 @@ pub enum ToolCall {
         /// remains bound to its exact final Project; in worktree mode the Runner re-observes that
         /// registered managed Project and its source provenance instead of creating a second worktree.
         /// Failure never guesses or creates a replacement Session. Supplying session_id does not prove this
-        /// model context still retains project instructions, workflow guidance, or extension metadata; a
-        /// fresh model context should keep the include_* defaults true. This business input is distinct
-        /// from wrapper recording_session_id.
+        /// model context still retains project instructions, workflow guidance, or extension metadata. A
+        /// fresh model context should request missing static guidance through context_request. This business
+        /// input is distinct from wrapper recording_session_id.
         #[schemars(regex(pattern = "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"))]
         #[serde(default)]
         session_id: Option<String>,

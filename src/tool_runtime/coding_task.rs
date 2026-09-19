@@ -100,9 +100,8 @@ struct CodingStartupOptions {
     tool_name: &'static str,
     detail: StartupDetail,
     include_repository_overview: bool,
-    include_project_instructions: bool,
+    include_instruction_content: bool,
     include_extension_catalog: bool,
-    include_reused_instruction_content: bool,
 }
 
 impl CodingStartupOptions {
@@ -113,14 +112,12 @@ impl CodingStartupOptions {
             detail,
             tool_name: "work_on_project",
             include_repository_overview: true,
-            include_project_instructions: true,
+            include_instruction_content: true,
             include_extension_catalog: false,
-            include_reused_instruction_content: false,
         }
     }
 
     fn work_on_project(
-        include_project_instructions: bool,
         include_extension_catalog: bool,
         guidance_profile: CodingGuidanceProfile,
     ) -> Self {
@@ -129,9 +126,8 @@ impl CodingStartupOptions {
             detail: StartupDetail::Standard,
             tool_name: "work_on_project",
             include_repository_overview: false,
-            include_project_instructions,
+            include_instruction_content: false,
             include_extension_catalog,
-            include_reused_instruction_content: include_project_instructions,
         }
     }
 }
@@ -1189,10 +1185,9 @@ impl ToolRuntime {
         // Reload rule bodies only when there is no prior snapshot to compare
         // against (fresh session, or a session whose rules were never
         // persisted, e.g. restored after a restart). Otherwise the shared
-        // brief compares fingerprints and reports reused/changed. Whether a
-        // reused body is projected is intentionally separate: diagnostic test
-        // projections stay incremental, while work_on_project follows
-        // its caller-explicit include_project_instructions preference.
+        // brief compares fingerprints and reports reused/changed. Diagnostic
+        // projections may include current/changed bodies; work_on_project keeps
+        // bodies out of its primary result and uses context_request when needed.
         let force_instruction_load = previous_instructions.is_none();
         let canonical_repository_root_matches = if resume_requested {
             None
@@ -1205,12 +1200,14 @@ impl ToolRuntime {
             .await;
         let project_resolution_value =
             serde_json::to_value(&project_resolution).unwrap_or_else(|_| json!({}));
+        let project_ref = self.project_reference_for_resolved(&resolved, auth);
         let startup_brief = build_startup_brief(StartupBriefInput {
             guidance_profile: startup.guidance_profile,
             detail,
             requested_project: &project,
             project_resolution: &project_resolution_value,
             resolved: &resolved,
+            project_ref: project_ref.as_deref(),
             knowledge_association: knowledge_association.as_ref(),
             session: session_summary,
             continuation_kind,
@@ -1219,8 +1216,7 @@ impl ToolRuntime {
             instructions: project_instructions,
             previous_instructions,
             force_instruction_load,
-            include_project_instructions: startup.include_project_instructions,
-            include_reused_instruction_content: startup.include_reused_instruction_content,
+            include_instruction_content: startup.include_instruction_content,
             extensions: extensions.as_ref(),
             git: &git,
             semantic_navigation: &semantic_navigation,
@@ -1337,8 +1333,6 @@ impl ToolRuntime {
         base_ref: Option<String>,
         instruction: String,
         session_id: Option<String>,
-        include_project_instructions: bool,
-        include_workflow_guidance: bool,
         guidance_profile: CodingGuidanceProfile,
         include_extension_catalog: bool,
         auth: Option<&AuthContext>,
@@ -1440,11 +1434,7 @@ impl ToolRuntime {
                 SessionMode::Normal,
                 false,
                 false,
-                CodingStartupOptions::work_on_project(
-                    include_project_instructions,
-                    include_extension_catalog,
-                    guidance_profile,
-                ),
+                CodingStartupOptions::work_on_project(include_extension_catalog, guidance_profile),
                 session_id.clone(),
                 None,
                 auth,
@@ -1468,10 +1458,9 @@ impl ToolRuntime {
         } else {
             project
         };
-        project_work_on_project_output_with_workflow_inner(
+        project_work_on_project_output_inner(
             projected_project,
             result.output,
-            include_workflow_guidance,
             guidance_profile,
             Some(correlation),
         )
@@ -2274,6 +2263,8 @@ struct WorkOnProjectSessionProjection {
 struct WorkOnProjectProjectProjection {
     resolved_id: String,
     #[serde(default)]
+    project_ref: Option<String>,
+    #[serde(default)]
     knowledge_association: Option<Value>,
 }
 
@@ -2468,22 +2459,7 @@ fn is_default_work_on_project_repository(repository: &Value) -> bool {
 /// Session state, so protocol drift fails closed with `state_changed=true`.
 #[cfg(test)]
 pub(crate) fn project_work_on_project_output(project: String, output: Value) -> ToolResult {
-    project_work_on_project_output_with_workflow(project, output, true)
-}
-
-#[cfg(test)]
-pub(crate) fn project_work_on_project_output_with_workflow(
-    project: String,
-    output: Value,
-    include_workflow_guidance: bool,
-) -> ToolResult {
-    project_work_on_project_output_with_workflow_inner(
-        project,
-        output,
-        include_workflow_guidance,
-        CodingGuidanceProfile::Direct,
-        None,
-    )
+    project_work_on_project_output_inner(project, output, CodingGuidanceProfile::Direct, None)
 }
 
 #[cfg(test)]
@@ -2492,19 +2468,17 @@ pub(crate) fn project_work_on_project_output_with_correlation_for_test(
     output: Value,
     correlation: &mut ToolCallCorrelation,
 ) -> ToolResult {
-    project_work_on_project_output_with_workflow_inner(
+    project_work_on_project_output_inner(
         project,
         output,
-        true,
         CodingGuidanceProfile::Direct,
         Some(correlation),
     )
 }
 
-fn project_work_on_project_output_with_workflow_inner(
+fn project_work_on_project_output_inner(
     project: String,
     output: Value,
-    include_workflow_guidance: bool,
     guidance_profile: CodingGuidanceProfile,
     correlation: Option<&mut ToolCallCorrelation>,
 ) -> ToolResult {
@@ -2665,11 +2639,11 @@ fn project_work_on_project_output_with_workflow_inner(
     if let Some(knowledge_association) = projection.project.knowledge_association {
         result.output["knowledge_association"] = knowledge_association;
     }
+    if let Some(project_ref) = projection.project.project_ref {
+        result.output["project_ref"] = json!(project_ref);
+    }
     if let Some(extensions) = projection.extensions {
         result.output["extensions"] = extensions;
-    }
-    if include_workflow_guidance {
-        result.output["workflow"] = projection.workflow;
     }
     if !project_resolution_is_default {
         let mut project_resolution = json!(projection.project_resolution);
