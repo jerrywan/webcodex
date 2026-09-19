@@ -3234,8 +3234,6 @@ impl ToolRuntime {
             let file = file
                 .as_object_mut()
                 .expect("validated apply_text_edits file result object");
-            file.remove("old_sha256");
-            file.remove("new_sha256");
             file.insert("read_revision".to_string(), json!(read_revision));
         }
         result

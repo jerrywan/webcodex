@@ -371,6 +371,22 @@ fn add_run_process_expectation_projection(
     );
 }
 
+fn apply_text_edits_model_projection(result: &mut ToolResult) {
+    if !result.success {
+        return;
+    }
+    let Some(files) = result.output.get_mut("files").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for file in files {
+        let Some(file) = file.as_object_mut() else {
+            continue;
+        };
+        file.remove("old_sha256");
+        file.remove("new_sha256");
+    }
+}
+
 enum SearchModelProjection {
     None,
     Batch {
@@ -411,6 +427,7 @@ enum ModelFacingProjection {
     None,
     JobHandoff,
     AgentWait,
+    ApplyTextEdits,
     Read(super::read_files::ReadModelProjection),
     Search(SearchModelProjection),
 }
@@ -429,6 +446,7 @@ impl ModelFacingProjectionPlan {
             ToolCall::WaitForAgentEvents { .. }
             | ToolCall::ReadAgentWait { .. }
             | ToolCall::CancelAgentWait { .. } => ModelFacingProjection::AgentWait,
+            ToolCall::ApplyTextEdits { .. } => ModelFacingProjection::ApplyTextEdits,
             ToolCall::RunJob { .. }
             | ToolCall::RunProcess { .. }
             | ToolCall::RunSkillResource { .. }
@@ -473,6 +491,7 @@ impl ModelFacingProjectionPlan {
             ModelFacingProjection::AgentWait => {
                 super::agent_wait::agent_wait_model_projection(result)
             }
+            ModelFacingProjection::ApplyTextEdits => apply_text_edits_model_projection(result),
             ModelFacingProjection::JobHandoff => {
                 super::jobs::sparsify_job_handoff_model_result(result)
             }

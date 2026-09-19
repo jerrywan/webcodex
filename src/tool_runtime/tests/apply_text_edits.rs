@@ -1044,8 +1044,8 @@ async fn apply_text_edits_success_mints_final_revisions_and_continues_without_re
     let files = result.output["files"].as_array().unwrap();
     assert_eq!(files.len(), 5);
     for file in files {
-        assert!(file.get("old_sha256").is_none());
-        assert!(file.get("new_sha256").is_none());
+        assert!(file.get("old_sha256").is_some());
+        assert!(file.get("new_sha256").is_some());
         assert!(file.get("read_revision").is_some());
     }
     let edit_final_revision = files[0]["read_revision"].as_u64().unwrap();
@@ -1053,11 +1053,12 @@ async fn apply_text_edits_success_mints_final_revisions_and_continues_without_re
     let rename_final_revision = files[2]["read_revision"].as_u64().unwrap();
     assert!(files[3]["read_revision"].is_null());
     assert_eq!(files[4]["read_revision"].as_u64(), Some(noop_revision));
-    crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
-        &serde_json::to_value(&result).unwrap(),
-        &crate::tool_runtime::registry::output_schema_for_tool("apply_text_edits"),
-    )
-    .unwrap();
+    let audit = crate::tool_runtime::tool_audit::session_log_result_for_tool(
+        "apply_text_edits",
+        &result.output,
+    );
+    assert_eq!(audit["files"][0]["old_sha256"], edit_old);
+    assert_eq!(audit["files"][0]["new_sha256"], edit_new);
 
     let edit_continuation = guarded_edit("edit.txt", edit_final_revision, "new", "newer");
     let continuation_task = tokio::spawn({
@@ -1884,8 +1885,8 @@ async fn apply_text_edits_dry_run_does_not_write() {
     assert_eq!(result.output["would_change"], true);
     assert_eq!(result.output["changed"], false);
     assert!(result.output["files"][0]["read_revision"].is_null());
-    assert!(result.output["files"][0].get("old_sha256").is_none());
-    assert!(result.output["files"][0].get("new_sha256").is_none());
+    assert!(result.output["files"][0].get("old_sha256").is_some());
+    assert!(result.output["files"][0].get("new_sha256").is_some());
     let next_revision =
         seed_read_revision(&runtime, &project, "after-dry-run.txt", &"c".repeat(64)).await;
     assert_eq!(
@@ -2080,6 +2081,16 @@ async fn apply_text_edits_session_event_summary() {
     assert!(result.success, "{:?}", result.error);
     assert_eq!(result.output["changed"], true);
     assert_eq!(result.output["changed_paths"][0], "src/lib.rs");
+    assert!(result.output["files"][0].get("old_sha256").is_none());
+    assert!(result.output["files"][0].get("new_sha256").is_none());
+    assert!(result.output["files"][0]["read_revision"]
+        .as_u64()
+        .is_some());
+    crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+        &serde_json::to_value(&result).unwrap(),
+        &crate::tool_runtime::registry::output_schema_for_tool("apply_text_edits"),
+    )
+    .unwrap();
 
     let summary = runtime
         .sessions
