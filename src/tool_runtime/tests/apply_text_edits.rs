@@ -1907,3 +1907,43 @@ async fn apply_text_edits_host_structural_schema_accepts_but_runtime_rejects_ung
         assert_no_apply_text_edits_runner_request(&runtime, client).await;
     }
 }
+
+#[tokio::test]
+async fn apply_text_edits_path_overlap_identifies_first_and_current_changes() {
+    let edit = |path: &str| serde_json::json!({"path":path,"old_text":"A","new_text":"B"});
+    let rename = |path: &str, to_path: &str| serde_json::json!({
+        "kind":"rename","path":path,"to_path":to_path,"expected_read_revision":1
+    });
+    for (changes, indices, path) in [
+        // Nonadjacent source/source, source/destination, destination/source,
+        // destination/destination and same-change source/destination conflicts.
+        (vec![edit("a.rs"), edit("b.rs"), edit("a.rs")], [0, 2], "a.rs"),
+        (vec![edit("a.rs"), rename("b.rs", "a.rs")], [0, 1], "a.rs"),
+        (vec![rename("a.rs", "b.rs"), edit("b.rs")], [0, 1], "b.rs"),
+        (vec![rename("a.rs", "c.rs"), rename("b.rs", "c.rs")], [0, 1], "c.rs"),
+        (vec![rename("a.rs", "a.rs")], [0, 0], "a.rs"),
+        // Sequential replacements are rejected, never automatically coalesced.
+        (vec![edit("a.rs"), serde_json::json!({"path":"a.rs","old_text":"B","new_text":"C"})], [0, 1], "a.rs"),
+    ] {
+        let runtime = test_runtime();
+        let result = runtime.apply_text_edits(
+            "agent:unused:unused".to_string(),
+            parsed_apply_text_edits_changes(serde_json::json!({"project":"agent:unused:unused","changes":changes})),
+            None,
+        ).await;
+        assert!(!result.success);
+        assert_eq!(result.output["error_kind"], "path_overlap");
+        assert_eq!(result.output["path_conflict_change_indices"], serde_json::json!(indices));
+        assert_eq!(result.output["change_index"], indices[1]);
+        assert_eq!(result.output["path"], path);
+        assert_eq!(result.output["execution_state"], "not_started");
+        assert_eq!(result.output["state_changed"], false);
+        for absent in ["recovery", "retry_guidance", "recovery_action", "old_text", "new_text"] {
+            assert!(result.output.get(absent).is_none(), "unexpected {absent}");
+        }
+        crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+            &serde_json::to_value(&result).unwrap(),
+            &crate::tool_runtime::registry::output_schema_for_tool("apply_text_edits"),
+        ).unwrap();
+    }
+}

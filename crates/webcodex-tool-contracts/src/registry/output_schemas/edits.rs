@@ -413,6 +413,16 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 nullable_schema("integer", "Zero-based failed file-change index when known; null or absent for batch-global failures."),
             ),
             (
+                "path_conflict_change_indices",
+                json!({
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {"type": "integer", "minimum": 0, "maximum": 15},
+                    "description": "Server-preflight indices [first occupant, conflicting change] for a repeated source/destination path. May be equal for a self-conflict. Identifies the conflict, not permission to merge sequential edits."
+                }),
+            ),
+            (
                 "edit_index",
                 nullable_schema("integer", "Zero-based failed text-edit index when known; null or absent when not edit-specific."),
             ),

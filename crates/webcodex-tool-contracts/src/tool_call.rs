@@ -4190,8 +4190,9 @@ pub enum ToolCall {
     ApplyTextEdits {
         /// Runner-registered project id.
         project: String,
-        /// Transactional list of 1..16 file changes. Use explicit kind forms, or path + old_text + new_text
-        /// for one replace_exact; the whole batch is preflighted before mutation.
+        /// Transactional list of 1..16 file changes. For multiple independent edits to the same file, use ONE
+        /// change with multiple entries in edits. Never repeat a source or destination path in changes.
+        /// All edits in one file change resolve against the same original source snapshot.
         #[schemars(length(min = 1, max = 16))]
         changes: Vec<ApplyFileChangeInput>,
         /// If true, compute the plan without writing.

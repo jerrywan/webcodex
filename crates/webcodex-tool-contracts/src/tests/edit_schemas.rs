@@ -197,3 +197,46 @@ fn write_project_file_schema_uses_read_revision_for_whole_file_replacement() {
         );
     }
 }
+
+#[test]
+fn apply_text_edits_composition_guidance_and_union_stay_unambiguous() {
+    let specs = registered_tool_specs();
+    let spec = spec_named(&specs, "apply_text_edits");
+    for phrase in [
+        "use ONE change with multiple entries in edits",
+        "Never repeat a source or destination path in changes",
+        "same original source snapshot",
+        "cannot be combined automatically",
+        "Shorthand path + old_text + new_text is only for one simple exact replacement",
+        "put occurrence/line_scope inside each edit, not on the change",
+    ] {
+        assert!(spec.description.contains(phrase), "missing guidance: {phrase}");
+    }
+    let changes = &spec.input_schema["properties"]["changes"];
+    assert!(changes["description"].as_str().unwrap().contains("ONE"));
+    let variants = changes["items"]["anyOf"].as_array().unwrap();
+    assert!(variants.iter().all(|variant| {
+        let description = variant["description"].as_str().unwrap();
+        description.contains("occurrence") && description.contains("line_scope")
+    }));
+    for change in [
+        json!({"path":"a.rs","old_text":"old","new_text":"new","occurrence":2}),
+        json!({"path":"a.rs","old_text":"old","new_text":"new","line_scope":{"start_line":1,"end_line":2}}),
+        json!({"path":"a.rs","old_text":"old","new_text":"new","edits":[]}),
+        json!({"kind":"edit","path":"a.rs","occurrence":2,"edits":[]}),
+        json!({"kind":"edit","path":"a.rs","line_scope":{"start_line":1,"end_line":2},"edits":[]}),
+    ] {
+        let request = json!({"project":"demo","changes":[change]});
+        assert!(!schema_accepts(&spec.input_schema, &request), "{request}");
+        assert!(ToolCall::from_tool_name("apply_text_edits", request).is_err());
+    }
+    let request = json!({"project":"demo","changes":[{
+        "kind":"edit","path":"a.rs","expected_read_revision":123,
+        "edits":[
+            {"kind":"replace_exact","old_text":"old","new_text":"new","occurrence":2},
+            {"kind":"delete_exact","old_text":"other","line_scope":{"start_line":10,"end_line":20}}
+        ]
+    }]});
+    assert!(schema_accepts(&spec.input_schema, &request));
+    assert!(ToolCall::from_tool_name("apply_text_edits", request).is_ok());
+}

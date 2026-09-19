@@ -97,6 +97,8 @@ pub use webcodex_core::apply_edits_shared::{
     ApplyFileChangeKind, ApplyTextEditInput, ApplyTextEditKind, ApplyTextLineScope,
 };
 
+/// Canonical file change. For occurrence, line_scope, or multiple edits use kind=edit
+/// with edits[]; occurrence and line_scope belong inside each edit, never on the change.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ApplyFileChangeCanonicalInput {
@@ -108,6 +110,8 @@ struct ApplyFileChangeCanonicalInput {
     to_path: Option<String>,
     #[serde(default)]
     content: Option<String>,
+    /// Independent edits to this file, all resolved against the same original source snapshot.
+    /// Use ONE change per file, not repeated changes. Put occurrence/line_scope on these entries.
     #[schemars(length(max = 20))]
     #[serde(default)]
     edits: Vec<ApplyTextEditInput>,
@@ -116,6 +120,8 @@ struct ApplyFileChangeCanonicalInput {
     expected_read_revision: Option<u64>,
 }
 
+/// Shorthand for ONE simple exact replacement only. For occurrence, line_scope, or
+/// multiple edits use canonical kind=edit with edits[] instead; do not mix the forms.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ApplyFileChangeExactReplaceInput {

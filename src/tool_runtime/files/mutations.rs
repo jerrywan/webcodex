@@ -1936,6 +1936,28 @@ fn compact_apply_text_edits_preflight_rejection(
     )
 }
 
+fn apply_text_edits_path_overlap(
+    first_change_index: usize,
+    change_index: usize,
+    kind: &str,
+    path: &str,
+) -> ToolResult {
+    let mut result = compact_apply_text_edits_preflight_rejection(
+        format!(
+            "change {change_index} reuses path '{path}' first occupied by change {first_change_index}; each source/destination path may appear only once"
+        ),
+        "path_overlap",
+        Some(change_index),
+        None,
+        Some(kind),
+        Some(path),
+    );
+    // Proven by Server preflight, not Runner-supplied recovery. This identifies
+    // the conflict; it does not imply sequential changes can be coalesced safely.
+    result.output["path_conflict_change_indices"] = json!([first_change_index, change_index]);
+    result
+}
+
 fn compact_apply_text_edits_path_policy_rejection(
     change_index: usize,
     kind: &str,
@@ -2842,7 +2864,7 @@ impl ToolRuntime {
                 None,
             );
         }
-        let mut touched_paths = HashSet::new();
+        let mut touched_paths = std::collections::HashMap::new();
         for (change_index, change) in changes.iter().enumerate() {
             if let Err(error) = validate_edit_file_path(&change.path) {
                 return compact_apply_text_edits_path_policy_rejection(
@@ -2852,17 +2874,12 @@ impl ToolRuntime {
                     error,
                 );
             }
-            if !touched_paths.insert(change.path.as_str()) {
-                return compact_apply_text_edits_preflight_rejection(
-                    format!(
-                        "change {change_index} reuses path '{}'; each source/destination path may appear only once",
-                        change.path
-                    ),
-                    "path_overlap",
-                    Some(change_index),
-                    None,
-                    Some(change.kind.as_str()),
-                    Some(&change.path),
+            if let Some(first_index) = touched_paths.insert(change.path.as_str(), change_index) {
+                return apply_text_edits_path_overlap(
+                    first_index,
+                    change_index,
+                    change.kind.as_str(),
+                    &change.path,
                 );
             }
             if let Some(to_path) = change.to_path.as_deref() {
@@ -2874,16 +2891,12 @@ impl ToolRuntime {
                         error,
                     );
                 }
-                if !touched_paths.insert(to_path) {
-                    return compact_apply_text_edits_preflight_rejection(
-                        format!(
-                            "change {change_index} reuses destination path '{to_path}'; each source/destination path may appear only once"
-                        ),
-                        "path_overlap",
-                        Some(change_index),
-                        None,
-                        Some(change.kind.as_str()),
-                        Some(to_path),
+                if let Some(first_index) = touched_paths.insert(to_path, change_index) {
+                    return apply_text_edits_path_overlap(
+                        first_index,
+                        change_index,
+                        change.kind.as_str(),
+                        to_path,
                     );
                 }
             }
