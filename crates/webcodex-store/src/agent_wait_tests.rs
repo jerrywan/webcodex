@@ -1276,6 +1276,212 @@ fn old_wait_schema_migrates_mode_to_any_and_malformed_all_fails_closed() {
 }
 
 #[test]
+fn malformed_complete_all_wait_cannot_be_cancelled_into_a_valid_terminal_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("wait-all-malformed-cancel.db")).unwrap();
+    let owner = principal('2');
+    let watcher = agent(&db, &owner, "wait-all-malformed-cancel-watcher");
+    let worker = agent(&db, &owner, "wait-all-malformed-cancel-worker");
+    let endpoint = endpoint(&db, &owner, &watcher, "wait-all-malformed-cancel-view");
+    let task_a = task(&db, &owner, &worker, "wait-all-malformed-cancel-a");
+    let task_b = task(&db, &owner, &worker, "wait-all-malformed-cancel-b");
+    let a = start(&db, &owner, &task_a, &worker, "wait-all-malformed-cancel-a");
+    let b = start(&db, &owner, &task_b, &worker, "wait-all-malformed-cancel-b");
+    complete(
+        &db,
+        &owner,
+        &task_a,
+        &worker,
+        &a,
+        "wait-all-malformed-cancel-a",
+    );
+    complete(
+        &db,
+        &owner,
+        &task_b,
+        &worker,
+        &b,
+        "wait-all-malformed-cancel-b",
+    );
+    let wait = db
+        .create_agent_wait(
+            &owner,
+            wait_input_mode(
+                &watcher,
+                &endpoint,
+                &[task_a, task_b],
+                "wait-all-malformed-cancel",
+                AgentWaitMode::All,
+            ),
+        )
+        .unwrap()
+        .agent_wait;
+    let wake_id = wait_wake_id(&db, &wait.wait_id);
+    db.conn_for_tests()
+        .execute(
+            "UPDATE wc_agent_waits
+             SET state = 'waiting', triggered_at_unix_ms = NULL
+             WHERE wait_id = ?1",
+            [wait.wait_id.as_str()],
+        )
+        .unwrap();
+
+    let error = db
+        .cancel_agent_wait(&owner, &wait.wait_id, "wait-all-malformed-cancel-op")
+        .unwrap_err();
+    assert_eq!(error.code(), "agent_wait_join_invariant");
+    let state: String = db
+        .conn_for_tests()
+        .query_row(
+            "SELECT state FROM wc_agent_waits WHERE wait_id = ?1",
+            [wait.wait_id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "waiting");
+    assert_eq!(
+        db.agent_wake(&wake_id).unwrap().unwrap().state,
+        AgentWakeState::Pending
+    );
+}
+
+#[test]
+fn all_wait_prepare_fails_closed_on_incomplete_wake_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("wait-all-malformed-wake.db")).unwrap();
+    let owner = principal('3');
+    let watcher = agent(&db, &owner, "wait-all-malformed-wake-watcher");
+    let worker = agent(&db, &owner, "wait-all-malformed-wake-worker");
+    let endpoint = endpoint(&db, &owner, &watcher, "wait-all-malformed-wake-view");
+    let task_a = task(&db, &owner, &worker, "wait-all-malformed-wake-a");
+    let task_b = task(&db, &owner, &worker, "wait-all-malformed-wake-b");
+    let a = start(&db, &owner, &task_a, &worker, "wait-all-malformed-wake-a");
+    let b = start(&db, &owner, &task_b, &worker, "wait-all-malformed-wake-b");
+    complete(
+        &db,
+        &owner,
+        &task_a,
+        &worker,
+        &a,
+        "wait-all-malformed-wake-a",
+    );
+    complete(
+        &db,
+        &owner,
+        &task_b,
+        &worker,
+        &b,
+        "wait-all-malformed-wake-b",
+    );
+    let wait = db
+        .create_agent_wait(
+            &owner,
+            wait_input_mode(
+                &watcher,
+                &endpoint,
+                &[task_a, task_b],
+                "wait-all-malformed-wake",
+                AgentWaitMode::All,
+            ),
+        )
+        .unwrap()
+        .agent_wait;
+    let wake_id = wait_wake_id(&db, &wait.wait_id);
+    let claim = db
+        .claim_next_agent_wake(
+            &owner,
+            &watcher,
+            &endpoint.endpoint_id,
+            endpoint.controller_generation,
+            "mcp_app",
+        )
+        .unwrap()
+        .unwrap();
+    db.conn_for_tests()
+        .execute(
+            "UPDATE wc_agent_wakes
+             SET wait_match_count_snapshot = 1, wait_match_sequence_snapshot = 1
+             WHERE wake_id = ?1",
+            [wake_id.as_str()],
+        )
+        .unwrap();
+
+    let error = db
+        .prepare_agent_wake_dispatch(
+            &owner,
+            &watcher,
+            &endpoint.endpoint_id,
+            endpoint.controller_generation,
+            &wake_id,
+            &claim.attempt.attempt_id,
+            &claim.claim_fence,
+            &claim.consume_token,
+        )
+        .unwrap_err();
+    assert_eq!(error.code(), "agent_wait_wake_invariant");
+    assert_eq!(
+        db.agent_wake(&wake_id).unwrap().unwrap().state,
+        AgentWakeState::Claimed
+    );
+}
+
+#[test]
+fn malformed_wait_match_sequence_fails_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("wait-all-malformed-sequence.db")).unwrap();
+    let owner = principal('4');
+    let watcher = agent(&db, &owner, "wait-all-malformed-sequence-watcher");
+    let worker = agent(&db, &owner, "wait-all-malformed-sequence-worker");
+    let endpoint = endpoint(&db, &owner, &watcher, "wait-all-malformed-sequence-view");
+    let task_a = task(&db, &owner, &worker, "wait-all-malformed-sequence-a");
+    let task_b = task(&db, &owner, &worker, "wait-all-malformed-sequence-b");
+    let a = start(
+        &db,
+        &owner,
+        &task_a,
+        &worker,
+        "wait-all-malformed-sequence-a",
+    );
+    let _b = start(
+        &db,
+        &owner,
+        &task_b,
+        &worker,
+        "wait-all-malformed-sequence-b",
+    );
+    let wait = db
+        .create_agent_wait(
+            &owner,
+            wait_input_mode(
+                &watcher,
+                &endpoint,
+                &[task_a.clone(), task_b],
+                "wait-all-malformed-sequence",
+                AgentWaitMode::All,
+            ),
+        )
+        .unwrap()
+        .agent_wait;
+    complete(
+        &db,
+        &owner,
+        &task_a,
+        &worker,
+        &a,
+        "wait-all-malformed-sequence-a",
+    );
+    db.conn_for_tests()
+        .execute(
+            "UPDATE wc_agent_wait_matches SET sequence = 2 WHERE wait_id = ?1",
+            [wait.wait_id.as_str()],
+        )
+        .unwrap();
+
+    let error = db.read_agent_wait(&owner, &wait.wait_id).unwrap_err();
+    assert_eq!(error.code(), "agent_wait_match_sequence_invariant");
+}
+
+#[test]
 fn source_fanout_is_bounded_at_wait_admission() {
     let temp = tempfile::tempdir().unwrap();
     let db = Database::open(&temp.path().join("wait-fanout.db")).unwrap();

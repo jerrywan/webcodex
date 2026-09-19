@@ -5,7 +5,7 @@ use super::agent_task::{
 };
 use super::agent_wait::{
     require_agent_wait_for_wake, resume_agent_wait_for_wake_in_transaction,
-    verify_agent_wait_resumed_for_consumed_wake,
+    verify_agent_wait_resumed_for_consumed_wake, AgentWaitMode,
 };
 use super::communication::lookup_idempotent_resource;
 use super::communication::{
@@ -3267,6 +3267,16 @@ fn wake_envelope(
                 "Agent Wait Wake is missing its match-sequence snapshot",
             )
         })?;
+        if wait.mode == AgentWaitMode::All
+            && (match_count != wait.match_count
+                || match_count != wait.source_count
+                || match_sequence != wait.match_sequence)
+        {
+            return Err(CommunicationStoreError::new(
+                "agent_wait_wake_invariant",
+                "ALL Agent Wait Wake snapshot does not match its complete durable join",
+            ));
+        }
         let resume_hint = format!(
             "WebCodex AgentWait continuation.\n\nagent_id={}\nendpoint_id={}\ncontroller_generation={}\nwake_id={}\nconsume_token={}\nwait_id={}\nmode={}\nmatched={}/{}\nmatch_sequence={}\n\nBootstrap this exact Wake with bootstrap_agent_conversation, then consume it immediately with consume_agent_wake. Read this Wait with read_agent_wait(wait_id), re-read the authoritative source AgentTasks, and decide the next action from current state. This Wait is one-shot; create a new Wait if further waiting is needed.\n",
             wake.target_agent_id,

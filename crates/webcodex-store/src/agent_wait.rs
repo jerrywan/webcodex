@@ -516,7 +516,7 @@ impl Database {
                 schedule_required: false,
             });
         }
-        let state = load_owned_agent_wait_state(&transaction, principal, wait_id)?;
+        let state = load_owned_agent_wait_detail(&transaction, principal, wait_id)?.state;
         let now = now_unix_ms();
         match state {
             AgentWaitState::Waiting => {}
@@ -704,20 +704,31 @@ fn record_wait_match_in_transaction(
     terminal_task_state: AgentTaskState,
     occurred_at_unix_ms: i64,
 ) -> Result<bool, CommunicationStoreError> {
-    let wait: Option<(String, String, i64, i64)> = transaction
+    let wait: Option<(String, String, i64, i64, i64)> = transaction
         .query_row(
             "SELECT mode, state,
                     (SELECT COUNT(*) FROM wc_agent_wait_sources s WHERE s.wait_id = w.wait_id),
-                    (SELECT COUNT(*) FROM wc_agent_wait_matches m WHERE m.wait_id = w.wait_id)
+                    (SELECT COUNT(*) FROM wc_agent_wait_matches m WHERE m.wait_id = w.wait_id),
+                    (SELECT COALESCE(MAX(sequence), 0) FROM wc_agent_wait_matches m WHERE m.wait_id = w.wait_id)
              FROM wc_agent_waits w
              WHERE wait_id = ?1 AND owner_principal_kind = ?2 AND owner_principal_digest = ?3
                AND target_agent_id = ?4 AND state IN ('waiting', 'triggered')",
             params![wait_id, principal.kind, principal.digest, target_agent_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()
         .map_err(store_error)?;
-    let Some((mode_text, state_text, source_count, current_match_count)) = wait else {
+    let Some((mode_text, state_text, source_count, current_match_count, current_match_sequence)) =
+        wait
+    else {
         return Err(CommunicationStoreError::new(
             "agent_wait_storage_invariant",
             "Agent Wait match could not load the exact active Wait",
@@ -725,7 +736,13 @@ fn record_wait_match_in_transaction(
     };
     let mode = AgentWaitMode::from_db(&mode_text, 0).map_err(store_error)?;
     let state = AgentWaitState::from_db(&state_text, 1).map_err(store_error)?;
-    validate_wait_join_invariants(mode, state, source_count, current_match_count)?;
+    validate_wait_join_invariants(
+        mode,
+        state,
+        source_count,
+        current_match_count,
+        current_match_sequence,
+    )?;
 
     let already_matched: i64 = transaction
         .query_row(
@@ -930,7 +947,7 @@ pub(crate) fn require_agent_wait_for_wake(
     }
     let state = AgentWaitState::from_db(&state_text, 1).map_err(store_error)?;
     let mode = AgentWaitMode::from_db(&mode_text, 2).map_err(store_error)?;
-    validate_wait_join_invariants(mode, state, source_count, match_count)?;
+    validate_wait_join_invariants(mode, state, source_count, match_count, match_sequence)?;
     if state != AgentWaitState::Triggered {
         return Err(CommunicationStoreError::new(
             "agent_wait_wake_stale",
@@ -1013,29 +1030,6 @@ pub(crate) fn verify_agent_wait_resumed_for_consumed_wake(
         ));
     }
     Ok(())
-}
-
-fn load_owned_agent_wait_state(
-    conn: &Connection,
-    principal: &CommunicationPrincipal,
-    wait_id: &str,
-) -> Result<AgentWaitState, CommunicationStoreError> {
-    let value: Option<String> = conn
-        .query_row(
-            "SELECT state FROM wc_agent_waits
-             WHERE wait_id = ?1 AND owner_principal_kind = ?2 AND owner_principal_digest = ?3",
-            params![wait_id, principal.kind, principal.digest],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(store_error)?;
-    let Some(value) = value else {
-        return Err(CommunicationStoreError::new(
-            "agent_wait_not_found",
-            "Agent Wait does not exist",
-        ));
-    };
-    AgentWaitState::from_db(&value, 0).map_err(store_error)
 }
 
 fn load_owned_agent_wait_detail(
@@ -1152,7 +1146,13 @@ fn load_owned_agent_wait_detail(
         ));
     }
     let match_sequence = matches.last().map(|entry| entry.sequence).unwrap_or(0);
-    validate_wait_join_invariants(mode, state, sources.len() as i64, matches.len() as i64)?;
+    validate_wait_join_invariants(
+        mode,
+        state,
+        sources.len() as i64,
+        matches.len() as i64,
+        match_sequence,
+    )?;
     Ok(AgentWaitDetail {
         wait_id: wait_id.to_string(),
         target_agent_id,
@@ -1177,6 +1177,7 @@ fn validate_wait_join_invariants(
     state: AgentWaitState,
     source_count: i64,
     match_count: i64,
+    match_sequence: i64,
 ) -> Result<(), CommunicationStoreError> {
     if !(1..=MAX_AGENT_WAIT_SOURCES as i64).contains(&source_count) {
         return Err(CommunicationStoreError::new(
@@ -1188,6 +1189,12 @@ fn validate_wait_join_invariants(
         return Err(CommunicationStoreError::new(
             "agent_wait_match_capacity_invariant",
             "Agent Wait match count exceeds its durable source bound",
+        ));
+    }
+    if match_sequence != match_count {
+        return Err(CommunicationStoreError::new(
+            "agent_wait_match_sequence_invariant",
+            "Agent Wait match sequence is not contiguous with its durable match count",
         ));
     }
     let valid = match (mode, state) {
