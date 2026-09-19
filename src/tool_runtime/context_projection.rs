@@ -406,8 +406,9 @@ impl ToolRuntime {
             )
             .map_err(|_| "window_activity_unavailable")?;
 
+        let scan_truncated = linked.len() >= SCAN_LIMIT;
         let mut candidates = Vec::new();
-        let mut candidates_truncated = false;
+        let mut candidates_truncated = scan_truncated;
         for link in linked {
             let session_id = link.workflow_session_id;
             if self.sessions.lifecycle_state(&session_id)

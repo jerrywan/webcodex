@@ -2440,6 +2440,34 @@ async fn workflow_resume_context_is_window_principal_scoped_bounded_and_non_auth
     );
     assert!(bounded.get("suggested_call").is_none());
 
+    let scan_bound_window_id = "workflow-resume-scan-bound";
+    let scan_bound_window = crate::client_window::ClientWindow::for_test(scan_bound_window_id);
+    for index in 0..100 {
+        let missing_session = format!("wc_sess_scan{index:012}");
+        record_window_activity_fixture(
+            &window_db,
+            &auth,
+            scan_bound_window_id,
+            &project,
+            "work_on_project",
+            Some((
+                &missing_session,
+                crate::action_audit_sessions::WorkflowSessionRelation::WorkOnProject,
+            )),
+            None,
+            10_000 + i64::from(index),
+        );
+    }
+    let scan_bound = runtime
+        .workflow_resume_context_projection_for_test(Some(&scan_bound_window), Some(&auth))
+        .await
+        .unwrap();
+    assert_eq!(scan_bound["count"], 0);
+    assert_eq!(
+        scan_bound["truncated"], true,
+        "saturating the bounded relation scan must not claim exhaustive recovery"
+    );
+
     assert_eq!(
         runtime.sessions.lifecycle_state(&second.session_id),
         Some(crate::tool_runtime::sessions::SessionLifecycle::Active),

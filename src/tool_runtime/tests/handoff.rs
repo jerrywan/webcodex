@@ -4456,6 +4456,10 @@ async fn handoff_marks_basis_incomplete_when_session_changes_during_workspace_re
             .unwrap()
             .contains(&json!("session_changed_during_snapshot")));
         assert!(serde_json::to_vec(brief).unwrap().len() <= 8192);
+        assert_eq!(
+            result.output["workspace_continuity"]["status"], "unproven",
+            "a Session revision race must invalidate continuity attribution"
+        );
         assert!(result.output.get("session_context_revision").is_none());
     }
 }
@@ -4646,6 +4650,88 @@ async fn session_handoff_workspace_continuity_uses_only_exact_session_history() 
     let projected = serde_json::to_string(&result.output).unwrap();
     assert!(!projected.contains("unrelated-secret.txt"));
     assert!(result.output.get("workspace").is_none());
+}
+
+#[tokio::test]
+async fn session_handoff_workspace_continuity_uses_full_retained_history_not_summary_tail() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_git_repo(tmp.path());
+    commit_file(tmp.path(), "README.md", "before\n", "initial");
+
+    let runtime = test_runtime();
+    let client_id = "handoff-workspace-continuity-long";
+    let project = register_runner_project_at_path(&runtime, client_id, "demo", tmp.path()).await;
+    let session = runtime.sessions.start_session(
+        Some(project.clone()),
+        Some("long implementation session".to_string()),
+    );
+
+    record_handoff_tool_event(
+        &runtime,
+        &session.session_id,
+        "apply_text_edits",
+        json!({
+            "project": project,
+            "changes": [{
+                "kind": "edit",
+                "path": "README.md",
+                "edits": [{
+                    "kind": "replace_exact",
+                    "old_text": "before",
+                    "new_text": "after"
+                }]
+            }]
+        }),
+        true,
+        json!({"state_changed": true, "changed_paths": ["README.md"]}),
+    );
+    for _ in 0..110 {
+        record_handoff_tool_event(
+            &runtime,
+            &session.session_id,
+            "read_files",
+            json!({"project": project, "items": [{"path": "README.md"}]}),
+            true,
+            json!({"files": []}),
+        );
+    }
+    let display_tail = runtime
+        .sessions
+        .summary(&session.session_id, Some(200))
+        .unwrap();
+    assert!(display_tail.events_truncated);
+    assert!(!display_tail.retention_truncated);
+    std::fs::write(tmp.path().join("README.md"), "after\n").unwrap();
+
+    let runtime_for_task = runtime.clone();
+    let session_id = session.session_id.clone();
+    let project_for_task = project.clone();
+    let task = tokio::spawn(async move {
+        runtime_for_task
+            .dispatch(ToolCall::SessionHandoffSummary {
+                session_id,
+                project: Some(project_for_task),
+                include_workspace: Some(true),
+                include_checkpoints: Some(false),
+                include_validation: Some(false),
+                diagnostic: false,
+                limit: None,
+            })
+            .await
+    });
+    let request = wait_for_patch_agent_request(&runtime, client_id).await;
+    complete_agent_request_by_running_locally(&runtime, client_id, request).await;
+    let result = task.await.unwrap();
+
+    assert!(result.success, "{result:?}");
+    assert_eq!(
+        result.output["workspace_continuity"]["status"], "consistent_with_session_history",
+        "model-facing Session tail truncation must not erase complete durable path evidence"
+    );
+    assert_eq!(
+        result.output["workspace_continuity"]["session_changed_paths_count"],
+        1
+    );
 }
 
 #[tokio::test]

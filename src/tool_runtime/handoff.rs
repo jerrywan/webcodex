@@ -43,10 +43,6 @@ const MAX_OPEN_ITEMS: usize = 20;
 #[cfg(feature = "workspace-checkpoints")]
 const MAX_RECENT_CHECKPOINTS: usize = 10;
 const HANDOFF_MESSAGE_CHARS: usize = 240;
-// Result-side changed-path evidence is sanitized by the workflow-session recorder
-// to at most 201 project-relative paths per event. Hitting that bound cannot
-// prove completeness, so continuity attribution must fail closed.
-const SESSION_CHANGED_PATH_RECORDER_BOUND: usize = 201;
 
 /// Actionable guidance only for a validation failure that still belongs to the
 /// current evidence window. Identity reuse is conditional: it strengthens
@@ -54,22 +50,6 @@ const SESSION_CHANGED_PATH_RECORDER_BOUND: usize = 201;
 /// never a requirement to clean stale audit history.
 pub(crate) const VALIDATION_IDENTITY_REUSE_ACTION: &str =
     "address the current validation failure; when intentionally rerunning it, reuse the original assertion_name when supplied and the same validation identity";
-
-fn session_changed_path_evidence(events: &[SessionEvent]) -> (Vec<Value>, bool) {
-    let mut paths = HashSet::<String>::new();
-    let mut complete = true;
-    for event in canonical_tool_call_finished_events(events) {
-        if event.changed_paths.len() >= SESSION_CHANGED_PATH_RECORDER_BOUND {
-            // The per-event recorder silently stops at this bound, so equality
-            // to the bound cannot prove that the source list was complete.
-            complete = false;
-        }
-        paths.extend(event.changed_paths.iter().cloned());
-    }
-    let mut paths = paths.into_iter().collect::<Vec<_>>();
-    paths.sort();
-    (paths.into_iter().map(Value::String).collect(), complete)
-}
 
 fn workspace_continuity_projection(
     workspace: &Value,
@@ -397,11 +377,16 @@ impl ToolRuntime {
             .unwrap_or(false);
         if has_project && include_workspace {
             let project = project.clone().unwrap_or_default();
-            let (continuity_changed_paths, changed_paths_complete) =
-                session_changed_path_evidence(&closeout_session.events);
-            let history_complete = !closeout_session.retention_truncated
-                && !closeout_session.events_truncated
-                && changed_paths_complete;
+            let (continuity_changed_paths, history_complete) = self
+                .sessions
+                .retained_changed_path_evidence(&session_id)
+                .map(|(paths, complete)| {
+                    (
+                        paths.into_iter().map(Value::String).collect::<Vec<_>>(),
+                        complete,
+                    )
+                })
+                .unwrap_or_else(|| (Vec::new(), false));
             let (workspace, continuity) = self
                 .handoff_workspace_summary(&project, &continuity_changed_paths, history_complete)
                 .await;
@@ -479,6 +464,17 @@ impl ToolRuntime {
             output["validation"] = reconciliation.validation;
         }
 
+        let session_changed_during_snapshot = observed_revision.is_none()
+            || observed_revision != self.sessions.handoff_revision(&session_id);
+        if session_changed_during_snapshot {
+            if let Some(continuity) = output
+                .get_mut("workspace_continuity")
+                .and_then(Value::as_object_mut)
+            {
+                continuity.insert("status".to_string(), json!("unproven"));
+            }
+        }
+
         // --- bounded suggested next actions ---
         output["suggested_next_actions"] = json!(handoff_suggested_next_actions(&output));
         output["handoff_brief"] = build_handoff_brief(HandoffBriefInput {
@@ -490,8 +486,7 @@ impl ToolRuntime {
             validation: Some(&feedback_validation),
             jobs: output.get("jobs"),
             guidance_available,
-            session_changed_during_snapshot: observed_revision.is_none()
-                || observed_revision != self.sessions.handoff_revision(&session_id),
+            session_changed_during_snapshot,
             existing_suggested_actions: output.get("suggested_next_actions"),
         });
 
