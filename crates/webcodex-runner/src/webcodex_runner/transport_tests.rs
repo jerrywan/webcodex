@@ -5193,7 +5193,7 @@ async fn websocket_proxy_connect_rejects_non_success_without_leaking_secrets() {
 
 #[tokio::test]
 async fn websocket_proxy_connect_response_header_is_bounded_and_redacted() {
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let proxy_secret = "PROXY_RESPONSE_SECRET_DO_NOT_LEAK";
     let server_token = "SERVER_TOKEN_DO_NOT_LEAK";
@@ -5204,11 +5204,15 @@ async fn websocket_proxy_connect_response_header_is_bounded_and_redacted() {
         let connect = read_async_http_headers(&mut stream).await;
         assert!(!connect.contains(server_token), "{connect}");
         let mut response = format!("HTTP/1.1 200 OK\r\nX-Secret: {proxy_secret}\r\n").into_bytes();
-        response.extend(std::iter::repeat_n(
-            b'x',
-            WS_PROXY_CONNECT_HEADER_MAX_BYTES + 1024,
-        ));
-        let _ = stream.write_all(&response).await;
+        assert!(response.len() < WS_PROXY_CONNECT_HEADER_MAX_BYTES);
+        response.resize(WS_PROXY_CONNECT_HEADER_MAX_BYTES, b'x');
+        stream.write_all(&response).await.unwrap();
+        stream.flush().await.unwrap();
+        // Keep the synthetic proxy alive until the client consumes the bounded
+        // header prefix and closes. Dropping immediately can surface a Windows
+        // connection-reset error before the client observes the size fence.
+        let mut byte = [0u8; 1];
+        let _ = stream.read(&mut byte).await;
     });
 
     let ws_url = "ws://127.0.0.1:9/api/agents/ws";
