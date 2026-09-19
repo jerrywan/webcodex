@@ -2075,12 +2075,14 @@ mod tests {
         req.timeout_ms = Some(1_000);
         let host_for_execute = host.clone();
         let task = tokio::spawn(async move {
-            execute_with_termination_mode(
+            execute_with_termination_mode_inner(
                 host_for_execute,
                 req,
                 CodeModeTerminationMode::DrainStartedChildren {
                     max_drain_ms: 5_000,
                 },
+                Arc::new(Semaphore::new(1)),
+                RuntimeStartupConfig::default(),
             )
             .await
         });
@@ -2112,10 +2114,12 @@ mod tests {
         req.timeout_ms = Some(50);
         let host_for_execute = host.clone();
         let task = tokio::spawn(async move {
-            execute_with_termination_mode(
+            execute_with_termination_mode_inner(
                 host_for_execute,
                 req,
                 CodeModeTerminationMode::DrainStartedChildren { max_drain_ms: 50 },
+                Arc::new(Semaphore::new(1)),
+                RuntimeStartupConfig::default(),
             )
             .await
         });
@@ -2137,10 +2141,12 @@ mod tests {
         let req = request("tools.effect({}); text('frontend done');", &["effect"]);
         let host_for_execute = host.clone();
         let task = tokio::spawn(async move {
-            execute_with_termination_mode(
+            execute_with_termination_mode_inner(
                 host_for_execute,
                 req,
                 CodeModeTerminationMode::DrainStartedChildren { max_drain_ms: 50 },
+                Arc::new(Semaphore::new(1)),
+                RuntimeStartupConfig::default(),
             )
             .await
         });
@@ -2170,12 +2176,14 @@ mod tests {
         req.timeout_ms = Some(1_000);
         let host_for_execute = host.clone();
         let task = tokio::spawn(async move {
-            execute_with_termination_mode(
+            execute_with_termination_mode_inner(
                 host_for_execute,
                 req,
                 CodeModeTerminationMode::DrainStartedChildren {
                     max_drain_ms: 5_000,
                 },
+                Arc::new(Semaphore::new(1)),
+                RuntimeStartupConfig::default(),
             )
             .await
         });
@@ -2213,7 +2221,16 @@ mod tests {
         );
         req.timeout_ms = Some(1_000);
         let host_for_execute = host.clone();
-        let task = tokio::spawn(async move { execute(host_for_execute, req).await });
+        let task = tokio::spawn(async move {
+            execute_with_termination_mode_inner(
+                host_for_execute,
+                req,
+                CodeModeTerminationMode::ReturnAtFrontendDeadline,
+                Arc::new(Semaphore::new(1)),
+                RuntimeStartupConfig::default(),
+            )
+            .await
+        });
 
         host.wait_for_started(1).await;
         let result = tokio::time::timeout(Duration::from_secs(5), task)

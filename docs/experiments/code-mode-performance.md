@@ -314,13 +314,17 @@ cargo fmt --all -- --check
 git diff --check
 ```
 
-The feature-enabled default parallel package command was attempted twice. Both runs
-reached the same two pre-existing effect-aware timeout tests and stalled; the identical
-command on the unchanged `main` baseline stalls on those same two tests. Running the
-package with `-- --test-threads=1` passes all 28 unit tests plus both value-conversion
-integration tests, while the latency probe remains ignored unless explicitly requested.
-The feature-disabled package run passes its single configuration test with V8-only
-cases excluded. The root integration check continues to exercise exact Project/Session
-binding through canonical read dispatch, and the all-targets experimental feature check
-passes. No root runtime contract, permission rule, stage allowlist, Server deployment,
-Runner deployment, or configured concurrency limit is changed by this patch.
+The feature-enabled default parallel package command passes all 28 unit tests plus both
+value-conversion integration tests; the latency probe remains ignored unless explicitly
+requested. During review, two effect-aware timeout tests initially stalled only under the
+parallel harness because they shared the process-wide execution slots with unrelated
+runtime tests and could wait forever for a host-start notification after their own call
+had timed out before dispatch. Those lifecycle tests now reuse the private per-test
+semaphore seam already used by the startup tests, so they still exercise the same runtime
+semantics without cross-test capacity contention. The feature-disabled package run passes
+its single configuration test with V8-only cases excluded. Root integration checks pass
+for exact Project/Session binding, E1 read-only orchestration, E2a validation admission,
+and E2c frontend-timeout preservation of the exact validation Job. The all-targets
+experimental feature check also passes. No root runtime contract, permission rule, stage
+allowlist, Server deployment, Runner deployment, or configured concurrency limit is
+changed by this patch.
