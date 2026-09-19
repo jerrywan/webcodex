@@ -1714,6 +1714,22 @@ impl ToolRuntime {
         } else {
             None
         };
+        // Resolve model-facing Project selectors exactly once under the current
+        // authenticated principal, then bind only the internal execution call to
+        // that canonical identity. Several specialized adapters still perform
+        // legacy ProjectConfig lookups without an AuthContext; feeding them the
+        // raw caller-scoped `~pN` selector would incorrectly re-resolve it in the
+        // local-dev principal namespace. The retained `project_resolution` keeps
+        // the canonical id + Runner root fingerprint fence used by authorization,
+        // context projection, and adapters that consume ResolvedProject directly.
+        if let Some(resolved) = project_resolution
+            .as_ref()
+            .and_then(|resolution| resolution.as_ref().ok())
+        {
+            if let Some(project) = call.project_mut() {
+                project.clone_from(&resolved.resolved_id);
+            }
+        }
         let mut result = self
             .dispatch_authorized_inner(
                 call,

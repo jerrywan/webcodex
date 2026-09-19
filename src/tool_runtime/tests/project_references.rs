@@ -1,7 +1,8 @@
 use super::support::*;
 use crate::runner_protocol::{RunnerCapabilities, RunnerProjectSummary};
 use crate::tool_runtime::projects::ListProjectsOptions;
-use crate::tool_runtime::ToolRuntime;
+use crate::tool_runtime::{ToolCall, ToolRuntime};
+use serde_json::json;
 use std::sync::Arc;
 
 fn root(hex: char) -> String {
@@ -34,6 +35,37 @@ fn project_ref_for(listed: &crate::tool_runtime::ToolResult, canonical: &str) ->
 fn runtime_with_reference_db(path: &std::path::Path) -> ToolRuntime {
     let db = Arc::new(crate::Database::open(&path.to_path_buf()).unwrap());
     ToolRuntime::new_for_tests().with_project_reference_database(db)
+}
+
+async fn dispatch_shell_success(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    auth: &crate::auth::AuthContext,
+    project_selector: &str,
+    expected_cwd: &str,
+) {
+    let call = ToolCall::from_tool_name(
+        "run_shell",
+        json!({
+            "project": project_selector,
+            "command": "pwd",
+            "timeout_secs": 10,
+            "sync_wait_secs": 10
+        }),
+    )
+    .unwrap();
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let auth = auth.clone();
+        async move { runtime.dispatch_with_auth(call, Some(&auth)).await }
+    });
+    let request = wait_for_patch_agent_request(runtime, client_id).await;
+    assert_eq!(request.command, "pwd");
+    assert_eq!(request.cwd.as_deref(), Some(expected_cwd));
+    complete_patch_agent_request(runtime, client_id, &request.request_id, 0, expected_cwd, "")
+        .await;
+    let result = task.await.unwrap();
+    assert!(result.success, "{:?}", result.error);
 }
 
 #[tokio::test]
@@ -178,6 +210,169 @@ async fn project_refs_are_principal_scoped_and_reauthorize_visibility() {
             .is_err(),
         "short ref must rerun current Runner visibility even for the same principal namespace"
     );
+}
+
+#[tokio::test]
+async fn server_issued_project_ref_crosses_real_project_scoped_dispatch_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    let runtime = runtime_with_reference_db(&tmp.path().join("dispatch-refs.db"));
+    let client_id = "project-ref-dispatch";
+    let canonical = "agent:project-ref-dispatch:repo";
+    let original_path = "/srv/project-ref-dispatch";
+    let replacement_path = "/srv/project-ref-dispatch-replacement";
+    let alice = auth_context(Some("alice"), false);
+    register_agent_with_projects(
+        &runtime,
+        client_id,
+        Some("alice"),
+        RunnerCapabilities {
+            shell: true,
+            file_read: true,
+            git: true,
+            internal_posix_script: true,
+            ..Default::default()
+        },
+        vec![project(client_id, "repo", "repo", original_path, '7')],
+    )
+    .await;
+
+    let listed = runtime
+        .dispatch_with_auth(
+            ToolCall::ListProjects {
+                client_id: None,
+                project: None,
+                query: None,
+                limit: None,
+                summary_only: false,
+            },
+            Some(&alice),
+        )
+        .await;
+    assert!(listed.success, "{:?}", listed.error);
+    let project_ref = project_ref_for(&listed, canonical);
+    assert!(project_ref.starts_with("~p"));
+
+    // The exact Server-issued selector must cross the real model-facing shell
+    // dispatch path and reach the Project that issued it.
+    dispatch_shell_success(&runtime, client_id, &alice, &project_ref, original_path).await;
+
+    // A representative read-only Project tool already consumes ResolvedProject;
+    // keep it in this regression so both dispatch styles stay aligned.
+    let read = ToolCall::from_tool_name(
+        "read_files",
+        json!({"project": project_ref, "items": [{"path": "README.md", "limit": 2}]}),
+    )
+    .unwrap();
+    let read_task = tokio::spawn({
+        let runtime = runtime.clone();
+        let auth = alice.clone();
+        async move { runtime.dispatch_with_auth(read, Some(&auth)).await }
+    });
+    let read_request = wait_for_patch_agent_request(&runtime, client_id).await;
+    assert_eq!(read_request.kind, "file_read");
+    assert_eq!(read_request.path.as_deref(), Some("README.md"));
+    complete_agent_ranged_file_read_request(&runtime, client_id, &read_request, "one\ntwo\n").await;
+    let read_result = read_task.await.unwrap();
+    assert!(read_result.success, "{:?}", read_result.error);
+    assert_eq!(read_result.output["project"], canonical);
+
+    // Git uses a specialized dispatcher that historically repeated the same
+    // auth-less resolution mistake as shell. Exercise that boundary too.
+    let git = ToolCall::from_tool_name("git_status", json!({"project": project_ref})).unwrap();
+    let git_task = tokio::spawn({
+        let runtime = runtime.clone();
+        let auth = alice.clone();
+        async move { runtime.dispatch_with_auth(git, Some(&auth)).await }
+    });
+    let git_request = wait_for_patch_agent_request(&runtime, client_id).await;
+    assert_eq!(git_request.command, "git status --porcelain");
+    assert_eq!(git_request.cwd.as_deref(), Some(original_path));
+    complete_patch_agent_request(&runtime, client_id, &git_request.request_id, 0, "", "").await;
+    let git_result = git_task.await.unwrap();
+    assert!(git_result.success, "{:?}", git_result.error);
+
+    // Full canonical ids remain first-class selectors.
+    dispatch_shell_success(&runtime, client_id, &alice, canonical, original_path).await;
+
+    // A different principal cannot use or infer Alice's mapping.
+    let bob = auth_context(Some("bob"), false);
+    let bob_result = runtime
+        .dispatch_with_auth(
+            ToolCall::from_tool_name(
+                "run_shell",
+                json!({"project": project_ref, "command": "pwd"}),
+            )
+            .unwrap(),
+            Some(&bob),
+        )
+        .await;
+    assert!(!bob_result.success);
+    let bob_projection = format!(
+        "{} {}",
+        bob_result.error.as_deref().unwrap_or_default(),
+        bob_result.output
+    );
+    assert!(bob_projection.contains("unknown_project"));
+    assert!(!bob_projection.contains(canonical));
+    assert!(!bob_projection.contains(original_path));
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
+
+    // Keep Alice's stable principal identity while changing the current Runner
+    // visibility identity. The old ref must be reauthorized and fail closed.
+    let mut alice_without_visibility = alice.clone();
+    alice_without_visibility.username = Some("bob".to_string());
+    let revoked_result = runtime
+        .dispatch_with_auth(
+            ToolCall::from_tool_name(
+                "run_shell",
+                json!({"project": project_ref, "command": "pwd"}),
+            )
+            .unwrap(),
+            Some(&alice_without_visibility),
+        )
+        .await;
+    assert!(!revoked_result.success);
+    assert!(revoked_result
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("unknown_project")));
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
+
+    // Re-register the same canonical id at a different root identity. The old
+    // short ref is fenced to the original fingerprint and must never retarget.
+    crate::test_support::apply_project_inventory_snapshot(
+        &runtime.runner_registry,
+        client_id,
+        "inst",
+        vec![project(client_id, "repo", "repo", replacement_path, '8')],
+    )
+    .await;
+    let stale_result = runtime
+        .dispatch_with_auth(
+            ToolCall::from_tool_name(
+                "run_shell",
+                json!({"project": project_ref, "command": "pwd"}),
+            )
+            .unwrap(),
+            Some(&alice),
+        )
+        .await;
+    assert!(!stale_result.success);
+    assert!(stale_result
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("unknown_project")));
+    assert!(probe_patch_agent_request(&runtime, client_id)
+        .await
+        .is_none());
+
+    // Canonical identity deliberately addresses the currently registered
+    // replacement Project, proving the legacy selector contract is unchanged.
+    dispatch_shell_success(&runtime, client_id, &alice, canonical, replacement_path).await;
 }
 
 #[tokio::test]
