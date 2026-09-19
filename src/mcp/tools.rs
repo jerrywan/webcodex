@@ -44,30 +44,31 @@ fn filter_specs_for_oauth(mut specs: Vec<ToolSpec>, auth: Option<&AuthContext>) 
     specs
 }
 
-fn stateless_operator_extension_specs_for_auth(
+// Discovery projection only. Canonical operator-extension specs still own
+// direct compatibility, capability-aware manifests, and gateway admission.
+fn stateless_advertised_operator_extension_specs_for_auth(
     stateless_2026: bool,
     auth: Option<&AuthContext>,
 ) -> Vec<ToolSpec> {
     if !stateless_2026 {
         return Vec::new();
     }
-    let oauth_scope_projection = auth.is_some_and(AuthContext::is_oauth_token);
     crate::tool_runtime::stateless_operator_extension_tool_specs()
         .into_iter()
         .filter(
             |spec| match runtime_tool_operator_extension_family(&spec.name) {
-                Some(ToolOperatorExtensionFamily::SkillRuntime) => {
-                    !oauth_scope_projection || check_runtime_tool_scope(auth, &spec.name).is_ok()
-                }
                 Some(ToolOperatorExtensionFamily::SkillManagement) => {
                     auth.is_some_and(|auth| auth.has_scope(crate::auth::SCOPE_ADMIN))
                 }
+                Some(ToolOperatorExtensionFamily::TraceDiagnostics) => {
+                    check_runtime_tool_scope(auth, &spec.name).is_ok()
+                }
                 Some(
-                    ToolOperatorExtensionFamily::MemoryRuntime
-                    | ToolOperatorExtensionFamily::MemoryManagement
-                    | ToolOperatorExtensionFamily::TraceDiagnostics,
-                ) => check_runtime_tool_scope(auth, &spec.name).is_ok(),
-                None => false,
+                    ToolOperatorExtensionFamily::SkillRuntime
+                    | ToolOperatorExtensionFamily::MemoryRuntime
+                    | ToolOperatorExtensionFamily::MemoryManagement,
+                )
+                | None => false,
             },
         )
         .collect()
@@ -308,7 +309,7 @@ pub(super) fn mcp_tools_list_payload_with_features_for_auth(
         crate::model_surface::adaptive_runtime_direct_tool_specs(),
         auth,
     );
-    specs.extend(stateless_operator_extension_specs_for_auth(
+    specs.extend(stateless_advertised_operator_extension_specs_for_auth(
         stateless_2026,
         auth,
     ));

@@ -2392,13 +2392,14 @@ async fn tool_manifest_operator_extensions_require_explicit_family_capabilities(
         skill_runtime: true,
         ..Default::default()
     };
-    let skill = manifest("skill_list", skill_only).await;
-    assert!(skill.success, "{:?}", skill.error);
-    assert_eq!(skill.output["contract"]["availability"], "gateway");
-    assert_eq!(
-        skill.output["contract"]["gateway_tool"],
-        "call_runtime_tool"
-    );
+    for name in ["skill_list", "skill_read_file"] {
+        let skill = manifest(name, skill_only).await;
+        assert!(skill.success, "{:?}", skill.error);
+        assert_eq!(skill.output["contract"]["availability"], "gateway");
+        assert_eq!(skill.output["contract"]["gateway_tool"], "call_runtime_tool");
+        assert!(skill.output["contract"]["input_schema"].is_object());
+        assert!(!manifest(name, ToolProtocolCapabilities::default()).await.success);
+    }
     for hidden_without_skill_cap in ["skill_install", "memory_search", "read_tool_trace"] {
         let hidden = manifest(hidden_without_skill_cap, skill_only).await;
         assert!(
@@ -2412,7 +2413,13 @@ async fn tool_manifest_operator_extensions_require_explicit_family_capabilities(
         memory_surface: true,
         ..Default::default()
     };
-    assert!(manifest("memory_search", memory_only).await.success);
+    let memory = manifest("memory_search", memory_only).await;
+    assert!(memory.success, "{:?}", memory.error);
+    assert_eq!(memory.output["contract"]["availability"], "gateway");
+    assert_eq!(memory.output["contract"]["gateway_tool"], "call_runtime_tool");
+    let canonical = crate::tool_runtime::memory_runtime_tool_specs().remove(0);
+    assert_eq!(memory.output["contract"]["description"], canonical.description);
+    assert_eq!(memory.output["contract"]["input_schema"], canonical.input_schema);
     assert!(!manifest("skill_list", memory_only).await.success);
     assert!(!manifest("read_tool_trace", memory_only).await.success);
 

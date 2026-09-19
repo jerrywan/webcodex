@@ -86,7 +86,8 @@ async fn mcp_tools_list_uses_adaptive_inventory_in_both_schema_modes() {
             .map(|tool| tool["name"].as_str().unwrap())
             .collect::<Vec<_>>();
         assert!(stateless_names.contains(&crate::model_surface::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME));
-        assert!(stateless_names.contains(&"skill_list"));
+        assert!(!stateless_names.contains(&"skill_list"));
+        assert!(!stateless_names.contains(&"skill_read_file"));
         assert!(!stateless_names.contains(&"memory_search"));
         assert!(!stateless_names.contains(&"read_tool_trace"));
         for tool in stateless_tools {
@@ -154,185 +155,120 @@ async fn stateless_mcp_gateway_advertises_peer_ack_without_session_wrappers() {
 }
 
 #[test]
-fn memory_tools_are_stateless_protocol_extensions_scope_filtered_and_schema_static() {
-    let generic_names = registered_tool_specs()
+fn memory_tools_remain_canonical_extensions_without_top_level_advertising() {
+    let specs = crate::tool_runtime::memory_runtime_tool_specs()
         .into_iter()
-        .map(|spec| spec.name)
+        .chain(crate::tool_runtime::memory_management_tool_specs())
         .collect::<Vec<_>>();
-    for name in [
-        "memory_search",
-        "memory_read",
-        "memory_set",
-        "memory_delete",
-        "memory_scope_list",
-        "memory_scope_purge",
-    ] {
-        assert!(!generic_names.iter().any(|generic| generic == name));
+    assert_eq!(specs.len(), 6);
+    let mut full_auth = crate::auth::shared_key_context("memory-tools-test");
+    full_auth.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
+    for compact in [false, true] {
+        for auth in [None, Some(&full_auth)] {
+            let payload = mcp_tools_list_payload_with_features_for_auth(
+                compact, false, true, true, auth,
+            );
+            for spec in &specs {
+                assert!(!payload["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == spec.name));
+                assert!(crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(&spec.name, true));
+                assert!(!crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(&spec.name, false));
+            }
+        }
     }
-
-    let render = |auth: Option<&crate::auth::AuthContext>| {
-        let mut payload =
-            mcp_tools_list_payload_with_features_for_auth(false, false, true, true, auth);
-        add_stateless_workflow_recorder_metadata(&mut payload);
-        payload
-    };
-    let memory_names = |payload: &Value| {
-        payload["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|tool| tool["name"].as_str())
-            .filter(|name| name.starts_with("memory_"))
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
-    let oauth = |scopes: &[&str]| crate::auth::AuthContext {
-        scopes: scopes.iter().map(|scope| (*scope).to_string()).collect(),
-        ..crate::auth::AuthContext::new(crate::auth::AuthKind::OAuth2Token)
-    };
-
-    assert!(memory_names(&render(None)).is_empty());
-    assert!(memory_names(&render(Some(&oauth(&[crate::auth::SCOPE_PROJECT_READ])))).is_empty());
-    assert!(memory_names(&render(Some(&oauth(&[crate::auth::SCOPE_MEMORY_READ])))).is_empty());
-    assert_eq!(
-        memory_names(&render(Some(&oauth(&[
-            crate::auth::SCOPE_PROJECT_READ,
-            crate::auth::SCOPE_MEMORY_READ,
-        ])))),
-        vec!["memory_search", "memory_read"]
-    );
-    assert!(memory_names(&render(Some(&oauth(&[crate::auth::SCOPE_PROJECT_WRITE])))).is_empty());
-    assert!(memory_names(&render(Some(&oauth(&[crate::auth::SCOPE_MEMORY_MANAGE])))).is_empty());
-    assert_eq!(
-        memory_names(&render(Some(&oauth(&[
-            crate::auth::SCOPE_PROJECT_WRITE,
-            crate::auth::SCOPE_MEMORY_MANAGE,
-        ])))),
-        vec!["memory_set", "memory_delete"]
-    );
-    let full_auth = oauth(&[
-        crate::auth::SCOPE_PROJECT_READ,
-        crate::auth::SCOPE_MEMORY_READ,
-        crate::auth::SCOPE_PROJECT_WRITE,
-        crate::auth::SCOPE_MEMORY_MANAGE,
-    ]);
-    let full = render(Some(&full_auth));
-    // Project Memory manage authority is not global lifecycle authority.
-    assert!(!memory_names(&full).contains(&"memory_scope_list".to_string()));
-    assert!(!memory_names(&full).contains(&"memory_scope_purge".to_string()));
-    let admin_auth = oauth(&[crate::auth::SCOPE_ADMIN]);
-    let admin = render(Some(&admin_auth));
-    assert!(memory_names(&admin).contains(&"memory_scope_list".to_string()));
-    assert!(memory_names(&admin).contains(&"memory_scope_purge".to_string()));
-    assert_eq!(
-        memory_names(&full),
-        vec![
-            "memory_search",
-            "memory_read",
-            "memory_set",
-            "memory_delete"
-        ]
-    );
-
-    let open = crate::auth::open_anonymous_context();
-    assert!(memory_names(&render(Some(&open))).is_empty());
-    let project_credential =
-        crate::auth::shared_key::project_credential_context("wc_pgrant_memorytools");
-    assert!(memory_names(&render(Some(&project_credential))).is_empty());
-    let direct = crate::auth::shared_key_context("memory-tools-direct-shared-key");
-    assert_eq!(
-        memory_names(&render(Some(&direct))),
-        vec![
-            "memory_search",
-            "memory_read",
-            "memory_set",
-            "memory_delete"
-        ]
-    );
-    let project_share = crate::auth::AuthContext {
-        kind: crate::auth::AuthKind::OAuth2Token,
-        scopes: crate::auth::project_share::PROJECT_SHARE_OAUTH_SCOPES
-            .iter()
-            .map(|scope| (*scope).to_string())
-            .collect(),
-        token_kind: Some(crate::auth::project_share::PROJECT_SHARE_OAUTH_TOKEN_KIND.to_string()),
-        ..crate::auth::AuthContext::new(crate::auth::AuthKind::OAuth2Token)
-    };
-    assert!(memory_names(&render(Some(&project_share))).is_empty());
-
-    let memory_search = full["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|tool| tool["name"] == "memory_search")
-        .unwrap();
-    let context_request = &memory_search["inputSchema"]["properties"]["context_request"];
-    assert_eq!(context_request["items"]["type"], "string");
-    assert!(context_request["items"].get("enum").is_none());
-    let description = context_request["description"].as_str().unwrap();
-    assert!(description.contains("after this tool's main effect/observation"));
-    assert!(description.contains("grants no authority"));
-    assert!(description.contains("retroactive precondition"));
-    for key in [
-        "project.instructions",
-        "webcodex.workflow",
-        "skills.catalog",
-        "plugins.catalog",
-        "memory.bootstrap",
-    ] {
-        assert!(description.contains(key));
+    let search = specs.iter().find(|spec| spec.name == "memory_search").unwrap();
+    assert!(search.output_schema["properties"]["output"]["properties"]["memories"].is_object());
+    let set = specs.iter().find(|spec| spec.name == "memory_set").unwrap();
+    for required in ["project:write", "memory:manage", "permission", "credentials", "execution authority"] {
+        assert!(set.description.contains(required), "{}", set.description);
     }
-    assert!(
-        memory_search["outputSchema"]["properties"]["output"]["properties"]["memories"].is_object()
-    );
+}
 
-    let set_description = full["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|tool| tool["name"] == "memory_set")
-        .and_then(|tool| tool["description"].as_str())
-        .unwrap();
-    for required in [
-        "project:write",
-        "memory:manage",
-        "permission",
-        "credentials",
-        "execution authority",
-    ] {
-        assert!(
-            set_description.contains(required),
-            "memory_set: {set_description}"
-        );
+#[tokio::test]
+async fn hidden_extensions_keep_exact_manifest_and_gateway_execution() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = std::sync::Arc::new(crate::Database::open(&tmp.path().join("memory.db")).unwrap());
+    let runtime = test_runtime().with_memory_database(db).with_permission_evaluator(
+        crate::tool_runtime::permissions::PermissionEvaluator::with_mode(
+            crate::tool_runtime::permissions::AuthorityMode::TrustedAgent,
+        ),
+    );
+    let mut auth = crate::auth::AuthContext::new(crate::auth::AuthKind::OAuth2Token);
+    auth.username = Some("memory-owner".to_string());
+    auth.user_id = Some("user-memory-owner".to_string());
+    auth.token_kind = Some("oauth2".to_string());
+    auth.scopes = ["runtime:read", "project:read", "project:write", "memory:read", "memory:manage"]
+        .into_iter().map(str::to_string).collect();
+    runtime.runner_registry.register_with_auth(
+        crate::test_support::current_runner_registration(RunnerRegisterRequest {
+            client_id: "hidden-extension-runner".to_string(),
+            runner_instance_id: "inst".to_string(),
+            runner_protocol_generation: crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
+            display_name: None, owner: auth.username.clone(), hostname: None, host_context: None,
+            capabilities: RunnerCapabilities::default(), policy: None,
+            process_started_at: None, build: None, job_concurrency_limit: None,
+            job_inventory: None, coding_agent_providers: None, coding_agent_inventory: None,
+        }),
+        Some(&crate::test_support::runner_access(&auth)),
+    ).await.unwrap();
+    crate::test_support::apply_project_inventory_snapshot(
+        &runtime.runner_registry, "hidden-extension-runner", "inst",
+        vec![RunnerProjectSummary {
+            id: "demo".to_string(), name: None, path: tmp.path().display().to_string(),
+            allow_patch: true, kind: None, registration_source: None, description: None,
+            hooks: Vec::new(), disabled: false, revision: None, root_fingerprint: None,
+            lineage: None, git_branch: None, git_head: None, git_dirty: None,
+            updated_at: 1, shell_profile: None,
+        }],
+    ).await;
+    let project = crate::tool_runtime::runner_project_runtime_id("hidden-extension-runner", "demo");
+    for name in ["memory_search", "skill_list", "skill_read_file"] {
+        let McpOutcome::Ok(value) = handle_mcp_request(&runtime, rpc(
+            "tools/call", Some(json!(1)), mcp_2026_params(json!({
+                "name": "tool_manifest", "arguments": {"tool_name": name},
+            })),
+        ), Some(&auth)).await else { panic!("manifest {name}"); };
+        let output = &value["result"]["structuredContent"]["output"];
+        assert_eq!(output["route"], json!({"mode": "gateway", "via": "call_runtime_tool"}));
+        let spec = crate::tool_runtime::stateless_operator_extension_tool_specs()
+            .into_iter().find(|spec| spec.name == name).unwrap();
+        assert_eq!(output["description"], spec.description);
+        assert_eq!(output["input_schema"], spec.input_schema);
     }
-
-    assert_eq!(
-        full,
-        render(Some(&full_auth)),
-        "Memory schemas are record-content independent"
-    );
-    assert_eq!(
-        crate::tool_runtime::memory_runtime_tool_specs()
-            .into_iter()
-            .map(|spec| spec.name)
-            .collect::<Vec<_>>(),
-        vec!["memory_search", "memory_read"]
-    );
-    assert_eq!(
-        crate::tool_runtime::memory_management_tool_specs()
-            .into_iter()
-            .map(|spec| spec.name)
-            .collect::<Vec<_>>(),
-        vec![
-            "memory_set",
-            "memory_delete",
-            "memory_scope_list",
-            "memory_scope_purge"
-        ]
-    );
-
-    let legacy_full = mcp_tools_list_payload_with_compact(false);
-    assert!(memory_names(&legacy_full).is_empty());
+    for (name, arguments) in [
+        ("memory_set", json!({"project": project, "memory_key": "discovery", "summary": "Keep gateway reachability", "bootstrap": true})),
+        ("memory_search", json!({"project": project, "context_request": ["memory.bootstrap"]})),
+        ("memory_read", json!({"project": project, "memory_key": "discovery"})),
+    ] {
+        let McpOutcome::Ok(value) = handle_mcp_request(&runtime, rpc(
+            "tools/call", Some(json!(2)), mcp_2026_params(adaptive_runtime_gateway_params(name, arguments)),
+        ), Some(&auth)).await else { panic!("gateway {name}"); };
+        let result = &value["result"]["structuredContent"];
+        assert_eq!(result["success"], true, "{name}: {result}");
+        if name == "memory_search" {
+            let material = &result["output"]["context_projection"]["materials"][0];
+            assert_eq!(material["key"], "memory.bootstrap");
+            assert_eq!(material["status"], "available");
+            assert!(material["projection"].to_string().contains("Keep gateway reachability"));
+        }
+    }
+    // Both compatibility paths reach the same Project authority boundary;
+    // gateway admission never makes an unknown Project available.
+    for (name, arguments) in [
+        ("skill_list", json!({"project": "missing-project"})),
+        ("skill_read_file", json!({"project": "missing-project", "skill_id": "wc_skill_AAAAAAAAAAAAAAAAAAAAAA", "path": "SKILL.md"})),
+    ] {
+        let mut results = Vec::new();
+        for params in [json!({"name": name, "arguments": arguments}), adaptive_runtime_gateway_params(name, arguments)] {
+            let McpOutcome::Ok(value) = handle_mcp_request(&runtime, rpc(
+                "tools/call", Some(json!(3)), mcp_2026_params(params),
+            ), Some(&auth)).await else { panic!("compatibility call {name}"); };
+            let result = value["result"]["structuredContent"].clone();
+            assert_eq!(result["success"], false, "{name}: {result}");
+            assert_eq!(result["output"]["error_kind"], "unknown_project", "{name}: {result}");
+            results.push(result);
+        }
+        assert_eq!(results[0], results[1]);
+    }
 }
 
 #[test]
@@ -409,7 +345,7 @@ fn skill_runtime_tools_are_stateless_protocol_extensions_and_schema_static() {
         .collect::<Vec<_>>();
     assert_eq!(
         skill_names,
-        vec!["skill_load", "skill_list", "skill_read_file"]
+        vec!["skill_load"]
     );
 
     let run_skill_resource = before["tools"]
@@ -442,23 +378,14 @@ fn skill_runtime_tools_are_stateless_protocol_extensions_and_schema_static() {
         ])
     );
 
-    let skill_list = before["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|tool| tool["name"] == "skill_list")
-        .unwrap();
-    assert_eq!(
-        skill_list["inputSchema"]["properties"]["limit"]["maximum"],
-        64
-    );
-    let context_request = &skill_list["inputSchema"]["properties"]["context_request"];
-    assert_eq!(context_request["items"]["type"], "string");
-    assert!(context_request["items"].get("enum").is_none());
-    assert_eq!(
-        skill_list["outputSchema"]["properties"]["output"]["properties"]["skills"]["type"],
-        "array"
-    );
+    let compatibility_specs = crate::tool_runtime::stateless_operator_extension_tool_specs();
+    let skill_list = compatibility_specs.iter().find(|spec| spec.name == "skill_list").unwrap();
+    assert_eq!(skill_list.input_schema["properties"]["limit"]["maximum"], 64);
+    assert_eq!(skill_list.output_schema["properties"]["output"]["properties"]["skills"]["type"], "array");
+    for name in ["skill_list", "skill_read_file"] {
+        assert!(crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(name, true));
+        assert!(!crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(name, false));
+    }
 
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join(".agents/skills/foo")).unwrap();
@@ -508,7 +435,7 @@ fn skill_management_tools_require_admin_and_remain_fixed_schema() {
         .collect::<Vec<_>>();
     assert_eq!(
         shared_names,
-        vec!["skill_load", "skill_list", "skill_read_file"]
+        vec!["skill_load"]
     );
 
     let admin = crate::auth::AuthContext {
@@ -529,8 +456,6 @@ fn skill_management_tools_require_admin_and_remain_fixed_schema() {
         names,
         vec![
             "skill_load",
-            "skill_list",
-            "skill_read_file",
             "skill_versions",
             "skill_install",
             "skill_activate",
@@ -1402,6 +1327,34 @@ fn mcp_tools_list_compact_is_smaller_than_full_serialized() {
         "compact unexpectedly tiny: {}",
         compact.len()
     );
+}
+
+#[tokio::test]
+async fn mcp_tools_list_stateless_serialized_size() {
+    let mut scoped = crate::auth::shared_key_context("surface-size-test");
+    scoped.scopes.extend([
+        crate::auth::SCOPE_PLUGIN_INSPECT.to_string(),
+        crate::auth::SCOPE_PLUGIN_INVOKE.to_string(),
+        crate::auth::SCOPE_PLUGIN_MANAGE.to_string(),
+    ]);
+    let mut admin = scoped.clone();
+    admin.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
+    for (label, auth) in [("anonymous", None), ("scoped", Some(&scoped)), ("admin", Some(&admin))] {
+        for app_enabled in [false, true] {
+            let mut sizes = Vec::new();
+            for compact in [true, false] {
+                let McpOutcome::Ok(value) = crate::mcp::tools::handle_list(
+                    Some(json!(1)), auth, true, compact, app_enabled,
+                ).await else { panic!("tools/list"); };
+                let result = &value["result"];
+                let count = result["tools"].as_array().unwrap().len();
+                let bytes = serde_json::to_vec(result).unwrap().len();
+                eprintln!("MCP_SIZE {label} app={app_enabled} compact={compact} count={count} bytes={bytes}");
+                sizes.push(bytes);
+            }
+            eprintln!("MCP_RATIO {label} app={app_enabled} {:.4}", sizes[0] as f64 / sizes[1] as f64);
+        }
+    }
 }
 
 // The compact switch is the tested product behavior: `tools/call` must be

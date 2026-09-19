@@ -785,28 +785,15 @@ fn listed_tool_names(body: &Value) -> std::collections::HashSet<String> {
 
 #[tokio::test]
 async fn oauth2_memory_tools_require_canonical_project_and_memory_scopes() {
-    for (extra_scopes, expected) in [
-        ("project:read", vec![]),
-        ("memory:read", vec![]),
-        (
-            "project:read memory:read",
-            vec!["memory_search", "memory_read"],
-        ),
-        (
-            "project:write memory:manage",
-            vec!["memory_set", "memory_delete"],
-        ),
-        ("project:write", vec![]),
-        ("memory:manage", vec![]),
-        (
-            "project:read memory:read project:write memory:manage",
-            vec![
-                "memory_search",
-                "memory_read",
-                "memory_set",
-                "memory_delete",
-            ],
-        ),
+    for extra_scopes in [
+        "project:read",
+        "memory:read",
+        "project:read memory:read",
+        "project:write memory:manage",
+        "project:write",
+        "memory:manage",
+        "project:read memory:read project:write memory:manage",
+        "admin project:read memory:read project:write memory:manage",
     ] {
         let scopes = format!("runtime:read {extra_scopes}");
         let (_tmp, service, token) = oauth_mcp_service(&scopes);
@@ -819,11 +806,13 @@ async fn oauth2_memory_tools_require_canonical_project_and_memory_scopes() {
             "memory_read",
             "memory_set",
             "memory_delete",
+            "memory_scope_list",
+            "memory_scope_purge",
         ]
         .into_iter()
         .filter(|name| names.contains(*name))
         .collect::<Vec<_>>();
-        assert_eq!(actual, expected, "{scopes}");
+        assert!(actual.is_empty(), "{scopes}: {actual:?}");
     }
 
     for (scopes, tool, arguments, missing_scope) in [
@@ -853,14 +842,15 @@ async fn oauth2_memory_tools_require_canonical_project_and_memory_scopes() {
         ),
     ] {
         let (_tmp, service, token) = oauth_mcp_service(scopes);
-        let (status, body, challenge) = oauth_mcp_request(
-            &service,
-            &token,
-            "tools/call",
-            mcp_2026_params(json!({"name":tool,"arguments":arguments})),
-        )
-        .await;
-        assert_mcp_oauth_scope_rejected(status, &body, challenge.as_deref(), Some(missing_scope));
+        for params in [
+            json!({"name": tool, "arguments": arguments}),
+            adaptive_gateway_params(tool, arguments),
+        ] {
+            let (status, body, challenge) = oauth_mcp_request(
+                &service, &token, "tools/call", mcp_2026_params(params),
+            ).await;
+            assert_mcp_oauth_scope_rejected(status, &body, challenge.as_deref(), Some(missing_scope));
+        }
     }
 }
 

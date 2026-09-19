@@ -298,6 +298,14 @@ prose.
 
 The same ToolRuntime serves project-scoped local `share`/`run` instances and multi-project hosted Servers through one Adaptive Runtime contract. Project-scoped credentials change visibility and authority, not the model-facing runtime shape. Protocol-specific capabilities and MCP Apps may admit additional hidden presentation or resource operations without creating another runtime surface.
 
+Stateless MCP keeps Memory tools and the Skill compatibility tools `skill_list`
+and `skill_read_file` off the top-level `tools/list`, even with full OAuth scopes.
+Their exact contracts remain available through `tool_manifest(tool_name=...)`
+and execute through `call_runtime_tool` with unchanged scope, Project, permission,
+and capability checks. Existing direct protocol compatibility and the
+`memory.bootstrap` context sidecar remain supported. Ordinary Skill selection
+and execution keep the direct `skill_load` and `run_skill_resource` paths.
+
 ### ChatGPT file bridge
 
 When the connected MCP protocol/host admits the artifact capabilities, WebCodex supports
