@@ -145,6 +145,11 @@ impl ToolRuntime {
 
 fn work_result_session(summary: &webcodex_workflow_session::SessionSummary) -> Value {
     let latest = summary.events.iter().rev().find_map(|event| {
+        if !webcodex_tool_contracts::runtime_tool_activity_interaction(&event.tool_name)
+            .is_meaningful()
+        {
+            return None;
+        }
         let tool = bounded_token(&event.tool_name, MAX_WORK_RESULT_TOOL_CHARS)?;
         let kind = bounded_token(&event.kind, 64)?;
         let mut value = Map::new();

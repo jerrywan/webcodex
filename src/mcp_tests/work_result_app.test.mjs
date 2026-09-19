@@ -138,7 +138,7 @@ test("live progress performs bounded app-only polling and adapts to visibility",
   assert.deepEqual({ ...view.calls("work_result_state")[0].params.arguments }, input);
   await view.reply(view.calls("work_result_state")[0], toolResult({ work_result: nextState }));
   assert.equal(view.nodes.progressStatus.textContent, "cargo_test · completed");
-  assert.match(view.nodes.progressMeta.textContent, /9 tool events · live/);
+  assert.match(view.nodes.progressMeta.textContent, /9 session events · live/);
   await view.fireTimers(2500);
   assert.equal(view.calls("work_result_state").length, 2);
   await view.reply(view.calls("work_result_state")[1], toolResult({ work_result: nextState }));
@@ -173,6 +173,27 @@ test("closed Session stops automatic polling but remains manually refreshable", 
   assert.equal(view.timers.size, 0);
   assert.equal(view.nodes.refresh.disabled, false);
   assert.match(view.nodes.status.textContent, /closed/i);
+});
+
+test("unchanged active Session pauses automatic polling after bounded idle time and manual Refresh resumes it", async () => {
+  const view = app("mcp_work_result_app.html");
+  view.toolInput(input);
+  view.toolResult({ work_result: baseState });
+  await view.initialize();
+  assert.equal(view.timers.size, 1);
+
+  view.advanceTime(30 * 60 * 1000);
+  await view.visibility(false);
+  assert.equal(view.timers.size, 0);
+  assert.match(view.nodes.status.textContent, /auto refresh paused/);
+  assert.equal(view.calls("work_result_state").length, 0);
+
+  view.nodes.refresh.onclick();
+  await flush();
+  assert.equal(view.calls("work_result_state").length, 1);
+  await view.reply(view.calls("work_result_state")[0], toolResult({ work_result: baseState }));
+  assert.equal(view.nodes.status.textContent, "Up to date");
+  assert.equal([...view.timers.values()].some(timer => timer.delay === 2500), true);
 });
 
 test("user Refresh performs one exact state read and updates the snapshot", async () => {

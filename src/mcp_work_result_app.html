@@ -70,6 +70,10 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
   const CALL_TIMEOUT_MS = 10000;
   const VISIBLE_REFRESH_MS = 2500;
   const HIDDEN_REFRESH_MS = 12000;
+  const VISIBLE_IDLE_REFRESH_MS = 10000;
+  const HIDDEN_IDLE_REFRESH_MS = 30000;
+  const IDLE_BACKOFF_AFTER_MS = 60000;
+  const AUTO_REFRESH_IDLE_PAUSE_MS = 30 * 60 * 1000;
   const MAX_PROJECT = 512;
   const MAX_PATH = 512;
   const MAX_FILES = 8;
@@ -91,6 +95,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
   let refreshInFlight = false;
   let refreshTimer = null;
   let sessionLifecycle = null;
+  let lastStateChangeAt = null;
   let tornDown = false;
   const pending = new Map();
   const el = id => document.getElementById(id);
@@ -458,7 +463,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
     } else {
       el("progressStatus").textContent = session.lifecycle === "closed" ? "Session closed" : "Session active";
     }
-    const pieces = [`${session.events_total} tool events`];
+    const pieces = [`${session.events_total} session events`];
     if (session.history_partial) pieces.push("history partial");
     pieces.push(session.lifecycle === "closed" ? "closed" : "live");
     el("progressMeta").textContent = pieces.join(" · ");
@@ -478,14 +483,24 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
     button.textContent = refreshInFlight ? "Refreshing…" : "Refresh";
   }
 
+  function automaticRefreshDelay() {
+    const idleMs = lastStateChangeAt === null ? 0 : Math.max(0, Date.now() - lastStateChangeAt);
+    if (idleMs < IDLE_BACKOFF_AFTER_MS) return document.hidden ? HIDDEN_REFRESH_MS : VISIBLE_REFRESH_MS;
+    return document.hidden ? HIDDEN_IDLE_REFRESH_MS : VISIBLE_IDLE_REFRESH_MS;
+  }
+
   function scheduleRefresh(delay) {
     if (refreshTimer !== null) clearTimeout(refreshTimer);
     refreshTimer = null;
     if (tornDown || !hostInitialized || !identity || lastStateVersion === null || sessionLifecycle === "closed") return;
+    if (lastStateChangeAt !== null && Date.now() - lastStateChangeAt >= AUTO_REFRESH_IDLE_PAUSE_MS) {
+      if (!refreshInFlight) el("status").textContent = "Live · auto refresh paused";
+      return;
+    }
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
       void refresh(true);
-    }, delay ?? (document.hidden ? HIDDEN_REFRESH_MS : VISIBLE_REFRESH_MS));
+    }, delay ?? automaticRefreshDelay());
   }
 
   async function refresh(automatic = false) {
@@ -510,11 +525,13 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
       sessionLifecycle = state.session.lifecycle;
       if (state.state_version !== lastStateVersion) {
         lastStateVersion = state.state_version;
+        lastStateChangeAt = Date.now();
         render(state);
         el("status").textContent = sessionLifecycle === "closed"
           ? (automatic ? "Closed · updated" : "Updated · closed")
           : (automatic ? "Live · updated" : "Updated");
       } else {
+        if (!automatic) lastStateChangeAt = Date.now();
         el("status").textContent = sessionLifecycle === "closed"
           ? (automatic ? "Closed" : "Up to date · closed")
           : (automatic ? "Live" : "Up to date");
@@ -544,6 +561,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
     sessionLifecycle = state.session.lifecycle;
     if (!hasRefreshed && state.state_version !== lastStateVersion) {
       lastStateVersion = state.state_version;
+      lastStateChangeAt = Date.now();
       render(state);
     }
     el("status").textContent = sessionLifecycle === "closed" ? "Closed · manual Refresh available" : "Live";
