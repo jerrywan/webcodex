@@ -167,6 +167,10 @@ session isolation.
 
 ## Verification and platform notes
 
+For the actual macOS deployment identities, native/browser observations, test
+matrix, independent Runner restoration and rollback evidence, see
+[mini dogfood verification](DESKTOP_532_537_DOGFOOD.md).
+
 Desktop Rust tests cover multi-instance cleanup/generation fences, migration and
 interruption, private projections, independent observers, TOML identity/comment
 preservation, A/B re-materialization, updates/removals and cross-feature PID stability.
