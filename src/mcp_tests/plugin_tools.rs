@@ -1993,10 +1993,14 @@ async fn tool_manifest_returns_sparse_static_plugin_tool_contract_without_runner
             "Stateless MCP must preserve canonical Plugin business schema for {field}"
         );
     }
-    assert_eq!(
-        stateless_gateway["inputSchema"]["properties"]["recording_session_id"]["pattern"],
-        "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
-    );
+    for schema in [&output["input_schema"], &stateless_gateway["inputSchema"]] {
+        assert!(
+            schema["properties"]["recording_session_id"]
+                .get("pattern")
+                .is_none(),
+            "sparse Plugin discovery intentionally omits the opaque wc_sess_* regex"
+        );
+    }
 }
 
 #[tokio::test]
