@@ -510,13 +510,19 @@ fn explicit_controller_routes_worker_terminal_and_historical_wake_does_not_retar
         .resume_hint
         .contains(&format!("agent_id={controller}")));
     assert!(prepared.envelope.resume_hint.contains(&goal_id));
+    assert!(prepared.envelope.resume_hint.contains("get_goal(goal_id)"));
     assert!(prepared
         .envelope
         .resume_hint
-        .contains("independently get_goal(goal_id) and read_agent_task(task_id)"));
-    assert!(prepared.envelope.resume_hint.contains(
-        "grants no Goal, Task, Project, Runner, filesystem, Conversation, or Workflow Session authority"
-    ));
+        .contains("read_agent_task(task_id)"));
+    assert!(prepared
+        .envelope
+        .resume_hint
+        .contains("explicit next Goal decision"));
+    assert!(!prepared
+        .envelope
+        .resume_hint
+        .contains("grants no Goal, Task, Project, Runner"));
     assert_eq!(
         db.read_goal(&owner, &goal_id)
             .unwrap()
@@ -856,27 +862,32 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
         .envelope
         .resume_hint
         .contains("terminal_task_state=succeeded"));
+    let hint = &prepared.envelope.resume_hint;
     for required_semantic in [
-        "already dispatched by the Endpoint continuation carrier",
-        "OMIT activation_idempotency_key",
-        "Require the returned Wake to remain attention_event",
-        "Do not call start_agent_task_endpoint_continuation",
-        "consume this exact Wake",
-        "does not require a TaskAttempt lease or heartbeat",
-        "independently get_goal(goal_id) and read_agent_task(task_id)",
-        "grants no Goal, Task, Project, Runner, filesystem, Conversation, or Workflow Session authority",
-        "make an explicit Goal decision",
-        "Never repeat a terminal Task",
-        "does not auto-complete Goals or auto-create successor Tasks",
-        "report the actual decision/result/blocker",
+        "bootstrap_agent_conversation",
+        "consume_agent_wake",
+        "get_goal(goal_id)",
+        "read_agent_task(task_id)",
+        "explicit next Goal decision",
+        "Never rerun the terminal Task",
+        "reopen a terminal Goal",
     ] {
-        assert!(prepared.envelope.resume_hint.contains(required_semantic));
+        assert!(hint.contains(required_semantic));
     }
-    assert!(!prepared
-        .envelope
-        .resume_hint
-        .contains("heartbeat_agent_task_attempt"));
-    assert!(prepared.envelope.resume_hint.len() < 2_000);
+    for removed_prose in [
+        "already dispatched by the Endpoint continuation carrier",
+        "never infer or retarget identities",
+        "grants no Goal, Task, Project, Runner",
+        "does not auto-complete Goals",
+    ] {
+        assert!(!hint.contains(removed_prose));
+    }
+    assert!(!hint.contains("heartbeat_agent_task_attempt"));
+    assert!(
+        hint.chars().count() <= 1_200,
+        "Goal attention hint too long: {}",
+        hint.chars().count()
+    );
     assert!(!prepared
         .envelope
         .resume_hint

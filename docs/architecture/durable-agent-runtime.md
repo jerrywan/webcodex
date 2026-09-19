@@ -143,6 +143,8 @@ G3 adds an optional production ChatGPT MCP App Host carrier on top of this subst
 
 Every bridge operation re-runs ordinary communication authorization and exact Agent/Endpoint/controller-generation validation. Ordinary push bindings still require an Endpoint freshly attached in the current Server process. For MCP Apps, successful bind persists the current identity-bound recovery fingerprint and the optional canonical ClientWindow key already derived by the protocol adapter. Server takeover clears process-local bindings and `wake_capable` but preserves both. With no local binding, the exact fingerprint remains sufficient; when a canonical Window is present, the same principal + exact current Endpoint/generation + same Window may also receive the normal `success=true` recovery projection and create a new iframe fence after refresh. Exact unbind clears the current fingerprint but preserves a matching Window key; natural expiry also preserves only that Window key for the dedicated expired-Endpoint replacement operation. Explicit detach (including after expiry), ordinary Endpoint replacement, and push transition clear both recovery values. Replacement replay re-checks the successor's retained Window key, so a historical replay record cannot undo that revocation. Only a newly committed replacement populates `attached_endpoints`; replay and restart recovery never recreate fresh push-attachment authority. Missing or malformed Window metadata grants nothing beyond the exact fingerprint fallback, and another Window, stale generation, expiry, detach, foreign principal, malformed result, or generic bridge failure remains fail-closed. The strict published continuation projection schema still requires `recovery` on every result (`null` normally, the sole fixed restart-loss object when recoverable), so Host schema projection cannot discard the observation. Replacing or withdrawing a View reuses existing Wake reconciliation: a pre-fence claim is revoked and the logical Wake returns to `pending`, while a prepared/delivered Attempt becomes `delivery_unknown`. The App never blindly resends after the dispatch fence. Host `ui/message` success means only `dispatch_accepted`; only later exact `consume_agent_wake` proves that a continuation model turn actually ran. A consume-before-ACK race is valid and late ACK is idempotent. v16 keeps the slower bounded heartbeat cadence while hidden but allows the same acquire -> prepare -> `ui/message` -> finish path in background. Visibility transitions are scheduling observations only: they do not by themselves create `delivery_unknown`. Host scheduling remains best effort/non-immediate, and correctness still depends on the durable Wake and exact consume rather than timer liveness.
 
+For a new ChatGPT durable-Agent window, the canonical setup sequence is `create_agent_identity -> rotate_agent_continuation_endpoint -> present_agent_continuation -> yield/end the current model turn`. Presentation can return before the MCP App has established its process-local Host binding, and the presenting model turn has no authoritative “card fully mounted” signal. Do not present the card and then continue a long coordinator/business turn while assuming wake readiness. On a later turn, `list_agent_identities.production_auto_resume_available` is the bounded readiness observation for the exact current generation. ClientWindow continuity remains recovery input, not a correctness or model-liveness signal.
+
 Runtime Console, explicit activation, and push `ContinuationAdapter` behavior retain their existing contracts. The MCP App is an optional carrier, not a scheduler or a source of Agent, Task, Goal, Project, Workflow Session, or execution authority. Ordinary WebCodex Jobs are not materialized as MCP Tasks. See [`../agent/mcp-app-continuation-experiments.md`](../agent/mcp-app-continuation-experiments.md) for the Host evidence and production mapping.
 
 These invariants, the natural-conversation slice, and the durable A3 ownership
@@ -604,10 +606,12 @@ A4b intentionally separates a short pre-takeover lease from renewable bounded ac
 
 ```text
 TaskAttempt start
-  -> short 60-second pre-takeover lease
-Endpoint carrier claim / prepare / Host dispatch
-  -> still short pre-takeover semantics
-exact model turn bootstrap + first exact consume
+  -> short 60-second setup/pre-dispatch lease
+Endpoint carrier claim / prepare
+  -> still short pre-dispatch semantics
+first durable Host dispatch outcome (dispatch_accepted | delivery_unknown)
+  -> bounded 5-minute Host scheduling grace
+exact model turn bootstrap + first exact consume during that grace
   -> bounded 30-minute active-turn reservation
 ordinary coding work
   -> no periodic 60-second heartbeat ceremony
@@ -621,18 +625,16 @@ abnormal/stalled model turn
   -> a new Attempt requires an explicit authorized start
 ```
 
-The first successful exact consume of an `agent_task_attempt` Wake promotes only the
-same latest, active, unexpired, exact-assignee Attempt whose durable A4b Endpoint
-execution still matches that Wake and Endpoint generation. Promotion is atomic with
-Wake consumption and uses `max(existing_lease, now + 30 minutes)`. Consume replay does
-not slide the lease. An expired, terminal, superseded, or carrier-mismatched Attempt is
-never revived; its already-dispatched Wake can still be consumed/ACKed without lease
-promotion. `inbox_changed` and `attention_event` consumption never changes a TaskAttempt
-lease.
+Crossing the durable Host dispatch fence now creates a separate scheduling reservation only for an exact Task-origin Wake. The first `prepared -> dispatch_accepted | delivery_unknown` transition atomically rechecks the owned latest active/unexpired Attempt, exact assignee, exact Wake, and exact bound Endpoint/generation, then uses `max(existing_lease, now + 5 minutes)`. Delivery uncertainty gets the same reservation because the Host may already have accepted the message and exactly-once delivery forbids a blind resend. Same-generation process-local Host-binding loss or Server takeover that conservatively records an already-prepared Wake as `delivery_unknown` establishes that same one-shot grace before carrier capability is cleared; durable Endpoint replacement/expiry/detach fences the old generation instead and grants it no new grace. Dispatch replay, `delivery_unknown -> delivered` reconciliation, stale Endpoint generations, wrong Wakes, non-Task Wakes, polling, Endpoint heartbeat, and ClientWindow activity do not slide this reservation. A dispatch outcome arriving after the Attempt already expired or was superseded is still durable Wake evidence but never revives that Attempt.
+
+The first successful exact consume of an `agent_task_attempt` Wake promotes only the same latest, active, unexpired, exact-assignee Attempt whose durable A4b Endpoint execution still matches that Wake and Endpoint generation. Promotion is atomic with Wake consumption and uses `max(existing_lease, now + 30 minutes)`. Consume replay does not slide the lease. An expired, terminal, superseded, or carrier-mismatched Attempt is never revived; its already-dispatched Wake can still be consumed/ACKed without lease promotion. `inbox_changed`, `attention_event`, and `agent_wait_events` consumption never changes a TaskAttempt lease.
 
 `heartbeat_agent_task_attempt` has two intentionally distinct modes. Without active-turn
 proof it preserves the ordinary A3/pre-takeover behavior: exact current Attempt fencing
-plus `max(existing_lease, now + 60 seconds)`. After actual A4b model takeover, the same
+plus `max(existing_lease, now + 60 seconds)`, but a freshly resumed A4b turn no longer
+performs this as a mandatory preflight. It bootstraps the exact Wake, exact-consumes it
+immediately, then reads the authoritative AgentTask and works only if the same Attempt is
+still current. After actual A4b model takeover, the same
 turn may additionally provide the exact consumed Task-origin `wake_id` and its
 `consume_token`. In the same authoritative transaction the Server still rechecks normal
 Task ownership, latest Attempt identity, assignee, fence, current Attempt controller
@@ -657,10 +659,11 @@ only and is not a correctness lease input.
 A4b lifecycle v1 intentionally closes here. Automatic renewal would require a truthful,
 exact model-turn lifetime signal that proves this specific resumed turn is still running
 and eventually identifies its end. The current ChatGPT/MCP App carrier contract does not
-provide one: `ui/message` acceptance proves only Host delivery, View/App/Endpoint
-liveness proves only carrier coordination, and exact `consume_agent_wake` proves a model
-turn took over at least once but not that it remains alive minutes later. None of those
-signals may be promoted into TaskAttempt renewal authority. If a future Host contract
+provide one: `ui/message` acceptance or conservative delivery uncertainty may establish
+only the one-shot bounded Host scheduling grace described above, not model-turn liveness
+or active-turn renewal; View/App/Endpoint liveness proves only carrier coordination; and
+exact `consume_agent_wake` proves a model turn took over at least once but not that it
+remains alive minutes later. None of those carrier signals may become active-turn renewal authority. If a future Host contract
 exposes exact turn identity plus trustworthy running/end lifecycle, a bounded
 process-local controller may use the existing explicit active-turn heartbeat while that
 proof remains live. Until then, long A4b turns explicitly renew before expiry; Server

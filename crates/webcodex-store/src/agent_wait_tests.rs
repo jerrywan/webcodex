@@ -321,11 +321,40 @@ fn future_matches_coalesce_only_before_prepare_and_exact_consume_resumes_once() 
         .resume_hint
         .contains(&created.agent_wait.wait_id));
     assert!(prepared.envelope.resume_hint.contains("match_count=2"));
-    assert!(prepared
-        .envelope
-        .resume_hint
-        .contains("read_agent_wait(wait_id)"));
-    assert!(!prepared.envelope.resume_hint.contains("PRIVATE"));
+    let hint = &prepared.envelope.resume_hint;
+    for required in [
+        "agent_id=",
+        "endpoint_id=",
+        "controller_generation=",
+        "wake_id=",
+        "consume_token=",
+        "wait_id=",
+        "match_count=2",
+        "match_sequence=",
+        "bootstrap_agent_conversation",
+        "consume_agent_wake",
+        "read_agent_wait(wait_id)",
+        "authoritative source AgentTasks",
+        "one-shot",
+    ] {
+        assert!(
+            hint.contains(required),
+            "missing AgentWait continuation detail {required}"
+        );
+    }
+    assert!(
+        hint.chars().count() <= 1_000,
+        "AgentWait hint too long: {}",
+        hint.chars().count()
+    );
+    for removed_prose in [
+        "already dispatched by the Endpoint continuation carrier",
+        "grants no Task, Project, Goal",
+        "OMIT activation_idempotency_key",
+    ] {
+        assert!(!hint.contains(removed_prose));
+    }
+    assert!(!hint.contains("PRIVATE"));
 
     let consumed = db
         .consume_agent_wake(

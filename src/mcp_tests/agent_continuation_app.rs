@@ -1312,7 +1312,7 @@ async fn agent_continuation_app_protocol_uses_standard_result_without_model_proj
     assert!(!automatic_message.contains(private_body));
     assert!(!automatic_message.contains("PRIVATE Agent description"));
     assert!(!automatic_message.contains("PRIVATE-specialty-label"));
-    assert!(automatic_message.len() <= 4096);
+    assert!(automatic_message.chars().count() <= 1536);
     let prepare_content: Value = serde_json::from_str(
         prepare["result"]["content"][0]["text"]
             .as_str()

@@ -2471,7 +2471,7 @@ fn mcp_app_view_replacement_fences_pre_and_post_dispatch_without_second_lifecycl
 }
 
 #[test]
-fn mcp_app_state_heartbeat_never_renews_consumed_a4b_task_attempt() {
+fn mcp_app_dispatch_grace_then_consume_promotes_and_polling_never_slides() {
     let fixture = mcp_continuation_fixture("mcp-a4b-lease-independence");
     let created = fixture.runtime.create_agent_task(
         None,
@@ -2553,14 +2553,38 @@ fn mcp_app_state_heartbeat_never_renews_consumed_a4b_task_attempt() {
         fixture.receiver_generation,
         binding.clone(),
         wake_id.clone(),
-        wake_attempt_id,
+        wake_attempt_id.clone(),
         "dispatch_accepted".to_string(),
     );
     assert!(host_ack.success, "{:?}", host_ack.output);
+    let dispatch_grace_lease = task_attempt_lease_expires_at(&fixture.db, &task_attempt_id);
+    assert!(
+        dispatch_grace_lease > pre_takeover_lease,
+        "first accepted Host dispatch must establish the bounded scheduling grace"
+    );
+    let host_ack_replay = fixture.runtime.agent_continuation_wake_finish(
+        None,
+        fixture.receiver.clone(),
+        fixture.receiver_endpoint.clone(),
+        fixture.receiver_generation,
+        binding.clone(),
+        wake_id.clone(),
+        wake_attempt_id,
+        "dispatch_accepted".to_string(),
+    );
+    assert!(host_ack_replay.success, "{:?}", host_ack_replay.output);
+    let pre_consume_poll = fixture.runtime.agent_continuation_state(
+        None,
+        fixture.receiver.clone(),
+        fixture.receiver_endpoint.clone(),
+        fixture.receiver_generation,
+        binding.clone(),
+    );
+    assert!(pre_consume_poll.success, "{:?}", pre_consume_poll.output);
     assert_eq!(
         task_attempt_lease_expires_at(&fixture.db, &task_attempt_id),
-        pre_takeover_lease,
-        "Host ui/message acceptance is delivery evidence only and must not renew TaskAttempt"
+        dispatch_grace_lease,
+        "dispatch replay and MCP App state/Endpoint heartbeat must not slide scheduling grace"
     );
 
     let consumed = fixture.runtime.consume_agent_wake(
@@ -2574,8 +2598,8 @@ fn mcp_app_state_heartbeat_never_renews_consumed_a4b_task_attempt() {
     assert!(consumed.success, "{:?}", consumed.output);
     let active_turn_lease = task_attempt_lease_expires_at(&fixture.db, &task_attempt_id);
     assert!(
-        active_turn_lease > pre_takeover_lease,
-        "first exact Task-origin Wake consume must establish the bounded active-turn reservation"
+        active_turn_lease > dispatch_grace_lease,
+        "first exact Task-origin Wake consume must promote scheduling grace to the bounded active-turn reservation"
     );
 
     for poll in 0..4 {
@@ -2597,6 +2621,120 @@ fn mcp_app_state_heartbeat_never_renews_consumed_a4b_task_attempt() {
             "MCP App state/Endpoint heartbeat must never slide the TaskAttempt active-turn lease"
         );
     }
+}
+
+#[test]
+fn mcp_app_delivery_unknown_gets_same_one_shot_dispatch_grace() {
+    let fixture = mcp_continuation_fixture("mcp-a4b-unknown-grace");
+    let created = fixture.runtime.create_agent_task(
+        None,
+        "A4b unknown grace".to_string(),
+        "Prove delivery uncertainty reserves Host scheduling without proving takeover.".to_string(),
+        Some(fixture.receiver.clone()),
+        None,
+        None,
+        None,
+        "mcp-a4b-unknown-task".to_string(),
+    );
+    assert!(created.success, "{:?}", created.output);
+    let task_id = created.output["task"]["summary"]["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let started = fixture.runtime.start_agent_task_attempt(
+        None,
+        task_id.clone(),
+        fixture.receiver.clone(),
+        "mcp-a4b-unknown-attempt".to_string(),
+    );
+    assert!(started.success, "{:?}", started.output);
+    let task_attempt_id = started.output["attempt"]["attempt_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let attempt_fence = started.output["attempt_fence"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let attempt_controller_generation = started.output["attempt"]["attempt_controller_generation"]
+        .as_i64()
+        .unwrap();
+    let execution = fixture.runtime.start_agent_task_endpoint_continuation(
+        None,
+        task_id,
+        task_attempt_id.clone(),
+        fixture.receiver.clone(),
+        attempt_fence,
+        attempt_controller_generation,
+    );
+    assert!(execution.success, "{:?}", execution.output);
+    let wake_id = execution.output["execution"]["wake_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let binding = bind_mcp_app(
+        &fixture.runtime,
+        &fixture.receiver,
+        &fixture.receiver_endpoint,
+        fixture.receiver_generation,
+    );
+    let acquired = acquire_mcp_app(
+        &fixture.runtime,
+        &fixture.receiver,
+        &fixture.receiver_endpoint,
+        fixture.receiver_generation,
+        &binding,
+    );
+    let wake_attempt_id = acquired["wake"]["attempt_id"].as_str().unwrap().to_string();
+    let (_, automatic_message) = prepare_mcp_app(
+        &fixture.runtime,
+        &fixture.receiver,
+        &fixture.receiver_endpoint,
+        fixture.receiver_generation,
+        &binding,
+        &wake_id,
+        &wake_attempt_id,
+    );
+    let pre_dispatch_lease = task_attempt_lease_expires_at(&fixture.db, &task_attempt_id);
+    let unknown = fixture.runtime.agent_continuation_wake_finish(
+        None,
+        fixture.receiver.clone(),
+        fixture.receiver_endpoint.clone(),
+        fixture.receiver_generation,
+        binding.clone(),
+        wake_id.clone(),
+        wake_attempt_id.clone(),
+        "delivery_unknown".to_string(),
+    );
+    assert!(unknown.success, "{:?}", unknown.output);
+    let dispatch_grace = task_attempt_lease_expires_at(&fixture.db, &task_attempt_id);
+    assert!(dispatch_grace > pre_dispatch_lease);
+    let replay = fixture.runtime.agent_continuation_wake_finish(
+        None,
+        fixture.receiver.clone(),
+        fixture.receiver_endpoint.clone(),
+        fixture.receiver_generation,
+        binding,
+        wake_id.clone(),
+        wake_attempt_id,
+        "delivery_unknown".to_string(),
+    );
+    assert!(replay.success, "{:?}", replay.output);
+    assert_eq!(
+        task_attempt_lease_expires_at(&fixture.db, &task_attempt_id),
+        dispatch_grace,
+        "delivery_unknown replay must not slide scheduling grace"
+    );
+    let consumed = fixture.runtime.consume_agent_wake(
+        None,
+        fixture.receiver.clone(),
+        fixture.receiver_endpoint.clone(),
+        fixture.receiver_generation,
+        wake_id,
+        resume_field(&automatic_message, "consume_token"),
+    );
+    assert!(consumed.success, "{:?}", consumed.output);
+    assert!(task_attempt_lease_expires_at(&fixture.db, &task_attempt_id) > dispatch_grace);
 }
 
 #[test]

@@ -1181,7 +1181,7 @@ for (const loss of ["timeout", "missing", "wrong type", "blank", "oversized", "w
       if (loss === "missing") delete output.app_protocol;
       if (loss === "wrong type") output.app_protocol.automatic_message = {};
       if (loss === "blank") output.app_protocol.automatic_message = "  ";
-      if (loss === "oversized") output.app_protocol.automatic_message = "x".repeat(4097);
+      if (loss === "oversized") output.app_protocol.automatic_message = "x".repeat(1537);
       if (loss === "wrong Attempt") output.attempt_id = `wc_wake_attempt_7u7u7u7u7u7u7u7u`;
       if (loss === "business failure") response.structuredContent.success = false;
       await view.reply(view.calls("agent_continuation_wake_prepare")[0], response);

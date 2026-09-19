@@ -9,6 +9,7 @@ use super::communication::{
 };
 use super::goal::{GoalCorrelationKind, GoalLifecycle, NewGoal};
 use super::Database;
+use crate::server_instance::ServerInstanceGuard;
 use rusqlite::params;
 use std::sync::{mpsc, Arc, Barrier};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -95,10 +96,13 @@ struct EndpointTakeoverFixture {
     task_attempt_id: String,
     task_attempt_fence: String,
     task_attempt_controller_generation: i64,
-    initial_lease_expires_at_unix_ms: i64,
+    pre_dispatch_lease_expires_at_unix_ms: i64,
+    dispatch_grace_expires_at_unix_ms: i64,
     endpoint_id: String,
     endpoint_controller_generation: i64,
     wake_id: String,
+    wake_attempt_id: String,
+    wake_claim_fence: String,
     consume_token: String,
 }
 
@@ -112,7 +116,7 @@ fn attempt_lease_expires_at(db: &Database, attempt_id: &str) -> i64 {
         .unwrap()
 }
 
-fn dispatched_endpoint_takeover_fixture(
+fn prepared_endpoint_takeover_fixture(
     db: &Database,
     owner: &CommunicationPrincipal,
     label: &str,
@@ -128,10 +132,10 @@ fn dispatched_endpoint_takeover_fixture(
         &format!("{label}-attempt"),
         started_at,
     );
+    let pre_dispatch_lease_expires_at_unix_ms = started_at + DEFAULT_AGENT_TASK_ATTEMPT_LEASE_MS;
     assert_eq!(
-        started.attempt.lease_expires_at_unix_ms,
-        started_at + DEFAULT_AGENT_TASK_ATTEMPT_LEASE_MS,
-        "A4b starts with the ordinary short pre-takeover Attempt lease"
+        started.attempt.lease_expires_at_unix_ms, pre_dispatch_lease_expires_at_unix_ms,
+        "A4b starts with the ordinary short pre-dispatch Attempt lease"
     );
     let execution = db
         .start_agent_task_endpoint_continuation_at(
@@ -179,20 +183,10 @@ fn dispatched_endpoint_takeover_fixture(
         &claim.consume_token,
     )
     .unwrap();
-    db.complete_agent_wake_delivery(
-        owner,
-        &assignee,
-        &endpoint.endpoint_id,
-        endpoint.controller_generation,
-        &claim.wake.wake_id,
-        &claim.attempt.attempt_id,
-        &claim.claim_fence,
-    )
-    .unwrap();
     assert_eq!(
         attempt_lease_expires_at(db, &started.attempt.attempt_id),
-        started.attempt.lease_expires_at_unix_ms,
-        "claim, prepare, and Host dispatch must retain the short pre-takeover lease"
+        pre_dispatch_lease_expires_at_unix_ms,
+        "claim and prepare do not extend the short pre-dispatch lease"
     );
     let task_attempt_controller_generation = db
         .read_agent_task(owner, &task_id)
@@ -207,12 +201,41 @@ fn dispatched_endpoint_takeover_fixture(
         task_attempt_id: started.attempt.attempt_id,
         task_attempt_fence: started.attempt_fence,
         task_attempt_controller_generation,
-        initial_lease_expires_at_unix_ms: started.attempt.lease_expires_at_unix_ms,
+        pre_dispatch_lease_expires_at_unix_ms,
+        dispatch_grace_expires_at_unix_ms: started_at + 2 + AGENT_TASK_ENDPOINT_DISPATCH_GRACE_MS,
         endpoint_id: endpoint.endpoint_id,
         endpoint_controller_generation: endpoint.controller_generation,
         wake_id: claim.wake.wake_id,
+        wake_attempt_id: claim.attempt.attempt_id,
+        wake_claim_fence: claim.claim_fence,
         consume_token: claim.consume_token,
     }
+}
+
+fn dispatched_endpoint_takeover_fixture(
+    db: &Database,
+    owner: &CommunicationPrincipal,
+    label: &str,
+    started_at: i64,
+) -> EndpointTakeoverFixture {
+    let fixture = prepared_endpoint_takeover_fixture(db, owner, label, started_at);
+    db.complete_agent_wake_delivery_at(
+        owner,
+        &fixture.assignee,
+        &fixture.endpoint_id,
+        fixture.endpoint_controller_generation,
+        &fixture.wake_id,
+        &fixture.wake_attempt_id,
+        &fixture.wake_claim_fence,
+        started_at + 2,
+    )
+    .unwrap();
+    assert_eq!(
+        attempt_lease_expires_at(db, &fixture.task_attempt_id),
+        fixture.dispatch_grace_expires_at_unix_ms,
+        "first durable Host dispatch outcome establishes only the bounded scheduling grace"
+    );
+    fixture
 }
 
 fn dispatch_and_consume_next_wake(
@@ -2937,41 +2960,405 @@ fn endpoint_continuation_start_is_endpoint_independent_replay_safe_and_payload_f
             &claim.consume_token,
         )
         .unwrap();
-    let heartbeat_pos = prepared
-        .envelope
-        .resume_hint
-        .find("First call heartbeat_agent_task_attempt")
-        .expect("Task continuation must require heartbeat before business work");
-    let bootstrap_pos = prepared
-        .envelope
-        .resume_hint
-        .find("bootstrap_agent_conversation")
-        .expect("Task continuation must still bootstrap the exact Wake");
-    assert!(heartbeat_pos < bootstrap_pos);
-    for required_semantic in [
-        "without active-turn proof",
-        "short stale/fence preflight",
-        "OMIT activation_idempotency_key",
-        "already dispatched by the Endpoint continuation carrier",
-        "do not call start_agent_task_endpoint_continuation again",
-        "first successful exact consume establishes the bounded online-turn TaskAttempt execution lease",
-        "does not require a periodic 60-second heartbeat",
-        "same exact Attempt identity plus active_turn_wake_id=this wake_id",
-        "active_turn_consume_token=this consume_token",
-        "another bounded 30-minute reservation",
-        "before the current lease expires",
-        "Once the Attempt lease expires it is stale and this proof cannot revive it",
-        "Window activity and Endpoint heartbeat do not renew it",
-        "Complete only through complete_agent_task_attempt",
+    let hint = &prepared.envelope.resume_hint;
+    for field in [
+        "agent_id=",
+        "endpoint_id=",
+        "controller_generation=",
+        "wake_id=",
+        "consume_token=",
+        "task_id=",
+        "attempt_id=",
+        "attempt_fence=",
+        "attempt_controller_generation=",
     ] {
-        assert!(prepared.envelope.resume_hint.contains(required_semantic));
+        assert!(
+            hint.contains(field),
+            "missing exact continuation field {field}"
+        );
     }
-    assert!(prepared.envelope.resume_hint.len() < 4_096);
-    assert!(!prepared.envelope.resume_hint.contains("Durable work"));
-    assert!(!prepared
-        .envelope
-        .resume_hint
-        .contains("Perform bounded durable work without assuming a window or Endpoint."));
+    let bootstrap_pos = hint
+        .find("bootstrap_agent_conversation")
+        .expect("Task continuation must bootstrap the exact Wake");
+    let consume_pos = hint
+        .find("consume_agent_wake")
+        .expect("Task continuation must consume the exact Wake promptly");
+    let read_pos = hint
+        .find("read_agent_task")
+        .expect("Task continuation must read authoritative Task state after takeover");
+    assert!(bootstrap_pos < consume_pos && consume_pos < read_pos);
+    for required_semantic in [
+        "bounded 30-minute active-turn reservation",
+        "still current",
+        "same assignee/fence/generation",
+        "complete_agent_task_attempt",
+        "heartbeat_agent_task_attempt",
+        "active-turn proof",
+    ] {
+        assert!(hint.contains(required_semantic));
+    }
+    for removed_prose in [
+        "First call heartbeat_agent_task_attempt",
+        "short stale/fence preflight",
+        "Never infer or retarget",
+        "Agent/Conversation authority grants",
+        "Endpoint lease and TaskAttempt lease remain independent",
+    ] {
+        assert!(
+            !hint.contains(removed_prose),
+            "duplicated authority prose returned: {removed_prose}"
+        );
+    }
+    assert!(
+        hint.chars().count() <= 1_024,
+        "Task resume hint too long: {}",
+        hint.chars().count()
+    );
+    assert!(!hint.contains("Durable work"));
+    assert!(!hint.contains("Perform bounded durable work without assuming a window or Endpoint."));
+}
+
+#[test]
+fn endpoint_dispatch_outcomes_grant_bounded_one_shot_scheduling_grace() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("agent-task-dispatch-grace.db")).unwrap();
+    let owner = principal('7');
+    let started_at = wall_now_ms();
+
+    let accepted = prepared_endpoint_takeover_fixture(&db, &owner, "dispatch-accepted", started_at);
+    let accepted_at = started_at + 10;
+    db.complete_agent_wake_delivery_at(
+        &owner,
+        &accepted.assignee,
+        &accepted.endpoint_id,
+        accepted.endpoint_controller_generation,
+        &accepted.wake_id,
+        &accepted.wake_attempt_id,
+        &accepted.wake_claim_fence,
+        accepted_at,
+    )
+    .unwrap();
+    let accepted_grace = accepted_at + AGENT_TASK_ENDPOINT_DISPATCH_GRACE_MS;
+    assert_eq!(
+        attempt_lease_expires_at(&db, &accepted.task_attempt_id),
+        accepted_grace,
+        "accepted Host dispatch grants scheduling grace, not the 30-minute active-turn reservation"
+    );
+    db.complete_agent_wake_delivery_at(
+        &owner,
+        &accepted.assignee,
+        &accepted.endpoint_id,
+        accepted.endpoint_controller_generation,
+        &accepted.wake_id,
+        &accepted.wake_attempt_id,
+        &accepted.wake_claim_fence,
+        accepted_at + 120_000,
+    )
+    .unwrap();
+    assert_eq!(
+        attempt_lease_expires_at(&db, &accepted.task_attempt_id),
+        accepted_grace,
+        "dispatch ACK replay must not slide scheduling grace"
+    );
+
+    let unknown =
+        prepared_endpoint_takeover_fixture(&db, &owner, "dispatch-unknown", started_at + 1_000);
+    let unknown_at = started_at + 1_010;
+    db.mark_agent_wake_delivery_unknown_at(
+        &owner,
+        &unknown.assignee,
+        &unknown.endpoint_id,
+        unknown.endpoint_controller_generation,
+        &unknown.wake_id,
+        &unknown.wake_attempt_id,
+        &unknown.wake_claim_fence,
+        unknown_at,
+    )
+    .unwrap();
+    let unknown_grace = unknown_at + AGENT_TASK_ENDPOINT_DISPATCH_GRACE_MS;
+    assert_eq!(
+        attempt_lease_expires_at(&db, &unknown.task_attempt_id),
+        unknown_grace,
+        "delivery_unknown receives the same bounded one-shot scheduling grace"
+    );
+    db.mark_agent_wake_delivery_unknown_at(
+        &owner,
+        &unknown.assignee,
+        &unknown.endpoint_id,
+        unknown.endpoint_controller_generation,
+        &unknown.wake_id,
+        &unknown.wake_attempt_id,
+        &unknown.wake_claim_fence,
+        unknown_at + 60_000,
+    )
+    .unwrap();
+    db.complete_agent_wake_delivery_at(
+        &owner,
+        &unknown.assignee,
+        &unknown.endpoint_id,
+        unknown.endpoint_controller_generation,
+        &unknown.wake_id,
+        &unknown.wake_attempt_id,
+        &unknown.wake_claim_fence,
+        unknown_at + 120_000,
+    )
+    .unwrap();
+    assert_eq!(
+        attempt_lease_expires_at(&db, &unknown.task_attempt_id),
+        unknown_grace,
+        "delivery outcome replay/reconciliation must never slide the first scheduling reservation"
+    );
+}
+
+#[test]
+fn prepared_task_wake_host_binding_loss_gets_one_shot_dispatch_grace() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("agent-task-binding-loss-grace.db")).unwrap();
+    let owner = principal('6');
+    let started_at = wall_now_ms();
+    let fixture = prepared_endpoint_takeover_fixture(&db, &owner, "binding-loss", started_at);
+    let recovery_at = started_at + 10;
+
+    {
+        let mut conn = db.conn_for_tests();
+        let transaction = conn.transaction().unwrap();
+        super::agent_wake::reconcile_wakes_for_endpoint_loss(
+            &transaction,
+            &fixture.assignee,
+            &fixture.endpoint_id,
+            fixture.endpoint_controller_generation,
+            recovery_at,
+            false,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+    assert_eq!(
+        db.agent_wake(&fixture.wake_id).unwrap().unwrap().state,
+        AgentWakeState::DeliveryUnknown
+    );
+    let grace_expiry = recovery_at + AGENT_TASK_ENDPOINT_DISPATCH_GRACE_MS;
+    assert_eq!(
+        attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+        grace_expiry,
+        "same-generation Host binding loss records dispatch uncertainty and the bounded scheduling grace"
+    );
+    assert_eq!(
+        db.read_agent_task(&owner, &fixture.task_id)
+            .unwrap()
+            .summary
+            .latest_attempt
+            .unwrap()
+            .attempt_controller_generation,
+        fixture.task_attempt_controller_generation,
+        "process-local Host binding loss must not fabricate a controller-generation replacement"
+    );
+
+    {
+        let mut conn = db.conn_for_tests();
+        let transaction = conn.transaction().unwrap();
+        super::agent_wake::reconcile_wakes_for_endpoint_loss(
+            &transaction,
+            &fixture.assignee,
+            &fixture.endpoint_id,
+            fixture.endpoint_controller_generation,
+            recovery_at + 60_000,
+            false,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+    assert_eq!(
+        attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+        grace_expiry,
+        "recovery replay must not slide scheduling grace"
+    );
+    let consume_at = recovery_at + 60_001;
+    let consumed = db
+        .consume_agent_wake_at(
+            &owner,
+            &fixture.assignee,
+            &fixture.endpoint_id,
+            fixture.endpoint_controller_generation,
+            &fixture.wake_id,
+            &fixture.consume_token,
+            consume_at,
+        )
+        .unwrap();
+    assert!(consumed.state_changed);
+    assert_eq!(
+        attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+        consume_at + AGENT_TASK_ENDPOINT_TAKEOVER_LEASE_MS,
+        "exact consume after same-generation Host binding loss remains the active-turn takeover boundary"
+    );
+}
+
+#[test]
+fn server_takeover_preserves_prepared_task_dispatch_uncertainty_with_bounded_grace() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("agent-task-server-takeover-grace.db")).unwrap();
+    let owner = principal('5');
+    let started_at = wall_now_ms();
+    let fixture = prepared_endpoint_takeover_fixture(&db, &owner, "server-takeover", started_at);
+    let recovery_at = started_at + 10;
+    let ownership = ServerInstanceGuard::acquire(&db).unwrap();
+
+    db.recover_agent_wakes_for_server_takeover(&ownership, recovery_at)
+        .unwrap();
+    assert_eq!(
+        db.agent_wake(&fixture.wake_id).unwrap().unwrap().state,
+        AgentWakeState::DeliveryUnknown
+    );
+    let grace_expiry = recovery_at + AGENT_TASK_ENDPOINT_DISPATCH_GRACE_MS;
+    assert_eq!(
+        attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+        grace_expiry,
+        "Server takeover restores durable dispatch uncertainty without inventing active-turn liveness"
+    );
+    assert_eq!(
+        db.read_agent_task(&owner, &fixture.task_id)
+            .unwrap()
+            .summary
+            .latest_attempt
+            .unwrap()
+            .attempt_controller_generation,
+        fixture.task_attempt_controller_generation
+    );
+
+    db.recover_agent_wakes_for_server_takeover(&ownership, recovery_at + 60_000)
+        .unwrap();
+    assert_eq!(
+        attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+        grace_expiry,
+        "Server takeover replay must not slide scheduling grace"
+    );
+    let consume_at = recovery_at + 60_001;
+    let consumed = db
+        .consume_agent_wake_at(
+            &owner,
+            &fixture.assignee,
+            &fixture.endpoint_id,
+            fixture.endpoint_controller_generation,
+            &fixture.wake_id,
+            &fixture.consume_token,
+            consume_at,
+        )
+        .unwrap();
+    assert!(consumed.state_changed);
+    assert_eq!(
+        attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+        consume_at + AGENT_TASK_ENDPOINT_TAKEOVER_LEASE_MS,
+        "exact consume after Server takeover uses durable post-fence binding truth, not reconstructed liveness"
+    );
+}
+
+#[test]
+fn endpoint_dispatch_grace_fails_closed_for_expired_or_wrong_exact_binding() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("agent-task-dispatch-grace-fences.db")).unwrap();
+    let owner = principal('8');
+    let started_at = wall_now_ms();
+    let fixture = prepared_endpoint_takeover_fixture(&db, &owner, "dispatch-fence", started_at);
+    let pre_dispatch_lease = fixture.pre_dispatch_lease_expires_at_unix_ms;
+
+    for (endpoint_id, generation, wake_id) in [
+        (
+            "wc_endpoint_0000000000000000",
+            fixture.endpoint_controller_generation,
+            fixture.wake_id.as_str(),
+        ),
+        (
+            fixture.endpoint_id.as_str(),
+            fixture.endpoint_controller_generation + 1,
+            fixture.wake_id.as_str(),
+        ),
+        (
+            fixture.endpoint_id.as_str(),
+            fixture.endpoint_controller_generation,
+            "wc_wake_0000000000000000",
+        ),
+    ] {
+        assert!(db
+            .complete_agent_wake_delivery_at(
+                &owner,
+                &fixture.assignee,
+                endpoint_id,
+                generation,
+                wake_id,
+                &fixture.wake_attempt_id,
+                &fixture.wake_claim_fence,
+                started_at + 20,
+            )
+            .is_err());
+        assert_eq!(
+            attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+            pre_dispatch_lease,
+            "wrong Endpoint/generation/Wake must fail closed without extending the Attempt"
+        );
+    }
+
+    let successor = start(
+        &db,
+        &owner,
+        &fixture.task_id,
+        &fixture.assignee,
+        "dispatch-fence-successor",
+        pre_dispatch_lease + 1,
+    );
+    assert_eq!(successor.attempt.attempt_number, 2);
+    db.complete_agent_wake_delivery_at(
+        &owner,
+        &fixture.assignee,
+        &fixture.endpoint_id,
+        fixture.endpoint_controller_generation,
+        &fixture.wake_id,
+        &fixture.wake_attempt_id,
+        &fixture.wake_claim_fence,
+        pre_dispatch_lease + 2,
+    )
+    .unwrap();
+    assert_eq!(
+        attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+        pre_dispatch_lease,
+        "expired and superseded Attempt must not be revived when a post-fence dispatch outcome arrives"
+    );
+}
+
+#[test]
+fn endpoint_dispatch_grace_expiry_requires_explicit_new_attempt() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("agent-task-dispatch-grace-expiry.db")).unwrap();
+    let owner = principal('9');
+    let started_at = wall_now_ms();
+    let fixture = dispatched_endpoint_takeover_fixture(&db, &owner, "dispatch-expiry", started_at);
+    let grace_expiry = fixture.dispatch_grace_expires_at_unix_ms;
+
+    let consumed = db
+        .consume_agent_wake_at(
+            &owner,
+            &fixture.assignee,
+            &fixture.endpoint_id,
+            fixture.endpoint_controller_generation,
+            &fixture.wake_id,
+            &fixture.consume_token,
+            grace_expiry,
+        )
+        .unwrap();
+    assert!(consumed.state_changed);
+    assert_eq!(
+        attempt_lease_expires_at(&db, &fixture.task_attempt_id),
+        grace_expiry,
+        "consume at/after grace expiry may ACK the Wake but cannot revive or promote the Attempt"
+    );
+    let successor = start(
+        &db,
+        &owner,
+        &fixture.task_id,
+        &fixture.assignee,
+        "dispatch-expiry-successor",
+        grace_expiry + 1,
+    );
+    assert_eq!(successor.attempt.attempt_number, 2);
 }
 
 #[test]
@@ -2983,12 +3370,16 @@ fn endpoint_exact_consume_promotes_takeover_lease_once_and_survives_reopen() {
     let started_at = wall_now_ms();
     let fixture = dispatched_endpoint_takeover_fixture(&db, &owner, "takeover", started_at);
     assert_eq!(
-        fixture.initial_lease_expires_at_unix_ms,
+        fixture.pre_dispatch_lease_expires_at_unix_ms,
         started_at + DEFAULT_AGENT_TASK_ATTEMPT_LEASE_MS
+    );
+    assert_eq!(
+        fixture.dispatch_grace_expires_at_unix_ms,
+        started_at + 2 + AGENT_TASK_ENDPOINT_DISPATCH_GRACE_MS
     );
 
     let takeover_at = wall_now_ms();
-    assert!(takeover_at < fixture.initial_lease_expires_at_unix_ms);
+    assert!(takeover_at < fixture.dispatch_grace_expires_at_unix_ms);
     let consumed = db
         .consume_agent_wake_at(
             &owner,
@@ -3034,7 +3425,7 @@ fn endpoint_exact_consume_promotes_takeover_lease_once_and_survives_reopen() {
         promoted_lease,
         "promoted lease must remain ordinary durable Attempt state after reopen"
     );
-    let completion_at = fixture.initial_lease_expires_at_unix_ms + 1;
+    let completion_at = fixture.dispatch_grace_expires_at_unix_ms + 1;
     assert!(completion_at < promoted_lease);
     let completed = reopened
         .complete_agent_task_attempt_at(
@@ -3147,7 +3538,7 @@ fn consumed_endpoint_active_turn_proof_renews_repeated_bounded_windows() {
     let started_at = wall_now_ms();
     let fixture = dispatched_endpoint_takeover_fixture(&db, &owner, "renew", started_at);
     let takeover_at = wall_now_ms();
-    assert!(takeover_at < fixture.initial_lease_expires_at_unix_ms);
+    assert!(takeover_at < fixture.dispatch_grace_expires_at_unix_ms);
     db.consume_agent_wake_at(
         &owner,
         &fixture.assignee,
@@ -3829,7 +4220,7 @@ fn endpoint_consume_failures_and_expired_source_never_promote_or_revive_attempt(
     let owner = principal('1');
     let started_at = wall_now_ms();
     let fixture = dispatched_endpoint_takeover_fixture(&db, &owner, "stale-takeover", started_at);
-    let initial_lease = fixture.initial_lease_expires_at_unix_ms;
+    let initial_lease = fixture.dispatch_grace_expires_at_unix_ms;
 
     let wrong_endpoint = "wc_endpoint_________________".to_string();
     assert!(db
