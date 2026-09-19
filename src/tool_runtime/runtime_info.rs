@@ -440,32 +440,52 @@ impl ToolRuntime {
             })
         });
 
-        let mut output = json!({
-            "service": "webcodex",
-            "mcp_compact_schemas": crate::model_surface::effective_mcp_compact_schemas(
+        // Keep the top-level status assembly incremental. A single large `json!`
+        // here materially inflates the debug async poll frame on fresh builds and
+        // can overflow the default Tokio worker stack once a Runner is registered.
+        let mut output = serde_json::Map::with_capacity(18);
+        output.insert("service".to_string(), json!("webcodex"));
+        output.insert(
+            "mcp_compact_schemas".to_string(),
+            json!(crate::model_surface::effective_mcp_compact_schemas(
                 crate::config::mcp_compact_schemas_override(),
-            ),
-            "effective_config": self.effective_config_status(),
-            "version": env!("CARGO_PKG_VERSION"),
-            "build": crate::build_info::runtime_build_info(),
-            "server_time": now,
-            "pid": std::process::id(),
-            "auth_enabled": self.runtime_info.auth_enabled,
-            "configured_public_url": self.runtime_info.configured_public_url,
-            "projects": projects,
-            // Runtime Console, admin HTTP, and CLI ops consume this established key.
-            "agents": runners,
-            "connection_layers": connection_layers,
-            "version_compatibility": version_compatibility,
-            "jobs": jobs,
-            "tools": tools,
-            "authority": permissions::authority_profile_payload(),
-            "session_store": self.sessions.status(),
-        });
+            )),
+        );
+        output.insert(
+            "effective_config".to_string(),
+            self.effective_config_status(),
+        );
+        output.insert("version".to_string(), json!(env!("CARGO_PKG_VERSION")));
+        output.insert(
+            "build".to_string(),
+            json!(crate::build_info::runtime_build_info()),
+        );
+        output.insert("server_time".to_string(), json!(now));
+        output.insert("pid".to_string(), json!(std::process::id()));
+        output.insert(
+            "auth_enabled".to_string(),
+            json!(self.runtime_info.auth_enabled),
+        );
+        output.insert(
+            "configured_public_url".to_string(),
+            json!(self.runtime_info.configured_public_url),
+        );
+        output.insert("projects".to_string(), projects);
+        // Runtime Console, admin HTTP, and CLI ops consume this established key.
+        output.insert("agents".to_string(), runners);
+        output.insert("connection_layers".to_string(), connection_layers);
+        output.insert("version_compatibility".to_string(), version_compatibility);
+        output.insert("jobs".to_string(), jobs);
+        output.insert("tools".to_string(), tools);
+        output.insert(
+            "authority".to_string(),
+            permissions::authority_profile_payload(),
+        );
+        output.insert("session_store".to_string(), json!(self.sessions.status()));
         if let Some(quic) = quic {
-            output["quic"] = quic;
+            output.insert("quic".to_string(), quic);
         }
-        ToolResult::ok(output)
+        ToolResult::ok(Value::Object(output))
     }
 
     pub(crate) async fn runtime_status_with_options(
@@ -639,47 +659,67 @@ impl ToolRuntime {
             "names": specs.iter().map(|spec| spec.name.clone()).collect::<Vec<_>>(),
         });
         let server_build = crate::build_info::runtime_build_info();
-        ToolResult::ok(json!({
-            "service": "webcodex",
-            "mcp_compact_schemas": crate::model_surface::effective_mcp_compact_schemas(
-                crate::config::mcp_compact_schemas_override(),
-            ),
-            "effective_config": self.effective_config_status(),
+        let focus = json!({
+            "client_id": client.client_id,
+            "connected": client.connected,
+            "status": client.status,
+            "agent_instance_id": client.runner_instance_id,
+            "build": client.build,
+            "project_count": project_count,
+            "active_jobs": runner_active,
+            "job_concurrency": job_concurrency_for_client(&client, &selected_jobs),
+            "compatibility_status": target_runner.get("status").cloned().unwrap_or(Value::Null),
+            "source_alignment": source_alignment,
+        });
+        let server = json!({
             "version": env!("CARGO_PKG_VERSION"),
             "build": server_build,
-            "server_time": now,
-            "pid": std::process::id(),
-            "auth_enabled": self.runtime_info.auth_enabled,
-            "configured_public_url": self.runtime_info.configured_public_url,
-            "focus": {
-                "client_id": client.client_id,
-                "connected": client.connected,
-                "status": client.status,
-                "agent_instance_id": client.runner_instance_id,
-                "build": client.build,
-                "project_count": project_count,
-                "active_jobs": runner_active,
-                "job_concurrency": job_concurrency_for_client(&client, &selected_jobs),
-                "compatibility_status": target_runner.get("status").cloned().unwrap_or(Value::Null),
-                "source_alignment": source_alignment,
-            },
-            "server": {
-                "version": env!("CARGO_PKG_VERSION"),
-                "build": server_build,
-            },
-            "fleet_summary": {
-                "visible_runner_count": visible_clients.len(),
-                "mismatched_agents_count": mismatched_agents_count,
-                "source_mismatched_agents_count": source_mismatched_agents_count,
-                "mixed_builds_present": mismatched_agents_count > 0 || source_mismatched_agents_count > 0,
-            },
-            "projects": projects,
-            "agents": runners,
-            "version_compatibility": target_compatibility,
-            "jobs": jobs,
-            "tools": tools,
-            "authority": permissions::authority_profile_payload(),
-        }))
+        });
+        let fleet_summary = json!({
+            "visible_runner_count": visible_clients.len(),
+            "mismatched_agents_count": mismatched_agents_count,
+            "source_mismatched_agents_count": source_mismatched_agents_count,
+            "mixed_builds_present": mismatched_agents_count > 0 || source_mismatched_agents_count > 0,
+        });
+        // As above, avoid one large `json!` in this async poll frame so focused
+        // status requests retain the same bounded worker-stack behavior.
+        let mut output = serde_json::Map::with_capacity(17);
+        output.insert("service".to_string(), json!("webcodex"));
+        output.insert(
+            "mcp_compact_schemas".to_string(),
+            json!(crate::model_surface::effective_mcp_compact_schemas(
+                crate::config::mcp_compact_schemas_override(),
+            )),
+        );
+        output.insert(
+            "effective_config".to_string(),
+            self.effective_config_status(),
+        );
+        output.insert("version".to_string(), json!(env!("CARGO_PKG_VERSION")));
+        output.insert("build".to_string(), json!(server_build));
+        output.insert("server_time".to_string(), json!(now));
+        output.insert("pid".to_string(), json!(std::process::id()));
+        output.insert(
+            "auth_enabled".to_string(),
+            json!(self.runtime_info.auth_enabled),
+        );
+        output.insert(
+            "configured_public_url".to_string(),
+            json!(self.runtime_info.configured_public_url),
+        );
+        output.insert("focus".to_string(), focus);
+        output.insert("server".to_string(), server);
+        output.insert("fleet_summary".to_string(), fleet_summary);
+        output.insert("projects".to_string(), projects);
+        output.insert("agents".to_string(), runners);
+        output.insert("version_compatibility".to_string(), target_compatibility);
+        output.insert("jobs".to_string(), jobs);
+        output.insert("tools".to_string(), tools);
+        output.insert(
+            "authority".to_string(),
+            permissions::authority_profile_payload(),
+        );
+        ToolResult::ok(Value::Object(output))
     }
 }
 

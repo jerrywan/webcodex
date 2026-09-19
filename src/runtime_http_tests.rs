@@ -228,6 +228,28 @@ fn build_projects_router(
         )
 }
 
+fn build_runner_registration_status_router(
+    config: Arc<crate::Config>,
+    db: Arc<crate::Database>,
+    runtime: Arc<ToolRuntime>,
+    registry: Arc<RunnerRegistry>,
+) -> Router {
+    Router::new()
+        .hoop(affix_state::inject(config))
+        .hoop(affix_state::inject(db))
+        .hoop(affix_state::inject(runtime))
+        .hoop(affix_state::inject(registry))
+        .push(
+            Router::with_path("api")
+                .hoop(crate::AuthMiddleware)
+                .push(
+                    Router::with_path("shell/agent/register")
+                        .post(crate::runner_http::runner_register),
+                )
+                .push(Router::with_path("runtime/status").post(runtime_status)),
+        )
+}
+
 fn effective_status(resp: &Response) -> StatusCode {
     resp.status_code.unwrap_or(StatusCode::OK)
 }
@@ -508,6 +530,76 @@ async fn http_runtime_status_correct_bearer_returns_summary() {
             forbidden
         );
     }
+}
+
+#[test]
+fn http_runtime_status_after_runner_registration_fits_default_worker_stack() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("build production-shaped runtime status regression runtime");
+
+    runtime.block_on(async {
+        tokio::spawn(async {
+            use crate::runner_protocol::RunnerRegisterRequest;
+
+            let config = test_config(Some("secret"));
+            let (_tmp, db) = test_db();
+            let registry = Arc::new(RunnerRegistry::default());
+            let tool_runtime = Arc::new(ToolRuntime::new_for_tests_with_runner_registry(
+                registry.clone(),
+            ));
+            let service = Service::new(build_runner_registration_status_router(
+                config,
+                db,
+                tool_runtime,
+                registry,
+            ));
+            let registration =
+                crate::test_support::current_runner_registration(RunnerRegisterRequest {
+                    process_started_at: Some(1),
+                    build: None,
+                    job_concurrency_limit: Some(4),
+                    job_inventory: None,
+                    coding_agent_providers: None,
+                    coding_agent_inventory: None,
+                    client_id: "status-stack-runner".to_string(),
+                    runner_instance_id: "status-stack-instance".to_string(),
+                    runner_protocol_generation:
+                        crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
+                    display_name: Some("Status Stack Runner".to_string()),
+                    owner: Some("status-stack".to_string()),
+                    hostname: Some("status-stack-host".to_string()),
+                    host_context: None,
+                    capabilities: Default::default(),
+                    policy: None,
+                });
+
+            let register = TestClient::post("http://localhost/api/shell/agent/register")
+                .bearer_auth("secret")
+                .json(&registration)
+                .send(&service)
+                .await;
+            assert_eq!(effective_status(&register), StatusCode::OK);
+
+            let mut status = TestClient::post("http://localhost/api/runtime/status")
+                .bearer_auth("secret")
+                .json(&json!({}))
+                .send(&service)
+                .await;
+            assert_eq!(effective_status(&status), StatusCode::OK);
+            let body: Value = status.take_json().await.unwrap();
+            assert_eq!(body["success"], true);
+            assert_eq!(body["output"]["agents"]["count"], 1);
+            assert_eq!(
+                body["output"]["agents"]["clients"][0]["client_id"],
+                "status-stack-runner"
+            );
+        })
+        .await
+        .expect("runtime status regression task must not abort or panic");
+    });
 }
 
 #[tokio::test]
