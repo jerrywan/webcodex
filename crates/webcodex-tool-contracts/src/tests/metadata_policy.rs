@@ -98,6 +98,7 @@ fn tool_specs_annotations_are_canonical_semantic_projections() {
         "workspace_checkpoint_restore",
         "save_project_artifact",
         "import_conversation_files_to_project",
+        "transfer_project_artifact",
         "artifact_upload_finish",
         "artifact_upload_abort",
         "assign_agent_task",

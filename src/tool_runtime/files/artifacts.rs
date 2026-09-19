@@ -258,6 +258,21 @@ pub(crate) fn validate_project_artifact_export_snapshot(
     })
 }
 
+pub(crate) fn artifact_upload_failure_is_definite(
+    result: &ToolResult,
+    upload_id: &str,
+) -> bool {
+    result
+        .output
+        .get("upload_id")
+        .and_then(Value::as_str)
+        .is_some_and(|returned| returned == upload_id)
+}
+
+pub(crate) fn artifact_upload_begin_failure_is_definite(result: &ToolResult) -> bool {
+    !result.output.is_null()
+}
+
 impl ToolRuntime {
     /// Internal-only large-file metadata transport for MCP artifact export.
     /// The Runner registry atomically rechecks the generation-2 streaming
@@ -341,6 +356,7 @@ impl ToolRuntime {
         project: &str,
         path: &str,
         expected_file_bytes: usize,
+        expected_sha256: &str,
         offset: usize,
         length: usize,
         auth: Option<&AuthContext>,
@@ -353,6 +369,12 @@ impl ToolRuntime {
                 "artifact is too large to export; maximum is {} bytes",
                 MAX_PROJECT_ARTIFACT_EXPORT_BYTES
             ));
+        }
+        if !is_hex_sha256(expected_sha256) {
+            return Err(
+                "artifact export expected_sha256 must be a lowercase 64-character hex digest"
+                    .to_string(),
+            );
         }
         if length == 0 || length > MAX_READ_PROJECT_ARTIFACT_LENGTH {
             return Err(format!(
@@ -371,6 +393,7 @@ impl ToolRuntime {
         let payload = json!({
             "path": path,
             "expected_file_bytes": expected_file_bytes,
+            "expected_sha256": expected_sha256,
             "offset": offset,
             "length": length,
         });

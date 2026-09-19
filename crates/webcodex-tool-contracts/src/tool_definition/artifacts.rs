@@ -1,7 +1,7 @@
 use super::RunnerCapabilityRequirement::{FileRead, FileWrite};
 use super::ToolVisibility::ModelVisible;
 use super::{
-    adaptive_runtime_direct, def, model_spec, permission_risk,
+    adaptive_runtime_direct, def, model_spec, permission_risk, require_all_scopes,
     requires_artifact_upload_path_binding, ToolDefinition, PERMISSION_RISK_ARTIFACT_WRITE,
     TOOL_CATEGORY_ARTIFACT,
 };
@@ -62,10 +62,42 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
                 "Import 1..10 current ChatGPT/host attachments into a Runner project using openaiFileIdRefs from the host file-reference mechanism, up to 256 MiB per file. This is the preferred host-native attachment-to-project transfer path: do not base64-transfer files, construct download URLs, or use local /mnt/data paths; Control streams downloads into project artifacts. A multi-file batch is not atomic: if a later item fails, structured output preserves imported/succeeded items, identifies the failed item and reason, and sets partial_success=true. Existing trusted MCP host/OAuth client and host rewrite checks still apply.",
-            ).with_gpt_action_description("Import 1..10 current ChatGPT attachments, up to 256 MiB each, into a Runner project through host-populated openaiFileIdRefs. Do not invent file ids/URLs or base64-transfer attachments. Multi-file import is not atomic and reports partial success structurally. Host provenance is adapter-derived; runtime authority remains canonical."),
+            ).with_gpt_action_description("Import 1..10 current ChatGPT attachments (max 256 MiB each) into a Runner project through host-populated openaiFileIdRefs. Do not invent ids/URLs or base64-transfer attachments. Multi-file import is non-atomic and reports partial success; host provenance and runtime authority remain canonical."),
             PERMISSION_RISK_ARTIFACT_WRITE,
         ),
         55,
+    ),
+    adaptive_runtime_direct(
+        permission_risk(
+            model_spec(
+                require_all_scopes(
+                    def(
+                        "transfer_project_artifact",
+                        super::ToolAuditPolicy::TYPED_CANONICAL,
+                        ModelVisible,
+                        TOOL_CATEGORY_ARTIFACT,
+                        None,
+                        TOOL_PROVIDER_CONTROL,
+                        super::ToolSemanticContract {
+                            effect: super::ToolEffect::Mutate,
+                            risk: ProjectWrite,
+                            approval: super::ToolApprovalPolicy::Standard,
+                            idempotency: super::ToolIdempotency::NonIdempotent,
+                        },
+                        None,
+                        true,
+                        Artifact,
+                        true,
+                        false,
+                        super::ToolSessionEvidencePolicy::NONE,
+                    ),
+                    &[PROJECT_READ, PROJECT_WRITE],
+                ),
+                "Transfer one regular artifact directly from a source Project to a destination Project through Control. Requires source project:read and destination project:write; each Project is independently resolved and authorized. Control fences the exact source bytes/SHA-256/MIME snapshot, streams bounded internal chunks into the existing destination artifact upload protocol, and verifies the committed destination bytes/SHA-256. Binary payloads do not pass through Host attachments or model text. overwrite defaults to false.",
+            ).with_gpt_action_description("Transfer one Project artifact directly through Control. Requires project:read on source and project:write on destination; both are independently authorized. Streams exact bytes/SHA without Host attachments or model base64. overwrite defaults to false."),
+            PERMISSION_RISK_ARTIFACT_WRITE,
+        ),
+        57,
     ),
     adaptive_runtime_direct(
         model_spec(

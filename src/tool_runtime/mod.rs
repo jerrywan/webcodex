@@ -6,6 +6,7 @@
 pub mod activity;
 mod agent_task;
 mod agent_wait;
+mod artifact_transfer;
 mod browser_tools;
 mod cargo;
 mod cargo_tools;

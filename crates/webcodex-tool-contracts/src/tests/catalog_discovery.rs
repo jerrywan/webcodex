@@ -424,6 +424,7 @@ fn tool_categories_and_recommended_flows_are_well_formed() {
         .expect("file_transfer category present");
     for name in [
         "import_conversation_files_to_project",
+        "transfer_project_artifact",
         "project_artifact",
         "export_project_artifact",
         "save_project_artifact",
@@ -467,10 +468,11 @@ fn tool_categories_and_recommended_flows_are_well_formed() {
         "bounded deterministic transforms",
         "validate: use structured validators when their canonical diagnostics",
         "native execution is first-class when the command is outside or awkward",
-        "artifact boundary: host/conversation attachment -> import_conversation_files_to_project",
-        "project -> model/host -> project_artifact",
+        "file transfer: host -> import_conversation_files_to_project -> project",
+        "project -> project_artifact -> host/model",
+        "project a -> transfer_project_artifact -> project b",
         "inspect for one bounded segment",
-        "export for complete mcp resourcelink delivery",
+        "export for complete resourcelink delivery",
         "copy show_changes.head.commit",
         "review: small bounded git observations may use native git",
         "git_review_summary to map broad or unknown committed ranges",

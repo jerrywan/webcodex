@@ -3994,6 +3994,22 @@ pub enum ToolCall {
         host_file_import_provenance: HostFileImportProvenance,
     },
 
+    /// Stream one exact source artifact snapshot directly from one Project to
+    /// another through Control, without Host attachments or model-facing base64.
+    TransferProjectArtifact {
+        /// Exact or resolvable source Runtime Project.
+        source_project: String,
+        /// Project-relative source artifact path.
+        source_path: String,
+        /// Exact or resolvable destination Runtime Project.
+        destination_project: String,
+        /// Project-relative destination artifact path.
+        destination_path: String,
+        /// Allow replacing an existing destination artifact (default false).
+        #[serde(default)]
+        overwrite: Option<bool>,
+    },
+
     /// Preferred unified read-side facade for Project artifacts. Physical
     /// dispatch remains action-specific: Runner-backed metadata/inspection and
     /// MCP presentation/authority for native images and complete export.
@@ -5127,6 +5143,7 @@ impl ToolCall {
             Self::WriteProjectFile { .. } => "write_project_file",
             Self::SaveProjectArtifact { .. } => "save_project_artifact",
             Self::ImportConversationFilesToProject { .. } => "import_conversation_files_to_project",
+            Self::TransferProjectArtifact { .. } => "transfer_project_artifact",
             Self::ProjectArtifact { .. } => "project_artifact",
             Self::ExportProjectArtifact { .. } => "export_project_artifact",
             Self::ReadProjectArtifactMetadata { .. } => "read_project_artifact_metadata",

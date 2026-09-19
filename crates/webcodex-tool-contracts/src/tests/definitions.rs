@@ -666,6 +666,7 @@ fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
         ("rotate_agent_continuation_endpoint", 19),
         ("import_conversation_files_to_project", 55),
         ("project_artifact", 56),
+        ("transfer_project_artifact", 57),
         ("run_detached_process", 72),
         ("run_shell", 75),
         ("observe_jobs", 80),

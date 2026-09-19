@@ -3065,6 +3065,7 @@ impl ToolRuntime {
             | ToolCall::SearchAndRead { .. }
             | ToolCall::WriteProjectFile { .. }
             | ToolCall::SaveProjectArtifact { .. }
+            | ToolCall::TransferProjectArtifact { .. }
             | ToolCall::ProjectArtifact { .. }
             | ToolCall::ExportProjectArtifact { .. }
             | ToolCall::ReadProjectArtifactMetadata { .. }

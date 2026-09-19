@@ -640,6 +640,47 @@ pub(super) fn artifact_mime_from_file(
     mime.map(str::to_string)
 }
 
+pub(super) fn read_file_range_with_digest(
+    path: &Path,
+    max_bytes: usize,
+    offset: usize,
+    length: usize,
+) -> Result<(usize, String, Vec<u8>), String> {
+    let requested_end = offset
+        .checked_add(length)
+        .ok_or_else(|| "offset + length overflow".to_string())?;
+    let mut file = File::open(path).map_err(|e| format!("read failed: {e}"))?;
+    let mut buffer = [0_u8; ARTIFACT_STREAM_BUFFER_BYTES];
+    let mut bytes = 0usize;
+    let mut sha256 = Sha256::new();
+    let mut segment = Vec::with_capacity(length);
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("read failed: {e}"))?;
+        if read == 0 {
+            break;
+        }
+        let chunk_start = bytes;
+        bytes = bytes
+            .checked_add(read)
+            .ok_or_else(|| "artifact size overflow".to_string())?;
+        if bytes > max_bytes {
+            return Err("artifact too large to inspect".to_string());
+        }
+        sha256.update(&buffer[..read]);
+
+        let overlap_start = offset.max(chunk_start);
+        let overlap_end = requested_end.min(bytes);
+        if overlap_start < overlap_end {
+            let local_start = overlap_start - chunk_start;
+            let local_end = overlap_end - chunk_start;
+            segment.extend_from_slice(&buffer[local_start..local_end]);
+        }
+    }
+    Ok((bytes, format!("{:x}", sha256.finalize()), segment))
+}
+
 pub(super) fn verify_upload_file(path: &Path, max_bytes: usize) -> Result<(usize, String), String> {
     let mut file = File::open(path).map_err(|e| format!("read failed: {e}"))?;
     let mut buffer = [0_u8; ARTIFACT_STREAM_BUFFER_BYTES];

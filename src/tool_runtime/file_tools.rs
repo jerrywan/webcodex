@@ -125,6 +125,24 @@ impl ToolRuntime {
                 self.save_project_artifact(project, path, content_base64, mime_type, overwrite)
                     .await
             }
+            ToolCall::TransferProjectArtifact {
+                source_project,
+                source_path,
+                destination_project,
+                destination_path,
+                overwrite,
+            } => {
+                self.transfer_project_artifact(
+                    source_project,
+                    source_path,
+                    destination_project,
+                    destination_path,
+                    overwrite,
+                    auth,
+                    transport.clone(),
+                )
+                .await
+            }
             ToolCall::ProjectArtifact {
                 project,
                 path,

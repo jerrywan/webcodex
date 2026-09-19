@@ -5199,6 +5199,19 @@ impl ToolCallAuditProjection for ToolCall {
                 "overwrite": overwrite,
                 "session_id": session_id,
             }),
+            Self::TransferProjectArtifact {
+                source_project,
+                source_path,
+                destination_project,
+                destination_path,
+                overwrite,
+            } => serde_json::json!({
+                "source_project": source_project,
+                "source_path": source_path,
+                "destination_project": destination_project,
+                "destination_path": destination_path,
+                "overwrite": overwrite,
+            }),
             Self::ProjectArtifact {
                 project,
                 path,

@@ -135,6 +135,19 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         );
     }
     let project_artifact_desc = desc("project_artifact");
+    let transfer_artifact_desc = desc("transfer_project_artifact");
+    for phrase in [
+        "source project:read",
+        "destination project:write",
+        "independently resolved and authorized",
+        "exact source bytes/sha-256/mime snapshot",
+        "do not pass through host attachments or model text",
+    ] {
+        assert!(
+            transfer_artifact_desc.contains(phrase),
+            "transfer_project_artifact: {phrase}"
+        );
+    }
     for phrase in [
         "metadata=facts",
         "inspect=fenced segment",

@@ -493,6 +493,7 @@ fn tool_definitions_drive_session_and_permission_policy() {
             "import_conversation_files_to_project",
             PERMISSION_RISK_ARTIFACT_WRITE,
         ),
+        ("transfer_project_artifact", PERMISSION_RISK_ARTIFACT_WRITE),
         ("artifact_upload_finish", PERMISSION_RISK_ARTIFACT_WRITE),
         ("artifact_upload_abort", PERMISSION_RISK_ARTIFACT_WRITE),
         ("computer_save_snapshot", PERMISSION_RISK_ARTIFACT_WRITE),

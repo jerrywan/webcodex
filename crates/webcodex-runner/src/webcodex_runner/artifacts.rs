@@ -6,7 +6,7 @@ use crate::artifact_policy::MAX_MCP_IMAGE_BYTES;
 use crate::runner_protocol::RunnerRequest;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Value};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 #[cfg(test)]
@@ -20,8 +20,8 @@ mod inspection;
 mod upload;
 
 use inspection::{
-    artifact_mime, artifact_mime_from_file, image_size, magic_mime, read_limited,
-    verify_upload_file, zip_entry_count,
+    artifact_mime, artifact_mime_from_file, image_size, magic_mime, read_file_range_with_digest,
+    read_limited, verify_upload_file, zip_entry_count,
 };
 #[cfg(test)]
 use inspection::ARTIFACT_STREAM_BUFFER_BYTES;
@@ -678,6 +678,18 @@ fn handle_read_project_artifact_export_chunk(
         Ok(value) => value,
         Err(e) => return line_edit_stdout(read_error(Some(path), e), start),
     };
+    let expected_sha256 = match payload.get("expected_sha256") {
+        Some(Value::String(value)) if is_hex_sha256(value) => value.as_str(),
+        _ => {
+            return line_edit_stdout(
+                read_error(
+                    Some(path),
+                    "expected_sha256 is required and must be a lowercase 64-character hex digest",
+                ),
+                start,
+            )
+        }
+    };
     if expected_file_bytes > MAX_ARTIFACT_EXPORT_BYTES {
         return line_edit_stdout(
             read_error(
@@ -710,50 +722,7 @@ fn handle_read_project_artifact_export_chunk(
             start,
         );
     }
-    let mut file = match std::fs::File::open(resolved) {
-        Ok(file) => file,
-        Err(e) => {
-            return line_edit_stdout(read_error(Some(path), format!("read failed: {e}")), start)
-        }
-    };
-    let metadata = match file.metadata() {
-        Ok(metadata) => metadata,
-        Err(e) => {
-            return line_edit_stdout(read_error(Some(path), format!("stat failed: {e}")), start)
-        }
-    };
-    let file_bytes = match usize::try_from(metadata.len()) {
-        Ok(value) => value,
-        Err(_) => {
-            return line_edit_stdout(
-                read_error(Some(path), "artifact size does not fit this platform"),
-                start,
-            )
-        }
-    };
-    if file_bytes > MAX_ARTIFACT_EXPORT_BYTES {
-        return line_edit_stdout(
-            read_error(
-                Some(path),
-                format!(
-                    "artifact is too large to export; maximum is {} bytes",
-                    MAX_ARTIFACT_EXPORT_BYTES
-                ),
-            ),
-            start,
-        );
-    }
-    if file_bytes != expected_file_bytes {
-        let mut output = read_error(
-            Some(path),
-            format!(
-                "artifact size changed during export; expected {expected_file_bytes} bytes, found {file_bytes}"
-            ),
-        );
-        output["error_kind"] = json!("snapshot_changed");
-        return line_edit_stdout(output, start);
-    }
-    if offset > file_bytes {
+    if offset > expected_file_bytes {
         return line_edit_stdout(
             read_error(Some(path), "offset exceeds artifact size"),
             start,
@@ -763,14 +732,23 @@ fn handle_read_project_artifact_export_chunk(
         Some(value) => value,
         None => return line_edit_stdout(read_error(Some(path), "offset + length overflow"), start),
     };
-    let next_offset = requested_end.min(file_bytes);
-    let bytes_to_read = next_offset - offset;
-    if let Err(e) = file.seek(SeekFrom::Start(offset as u64)) {
-        return line_edit_stdout(read_error(Some(path), format!("seek failed: {e}")), start);
+    let (file_bytes, actual_sha256, segment) =
+        match read_file_range_with_digest(resolved, MAX_ARTIFACT_EXPORT_BYTES, offset, length) {
+            Ok(result) => result,
+            Err(e) => return line_edit_stdout(read_error(Some(path), e), start),
+        };
+    if file_bytes != expected_file_bytes || actual_sha256 != expected_sha256 {
+        let mut output = read_snapshot_changed(path, expected_sha256, &actual_sha256);
+        output["expected_file_bytes"] = json!(expected_file_bytes);
+        output["actual_file_bytes"] = json!(file_bytes);
+        return line_edit_stdout(output, start);
     }
-    let mut segment = vec![0_u8; bytes_to_read];
-    if let Err(e) = file.read_exact(&mut segment) {
-        return line_edit_stdout(read_error(Some(path), format!("read failed: {e}")), start);
+    let next_offset = requested_end.min(file_bytes);
+    if segment.len() != next_offset.saturating_sub(offset) {
+        return line_edit_stdout(
+            read_error(Some(path), "artifact range length changed during export"),
+            start,
+        );
     }
     let truncated = next_offset < file_bytes;
     line_edit_stdout(

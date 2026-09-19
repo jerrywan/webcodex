@@ -140,6 +140,36 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 ),
             ),
         ])),
+        "transfer_project_artifact" => Some(wrapped_output_schema(vec![
+            (
+                "source_project",
+                schema_type("string", "Canonical resolved source Runtime Project id."),
+            ),
+            (
+                "source_path",
+                schema_type("string", "Project-relative source artifact path."),
+            ),
+            (
+                "destination_project",
+                schema_type("string", "Canonical resolved destination Runtime Project id."),
+            ),
+            (
+                "destination_path",
+                schema_type("string", "Project-relative destination artifact path."),
+            ),
+            (
+                "bytes",
+                schema_type("integer", "Transferred artifact size in bytes."),
+            ),
+            (
+                "sha256",
+                schema_type("string", "SHA-256 of the exact source snapshot and committed destination."),
+            ),
+            (
+                "mime_type",
+                schema_type("string", "Canonical artifact presentation MIME type."),
+            ),
+        ])),
         "export_project_artifact" => Some(wrapped_output_schema(vec![
             (
                 "project",

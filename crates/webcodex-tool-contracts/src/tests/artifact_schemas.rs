@@ -60,6 +60,60 @@ fn artifact_upload_followup_descriptions_explain_required_path_binding() {
 }
 
 #[test]
+fn transfer_project_artifact_has_two_project_contract_and_no_payload_field() {
+    let definition = lookup_tool_definition("transfer_project_artifact")
+        .expect("transfer_project_artifact definition");
+    assert_eq!(definition.metadata.effect, ToolEffect::Mutate);
+    assert_eq!(definition.metadata.risk, ToolRisk::ProjectWrite);
+    assert_eq!(definition.metadata.approval, ToolApprovalPolicy::Standard);
+    assert_eq!(
+        definition.metadata.authority,
+        ToolAuthorityPolicy::RequireAll(&[PROJECT_READ, PROJECT_WRITE])
+    );
+    assert!(definition.requires_permission());
+
+    let specs = registered_tool_specs();
+    let spec = spec_named(&specs, "transfer_project_artifact");
+    let props = spec.input_schema["properties"].as_object().unwrap();
+    assert_eq!(spec.input_schema["additionalProperties"], false);
+    assert_eq!(
+        spec.input_schema["required"],
+        json!([
+            "source_project",
+            "source_path",
+            "destination_project",
+            "destination_path"
+        ])
+    );
+    for field in [
+        "source_project",
+        "source_path",
+        "destination_project",
+        "destination_path",
+        "overwrite",
+    ] {
+        assert!(props.contains_key(field), "{field}");
+    }
+    for forbidden in ["content_base64", "download_url", "upload_id"] {
+        assert!(!props.contains_key(forbidden), "{forbidden}");
+    }
+    let output = spec.output_schema["properties"]["output"]["properties"]
+        .as_object()
+        .unwrap();
+    for field in [
+        "source_project",
+        "source_path",
+        "destination_project",
+        "destination_path",
+        "bytes",
+        "sha256",
+        "mime_type",
+    ] {
+        assert!(output.contains_key(field), "{field}");
+    }
+}
+
+#[test]
 fn project_artifact_is_compact_typed_project_read_facade() {
     let definition =
         lookup_tool_definition("project_artifact").expect("project_artifact definition");

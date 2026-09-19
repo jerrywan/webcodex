@@ -1065,6 +1065,7 @@ pub(super) async fn mcp_artifact_export_read_chunk(
             &record.project,
             &record.snapshot.path,
             record.snapshot.bytes,
+            &record.snapshot.sha256,
             offset,
             length,
             auth,

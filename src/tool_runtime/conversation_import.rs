@@ -5,7 +5,8 @@
 //! the download through the existing bounded artifact upload mutation path.
 
 use super::files::{
-    MAX_PROJECT_ARTIFACT_UPLOAD_BYTES, MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES,
+    artifact_upload_failure_is_definite, MAX_PROJECT_ARTIFACT_UPLOAD_BYTES,
+    MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES,
 };
 use super::sessions::SessionTransport;
 use super::tool_call::{HostFileImportProvenance, OpenAiHostFileRef};
@@ -405,14 +406,6 @@ fn request_url_for_download(validated_url: reqwest::Url) -> reqwest::Url {
     validated_url
 }
 
-fn import_upload_failure_is_definite(result: &ToolResult, upload_id: &str) -> bool {
-    result
-        .output
-        .get("upload_id")
-        .and_then(Value::as_str)
-        .is_some_and(|returned| returned == upload_id)
-}
-
 impl ToolRuntime {
     async fn dispatch_import_artifact_call(
         &self,
@@ -472,7 +465,7 @@ impl ToolRuntime {
             )
             .await;
         if !result.success {
-            if import_upload_failure_is_definite(&result, upload_id) {
+            if artifact_upload_failure_is_definite(&result, upload_id) {
                 self.abort_import_upload(
                     &input.project,
                     path,
@@ -722,7 +715,7 @@ impl ToolRuntime {
             )
             .await;
         if !result.success {
-            if import_upload_failure_is_definite(&result, &upload_id) {
+            if artifact_upload_failure_is_definite(&result, &upload_id) {
                 self.abort_import_upload(
                     &input.project,
                     &path,
