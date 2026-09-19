@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn embedded_bundle_contains_runtime_and_admin_only() {
-        assert!(RUNTIME_HTML.contains("WebCodex Runtime Console"));
+        assert!(RUNTIME_HTML.contains("WebCodex — Workspace"));
         assert!(RUNTIME_HTML.contains("/runtime/app.js"));
         assert!(RUNTIME_HTML.contains("/runtime/styles.css"));
         assert!(RUNTIME_APP_JS.contains("/api/runtime-console/"));
