@@ -136,7 +136,13 @@ export class RuntimeWindowController {
   async open(key: string): Promise<void> {
     if (this.snapshot.project) {
       this.listRequest?.abort(); this.listRequest = null;
-      this.snapshot.project = ""; this.snapshot.rows = this.snapshot.globalRows;
+      Object.assign(this.snapshot, {
+        project: "",
+        rows: this.snapshot.globalRows,
+        total: this.snapshot.globalTotal,
+        truncated: this.snapshot.globalTruncated,
+        availability: this.snapshot.globalAvailability,
+      });
     }
     await this.select(key);
   }

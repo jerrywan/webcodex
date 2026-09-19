@@ -128,6 +128,21 @@ test("Project filtering is explicit, cancels previous detail, and cannot replay 
   assert.equal(h.controller.snapshot.globalRows.length, 2, "filter does not erase Home's global inventory");
 });
 
+test("opening a global Window after Project filtering restores the complete global inventory state", async () => {
+  const h = harness(); await load(h);
+  const filter = h.controller.filter("agent:runner:other");
+  h.calls.at(-1).resolve(ok(listing([], { total: 0, truncated: false }))); await filter;
+  assert.equal(h.controller.snapshot.total, 0);
+  const opening = h.controller.open(windowB);
+  assert.equal(h.controller.snapshot.project, "");
+  assert.equal(h.controller.snapshot.rows.length, 2);
+  assert.equal(h.controller.snapshot.total, 2);
+  assert.equal(h.controller.snapshot.truncated, false);
+  assert.equal(h.controller.snapshot.availability, "available");
+  h.calls.at(-1).resolve(ok(detail(windowB))); await opening;
+  assert.equal(h.controller.snapshot.selectedKey, windowB);
+});
+
 test("revoked runtime:read clears all cached Window evidence and fences pending success without retrying other principals", async () => {
   const h = harness(); await load(h);
   const pending = h.controller.refreshDetail(), request = h.calls.at(-1);
