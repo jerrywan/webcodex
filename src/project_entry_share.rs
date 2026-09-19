@@ -964,6 +964,23 @@ async fn start_cloudflare_quick_with_binary(
 
     loop {
         if let Some(status) = child.try_wait().map_err(|_| tunnel_runtime_error())? {
+            // The child can exit after writing a valid Quick Tunnel URL but before
+            // the async pipe readers are scheduled. Give those readers one bounded
+            // chance to publish a URL already emitted by the child before classifying
+            // startup as failed. A returned tunnel may therefore already be terminal;
+            // the normal forwarding/exit supervision path will report that state.
+            if let Ok(Some(url)) =
+                tokio::time::timeout(TUNNEL_LOG_DRAIN_TIMEOUT, url_rx.recv()).await
+            {
+                return Ok((
+                    url,
+                    CloudflareTunnel {
+                        child,
+                        stdout_task,
+                        stderr_task,
+                    },
+                ));
+            }
             drain_tunnel_readers(stdout_task, stderr_task).await;
             let detail = bounded_tunnel_log_summary(&recent);
             let message = if detail.is_empty() {
@@ -1637,9 +1654,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn tunnel_early_exit_after_url_is_supervised() {
-        let (_temp, binary) = fake_cloudflared(
-            "#!/bin/sh\necho https://short-lived.trycloudflare.com >&2\nsleep 0.1\nexit 9\n",
-        );
+        let (_temp, binary) =
+            fake_cloudflared("#!/bin/sh\necho https://short-lived.trycloudflare.com >&2\nexit 9\n");
         let (url, mut tunnel) = start_cloudflare_quick_with_binary(
             &binary,
             "http://127.0.0.1:23456",
