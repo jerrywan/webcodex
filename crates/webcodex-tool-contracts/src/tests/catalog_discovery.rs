@@ -154,6 +154,38 @@ fn tool_recommended_flows_reference_visible_defined_tools() {
 }
 
 #[test]
+fn agent_continuation_setup_flow_is_focused_and_keeps_resume_tools_separate() {
+    let flow = TOOL_RECOMMENDED_FLOWS
+        .iter()
+        .find(|flow| flow.name == "agent_continuation_setup")
+        .expect("agent_continuation_setup recommended flow");
+    assert_eq!(
+        flow.tools,
+        &[
+            "create_agent_identity",
+            "rotate_agent_continuation_endpoint",
+            "present_agent_continuation",
+            "list_agent_identities",
+        ]
+    );
+    let guidance = format!("{}\n{}", flow.summary, flow.manifest_purpose).to_lowercase();
+    for phrase in [
+        "new durable agent window setup",
+        "yield/end",
+        "production_auto_resume_available",
+        "presentation success is not host readiness",
+    ] {
+        assert!(
+            guidance.contains(phrase),
+            "setup flow should mention {phrase}: {guidance}"
+        );
+    }
+    for resume_tool in ["bootstrap_agent_conversation", "consume_agent_wake"] {
+        assert!(!flow.tools.contains(&resume_tool));
+    }
+}
+
+#[test]
 fn edit_recommended_flow_selects_mutation_by_shape_without_weakening_guards() {
     let flow = TOOL_RECOMMENDED_FLOWS
         .iter()

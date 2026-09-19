@@ -41,7 +41,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "Create a durable Server-owned Agent identity and mutable self-description card. The canonical wc_dagent_* id is independent from windows, Endpoints, Workflow Sessions, Projects, and execution authority. Exact idempotency-key replay returns the original Agent; changed reuse is rejected.",
+            "Create a durable Server-owned Agent identity and mutable self-description card. For a new ChatGPT window that needs durable Agent continuation, this is the first setup step; next use rotate_agent_continuation_endpoint, then present_agent_continuation. The canonical wc_dagent_* id remains independent from windows, Endpoints, Workflow Sessions, Projects, and execution authority. Exact idempotency-key replay returns the original Agent; changed reuse is rejected.",
         ),
         COMMUNICATION_MANAGE_SCOPES,
     ),
@@ -156,7 +156,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                         false,
                         super::ToolSessionEvidencePolicy::NONE,
                     ),
-                    "Rotate the server-local continuation Endpoint for an owned durable Agent. This creates a new Endpoint record and monotonic controller generation and makes older generations stale. It does not connect to, configure, or control ChatGPT or any external Host. The new Endpoint is not wake-capable until a separately authorized process-local Host binding is established. Exact idempotency replay returns the same Endpoint.",
+                    "Create or rotate the server-local continuation Endpoint for an owned durable Agent. This is the canonical Endpoint step for first-time durable continuation setup; later calls replace the Endpoint with a new monotonic controller generation and make older generations stale. Next usually call present_agent_continuation. This tool does not establish a Host binding or production auto-resume readiness. Exact idempotency replay returns the same Endpoint.",
                 ),
                 PERMISSION_RISK_WRITE,
             )
@@ -242,7 +242,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     false,
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
-                "Present one explicit durable Agent/Endpoint generation as a sparse MCP App continuation controller card. All three identity fields are required; the tool never infers an Agent or Endpoint from Goal, Project, Workflow Session, ClientWindow, credential, recent activity, or any ambient state. Presentation is read-only and creates no Host binding when Apps are unavailable.",
+                "Present one explicit durable Agent/Endpoint generation as a sparse MCP App continuation controller card. New durable Agent window setup is create_agent_identity -> rotate_agent_continuation_endpoint -> present_agent_continuation; after presentation, yield/end the current model turn promptly so the MCP App can establish and maintain the Host binding. Presentation success is not production auto-resume readiness: verify list_agent_identities.production_auto_resume_available afterward. All identity fields remain explicit; presentation is read-only and never itself establishes Host binding or execution authority.",
             )
             .with_gpt_action_unsupported(),
             18,

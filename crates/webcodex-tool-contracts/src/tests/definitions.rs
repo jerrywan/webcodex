@@ -577,6 +577,61 @@ fn stop_job_direct_exposure_preserves_one_canonical_effect_and_gateway_budget() 
 }
 
 #[test]
+fn agent_continuation_setup_descriptions_are_self_guiding_without_direct_expansion() {
+    let specs = registered_tool_specs();
+    let description = |name: &str| {
+        specs
+            .iter()
+            .find(|spec| spec.name == name)
+            .unwrap_or_else(|| panic!("missing ToolSpec {name}"))
+            .description
+            .as_str()
+    };
+    let create = description("create_agent_identity");
+    assert!(create.contains("first setup step"));
+    assert!(create.contains("rotate_agent_continuation_endpoint"));
+    assert!(create.contains("present_agent_continuation"));
+    let rotate = description("rotate_agent_continuation_endpoint");
+    assert!(rotate.contains("first-time durable continuation setup"));
+    assert!(rotate.contains("present_agent_continuation"));
+    assert!(rotate.contains("does not establish a Host binding"));
+    let present = description("present_agent_continuation");
+    assert!(present.contains(
+        "create_agent_identity -> rotate_agent_continuation_endpoint -> present_agent_continuation"
+    ));
+    assert!(present.contains("yield/end the current model turn promptly"));
+    assert!(present.contains("production_auto_resume_available"));
+    assert!(present.contains("not production auto-resume readiness"));
+
+    assert_eq!(
+        lookup_tool_definition("create_agent_identity")
+            .unwrap()
+            .adaptive_runtime_direct_rank(),
+        None,
+        "identity creation stays discoverable through the gateway rather than expanding Direct"
+    );
+    assert_eq!(
+        lookup_tool_definition("present_agent_continuation")
+            .unwrap()
+            .adaptive_runtime_direct_rank(),
+        Some(18)
+    );
+    assert_eq!(
+        lookup_tool_definition("rotate_agent_continuation_endpoint")
+            .unwrap()
+            .adaptive_runtime_direct_rank(),
+        Some(19)
+    );
+    assert_eq!(
+        lookup_tool_definition("attach_agent_endpoint")
+            .unwrap()
+            .adaptive_runtime_direct_rank(),
+        None,
+        "compatibility alias must not become a second canonical Direct entry"
+    );
+}
+
+#[test]
 fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
     let mut seen_ranks = std::collections::BTreeMap::new();
     for definition in tool_definitions() {
