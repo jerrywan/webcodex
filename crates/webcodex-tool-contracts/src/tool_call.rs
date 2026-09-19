@@ -3829,10 +3829,13 @@ pub enum ToolCall {
     SearchAndRead {
         /// Runner-registered project id.
         project: String,
-        /// One bounded search query. Runtime forces match mode and zero search
-        /// context because source context is returned by the read phase.
+        /// One bounded search query. Exactly one of `query` or `queries` is required.
+        /// Runtime forces match mode and zero search context because source context
+        /// is returned by the read phase.
         #[serde(default)]
         query: Option<SearchProjectTextsQuery>,
+        /// Batch of 1..8 predetermined independent queries. Exactly one of `query`
+        /// or `queries` is required; all queries share the global `max_reads` budget.
         #[schemars(length(max = 8))]
         #[serde(default)]
         queries: Option<Vec<SearchProjectTextsQuery>>,
@@ -3848,7 +3851,7 @@ pub enum ToolCall {
         #[serde(default)]
         read_after: Option<usize>,
         #[schemars(extend("default" = 8))]
-        /// Maximum match-derived read requests; clamped to 1..8.
+        /// Global maximum match-derived read requests across all queries; clamped to 1..8.
         #[serde(default)]
         max_reads: Option<usize>,
         /// When true, successful source reads return numbered text.

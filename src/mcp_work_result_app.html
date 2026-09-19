@@ -90,6 +90,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
   let hostInitialized = false;
   let refreshInFlight = false;
   let refreshTimer = null;
+  let sessionLifecycle = null;
   let tornDown = false;
   const pending = new Map();
   const el = id => document.getElementById(id);
@@ -480,7 +481,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
   function scheduleRefresh(delay) {
     if (refreshTimer !== null) clearTimeout(refreshTimer);
     refreshTimer = null;
-    if (tornDown || !hostInitialized || !identity || lastStateVersion === null) return;
+    if (tornDown || !hostInitialized || !identity || lastStateVersion === null || sessionLifecycle === "closed") return;
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
       void refresh(true);
@@ -506,12 +507,17 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
         return;
       }
       hasRefreshed = true;
+      sessionLifecycle = state.session.lifecycle;
       if (state.state_version !== lastStateVersion) {
         lastStateVersion = state.state_version;
         render(state);
-        el("status").textContent = automatic ? "Live · updated" : "Updated";
+        el("status").textContent = sessionLifecycle === "closed"
+          ? (automatic ? "Closed · updated" : "Updated · closed")
+          : (automatic ? "Live · updated" : "Updated");
       } else {
-        el("status").textContent = automatic ? "Live" : "Up to date";
+        el("status").textContent = sessionLifecycle === "closed"
+          ? (automatic ? "Closed" : "Up to date · closed")
+          : (automatic ? "Live" : "Up to date");
       }
     } catch (_) {
       if (!tornDown && !automatic) el("status").textContent = hadSnapshot ? "Refresh unavailable · showing last snapshot" : "Refresh unavailable · retry";
@@ -535,11 +541,12 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
       return;
     }
     if (!acceptInitialFrozen(state.final_changes)) return;
+    sessionLifecycle = state.session.lifecycle;
     if (!hasRefreshed && state.state_version !== lastStateVersion) {
       lastStateVersion = state.state_version;
       render(state);
     }
-    el("status").textContent = "Live";
+    el("status").textContent = sessionLifecycle === "closed" ? "Closed · manual Refresh available" : "Live";
     updateRefreshControl();
     scheduleRefresh(500);
   }
@@ -599,7 +606,9 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; }
     .then(() => {
       if (tornDown) return;
       hostInitialized = true;
-      el("status").textContent = lastStateVersion !== null ? "Live" : identity ? "Waiting for Work snapshot" : "Host initialized · waiting for exact tool identity";
+      el("status").textContent = lastStateVersion !== null
+        ? (sessionLifecycle === "closed" ? "Closed · manual Refresh available" : "Live")
+        : identity ? "Waiting for Work snapshot" : "Host initialized · waiting for exact tool identity";
       notify("ui/notifications/initialized", {});
       updateRefreshControl();
       scheduleRefresh();

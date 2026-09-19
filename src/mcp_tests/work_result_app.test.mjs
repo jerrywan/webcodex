@@ -149,6 +149,32 @@ test("live progress performs bounded app-only polling and adapts to visibility",
   assert.equal(view.timers.size, 1);
 });
 
+test("closed Session stops automatic polling but remains manually refreshable", async () => {
+  const closedState = {
+    ...baseState,
+    state_version: `wr1_${"c".repeat(64)}`,
+    session: { ...baseState.session, lifecycle: "closed" },
+  };
+  const view = app("mcp_work_result_app.html");
+  view.toolInput(input);
+  view.toolResult({ work_result: closedState });
+  await view.initialize();
+  assert.equal(view.timers.size, 0);
+  assert.match(view.nodes.status.textContent, /Closed/);
+  await view.fireTimers(12000);
+  assert.equal(view.calls("work_result_state").length, 0);
+  await view.visibility(false);
+  assert.equal(view.timers.size, 0);
+
+  view.nodes.refresh.onclick();
+  await flush();
+  assert.equal(view.calls("work_result_state").length, 1);
+  await view.reply(view.calls("work_result_state")[0], toolResult({ work_result: closedState }));
+  assert.equal(view.timers.size, 0);
+  assert.equal(view.nodes.refresh.disabled, false);
+  assert.match(view.nodes.status.textContent, /closed/i);
+});
+
 test("user Refresh performs one exact state read and updates the snapshot", async () => {
   const view = app("mcp_work_result_app.html");
   view.toolInput(input);
