@@ -6,8 +6,13 @@ use crate::tool_runtime::startup_brief::{
 use serde_json::{json, Value};
 
 fn workflow_schema() -> Value {
-    registry::output_schema_for_tool("work_on_project")["properties"]["output"]["properties"]
-        ["workflow"]
+    let schema = registry::coding_workflow_diagnostic_output_schema_for_test();
+    schema["properties"]["output"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|variant| variant["properties"]["detail"]["const"] == "standard")
+        .unwrap()["properties"]["workflow"]
         .clone()
 }
 

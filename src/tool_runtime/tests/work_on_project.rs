@@ -3631,12 +3631,10 @@ async fn runner_global_instructions_compose_change_and_repeat_across_projects() 
     let first_sources = first.output["instructions"]["sources"].as_array().unwrap();
     assert_eq!(first_sources[0]["source_scope"], "runner");
     assert_eq!(first_sources[0]["path"], "runner/0/AGENTS.md");
-    assert_eq!(first_sources[0]["content"], "runner global v1");
+    assert!(first_sources[0].get("content").is_none());
     assert_eq!(first_sources[1]["source_scope"], "project");
     assert_eq!(first_sources[1]["path"], "AGENTS.md");
-    assert!(first_sources[1]["content"]
-        .as_str()
-        .is_some_and(|content| content.contains("project A rule")));
+    assert!(first_sources[1].get("content").is_none());
     let first_runner_fingerprint = first_sources[0]["fingerprint"]
         .as_str()
         .unwrap()
@@ -3675,7 +3673,7 @@ async fn runner_global_instructions_compose_change_and_repeat_across_projects() 
         .unwrap();
     assert_eq!(second_sources.len(), 1);
     assert_eq!(second_sources[0]["source_scope"], "runner");
-    assert_eq!(second_sources[0]["content"], "runner global v1");
+    assert!(second_sources[0].get("content").is_none());
 
     // Explicit body suppression remains one shared instruction projection switch;
     // it does not create a special retention protocol for Runner-global sources.
@@ -3737,7 +3735,7 @@ async fn runner_global_instructions_compose_change_and_repeat_across_projects() 
         .iter()
         .find(|source| source["source_scope"] == "runner")
         .unwrap();
-    assert_eq!(changed_runner["content"], "runner global v2");
+    assert!(changed_runner.get("content").is_none());
     assert_ne!(changed_runner["fingerprint"], first_runner_fingerprint);
 }
 
@@ -4933,9 +4931,8 @@ async fn runner_instruction_refresh_keeps_local_changes_and_observes_suppressed_
     assert!(first.success, "{:?}", first.error);
     let id = first.output["session_id"].as_str().unwrap();
     let sources = first.output["instructions"]["sources"].as_array().unwrap();
-    assert!(sources.iter().any(|source| source["content"]
-        .as_str()
-        .is_some_and(|body| body.contains("LOCAL_INITIAL_RULE"))));
+    assert!(sources.iter().all(|source| source.get("content").is_none()));
+    assert!(sources.iter().any(|source| source["path"] == "AGENTS.md"));
     assert_eq!(sources.len(), 17);
     assert!(sources[0].get("read_more").is_none());
     assert!(serde_json::to_vec(&first.output).unwrap().len() <= 30 * 1024);
