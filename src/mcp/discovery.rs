@@ -35,7 +35,7 @@ pub(super) fn compact_tool(tool: &mut Value) {
             ("recording_session_id", "Optional Workflow Session recorder provenance; never authority or a business Session selector."),
             ("ack_session_message_ids", "IDs of ACK-required Session/Peer messages retained in current model context. Repeat while retained; never resolves messages or grants authority."),
             ("session_message_resolution", "Resolve one already-handled non-todo message in the explicit recording Session; ACK if required. Unrelated to main call success."),
-            ("context_request", "Optional bounded context sidecar after the main result; never authority. Keys include project.instructions, webcodex.workflow, skills.catalog, plugins.catalog, memory.bootstrap."),
+            ("context_request", "Optional context sidecar after the result; never authority. Keys: project.instructions, webcodex.workflow, jobs.attention, skills.catalog, plugins.catalog, memory.bootstrap."),
         ] {
             if let Some(property) = schema.pointer_mut(&format!("/properties/{field}")) {
                 if property.get("description").is_some_and(Value::is_string) {

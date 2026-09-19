@@ -1616,7 +1616,10 @@ fn mcp_compact_descriptions_preserve_selection_and_schema_literals() {
         "inputSchema": {
             "type": "object", "additionalProperties": false,
             "required": ["description"],
-            "properties": {"description": {"type": "string", "description": long, "minLength": 1, "maxLength": 400, "pattern": "^x"}},
+            "properties": {
+                "description": {"type": "string", "description": long, "minLength": 1, "maxLength": 400, "pattern": "^x"},
+                "context_request": {"type": "array", "description": long}
+            },
             "$defs": {"nested": {"description": long}},
             "anyOf": [{"description": long, "properties": {"x": {"enum": ["a", "b"]}}}],
             "oneOf": [{"description": long, "items": {"description": long, "maximum": 3}}],
@@ -1627,6 +1630,15 @@ fn mcp_compact_descriptions_preserve_selection_and_schema_literals() {
     });
     let original = tool.clone();
     compact_tool(&mut tool);
+    let context_request_description = tool["inputSchema"]["properties"]["context_request"]
+        ["description"]
+        .as_str()
+        .unwrap();
+    assert!(
+        context_request_description.contains("jobs.attention"),
+        "{context_request_description}"
+    );
+    assert!(context_request_description.chars().count() <= INPUT_DESCRIPTION_MAX_CHARS);
     for keyword in ["const", "default", "enum", "examples"] {
         assert_eq!(
             tool["inputSchema"][keyword],
@@ -1676,7 +1688,7 @@ async fn mcp_tools_list_stateless_serialized_size_budget() {
     let mut admin = scoped.clone();
     admin.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
     // Final Stateless result bytes (including wrappers/gateways, excluding the
-    // JSON-RPC envelope). Measurements: 95,307 / 98,271 / 110,788 bytes,
+    // JSON-RPC envelope). Measurements: 95,179 / 98,139 / 110,636 bytes,
     // plus 16,641 with Apps. About 10% byte headroom; new advertised tools
     // require an explicit count-budget review, rather than silent growth.
     for (label, auth, max_tools, max_bytes) in [
