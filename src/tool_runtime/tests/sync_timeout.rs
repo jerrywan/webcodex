@@ -559,8 +559,8 @@ async fn timeout_rejection_does_not_pollute_validation_summary() {
                         no_default_features: None,
                         features: None,
                         package: None,
-                        timeout_secs: Some(60),
-                        sync_wait_secs: Some(60),
+                        timeout_secs: Some(55),
+                        sync_wait_secs: Some(55),
                     },
                     Some(&auth),
                 )

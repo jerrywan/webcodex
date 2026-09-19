@@ -1936,7 +1936,7 @@ pub enum ToolCall {
         #[schemars(range(min = 1))]
         #[serde(default)]
         timeout_secs: Option<u64>,
-        /// same-execution durable Job handoff grace (default 10s), clamped by 60s and timeout; controls
+        /// same-execution durable Job handoff grace (default 10s), clamped by 55s and timeout; controls
         /// return, not when the command is killed; named SSH unsupported.
         #[schemars(range(min = 1))]
         #[serde(default)]

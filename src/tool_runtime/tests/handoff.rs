@@ -999,8 +999,8 @@ async fn real_cargo_nonzero_failures_match_validation_failed_expectations() {
                 "project": &project,
                 "session_id": &sid,
                 "filter": "failing",
-                "timeout_secs": 60,
-                "sync_wait_secs": 60,
+                "timeout_secs": 55,
+                "sync_wait_secs": 55,
                 "expected_failure": true,
                 "expected_failure_kind": "validation_failed",
                 "assertion_name": "cargo_test expected validation failure"
@@ -1017,8 +1017,8 @@ async fn real_cargo_nonzero_failures_match_validation_failed_expectations() {
                 "project": &project,
                 "session_id": &sid,
                 "check": true,
-                "timeout_secs": 60,
-                "sync_wait_secs": 60,
+                "timeout_secs": 55,
+                "sync_wait_secs": 55,
                 "expected_failure": true,
                 "expected_failure_kind": "validation_failed",
                 "assertion_name": "cargo_fmt expected validation failure"
@@ -1034,8 +1034,8 @@ async fn real_cargo_nonzero_failures_match_validation_failed_expectations() {
             json!({
                 "project": &project,
                 "session_id": &sid,
-                "timeout_secs": 60,
-                "sync_wait_secs": 60,
+                "timeout_secs": 55,
+                "sync_wait_secs": 55,
                 "expected_failure": true,
                 "expected_failure_kind": "validation_failed",
                 "assertion_name": "cargo_check expected validation failure"
@@ -1166,8 +1166,8 @@ async fn public_failure_expectation_preserves_raw_cargo_failure_as_expected_vali
                     "project": project,
                     "session_id": sid,
                     "filter": "failing",
-                    "timeout_secs": 60,
-                    "sync_wait_secs": 60,
+                    "timeout_secs": 55,
+                    "sync_wait_secs": 55,
                     "result_expectation": "failure",
                     "assertion_name": assertion_name
                 }),
@@ -1372,8 +1372,8 @@ async fn cargo_test_zero_tests_success_is_detected_and_warns_in_handoff() {
                     "project": project,
                     "session_id": sid,
                     "filter": "missing_filter",
-                    "timeout_secs": 60,
-                    "sync_wait_secs": 60,
+                    "timeout_secs": 55,
+                    "sync_wait_secs": 55,
                     "expected_failure": true,
                     "expected_failure_kind": "validation_failed",
                     "assertion_name": "cargo_test expected failure but ran zero tests"
