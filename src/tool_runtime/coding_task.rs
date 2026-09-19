@@ -842,7 +842,7 @@ impl ToolRuntime {
         let semantic_navigation = serde_json::to_value(semantic_navigation).unwrap_or_else(|_| {
             json!({
                 "supported": false,
-                "available": false,
+                "available": Value::Null,
                 "status": "probe_failed",
                 "reason_code": "status_probe_failed",
             })

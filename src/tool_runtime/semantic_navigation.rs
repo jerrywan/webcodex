@@ -132,7 +132,13 @@ impl SemanticNavigationStartupSummary {
     ) -> Self {
         Self {
             supported: true,
-            available: Some(false),
+            // A failed status probe has no executable/slot availability fact.
+            // Preserve diagnostic status/reason without inventing unavailability.
+            available: match status {
+                SemanticNavigationStartupStatus::ProbeFailed
+                | SemanticNavigationStartupStatus::ProbeTimeout => None,
+                _ => Some(false),
+            },
             recommended: false,
             status,
             language: None,

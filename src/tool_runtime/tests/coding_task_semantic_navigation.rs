@@ -343,6 +343,29 @@ async fn coding_task_semantic_navigation_disconnected_agent_is_nonblocking() {
         .is_none());
 }
 
+fn assert_inconclusive_startup(result: &ToolResult, status: &str) {
+    let semantic = &result.output["semantic_navigation"];
+    assert_eq!(semantic["supported"], true);
+    assert_eq!(semantic["available"], Value::Null);
+    assert_eq!(semantic["status"], status);
+    assert_eq!(result.output["startup_verdict"]["status"], "pass");
+    assert!(!result.output["warnings"].as_array().unwrap().iter()
+        .any(|warning| warning == "semantic_navigation_unavailable"));
+    let compact = crate::tool_runtime::coding_task::project_work_on_project_output(
+        "demo".to_string(), result.output.clone(),
+    );
+    assert!(compact.success, "{compact:?}");
+    assert_eq!(compact.output["semantic_navigation"]["status"], status);
+    assert_eq!(compact.output["semantic_navigation"]["available"], Value::Null);
+    for absent in ["readiness", "warnings", "blockers", "action_required"] {
+        assert!(compact.output.get(absent).is_none(), "{compact:?}");
+    }
+    crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+        &serde_json::to_value(&compact).unwrap(),
+        &crate::tool_runtime::registry::output_schema_for_tool("work_on_project"),
+    ).unwrap();
+}
+
 #[tokio::test]
 async fn coding_task_semantic_navigation_timeout_uses_one_budget_and_cancels_waiter() {
     let runtime = test_runtime().with_semantic_navigation_probe_timeout(Duration::from_millis(25));
@@ -367,6 +390,7 @@ async fn coding_task_semantic_navigation_timeout_uses_one_budget_and_cancels_wai
     assert_eq!(semantic["available"], Value::Null);
     assert_eq!(semantic["provider"], Value::Null);
     assert_eq!(semantic["capability"], "lsp_read_only_navigation");
+    assert_inconclusive_startup(&result, "probe_timeout");
     assert!(!result.output["warnings"]
         .as_array()
         .unwrap()
@@ -428,11 +452,7 @@ async fn coding_task_semantic_navigation_malformed_result_is_sanitized() {
     for forbidden in ["/private/secret", "do not leak", "stderr"] {
         assert!(!serialized.contains(forbidden), "{serialized}");
     }
-    assert!(result.output["warnings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|warning| warning == "semantic_navigation_unavailable"));
+    assert_inconclusive_startup(&result, "probe_failed");
 }
 
 #[tokio::test]
@@ -457,11 +477,7 @@ async fn coding_task_semantic_navigation_agent_failure_uses_fixed_reason_code() 
     assert_eq!(semantic["status"], "probe_failed");
     assert_eq!(semantic["reason_code"], "status_probe_failed");
     assert!(!semantic.to_string().contains("private raw failure detail"));
-    assert!(result.output["warnings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|warning| warning == "semantic_navigation_unavailable"));
+    assert_inconclusive_startup(&result, "probe_failed");
 }
 
 #[tokio::test]

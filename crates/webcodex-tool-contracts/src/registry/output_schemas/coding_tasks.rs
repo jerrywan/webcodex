@@ -892,7 +892,7 @@ fn startup_semantic_navigation_schema() -> Value {
                     "probe_failed"
                 ]
             },
-            "available": nullable_schema("boolean", "Observed semantic-navigation availability. Null means the bounded startup status probe timed out, so availability is intentionally unknown rather than unavailable."),
+            "available": nullable_schema("boolean", "Observed semantic-navigation availability. Null means the bounded startup status probe timed out or failed without an availability observation; this is advisory, not unavailability."),
             "provider": nullable_schema("string", "Semantic provider when applicable."),
             "capability": nullable_schema("string", "Bounded advertised capability summary."),
             "reason_code": nullable_schema("string", "Stable semantic-navigation reason.")
@@ -1034,7 +1034,7 @@ fn semantic_navigation_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "supported": schema_type("boolean", "True when the Project is Runner-backed, the owning Runner is connected, and it advertises lsp_read_only_navigation."),
-            "available": nullable_schema("boolean", "Observed semantic-navigation availability. True means supported Rust/Go navigation has an available executable or an existing running/initializing server slot; false is a positive unavailable observation; null means the bounded startup status probe timed out before availability could be observed."),
+            "available": nullable_schema("boolean", "Observed semantic-navigation availability. True means supported Rust/Go navigation has an available executable or an existing running/initializing server slot; false is a positive unavailable observation; null means a bounded startup status probe timed out or failed before availability could be observed; this is advisory, not unavailability."),
             "recommended": schema_type("boolean", "True only for available or running status."),
             "status": {
                 "type": "string",
@@ -1190,7 +1190,7 @@ fn work_on_project_output_schema() -> Value {
         "type": "object",
         "properties": {
             "supported": {"type": "boolean"},
-            "available": nullable_schema("boolean", "Observed semantic-navigation availability. Null means the bounded startup status probe timed out, so availability is unknown rather than unavailable."),
+            "available": nullable_schema("boolean", "Observed semantic-navigation availability. Null means the bounded startup status probe timed out or failed without an availability observation; this does not lower coding readiness."),
             "status": {
                 "type": "string",
                 "enum": [
