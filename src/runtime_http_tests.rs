@@ -7,12 +7,8 @@ use std::time::Duration;
 
 #[path = "runtime_http/tests/import_http_tests.rs"]
 mod import_http_tests;
-#[path = "runtime_http/tests/jobs_tests.rs"]
-mod jobs_tests;
 #[path = "runtime_http/tests/model_ergonomics_tests.rs"]
 mod model_ergonomics_tests;
-#[path = "runtime_http/tests/project_files_tests.rs"]
-mod project_files_tests;
 #[path = "runtime_http/tests/projects_tests.rs"]
 mod projects_tests;
 #[path = "runtime_http/tests/runner_config_tests.rs"]
@@ -203,10 +199,9 @@ fn runtime_with_local_project(root: &std::path::Path, project_id: &str) -> ToolR
     )
 }
 
-/// Build a router that mirrors the production /api wiring for the new
-/// dedicated project actions: Config, Database, and ToolRuntime are
-/// injected so AuthMiddleware and the handlers resolve state exactly as
-/// in `main.rs`.
+/// Build a router that mirrors the retained production runtime HTTP wiring.
+/// Config, Database, and ToolRuntime are injected so AuthMiddleware and the
+/// canonical handlers resolve state exactly as in `main.rs`.
 fn build_projects_router(
     config: Arc<crate::Config>,
     db: Arc<crate::Database>,
@@ -229,25 +224,6 @@ fn build_projects_router(
                 .push(Router::with_path("projects/list").post(projects_list))
                 .push(Router::with_path("projects/register").post(projects_register))
                 .push(Router::with_path("projects/create").post(projects_create))
-                .push(Router::with_path("projects/git_status").post(projects_git_status))
-                .push(
-                    Router::with_path("projects/apply_unified_diff")
-                        .post(projects_apply_unified_diff),
-                )
-                .push(Router::with_path("projects/run_shell").post(projects_run_shell))
-                .push(
-                    Router::with_path("projects/git_restore_paths")
-                        .post(projects_git_restore_paths),
-                )
-                .push(
-                    Router::with_path("projects/discard_untracked")
-                        .post(projects_discard_untracked),
-                )
-                .push(Router::with_path("projects/run_job").post(projects_run_job))
-                .push(Router::with_path("projects/list_files").post(projects_list_files))
-                .push(Router::with_path("jobs/list").post(jobs_list))
-                .push(Router::with_path("jobs/stop").post(job_stop))
-                .push(Router::with_path("jobs/tail").post(job_tail))
                 .push(Router::with_path("runtime/status").post(runtime_status)),
         )
 }
