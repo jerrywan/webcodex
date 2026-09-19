@@ -918,7 +918,7 @@ for runtime_tool in ["work_on_project", "finish_coding_task"]:
         errors.append(f"ToolCallRequest.tool description missing {runtime_tool}")
 
 # Keep this cross-language check aligned with MODEL_TOOL_DESCRIPTION_MAX_CHARS.
-MODEL_TOOL_DESCRIPTION_MAX_CHARS = 900
+MODEL_TOOL_DESCRIPTION_MAX_CHARS = 1024
 # Phase 2: each operation description must fit the repository model budget.
 for path, methods in schema.get("paths", {}).items():
     for method, op in methods.items():
