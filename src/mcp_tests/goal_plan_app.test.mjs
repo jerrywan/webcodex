@@ -4,7 +4,6 @@ import { app, flush, toolResult } from "./app_test_support.mjs";
 
 const plan = {
   version: 1, goal_id: `wc_goal_ERERERERERERERER`, title: "Ship Goal",
-  controller_agent_id: null,
   objective: "Review and validate the Goal flow", lifecycle: "active", revision: 1,
   updated_at_unix_ms: 1000, terminal_at_unix_ms: null,
   controller_agent_id: null,
