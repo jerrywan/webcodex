@@ -6,6 +6,12 @@
 
 Ask your assistant to inspect a repository, modify code, run tests, use Git, or investigate a failure. Your repository stays on the machine where it already lives; you do not need to move the project into a hosted workspace just to use an AI coding agent.
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/121867">
+    <img src="https://trendshift.io/api/badge/repositories/121867" alt="WebCodex | GitHub Trending" width="250" height="55" />
+  </a>
+</p>
+
 ## Start using WebCodex
 
 ### Everyday development: full WebCodex (recommended)

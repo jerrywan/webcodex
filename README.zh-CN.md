@@ -6,6 +6,12 @@
 
 你可以直接让 AI 理解项目、修改代码、运行测试、检查 Git 或排查问题。仓库仍然留在原来的机器上，不需要为了使用 WebCodex 把整个项目搬到托管环境里。
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/121867">
+    <img src="https://trendshift.io/api/badge/repositories/121867" alt="WebCodex | GitHub Trending" width="250" height="55" />
+  </a>
+</p>
+
 ## 开始使用
 
 ### 日常使用：完整 WebCodex（推荐）
