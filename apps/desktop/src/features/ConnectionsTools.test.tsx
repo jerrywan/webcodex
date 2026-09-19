@@ -48,9 +48,31 @@ describe("Connections + Tools control surfaces", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Stop Account 3" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Stop Account 3" }));
     await waitFor(() => expect(api.tunnelProfileAction).toHaveBeenLastCalledWith("third", "stop"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Start ChatGPT Work" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Start ChatGPT Work" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restart ChatGPT Work" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Restart ChatGPT Work" }));
+    await waitFor(() => expect(api.tunnelProfileAction).toHaveBeenLastCalledWith("work", "restart"));
+    expect(api.restartOwnedRunner).not.toHaveBeenCalled();
+  });
+
+  it("can stop a failed enabled profile after its child exits and start it again without touching peers", async () => {
+    const initial = state();
+    const stopped = state();
+    stopped.connections = connectionSnapshot(...initial.connections!.profiles.map(profile => profile.id === "work"
+      ? { ...profile, enabled: false, lifecycle: "stopped" as const, last_error: null, pid: null, ready: false }
+      : profile));
+    api.tunnelProfileAction.mockResolvedValue(stopped);
+    render(<Harness mode="connections" initial={initial} />);
+    const work = screen.getByRole("article", { name: "ChatGPT Work" });
+    expect(within(work).getByRole("button", { name: "Restart ChatGPT Work" })).toBeEnabled();
+    fireEvent.click(within(work).getByRole("button", { name: "Stop ChatGPT Work" }));
+    await waitFor(() => expect(api.tunnelProfileAction).toHaveBeenCalledExactlyOnceWith("work", "stop"));
+    await waitFor(() => expect(within(work).getByRole("button", { name: "Start ChatGPT Work" })).toBeEnabled());
+    expect(within(work).queryByRole("button", { name: "Stop ChatGPT Work" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("article", { name: "ChatGPT Personal" })).getByText("Running")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Workspace" })).toHaveTextContent("ServerRunningRunnerRunningConnections2 / 3 Running");
+    fireEvent.click(within(work).getByRole("button", { name: "Start ChatGPT Work" }));
     await waitFor(() => expect(api.tunnelProfileAction).toHaveBeenLastCalledWith("work", "start"));
+    expect(api.tunnelProfileAction.mock.calls.every(([id]) => id === "work")).toBe(true);
     expect(api.restartOwnedRunner).not.toHaveBeenCalled();
   });
 
