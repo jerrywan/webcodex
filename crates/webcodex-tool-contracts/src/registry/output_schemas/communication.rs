@@ -44,6 +44,19 @@ fn agent_schema() -> Value {
     })
 }
 
+fn listed_agent_schema() -> Value {
+    let mut schema = agent_schema();
+    schema["properties"]["production_auto_resume_available"] = schema_type(
+        "boolean",
+        "True only when this listed Agent snapshot has a current unexpired generation-matching wake-capable Endpoint and the current Server process has a production Host carrier for that exact generation. This is continuation readiness only: it does not mean idle, reserve capacity, grant execution authority, or guarantee immediate Host scheduling.",
+    );
+    schema["required"]
+        .as_array_mut()
+        .expect("agent schema required fields")
+        .push(json!("production_auto_resume_available"));
+    schema
+}
+
 fn endpoint_schema() -> Value {
     json!({
         "type": "object",
@@ -336,7 +349,10 @@ pub fn output_schema_for_tool(name: &str) -> Option<Value> {
             ),
             (
                 "agents",
-                array_schema(agent_schema(), "Bounded Agent Card page."),
+                array_schema(
+                    listed_agent_schema(),
+                    "Bounded Agent Card page with current continuation readiness.",
+                ),
             ),
         ]),
         "present_agent_continuation" => wrapped_output_schema(vec![(

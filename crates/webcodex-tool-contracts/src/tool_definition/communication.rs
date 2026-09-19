@@ -75,7 +75,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 false,
                 super::ToolSessionEvidencePolicy::NONE,
             ),
-            "List bounded durable Agent cards owned by the current communication principal, or read one exact Agent. Handles, names, descriptions, labels, and Endpoint counts are metadata only and never grant Project, filesystem, Runner, or Workflow Session authority.",
+            "List bounded durable Agent cards owned by the current communication principal, or read one exact Agent. Each listed Agent includes production_auto_resume_available, a read-only conjunction of current durable Endpoint truth and the current Server process's production Host carrier for that exact generation. It is continuation readiness only: not idle/presence, not a capacity reservation, not execution authority, and not a guarantee of immediate Host scheduling. Handles, names, descriptions, labels, and Endpoint counts are metadata only and never grant Project, filesystem, Runner, or Workflow Session authority.",
         ),
         COMMUNICATION_READ_SCOPES,
     ),

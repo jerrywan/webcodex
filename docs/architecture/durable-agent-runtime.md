@@ -106,6 +106,13 @@ Important current invariants:
   Inbox and Conversation reads remain separate. An already-active explicit turn can
   idempotently accept one pending Wake through an `explicit_activation` Attempt and
   recover the same consume token without pretending it requested a new model turn.
+- bounded Agent listing exposes `production_auto_resume_available` only as the
+  conjunction of the listed current durable Endpoint/generation state and a production
+  Host carrier in this Server process. Together with `active_endpoint_count`, this lets
+  a coordinator distinguish a current Endpoint without a carrier from no current
+  Endpoint. It is not idle/model liveness, presence, capacity reservation, execution
+  authority, or guaranteed/immediate Host scheduling; restart clears the process-local
+  side until an ordinary fenced rebind/recovery succeeds.
 - automatically resumed replies can derive stable replay identity from exact Wake
   plus a bounded operation index, closing the reply-committed/response-lost window
   without merging Wake and Delivery consumption.

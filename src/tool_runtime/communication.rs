@@ -12,6 +12,22 @@ use sha2::{Digest, Sha256};
 
 const DEFAULT_COMMUNICATION_LIST_LIMIT: usize = 50;
 
+#[derive(Serialize)]
+struct AgentIdentityReadinessProjection {
+    #[serde(flatten)]
+    agent: crate::db::DurableAgentIdentity,
+    production_auto_resume_available: bool,
+}
+
+#[derive(Serialize)]
+struct AgentIdentityReadinessPage {
+    total_count: i64,
+    offset: usize,
+    next_offset: Option<usize>,
+    truncated: bool,
+    agents: Vec<AgentIdentityReadinessProjection>,
+}
+
 fn communication_list_limit(limit: Option<usize>) -> usize {
     limit
         .unwrap_or(DEFAULT_COMMUNICATION_LIST_LIMIT)
@@ -283,7 +299,33 @@ impl ToolRuntime {
             offset.unwrap_or(0),
             communication_list_limit(limit),
         ) {
-            Ok(result) => serialized_success(result),
+            Ok(result) => {
+                let agents = result
+                    .agents
+                    .into_iter()
+                    .map(|agent| {
+                        let production_auto_resume_available = agent.active_endpoint_count > 0
+                            && self.agent_continuations.as_ref().is_some_and(|controller| {
+                                controller.production_auto_resume_available(
+                                    &principal,
+                                    &agent.agent_id,
+                                    agent.current_controller_generation,
+                                )
+                            });
+                        AgentIdentityReadinessProjection {
+                            agent,
+                            production_auto_resume_available,
+                        }
+                    })
+                    .collect();
+                serialized_success(AgentIdentityReadinessPage {
+                    total_count: result.total_count,
+                    offset: result.offset,
+                    next_offset: result.next_offset,
+                    truncated: result.truncated,
+                    agents,
+                })
+            }
             Err(error) => communication_error(error, RecoveryKind::RetrySame),
         }
     }

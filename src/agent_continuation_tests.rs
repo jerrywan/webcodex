@@ -299,6 +299,14 @@ fn bind_mcp_app(
     binding_id
 }
 
+fn listed_agent(runtime: &ToolRuntime, agent_id: &str) -> Value {
+    let result = runtime.list_agent_identities(None, Some(agent_id.to_string()), None, None);
+    assert!(result.success, "{:?}", result.output);
+    let agents = result.output["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 1);
+    agents[0].clone()
+}
+
 fn acquire_mcp_app(
     runtime: &ToolRuntime,
     agent_id: &str,
@@ -579,6 +587,117 @@ fn natural_agent_message_dispatches_once_and_burst_remains_bounded_and_private()
 }
 
 #[test]
+fn agent_listing_projects_only_current_production_continuation_readiness() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Arc::new(Database::open(&temp.path().join("readiness.db")).unwrap());
+    let runtime = runtime_with_db(db.clone());
+
+    let ready = create_agent(
+        &runtime,
+        "ready",
+        "Ready Agent",
+        "ready description",
+        "ready-label",
+        "readiness-ready-agent",
+    );
+    let (ready_endpoint, ready_generation) = attach(&runtime, &ready, "readiness-ready-endpoint");
+    let unbound = listed_agent(&runtime, &ready);
+    assert_eq!(unbound["active_endpoint_count"], 1);
+    assert_eq!(unbound["production_auto_resume_available"], false);
+
+    bind_mcp_app(&runtime, &ready, &ready_endpoint, ready_generation);
+    let bound = listed_agent(&runtime, &ready);
+    assert_eq!(bound["active_endpoint_count"], 1);
+    assert_eq!(bound["production_auto_resume_available"], true);
+
+    let other = create_agent(
+        &runtime,
+        "other",
+        "Other Agent",
+        "other description",
+        "other-label",
+        "readiness-other-agent",
+    );
+    let (_other_endpoint, _other_generation) = attach(&runtime, &other, "readiness-other-endpoint");
+    let other_listing = listed_agent(&runtime, &other);
+    assert_eq!(other_listing["active_endpoint_count"], 1);
+    assert_eq!(
+        other_listing["production_auto_resume_available"], false,
+        "another Agent's process-local Host binding must never cross-wire readiness"
+    );
+
+    let detached = create_agent(
+        &runtime,
+        "detached",
+        "Detached Agent",
+        "detached description",
+        "detached-label",
+        "readiness-detached-agent",
+    );
+    let (detached_endpoint, detached_generation) =
+        attach(&runtime, &detached, "readiness-detached-endpoint");
+    bind_mcp_app(&runtime, &detached, &detached_endpoint, detached_generation);
+    assert_eq!(
+        listed_agent(&runtime, &detached)["production_auto_resume_available"],
+        true
+    );
+    let detached_result = runtime.detach_agent_endpoint(None, detached_endpoint.clone());
+    assert!(detached_result.success, "{:?}", detached_result.output);
+    let detached_listing = listed_agent(&runtime, &detached);
+    assert_eq!(detached_listing["active_endpoint_count"], 0);
+    assert_eq!(detached_listing["production_auto_resume_available"], false);
+
+    let expired = create_agent(
+        &runtime,
+        "expired",
+        "Expired Agent",
+        "expired description",
+        "expired-label",
+        "readiness-expired-agent",
+    );
+    let (expired_endpoint, expired_generation) =
+        attach(&runtime, &expired, "readiness-expired-endpoint");
+    bind_mcp_app(&runtime, &expired, &expired_endpoint, expired_generation);
+    db.conn_for_tests()
+        .execute(
+            "UPDATE wc_agent_endpoints SET lease_expires_at_unix_ms = 0 WHERE endpoint_id = ?1",
+            [&expired_endpoint],
+        )
+        .unwrap();
+    let expired_listing = listed_agent(&runtime, &expired);
+    assert_eq!(expired_listing["active_endpoint_count"], 0);
+    assert_eq!(
+        expired_listing["production_auto_resume_available"], false,
+        "an expired durable Endpoint must fail closed even while its local binding still exists"
+    );
+
+    let stale = create_agent(
+        &runtime,
+        "stale",
+        "Stale Agent",
+        "stale description",
+        "stale-label",
+        "readiness-stale-agent",
+    );
+    let (stale_endpoint, stale_generation) = attach(&runtime, &stale, "readiness-stale-endpoint");
+    bind_mcp_app(&runtime, &stale, &stale_endpoint, stale_generation);
+    db.conn_for_tests()
+        .execute(
+            "UPDATE wc_agent_identities
+             SET current_controller_generation = current_controller_generation + 1
+             WHERE agent_id = ?1",
+            [&stale],
+        )
+        .unwrap();
+    let stale_listing = listed_agent(&runtime, &stale);
+    assert_eq!(stale_listing["active_endpoint_count"], 0);
+    assert_eq!(
+        stale_listing["production_auto_resume_available"], false,
+        "a stale generation must not remain continuation-ready"
+    );
+}
+
+#[test]
 fn offline_restart_and_replacement_dispatch_the_same_logical_wake() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("restart.db");
@@ -639,6 +758,12 @@ fn offline_restart_and_replacement_dispatch_the_same_logical_wake() {
         .recover_agent_wakes_for_server_takeover(&ownership, chrono::Utc::now().timestamp_millis())
         .unwrap();
     let runtime = runtime_with_db(reopened.clone());
+    let restart_listing = listed_agent(&runtime, &agent_b);
+    assert_eq!(restart_listing["active_endpoint_count"], 1);
+    assert_eq!(
+        restart_listing["production_auto_resume_available"], false,
+        "Server restart must drop process-local continuation readiness"
+    );
     let bootstrap = runtime.bootstrap_agent_conversation(
         None,
         agent_b.clone(),
@@ -734,6 +859,11 @@ fn offline_restart_and_replacement_dispatch_the_same_logical_wake() {
         old_app_registration.success,
         "{:?}",
         old_app_registration.output
+    );
+    assert_eq!(
+        listed_agent(&runtime, &agent_b)["production_auto_resume_available"],
+        true,
+        "successful Host rebind must restore continuation readiness"
     );
     assert_eq!(
         old_app_registration.output["agent_continuation"]["host_binding"]["bound"],

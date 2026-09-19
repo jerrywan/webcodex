@@ -361,6 +361,50 @@ fn agent_continuation_projection_schema_requires_strict_nullable_restart_recover
 }
 
 #[test]
+fn agent_identity_listing_readiness_schema_is_sparse_and_non_authoritative() {
+    let schema = output_schema_for_tool("list_agent_identities");
+    let agent = &schema["properties"]["output"]["properties"]["agents"]["items"];
+    assert_eq!(agent["additionalProperties"], false);
+    let properties = agent["properties"].as_object().unwrap();
+    assert_eq!(
+        properties["production_auto_resume_available"]["type"],
+        "boolean"
+    );
+    let description = properties["production_auto_resume_available"]["description"]
+        .as_str()
+        .unwrap();
+    for semantic in [
+        "continuation readiness only",
+        "does not mean idle",
+        "reserve capacity",
+        "execution authority",
+        "guarantee immediate Host scheduling",
+    ] {
+        assert!(
+            description.contains(semantic),
+            "missing semantic: {semantic}"
+        );
+    }
+    assert!(agent["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|field| field == "production_auto_resume_available"));
+    for forbidden in [
+        "client_window",
+        "client_window_key",
+        "window_hash",
+        "binding_id",
+        "consume_token",
+        "claim_fence",
+        "credential",
+        "transport",
+    ] {
+        assert!(!properties.contains_key(forbidden), "leaked {forbidden}");
+    }
+}
+
+#[test]
 fn job_terminal_continuation_output_schemas_are_sparse_and_private_app_payload_is_bounded() {
     let present = output_schema_for_tool("present_job_terminal_continuation");
     let projection = &present["properties"]["output"]["properties"]["job_terminal_continuation"];

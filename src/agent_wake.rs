@@ -1160,6 +1160,51 @@ impl AgentContinuationController {
         }
     }
 
+    /// Read-only readiness projection for a listed durable Agent snapshot.
+    ///
+    /// A production carrier is available only when the process-local binding still
+    /// belongs to the same principal/Agent/generation and the exact durable Endpoint
+    /// remains current, unexpired, and wake-capable. Holding the transition fence
+    /// prevents a carrier replacement from being observed half-applied.
+    pub(crate) fn production_auto_resume_available(
+        &self,
+        principal: &CommunicationPrincipal,
+        agent_id: &str,
+        expected_controller_generation: i64,
+    ) -> bool {
+        if expected_controller_generation < 1 {
+            return false;
+        }
+        let _transition = self
+            .state
+            .binding_transitions
+            .lock()
+            .expect("Agent continuation binding transition mutex poisoned");
+        let (endpoint_id, controller_generation) = {
+            let bindings = self
+                .state
+                .bindings
+                .lock()
+                .expect("Agent continuation registry mutex poisoned");
+            let Some(binding) = bindings.get(agent_id) else {
+                return false;
+            };
+            if binding.principal != *principal
+                || binding.agent_id != agent_id
+                || binding.controller_generation != expected_controller_generation
+                || !binding.carrier.production_auto_resume_available()
+            {
+                return false;
+            }
+            (binding.endpoint_id.clone(), binding.controller_generation)
+        };
+        self.state
+            .db
+            .verify_current_agent_endpoint(principal, agent_id, &endpoint_id, controller_generation)
+            .ok()
+            .is_some_and(|endpoint| endpoint.wake_capable)
+    }
+
     pub(crate) fn mcp_app_binding_observation(
         &self,
         agent_id: &str,
