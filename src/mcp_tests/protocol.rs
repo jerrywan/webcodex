@@ -226,8 +226,8 @@ async fn mcp_stateless_tools_list_uses_2026_result_shape() {
                 "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
             );
             let description = ack["description"].as_str().unwrap();
-            assert!(description.contains("current model context still retains"));
-            assert!(description.contains("ACK neither resolves"));
+            assert!(description.contains("retained in current model context"));
+            assert!(description.contains("never resolves messages or grants authority"));
             let resolution = &read_files["inputSchema"]["properties"]["session_message_resolution"];
             assert_eq!(resolution["type"], "object");
             assert_eq!(
@@ -240,9 +240,9 @@ async fn mcp_stateless_tools_list_uses_2026_result_shape() {
                 crate::tool_runtime::sessions::MAX_MESSAGE_RESOLUTION_CHARS
             );
             let resolution_description = resolution["description"].as_str().unwrap();
-            assert!(resolution_description.contains("same WebCodex call"));
             assert!(resolution_description.contains("explicit recording Session"));
-            assert!(resolution_description.contains("atomic completion path"));
+            assert!(resolution_description.contains("ACK if required"));
+            assert!(resolution_description.contains("Unrelated to main call success"));
             assert!(!resolution_description.contains("recording_session_id"));
             assert!(!resolution_description.contains("complete_session_message"));
             let context_request = &read_files["inputSchema"]["properties"]["context_request"];
@@ -252,8 +252,8 @@ async fn mcp_stateless_tools_list_uses_2026_result_shape() {
             assert!(context_request["items"].get("enum").is_none());
             assert_eq!(context_request["items"]["maxLength"], 64);
             let request_description = context_request["description"].as_str().unwrap();
-            assert!(request_description.contains("after this tool's main effect/observation"));
-            assert!(request_description.contains("grants no authority"));
+            assert!(request_description.contains("after the result"));
+            assert!(request_description.contains("never authority"));
             assert!(!request_description.contains("memory_read"));
             assert!(read_files["inputSchema"]["properties"]
                 .get("ack_session_context_revision")

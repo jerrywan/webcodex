@@ -255,26 +255,19 @@ fn coding_task_tools_are_registered_in_metadata_and_openapi() {
         );
     }
 
-    let finish = &openapi["paths"]["/api/actions/finish_coding_task"]["post"];
-    assert_eq!(finish["operationId"], "finish_coding_task");
-    let finish_properties = finish["requestBody"]["content"]["application/json"]["schema"]
-        ["properties"]
-        .as_object()
-        .unwrap();
-    for field in [
-        "project",
-        "session_id",
-        "include_hygiene",
-        "include_handoff",
-        "include_workspace",
-        "include_validation_summary",
-        "summary_only",
-    ] {
-        assert!(
-            finish_properties.contains_key(field),
-            "finish_coding_task missing {field}"
-        );
-    }
+    assert!(
+        openapi["paths"]
+            .get("/api/actions/finish_coding_task")
+            .is_none(),
+        "finish_coding_task is model-visible but intentionally gateway-only"
+    );
+    assert_eq!(
+        webcodex_tool_contracts::runtime_tool_adaptive_direct_rank("finish_coding_task"),
+        None
+    );
+    assert!(webcodex_tool_contracts::gpt_action_tool_supported(
+        "finish_coding_task"
+    ));
     assert!(openapi["paths"]
         .get("/api/actions/start_coding_task")
         .is_none());
