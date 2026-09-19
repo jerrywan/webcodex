@@ -9,10 +9,6 @@ use std::time::Duration;
 mod import_http_tests;
 #[path = "runtime_http/tests/model_ergonomics_tests.rs"]
 mod model_ergonomics_tests;
-#[path = "runtime_http/tests/projects_tests.rs"]
-mod projects_tests;
-#[path = "runtime_http/tests/runner_config_tests.rs"]
-mod runner_config_tests;
 
 #[test]
 fn computer_action_audit_projection_omits_sensitive_observation_payloads() {
@@ -221,9 +217,10 @@ fn build_projects_router(
                     Router::with_path("artifacts/import")
                         .post(import_conversation_files_to_project),
                 )
-                .push(Router::with_path("projects/list").post(projects_list))
-                .push(Router::with_path("projects/register").post(projects_register))
-                .push(Router::with_path("projects/create").post(projects_create))
+                .push(
+                    Router::with_path("projects/resolve-or-register")
+                        .post(projects_resolve_or_register),
+                )
                 .push(Router::with_path("runtime/status").post(runtime_status)),
         )
 }
@@ -393,7 +390,7 @@ fn spawn_startup_agent_executor(registry: Arc<RunnerRegistry>) -> tokio::task::J
 }
 
 // =========================================================================
-// listProjects
+// list_projects
 // =========================================================================
 
 #[tokio::test]
@@ -406,17 +403,12 @@ async fn retained_runtime_endpoints_require_bearer_auth() {
     let service = Service::new(build_projects_router(config, db, runtime));
 
     let endpoints: Vec<(&str, Value)> = vec![
-        ("/api/projects/list", json!({})),
         ("/api/tools/list", json!({})),
         ("/api/tools/call", json!({"tool": "list_tools"})),
         ("/api/runtime/status", json!({})),
         (
-            "/api/projects/register",
-            json!({"client_id": "oe", "id": "my-project", "name": "My Project", "path": "/root/git/my-project"}),
-        ),
-        (
-            "/api/projects/create",
-            json!({"client_id": "oe", "id": "hello", "name": "Hello", "path": "/root/git/hello"}),
+            "/api/projects/resolve-or-register",
+            json!({"client_id": "oe", "path": "/root/git/my-project"}),
         ),
     ];
     for (path, body) in &endpoints {
@@ -455,6 +447,12 @@ async fn retired_dedicated_runtime_routes_are_unmounted() {
         ("jobs", "list"),
         ("jobs", "tail"),
         ("jobs", "stop"),
+        ("projects", "list"),
+        ("projects", "register"),
+        ("projects", "create"),
+        ("projects", "unregister"),
+        ("runners/config", "check"),
+        ("runners/config", "reload"),
     ] {
         let path = format!("/api/{group}/{leaf}");
         let resp = TestClient::post(format!("http://localhost{path}"))

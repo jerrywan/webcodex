@@ -478,15 +478,15 @@ log "---- GPT Actions surface ----"
 body="$(api_post /api/runtime/status '{}')"
 assert_success "getRuntimeStatus" "$body" || true
 
-# listProjects — must include the agent-registered project id.
+# list_projects — must include the agent-registered project id.
 body="$(runtime_tool_call "list_projects" '{}')"
-assert_success "listProjects" "$body" || true
+assert_success "list_projects" "$body" || true
 # Verify the runtime project id appears in the list.
 list_json="$(json_get "$body" output)"
 if echo "$list_json" | grep -q "\"$RUNTIME_PROJECT_ID\""; then
-    pass "listProjects contains $RUNTIME_PROJECT_ID"
+    pass "list_projects contains $RUNTIME_PROJECT_ID"
 else
-    fail "listProjects did not contain $RUNTIME_PROJECT_ID (got: ${list_json:0:200})"
+    fail "list_projects did not contain $RUNTIME_PROJECT_ID (got: ${list_json:0:200})"
 fi
 
 # git_status — routes to the agent through the canonical runtime tool path.
@@ -1660,7 +1660,7 @@ fi
 # a custom GPT can complete a small edit → verify → cleanup cycle through the
 # recommended flow:
 #
-#   1. listProjects              — find the agent project
+#   1. list_projects              — find the agent project
 #   2. callRuntimeTool(read_files) — read a tracked file (README.md)
 #   3. callRuntimeTool(search_project_texts) — locate the target substring
 #   4. callRuntimeTool(show_changes) — confirm initial clean state
@@ -1681,13 +1681,13 @@ log "---- full-auto coding loop smoke (dedicated actions plus callRuntimeTool) -
 LOOP_MARKER_OLD="Smoke Project"
 LOOP_MARKER_NEW="Smoke Project [auto-loop]"
 
-# Step 1: listProjects — find the agent project (re-check as part of the loop).
+# Step 1: list_projects — find the agent project (re-check as part of the loop).
 body="$(runtime_tool_call "list_projects" '{}')"
 loop_list_json="$(json_get "$body" output)"
 if echo "$loop_list_json" | grep -q "\"$RUNTIME_PROJECT_ID\""; then
-    pass "loop: listProjects found $RUNTIME_PROJECT_ID"
+    pass "loop: list_projects found $RUNTIME_PROJECT_ID"
 else
-    fail "loop: listProjects did not find $RUNTIME_PROJECT_ID (got: ${loop_list_json:0:200})"
+    fail "loop: list_projects did not find $RUNTIME_PROJECT_ID (got: ${loop_list_json:0:200})"
 fi
 
 # Step 2: read_files — read README.md.
