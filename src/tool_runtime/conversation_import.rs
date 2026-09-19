@@ -4,13 +4,15 @@
 //! and consumes those references immediately on the Control side, then streams
 //! the download through the existing bounded artifact upload mutation path.
 
-use super::files::MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES;
+use super::files::{
+    MAX_PROJECT_ARTIFACT_UPLOAD_BYTES, MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES,
+};
 use super::sessions::SessionTransport;
 use super::tool_call::{HostFileImportProvenance, OpenAiHostFileRef};
 use super::{ToolCall, ToolResult, ToolRuntime};
 use crate::artifact_policy::{
     canonical_extension_for_mime, canonical_known_mime, mime_is_compatible_with_path,
-    GENERIC_BINARY_MIME,
+    normalize_host_import_presentation_mime, GENERIC_BINARY_MIME,
 };
 use crate::auth::AuthContext;
 use base64::{engine::general_purpose, Engine as _};
@@ -20,7 +22,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 pub(crate) const MAX_IMPORT_FILES: usize = 10;
-pub(crate) const MAX_IMPORT_FILE_BYTES: usize = 10 * 1024 * 1024;
+pub(crate) const MAX_IMPORT_FILE_BYTES: usize = MAX_PROJECT_ARTIFACT_UPLOAD_BYTES;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConversationImportDownloadPolicy {
@@ -29,7 +31,8 @@ pub(crate) enum ConversationImportDownloadPolicy {
 }
 
 const IMPORT_DNS_RESOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
-const IMPORT_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
+const IMPORT_DOWNLOAD_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const IMPORT_DOWNLOAD_OVERALL_NETWORK_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug)]
 struct TrustedDownloadTarget {
@@ -72,20 +75,44 @@ impl From<OpenAiHostFileRef> for OpenAiFileIdRef {
 }
 
 fn sanitize_import_name(name: &str, fallback: &str) -> String {
-    let mut out = String::new();
-    for ch in name.rsplit('/').next().unwrap_or(name).chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
-            out.push(ch);
-        } else {
+    let basename = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let mut out = String::with_capacity(basename.len().min(255));
+    for ch in basename.chars() {
+        if ch == '\0'
+            || ch.is_control()
+            || matches!(ch, '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*')
+        {
             out.push('_');
+        } else {
+            out.push(ch);
         }
     }
-    let trimmed = out.trim_matches('.').trim_matches('_');
-    if trimmed.is_empty() {
-        fallback.to_string()
-    } else {
-        trimmed.to_string()
+    while out.ends_with([' ', '.']) {
+        out.pop();
     }
+    while out.len() > 240 {
+        out.pop();
+    }
+    if out.is_empty() || matches!(out.as_str(), "." | "..") {
+        return fallback.to_string();
+    }
+    let stem = out
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_uppercase();
+    let windows_reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|suffix| {
+                suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9')
+            });
+    if windows_reserved {
+        out.insert(0, '_');
+    }
+    out
 }
 
 
@@ -475,6 +502,259 @@ impl ToolRuntime {
         Ok(next_offset)
     }
 
+    async fn import_one_conversation_file(
+        &self,
+        input: &ImportConversationFilesInput,
+        file_ref: &OpenAiFileIdRef,
+        idx: usize,
+        auth: Option<&AuthContext>,
+        transport: SessionTransport,
+        download_policy: ConversationImportDownloadPolicy,
+    ) -> Result<Value, ToolResult> {
+        let source_name = file_ref
+            .name
+            .as_deref()
+            .or(file_ref.id.as_deref())
+            .unwrap_or("artifact");
+        let reported_mime = file_ref
+            .mime_type
+            .as_deref()
+            .unwrap_or(GENERIC_BINARY_MIME);
+        let fallback = format!("artifact-{}", idx + 1);
+        let leaf = input
+            .targets
+            .as_ref()
+            .and_then(|targets| targets.get(idx))
+            .map(|target| sanitize_import_name(target, &fallback))
+            .unwrap_or_else(|| default_import_leaf(file_ref, idx, reported_mime));
+        let path = join_import_path(input.output_dir.as_deref(), &leaf).map_err(ToolResult::err)?;
+        let mime = normalize_host_import_presentation_mime(&path, file_ref.mime_type.as_deref());
+        if !mime_allowed_for_import(&mime, &path) {
+            return Err(ToolResult::err(format!(
+                "MIME type for '{source_name}' is incompatible with destination path: {mime}"
+            )));
+        }
+        let (client, request_url) =
+            prepare_download_request(&file_ref.download_link, download_policy)
+                .await
+                .map_err(ToolResult::err)?;
+
+        // Bound both a single stalled network operation and cumulative network
+        // wait time. Runner upload backpressure is deliberately excluded.
+        let mut network_budget = IMPORT_DOWNLOAD_OVERALL_NETWORK_TIMEOUT;
+        let send_started = Instant::now();
+        let send_result = tokio::time::timeout(
+            IMPORT_DOWNLOAD_IDLE_TIMEOUT.min(network_budget),
+            client.get(request_url).send(),
+        )
+        .await;
+        network_budget = network_budget.saturating_sub(send_started.elapsed());
+        let mut response = match send_result {
+            Ok(Ok(response)) => response,
+            Ok(Err(_)) | Err(_) => {
+                return Err(ToolResult::err(format!(
+                    "failed to download '{source_name}'"
+                )));
+            }
+        };
+        if !response.status().is_success() {
+            return Err(ToolResult::err(format!(
+                "download for '{source_name}' returned HTTP {}",
+                response.status()
+            )));
+        }
+        let expected_bytes = match response.content_length() {
+            Some(len) if len > MAX_IMPORT_FILE_BYTES as u64 => {
+                return Err(ToolResult::err(format!(
+                    "download for '{source_name}' exceeds {MAX_IMPORT_FILE_BYTES} bytes"
+                )));
+            }
+            Some(len) => Some(len as usize),
+            None => None,
+        };
+        let begin = self
+            .dispatch_import_artifact_call(
+                ToolCall::ArtifactUploadBegin {
+                    project: input.project.clone(),
+                    path: path.clone(),
+                    session_id: input.session_id.clone(),
+                    expected_bytes,
+                    expected_sha256: None,
+                    mime_type: Some(mime.clone()),
+                    overwrite: input.overwrite,
+                },
+                auth,
+                transport.clone(),
+            )
+            .await;
+        if !begin.success {
+            return Err(begin);
+        }
+        let Some(upload_id) = begin
+            .output
+            .get("upload_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            return Err(ToolResult::err(
+                "artifact upload begin returned no upload_id",
+            ));
+        };
+
+        let mut downloaded_bytes = 0usize;
+        let mut uploaded_bytes = 0usize;
+        let mut pending = Vec::with_capacity(MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES);
+        loop {
+            if network_budget.is_zero() {
+                self.abort_import_upload(
+                    &input.project,
+                    &path,
+                    &upload_id,
+                    input.session_id.as_deref(),
+                    auth,
+                    transport.clone(),
+                )
+                .await;
+                return Err(ToolResult::err(format!(
+                    "failed to read download for '{source_name}'"
+                )));
+            }
+            let read_started = Instant::now();
+            let read_result = tokio::time::timeout(
+                IMPORT_DOWNLOAD_IDLE_TIMEOUT.min(network_budget),
+                response.chunk(),
+            )
+            .await;
+            network_budget = network_budget.saturating_sub(read_started.elapsed());
+            let chunk = match read_result {
+                Ok(Ok(Some(chunk))) => chunk,
+                Ok(Ok(None)) => break,
+                Ok(Err(_)) | Err(_) => {
+                    self.abort_import_upload(
+                        &input.project,
+                        &path,
+                        &upload_id,
+                        input.session_id.as_deref(),
+                        auth,
+                        transport.clone(),
+                    )
+                    .await;
+                    return Err(ToolResult::err(format!(
+                        "failed to read download for '{source_name}'"
+                    )));
+                }
+            };
+            let Some(next_downloaded_bytes) = downloaded_bytes.checked_add(chunk.len()) else {
+                self.abort_import_upload(
+                    &input.project,
+                    &path,
+                    &upload_id,
+                    input.session_id.as_deref(),
+                    auth,
+                    transport.clone(),
+                )
+                .await;
+                return Err(ToolResult::err(format!(
+                    "download for '{source_name}' exceeds {MAX_IMPORT_FILE_BYTES} bytes"
+                )));
+            };
+            if next_downloaded_bytes > MAX_IMPORT_FILE_BYTES {
+                self.abort_import_upload(
+                    &input.project,
+                    &path,
+                    &upload_id,
+                    input.session_id.as_deref(),
+                    auth,
+                    transport.clone(),
+                )
+                .await;
+                return Err(ToolResult::err(format!(
+                    "download for '{source_name}' exceeds {MAX_IMPORT_FILE_BYTES} bytes"
+                )));
+            }
+            downloaded_bytes = next_downloaded_bytes;
+
+            let mut remaining = chunk.as_ref();
+            while !remaining.is_empty() {
+                let available = MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES - pending.len();
+                let take = available.min(remaining.len());
+                pending.extend_from_slice(&remaining[..take]);
+                remaining = &remaining[take..];
+                if pending.len() == MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES {
+                    uploaded_bytes = self
+                        .append_import_upload_chunk(
+                            input,
+                            &path,
+                            &upload_id,
+                            uploaded_bytes,
+                            &pending,
+                            auth,
+                            transport.clone(),
+                        )
+                        .await?;
+                    pending.clear();
+                }
+            }
+        }
+        if !pending.is_empty() {
+            self.append_import_upload_chunk(
+                input,
+                &path,
+                &upload_id,
+                uploaded_bytes,
+                &pending,
+                auth,
+                transport.clone(),
+            )
+            .await?;
+        }
+
+        let result = self
+            .dispatch_import_artifact_call(
+                ToolCall::ArtifactUploadFinish {
+                    project: input.project.clone(),
+                    path: path.clone(),
+                    upload_id: upload_id.clone(),
+                    session_id: input.session_id.clone(),
+                },
+                auth,
+                transport.clone(),
+            )
+            .await;
+        if !result.success {
+            if import_upload_failure_is_definite(&result, &upload_id) {
+                self.abort_import_upload(
+                    &input.project,
+                    &path,
+                    &upload_id,
+                    input.session_id.as_deref(),
+                    auth,
+                    transport,
+                )
+                .await;
+            }
+            return Err(result);
+        }
+        let mut obj = Map::new();
+        obj.insert(
+            "source_name".to_string(),
+            Value::String(source_name.to_string()),
+        );
+        obj.insert("project".to_string(), Value::String(input.project.clone()));
+        obj.insert("path".to_string(), Value::String(path));
+        obj.insert("bytes_written".to_string(), result.output["bytes"].clone());
+        obj.insert(
+            "mime_type".to_string(),
+            result
+                .output
+                .get("mime_type")
+                .cloned()
+                .unwrap_or_else(|| Value::String(mime)),
+        );
+        obj.insert("sha256".to_string(), result.output["sha256"].clone());
+        Ok(Value::Object(obj))
+    }
+
     pub(crate) async fn import_conversation_files(
         &self,
         input: ImportConversationFilesInput,
@@ -491,245 +771,55 @@ impl ToolRuntime {
         }
         let mut imported = Vec::new();
         for (idx, file_ref) in input.openai_file_id_refs.iter().enumerate() {
-            let source_name = file_ref
-                .name
-                .as_deref()
-                .or(file_ref.id.as_deref())
-                .unwrap_or("artifact");
-            let mime = file_ref
-                .mime_type
-                .as_deref()
-                .unwrap_or("application/octet-stream");
-            let fallback = format!("artifact-{}", idx + 1);
-            let leaf = input
-                .targets
-                .as_ref()
-                .and_then(|targets| targets.get(idx))
-                .map(|target| sanitize_import_name(target, &fallback))
-                .unwrap_or_else(|| default_import_leaf(file_ref, idx, mime));
-            let path = match join_import_path(input.output_dir.as_deref(), &leaf) {
-                Ok(path) => path,
-                Err(e) => return ToolResult::err(e),
-            };
-            if !mime_allowed_for_import(mime, &path) {
-                return ToolResult::err(format!(
-                    "unsupported MIME type for '{source_name}': {mime}"
-                ));
-            }
-            let (client, request_url) =
-                match prepare_download_request(&file_ref.download_link, download_policy).await {
-                    Ok(prepared) => prepared,
-                    Err(e) => return ToolResult::err(e),
-                };
-            // Preserve the previous 30-second download bound without charging
-            // time spent waiting for Runner upload round-trips against the
-            // network budget. Each actual network wait consumes from the same
-            // cumulative budget; remote-controlled stalls therefore remain
-            // bounded while upload backpressure does not create false timeouts.
-            let mut download_budget = IMPORT_DOWNLOAD_TIMEOUT;
-            let send_started = Instant::now();
-            let send_result =
-                tokio::time::timeout(download_budget, client.get(request_url).send()).await;
-            download_budget = download_budget.saturating_sub(send_started.elapsed());
-            let mut response = match send_result {
-                Ok(Ok(response)) => response,
-                Ok(Err(_)) | Err(_) => {
-                    // reqwest error text can include the request URL. Keep the
-                    // temporary host URL out of durable/model-visible errors.
-                    return ToolResult::err(format!("failed to download '{source_name}'"));
-                }
-            };
-            if !response.status().is_success() {
-                return ToolResult::err(format!(
-                    "download for '{source_name}' returned HTTP {}",
-                    response.status()
-                ));
-            }
-            let expected_bytes = match response.content_length() {
-                Some(len) if len > MAX_IMPORT_FILE_BYTES as u64 => {
-                    return ToolResult::err(format!(
-                        "download for '{source_name}' exceeds {MAX_IMPORT_FILE_BYTES} bytes"
-                    ));
-                }
-                Some(len) => Some(len as usize),
-                None => None,
-            };
-            let begin = self
-                .dispatch_import_artifact_call(
-                    ToolCall::ArtifactUploadBegin {
-                        project: input.project.clone(),
-                        path: path.clone(),
-                        session_id: input.session_id.clone(),
-                        expected_bytes,
-                        expected_sha256: None,
-                        mime_type: Some(mime.to_string()),
-                        overwrite: input.overwrite,
-                    },
+            match self
+                .import_one_conversation_file(
+                    &input,
+                    file_ref,
+                    idx,
                     auth,
                     transport.clone(),
+                    download_policy,
                 )
-                .await;
-            if !begin.success {
-                return begin;
-            }
-            let Some(upload_id) = begin
-                .output
-                .get("upload_id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-            else {
-                return ToolResult::err("artifact upload begin returned no upload_id");
-            };
-
-            let mut downloaded_bytes = 0usize;
-            let mut uploaded_bytes = 0usize;
-            let mut pending = Vec::with_capacity(MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES);
-            loop {
-                if download_budget.is_zero() {
-                    self.abort_import_upload(
-                        &input.project,
-                        &path,
-                        &upload_id,
-                        input.session_id.as_deref(),
-                        auth,
-                        transport.clone(),
-                    )
-                    .await;
-                    return ToolResult::err(format!("failed to read download for '{source_name}'"));
-                }
-                let read_started = Instant::now();
-                let read_result = tokio::time::timeout(download_budget, response.chunk()).await;
-                download_budget = download_budget.saturating_sub(read_started.elapsed());
-                let chunk = match read_result {
-                    Ok(Ok(Some(chunk))) => chunk,
-                    Ok(Ok(None)) => break,
-                    Ok(Err(_)) | Err(_) => {
-                        self.abort_import_upload(
-                            &input.project,
-                            &path,
-                            &upload_id,
-                            input.session_id.as_deref(),
-                            auth,
-                            transport.clone(),
-                        )
-                        .await;
-                        return ToolResult::err(format!(
-                            "failed to read download for '{source_name}'"
-                        ));
-                    }
-                };
-                let Some(next_downloaded_bytes) = downloaded_bytes.checked_add(chunk.len()) else {
-                    self.abort_import_upload(
-                        &input.project,
-                        &path,
-                        &upload_id,
-                        input.session_id.as_deref(),
-                        auth,
-                        transport.clone(),
-                    )
-                    .await;
-                    return ToolResult::err(format!(
-                        "download for '{source_name}' exceeds {MAX_IMPORT_FILE_BYTES} bytes"
-                    ));
-                };
-                if next_downloaded_bytes > MAX_IMPORT_FILE_BYTES {
-                    self.abort_import_upload(
-                        &input.project,
-                        &path,
-                        &upload_id,
-                        input.session_id.as_deref(),
-                        auth,
-                        transport.clone(),
-                    )
-                    .await;
-                    return ToolResult::err(format!(
-                        "download for '{source_name}' exceeds {MAX_IMPORT_FILE_BYTES} bytes"
-                    ));
-                }
-                downloaded_bytes = next_downloaded_bytes;
-
-                let mut remaining = chunk.as_ref();
-                while !remaining.is_empty() {
-                    let available = MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES - pending.len();
-                    let take = available.min(remaining.len());
-                    pending.extend_from_slice(&remaining[..take]);
-                    remaining = &remaining[take..];
-                    if pending.len() == MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES {
-                        uploaded_bytes = match self
-                            .append_import_upload_chunk(
-                                &input,
-                                &path,
-                                &upload_id,
-                                uploaded_bytes,
-                                &pending,
-                                auth,
-                                transport.clone(),
-                            )
-                            .await
-                        {
-                            Ok(next_offset) => next_offset,
-                            Err(result) => return result,
-                        };
-                        pending.clear();
-                    }
+                .await
+            {
+                Ok(item) => imported.push(item),
+                Err(failure) => {
+                    let source_name = file_ref
+                        .name
+                        .as_deref()
+                        .or(file_ref.id.as_deref())
+                        .unwrap_or("artifact");
+                    let reason = failure
+                        .error
+                        .unwrap_or_else(|| "conversation file import failed".to_string());
+                    return ToolResult::err_with_output(
+                        reason.clone(),
+                        json!({
+                            "imported": imported,
+                            "succeeded": imported,
+                            "count": imported.len(),
+                            "succeeded_count": imported.len(),
+                            "failed_item": {
+                                "index": idx,
+                                "source_name": source_name,
+                            },
+                            "failure_reason": reason,
+                            "partial_success": !imported.is_empty(),
+                            "atomic": false,
+                            "failure": failure.output,
+                        }),
+                    );
                 }
             }
-            if !pending.is_empty() {
-                if let Err(result) = self
-                    .append_import_upload_chunk(
-                        &input,
-                        &path,
-                        &upload_id,
-                        uploaded_bytes,
-                        &pending,
-                        auth,
-                        transport.clone(),
-                    )
-                    .await
-                {
-                    return result;
-                }
-            }
-
-            let result = self
-                .dispatch_import_artifact_call(
-                    ToolCall::ArtifactUploadFinish {
-                        project: input.project.clone(),
-                        path: path.clone(),
-                        upload_id: upload_id.clone(),
-                        session_id: input.session_id.clone(),
-                    },
-                    auth,
-                    transport.clone(),
-                )
-                .await;
-            if !result.success {
-                if import_upload_failure_is_definite(&result, &upload_id) {
-                    self.abort_import_upload(
-                        &input.project,
-                        &path,
-                        &upload_id,
-                        input.session_id.as_deref(),
-                        auth,
-                        transport.clone(),
-                    )
-                    .await;
-                }
-                return result;
-            }
-            let mut obj = Map::new();
-            obj.insert(
-                "source_name".to_string(),
-                Value::String(source_name.to_string()),
-            );
-            obj.insert("project".to_string(), Value::String(input.project.clone()));
-            obj.insert("path".to_string(), Value::String(path));
-            obj.insert("bytes_written".to_string(), result.output["bytes"].clone());
-            obj.insert("mime_type".to_string(), Value::String(mime.to_string()));
-            obj.insert("sha256".to_string(), result.output["sha256"].clone());
-            imported.push(Value::Object(obj));
         }
-        ToolResult::ok(json!({"imported": imported, "count": imported.len()}))
+        ToolResult::ok(json!({
+            "imported": imported,
+            "succeeded": imported,
+            "count": imported.len(),
+            "succeeded_count": imported.len(),
+            "partial_success": false,
+            "atomic": false,
+        }))
     }
 
     pub(crate) async fn dispatch_conversation_import_tool(
@@ -788,6 +878,30 @@ impl ToolRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_limit_matches_canonical_streaming_artifact_limit() {
+        assert_eq!(MAX_IMPORT_FILE_BYTES, MAX_PROJECT_ARTIFACT_UPLOAD_BYTES);
+        assert_eq!(MAX_IMPORT_FILE_BYTES, 256 * 1024 * 1024);
+    }
+
+    #[test]
+    fn import_filename_sanitization_preserves_unicode_basename() {
+        assert_eq!(
+            sanitize_import_name("folder/毕业论文.pdf", "fallback.pdf"),
+            "毕业论文.pdf"
+        );
+        assert_eq!(
+            sanitize_import_name(r"folder\报告.md", "fallback.md"),
+            "报告.md"
+        );
+        assert_eq!(
+            sanitize_import_name("../unsafe/name?.txt", "fallback.txt"),
+            "name_.txt"
+        );
+        assert_eq!(sanitize_import_name("..", "fallback"), "fallback");
+        assert_eq!(sanitize_import_name("NUL.txt", "fallback"), "_NUL.txt");
+    }
 
     #[test]
     fn default_import_leaf_preserves_ooxml_when_host_omits_filename() {

@@ -46,11 +46,11 @@ mod search;
 pub(crate) use artifacts::{
     validate_artifact_file_path, validate_artifact_mime_for_path,
     validate_project_artifact_export_snapshot, ProjectArtifactExportSnapshot,
-    MAX_PROJECT_ARTIFACT_EXPORT_BYTES, MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES,
-    MAX_READ_PROJECT_ARTIFACT_LENGTH,
+    MAX_PROJECT_ARTIFACT_EXPORT_BYTES, MAX_PROJECT_ARTIFACT_UPLOAD_BYTES,
+    MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES, MAX_READ_PROJECT_ARTIFACT_LENGTH,
 };
 #[cfg(test)]
-pub(crate) use artifacts::{MAX_PROJECT_ARTIFACT_BYTES, MAX_PROJECT_ARTIFACT_UPLOAD_BYTES};
+pub(crate) use artifacts::MAX_PROJECT_ARTIFACT_BYTES;
 #[cfg(all(test, windows))]
 pub(crate) use inspection::LIST_TRACKED_STDERR_MAX_CHARS;
 pub(crate) use inspection::{effective_read_file_range, slice_read_file_success_output};

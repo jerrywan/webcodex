@@ -125,6 +125,9 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         "preferred host-native attachment-to-project transfer path",
         "do not base64-transfer files",
         "trusted mcp host/oauth client",
+        "up to 256 mib per file",
+        "batch is not atomic",
+        "partial_success=true",
     ] {
         assert!(
             import_artifact_desc.contains(phrase),

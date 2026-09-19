@@ -473,149 +473,6 @@ async fn complete_mcp_import_save(
     }
 }
 
-async fn complete_mcp_import_until_abort(
-    registry: Arc<crate::runner_http::RunnerRegistry>,
-) -> usize {
-    use crate::runner_protocol::{RunnerPollRequest, RunnerResultRequest};
-    use base64::Engine as _;
-
-    async fn next_request(
-        registry: &crate::runner_http::RunnerRegistry,
-    ) -> crate::runner_protocol::RunnerRequest {
-        loop {
-            if let Some(request) = registry
-                .poll(RunnerPollRequest {
-                    client_id: "importer".to_string(),
-                    runner_instance_id: "inst-import".to_string(),
-                })
-                .await
-                .unwrap()
-            {
-                return request;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    }
-
-    let request = next_request(&registry).await;
-    assert_eq!(request.kind, "file_artifact_upload_begin");
-    let begin: Value = serde_json::from_str(request.content.as_deref().unwrap()).unwrap();
-    assert!(begin["expected_bytes"].is_null());
-    let path = begin["path"].as_str().unwrap().to_string();
-    let mime_type = begin["mime_type"].as_str().unwrap().to_string();
-    let upload_id = "wc_upload_mcp_abort_fixture";
-    registry
-        .complete(RunnerResultRequest {
-            client_id: "importer".to_string(),
-            runner_instance_id: "inst-import".to_string(),
-            request_id: request.request_id,
-            exit_code: Some(0),
-            stdout: Some(
-                json!({
-                    "path": path,
-                    "upload_id": upload_id,
-                    "received_bytes": 0,
-                    "next_offset": 0,
-                    "expected_bytes": null,
-                    "expected_sha256": null,
-                    "max_bytes": crate::tool_runtime::files::MAX_PROJECT_ARTIFACT_UPLOAD_BYTES,
-                    "mime_type": mime_type,
-                    "committed": false
-                })
-                .to_string(),
-            ),
-            stderr: None,
-            stdout_truncated: false,
-            stderr_truncated: false,
-            duration_ms: Some(1),
-            error: None,
-        })
-        .await
-        .unwrap();
-
-    let mut received_bytes = 0usize;
-    let mut chunk_count = 0usize;
-    loop {
-        let request = next_request(&registry).await;
-        let payload: Value = serde_json::from_str(request.content.as_deref().unwrap()).unwrap();
-        assert_eq!(payload["path"], path);
-        assert_eq!(payload["upload_id"], upload_id);
-        match request.kind.as_str() {
-            "file_artifact_upload_chunk" => {
-                assert_eq!(payload["offset"], received_bytes);
-                let chunk = base64::engine::general_purpose::STANDARD
-                    .decode(payload["content_base64"].as_str().unwrap())
-                    .unwrap();
-                assert!(!chunk.is_empty());
-                assert!(
-                    chunk.len()
-                        <= crate::tool_runtime::files::MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES
-                );
-                received_bytes += chunk.len();
-                chunk_count += 1;
-                registry
-                    .complete(RunnerResultRequest {
-                        client_id: "importer".to_string(),
-                        runner_instance_id: "inst-import".to_string(),
-                        request_id: request.request_id,
-                        exit_code: Some(0),
-                        stdout: Some(
-                            json!({
-                                "path": path,
-                                "upload_id": upload_id,
-                                "received_bytes": received_bytes,
-                                "next_offset": received_bytes,
-                                "expected_bytes": null,
-                                "expected_sha256": null,
-                                "max_bytes": crate::tool_runtime::files::MAX_PROJECT_ARTIFACT_UPLOAD_BYTES,
-                                "mime_type": mime_type,
-                                "committed": false
-                            })
-                            .to_string(),
-                        ),
-                        stderr: None,
-                        stdout_truncated: false,
-                        stderr_truncated: false,
-                        duration_ms: Some(1),
-                        error: None,
-                    })
-                    .await
-                    .unwrap();
-            }
-            "file_artifact_upload_abort" => {
-                registry
-                    .complete(RunnerResultRequest {
-                        client_id: "importer".to_string(),
-                        runner_instance_id: "inst-import".to_string(),
-                        request_id: request.request_id,
-                        exit_code: Some(0),
-                        stdout: Some(
-                            json!({
-                                "path": path,
-                                "upload_id": upload_id,
-                                "received_bytes": received_bytes,
-                                "temp_file_removed": true,
-                                "sidecar_removed": true,
-                                "final_file_exists": false,
-                                "committed": false
-                            })
-                            .to_string(),
-                        ),
-                        stderr: None,
-                        stdout_truncated: false,
-                        stderr_truncated: false,
-                        duration_ms: Some(1),
-                        error: None,
-                    })
-                    .await
-                    .unwrap();
-                return chunk_count;
-            }
-            other => panic!("unexpected over-limit MCP import request: {other}"),
-        }
-    }
-}
-
 #[tokio::test]
 async fn pat_created_replacement_client_with_same_redirect_remains_untrusted() {
     let (_db_tmp, db) = test_db();
@@ -1135,7 +992,7 @@ async fn oauth_mcp_file_import_trusted_download_guards_remain_bounded_impl() {
         seed_mcp_import_client(&db, &user, "ChatGPT WebCodex", MCP_IMPORT_TRUSTED_REDIRECT);
     let token = seed_oauth_access_token(&db, &client, &user, "project:write");
     let project_tmp = tempfile::tempdir().unwrap();
-    let (runtime, registry) = mcp_import_runtime(project_tmp.path(), Some("alice")).await;
+    let (runtime, _registry) = mcp_import_runtime(project_tmp.path(), Some("alice")).await;
     let service = Service::new(build_test_router(
         mcp_import_config(&[client.client_id.as_str()]),
         db,
@@ -1179,31 +1036,13 @@ async fn oauth_mcp_file_import_trusted_download_guards_remain_bounded_impl() {
             "exceeds",
             false,
         ),
-        (
-            mcp_import_http_response(
-                "200 OK",
-                &[],
-                &vec![b'x'; crate::tool_runtime::conversation_import::MAX_IMPORT_FILE_BYTES + 1],
-            ),
-            "exceeds",
-            true,
-        ),
     ];
 
-    for (response, expected_error, requires_upload_cleanup) in cases {
+    for (response, expected_error, _) in cases {
         let server = start_mcp_import_mock_server(response).await;
         let network = McpImportNetworkOverride::set(server.base_url.clone());
-        let upload_fixture = requires_upload_cleanup
-            .then(|| tokio::spawn(complete_mcp_import_until_abort(registry.clone())));
         let (status, body, _) =
             oauth_mcp_request(&service, &token, "tools/call", params.clone()).await;
-        if let Some(upload_fixture) = upload_fixture {
-            tokio::time::timeout(std::time::Duration::from_secs(10), upload_fixture)
-                .await
-                .expect("over-limit import abort fixture timed out")
-                .unwrap();
-            assert!(!project_tmp.path().join("guard.pptx").exists());
-        }
         assert_eq!(status, StatusCode::OK, "body: {body:?}");
         assert_eq!(body["result"]["isError"], true, "body: {body:?}");
         let serialized = serde_json::to_string(&body).unwrap();

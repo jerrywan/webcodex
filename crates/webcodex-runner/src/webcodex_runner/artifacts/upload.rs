@@ -16,6 +16,7 @@ use super::{
     parse_json_payload, parse_optional_clean_string, parse_optional_usize_field,
     parse_required_clean_string, parse_usize_field, project_root, validate_artifact_runner_path,
 };
+use crate::artifact_policy::ooxml_extension_for_mime;
 use crate::apply_edits_shared::is_lowercase_hex_sha256 as is_hex_sha256;
 
 pub(super) const MAX_ARTIFACT_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
@@ -845,11 +846,24 @@ pub(super) fn handle_artifact_upload_finish(
             start,
         );
     }
-    let detected_mime = if state.mime_type.is_none() {
-        artifact_mime_from_file(path, &part, true)
-    } else {
-        None
-    };
+    let detected_mime = artifact_mime_from_file(path, &part, true);
+    if let Some(claimed_ooxml_mime) = state
+        .mime_type
+        .as_deref()
+        .filter(|mime| ooxml_extension_for_mime(mime).is_some())
+    {
+        if detected_mime.as_deref() != Some(claimed_ooxml_mime) {
+            return line_edit_stdout(
+                upload_error(
+                    Some(path),
+                    Some(&upload_id),
+                    "OOXML MIME type does not match uploaded package content",
+                ),
+                start,
+            );
+        }
+    }
+    let presentation_mime = detected_mime.or_else(|| state.mime_type.clone());
     let exists = std::fs::symlink_metadata(resolved).is_ok();
     if exists && !state.overwrite {
         return line_edit_stdout(
@@ -891,7 +905,7 @@ pub(super) fn handle_artifact_upload_finish(
             "expected_bytes": state.expected_bytes,
             "expected_sha256": state.expected_sha256,
             "sha256": sha256,
-            "mime_type": state.mime_type.or(detected_mime),
+            "mime_type": presentation_mime,
             "committed": true,
         }),
         start,
