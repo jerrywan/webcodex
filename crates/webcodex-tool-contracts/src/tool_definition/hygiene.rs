@@ -1,8 +1,6 @@
 use super::RunnerCapabilityRequirement::{GitOrShell, Shell, StructuredProcess};
 use super::ToolVisibility::ModelVisible;
-use super::{
-    def, git_like, model_spec, ToolDefinition, TOOL_CATEGORY_CLEANUP,
-};
+use super::{def, git_like, model_spec, ToolDefinition, TOOL_CATEGORY_CLEANUP};
 use crate::metadata::{
     ToolPathHint::{None as NoPath, PathList},
     ToolRisk::{ProjectWrite, Read},

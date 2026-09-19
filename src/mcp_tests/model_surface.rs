@@ -115,19 +115,40 @@ async fn long_tail_manifest_routes_through_call_runtime_tool() {
 async fn closeout_helpers_remain_visible_with_exact_gateway_contracts() {
     let runtime = test_runtime();
     for name in ["workspace_hygiene_check", "finish_coding_task"] {
-        let definition = crate::tool_runtime::tool_definition::lookup_tool_definition(name).unwrap();
+        let definition =
+            crate::tool_runtime::tool_definition::lookup_tool_definition(name).unwrap();
         assert!(definition.visibility.is_model_visible());
         assert_eq!(definition.adaptive_runtime_direct_rank(), None);
         let listed = crate::mcp::tools::mcp_tools_list_payload_with_compact(false);
-        assert!(!listed["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == name));
-        let McpOutcome::Ok(value) = handle_mcp_request(&runtime, rpc(
-            "tools/call", Some(json!(66)), mcp_2026_params(json!({
-                "name": "tool_manifest", "arguments": {"tool_name": name},
-            })),
-        ), None).await else { panic!("manifest {name}"); };
+        assert!(!listed["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == name));
+        let McpOutcome::Ok(value) = handle_mcp_request(
+            &runtime,
+            rpc(
+                "tools/call",
+                Some(json!(66)),
+                mcp_2026_params(json!({
+                    "name": "tool_manifest", "arguments": {"tool_name": name},
+                })),
+            ),
+            None,
+        )
+        .await
+        else {
+            panic!("manifest {name}");
+        };
         let output = &value["result"]["structuredContent"]["output"];
-        assert_eq!(output["route"], json!({"mode": "gateway", "via": "call_runtime_tool"}));
-        assert_eq!(output["input_schema"], webcodex_tool_contracts::input_schema_for_tool(name));
+        assert_eq!(
+            output["route"],
+            json!({"mode": "gateway", "via": "call_runtime_tool"})
+        );
+        assert_eq!(
+            output["input_schema"],
+            webcodex_tool_contracts::input_schema_for_tool(name)
+        );
         assert_eq!(output["effect"], "observe");
         assert!(crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(name, true));
     }

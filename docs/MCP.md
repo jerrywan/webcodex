@@ -308,6 +308,21 @@ and execution keep the direct `skill_load` and `run_skill_resource` paths.
 The optional closeout helpers `workspace_hygiene_check` and `finish_coding_task`
 are model-visible gateway tools; review/coding catalogs still recommend them.
 
+`WEBCODEX_MCP_COMPACT_SCHEMAS` defaults to `true`. Compact `tools/list` omits
+`outputSchema` and projects shorter MCP-specific tool/input descriptions for
+selection: purpose, nearby tool distinctions, and essential continuation guidance.
+Repeated Session/context wrapper copy is shortened too. Field names, required
+fields, enums, patterns, bounds, object/union shape, annotations, and MCP App/file
+metadata are preserved. This is discovery presentation only; runtime argument
+validation and execution authority do not change.
+
+Use `tool_manifest(tool_name=...)` for the full exact input contract and operational
+description, or set compact schemas to `false` for full discovery schemas.
+Canonical ToolSpecs are never rewritten. Focused MCP tests compare inputs against
+canonical schemas (with the explicit host-file reference overlay) and enforce
+serialized-byte and advertised-tool-count budgets on final Stateless results,
+including Session wrappers, gateway tools, and optional App metadata/tools.
+
 ### ChatGPT file bridge
 
 When the connected MCP protocol/host admits the artifact capabilities, WebCodex supports

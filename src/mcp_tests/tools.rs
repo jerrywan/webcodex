@@ -165,20 +165,40 @@ fn memory_tools_remain_canonical_extensions_without_top_level_advertising() {
     full_auth.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
     for compact in [false, true] {
         for auth in [None, Some(&full_auth)] {
-            let payload = mcp_tools_list_payload_with_features_for_auth(
-                compact, false, true, true, auth,
-            );
+            let payload =
+                mcp_tools_list_payload_with_features_for_auth(compact, false, true, true, auth);
             for spec in &specs {
-                assert!(!payload["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == spec.name));
-                assert!(crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(&spec.name, true));
-                assert!(!crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(&spec.name, false));
+                assert!(!payload["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["name"] == spec.name));
+                assert!(
+                    crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(
+                        &spec.name, true
+                    )
+                );
+                assert!(
+                    !crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(
+                        &spec.name, false
+                    )
+                );
             }
         }
     }
-    let search = specs.iter().find(|spec| spec.name == "memory_search").unwrap();
+    let search = specs
+        .iter()
+        .find(|spec| spec.name == "memory_search")
+        .unwrap();
     assert!(search.output_schema["properties"]["output"]["properties"]["memories"].is_object());
     let set = specs.iter().find(|spec| spec.name == "memory_set").unwrap();
-    for required in ["project:write", "memory:manage", "permission", "credentials", "execution authority"] {
+    for required in [
+        "project:write",
+        "memory:manage",
+        "permission",
+        "credentials",
+        "execution authority",
+    ] {
         assert!(set.description.contains(required), "{}", set.description);
     }
 }
@@ -187,84 +207,172 @@ fn memory_tools_remain_canonical_extensions_without_top_level_advertising() {
 async fn hidden_extensions_keep_exact_manifest_and_gateway_execution() {
     let tmp = tempfile::tempdir().unwrap();
     let db = std::sync::Arc::new(crate::Database::open(&tmp.path().join("memory.db")).unwrap());
-    let runtime = test_runtime().with_memory_database(db).with_permission_evaluator(
-        crate::tool_runtime::permissions::PermissionEvaluator::with_mode(
-            crate::tool_runtime::permissions::AuthorityMode::TrustedAgent,
-        ),
-    );
+    let runtime = test_runtime()
+        .with_memory_database(db)
+        .with_permission_evaluator(
+            crate::tool_runtime::permissions::PermissionEvaluator::with_mode(
+                crate::tool_runtime::permissions::AuthorityMode::TrustedAgent,
+            ),
+        );
     let mut auth = crate::auth::AuthContext::new(crate::auth::AuthKind::OAuth2Token);
     auth.username = Some("memory-owner".to_string());
     auth.user_id = Some("user-memory-owner".to_string());
     auth.token_kind = Some("oauth2".to_string());
-    auth.scopes = ["runtime:read", "project:read", "project:write", "memory:read", "memory:manage"]
-        .into_iter().map(str::to_string).collect();
-    runtime.runner_registry.register_with_auth(
-        crate::test_support::current_runner_registration(RunnerRegisterRequest {
-            client_id: "hidden-extension-runner".to_string(),
-            runner_instance_id: "inst".to_string(),
-            runner_protocol_generation: crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
-            display_name: None, owner: auth.username.clone(), hostname: None, host_context: None,
-            capabilities: RunnerCapabilities::default(), policy: None,
-            process_started_at: None, build: None, job_concurrency_limit: None,
-            job_inventory: None, coding_agent_providers: None, coding_agent_inventory: None,
-        }),
-        Some(&crate::test_support::runner_access(&auth)),
-    ).await.unwrap();
+    auth.scopes = [
+        "runtime:read",
+        "project:read",
+        "project:write",
+        "memory:read",
+        "memory:manage",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    runtime
+        .runner_registry
+        .register_with_auth(
+            crate::test_support::current_runner_registration(RunnerRegisterRequest {
+                client_id: "hidden-extension-runner".to_string(),
+                runner_instance_id: "inst".to_string(),
+                runner_protocol_generation: crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
+                display_name: None,
+                owner: auth.username.clone(),
+                hostname: None,
+                host_context: None,
+                capabilities: RunnerCapabilities::default(),
+                policy: None,
+                process_started_at: None,
+                build: None,
+                job_concurrency_limit: None,
+                job_inventory: None,
+                coding_agent_providers: None,
+                coding_agent_inventory: None,
+            }),
+            Some(&crate::test_support::runner_access(&auth)),
+        )
+        .await
+        .unwrap();
     crate::test_support::apply_project_inventory_snapshot(
-        &runtime.runner_registry, "hidden-extension-runner", "inst",
+        &runtime.runner_registry,
+        "hidden-extension-runner",
+        "inst",
         vec![RunnerProjectSummary {
-            id: "demo".to_string(), name: None, path: tmp.path().display().to_string(),
-            allow_patch: true, kind: None, registration_source: None, description: None,
-            hooks: Vec::new(), disabled: false, revision: None, root_fingerprint: None,
-            lineage: None, git_branch: None, git_head: None, git_dirty: None,
-            updated_at: 1, shell_profile: None,
+            id: "demo".to_string(),
+            name: None,
+            path: tmp.path().display().to_string(),
+            allow_patch: true,
+            kind: None,
+            registration_source: None,
+            description: None,
+            hooks: Vec::new(),
+            disabled: false,
+            revision: None,
+            root_fingerprint: None,
+            lineage: None,
+            git_branch: None,
+            git_head: None,
+            git_dirty: None,
+            updated_at: 1,
+            shell_profile: None,
         }],
-    ).await;
+    )
+    .await;
     let project = crate::tool_runtime::runner_project_runtime_id("hidden-extension-runner", "demo");
     for name in ["memory_search", "skill_list", "skill_read_file"] {
-        let McpOutcome::Ok(value) = handle_mcp_request(&runtime, rpc(
-            "tools/call", Some(json!(1)), mcp_2026_params(json!({
-                "name": "tool_manifest", "arguments": {"tool_name": name},
-            })),
-        ), Some(&auth)).await else { panic!("manifest {name}"); };
+        let McpOutcome::Ok(value) = handle_mcp_request(
+            &runtime,
+            rpc(
+                "tools/call",
+                Some(json!(1)),
+                mcp_2026_params(json!({
+                    "name": "tool_manifest", "arguments": {"tool_name": name},
+                })),
+            ),
+            Some(&auth),
+        )
+        .await
+        else {
+            panic!("manifest {name}");
+        };
         let output = &value["result"]["structuredContent"]["output"];
-        assert_eq!(output["route"], json!({"mode": "gateway", "via": "call_runtime_tool"}));
+        assert_eq!(
+            output["route"],
+            json!({"mode": "gateway", "via": "call_runtime_tool"})
+        );
         let spec = crate::tool_runtime::stateless_operator_extension_tool_specs()
-            .into_iter().find(|spec| spec.name == name).unwrap();
+            .into_iter()
+            .find(|spec| spec.name == name)
+            .unwrap();
         assert_eq!(output["description"], spec.description);
         assert_eq!(output["input_schema"], spec.input_schema);
     }
     for (name, arguments) in [
-        ("memory_set", json!({"project": project, "memory_key": "discovery", "summary": "Keep gateway reachability", "bootstrap": true})),
-        ("memory_search", json!({"project": project, "context_request": ["memory.bootstrap"]})),
-        ("memory_read", json!({"project": project, "memory_key": "discovery"})),
+        (
+            "memory_set",
+            json!({"project": project, "memory_key": "discovery", "summary": "Keep gateway reachability", "bootstrap": true}),
+        ),
+        (
+            "memory_search",
+            json!({"project": project, "context_request": ["memory.bootstrap"]}),
+        ),
+        (
+            "memory_read",
+            json!({"project": project, "memory_key": "discovery"}),
+        ),
     ] {
-        let McpOutcome::Ok(value) = handle_mcp_request(&runtime, rpc(
-            "tools/call", Some(json!(2)), mcp_2026_params(adaptive_runtime_gateway_params(name, arguments)),
-        ), Some(&auth)).await else { panic!("gateway {name}"); };
+        let McpOutcome::Ok(value) = handle_mcp_request(
+            &runtime,
+            rpc(
+                "tools/call",
+                Some(json!(2)),
+                mcp_2026_params(adaptive_runtime_gateway_params(name, arguments)),
+            ),
+            Some(&auth),
+        )
+        .await
+        else {
+            panic!("gateway {name}");
+        };
         let result = &value["result"]["structuredContent"];
         assert_eq!(result["success"], true, "{name}: {result}");
         if name == "memory_search" {
             let material = &result["output"]["context_projection"]["materials"][0];
             assert_eq!(material["key"], "memory.bootstrap");
             assert_eq!(material["status"], "available");
-            assert!(material["projection"].to_string().contains("Keep gateway reachability"));
+            assert!(material["projection"]
+                .to_string()
+                .contains("Keep gateway reachability"));
         }
     }
     // Both compatibility paths reach the same Project authority boundary;
     // gateway admission never makes an unknown Project available.
     for (name, arguments) in [
         ("skill_list", json!({"project": "missing-project"})),
-        ("skill_read_file", json!({"project": "missing-project", "skill_id": "wc_skill_AAAAAAAAAAAAAAAAAAAAAA", "path": "SKILL.md"})),
+        (
+            "skill_read_file",
+            json!({"project": "missing-project", "skill_id": "wc_skill_AAAAAAAAAAAAAAAAAAAAAA", "path": "SKILL.md"}),
+        ),
     ] {
         let mut results = Vec::new();
-        for params in [json!({"name": name, "arguments": arguments}), adaptive_runtime_gateway_params(name, arguments)] {
-            let McpOutcome::Ok(value) = handle_mcp_request(&runtime, rpc(
-                "tools/call", Some(json!(3)), mcp_2026_params(params),
-            ), Some(&auth)).await else { panic!("compatibility call {name}"); };
+        for params in [
+            json!({"name": name, "arguments": arguments}),
+            adaptive_runtime_gateway_params(name, arguments),
+        ] {
+            let McpOutcome::Ok(value) = handle_mcp_request(
+                &runtime,
+                rpc("tools/call", Some(json!(3)), mcp_2026_params(params)),
+                Some(&auth),
+            )
+            .await
+            else {
+                panic!("compatibility call {name}");
+            };
             let result = value["result"]["structuredContent"].clone();
             assert_eq!(result["success"], false, "{name}: {result}");
-            assert_eq!(result["output"]["error_kind"], "unknown_project", "{name}: {result}");
+            assert_eq!(
+                result["output"]["error_kind"], "unknown_project",
+                "{name}: {result}"
+            );
             results.push(result);
         }
         assert_eq!(results[0], results[1]);
@@ -343,10 +451,7 @@ fn skill_runtime_tools_are_stateless_protocol_extensions_and_schema_static() {
         .filter_map(|tool| tool["name"].as_str())
         .filter(|name| name.starts_with("skill_"))
         .collect::<Vec<_>>();
-    assert_eq!(
-        skill_names,
-        vec!["skill_load"]
-    );
+    assert_eq!(skill_names, vec!["skill_load"]);
 
     let run_skill_resource = before["tools"]
         .as_array()
@@ -379,9 +484,18 @@ fn skill_runtime_tools_are_stateless_protocol_extensions_and_schema_static() {
     );
 
     let compatibility_specs = crate::tool_runtime::stateless_operator_extension_tool_specs();
-    let skill_list = compatibility_specs.iter().find(|spec| spec.name == "skill_list").unwrap();
-    assert_eq!(skill_list.input_schema["properties"]["limit"]["maximum"], 64);
-    assert_eq!(skill_list.output_schema["properties"]["output"]["properties"]["skills"]["type"], "array");
+    let skill_list = compatibility_specs
+        .iter()
+        .find(|spec| spec.name == "skill_list")
+        .unwrap();
+    assert_eq!(
+        skill_list.input_schema["properties"]["limit"]["maximum"],
+        64
+    );
+    assert_eq!(
+        skill_list.output_schema["properties"]["output"]["properties"]["skills"]["type"],
+        "array"
+    );
     for name in ["skill_list", "skill_read_file"] {
         assert!(crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(name, true));
         assert!(!crate::mcp::tools::adaptive_runtime_gateway_target_admitted_for_test(name, false));
@@ -433,10 +547,7 @@ fn skill_management_tools_require_admin_and_remain_fixed_schema() {
         .filter_map(|tool| tool["name"].as_str())
         .filter(|name| name.starts_with("skill_"))
         .collect::<Vec<_>>();
-    assert_eq!(
-        shared_names,
-        vec!["skill_load"]
-    );
+    assert_eq!(shared_names, vec!["skill_load"]);
 
     let admin = crate::auth::AuthContext {
         role: Some("admin".to_string()),
@@ -1283,7 +1394,7 @@ fn mcp_work_on_project_schema_exposes_managed_worktree_without_internal_operatio
 }
 
 #[test]
-fn mcp_tools_list_compact_omits_output_schema_only() {
+fn mcp_tools_list_compact_omits_output_schema_and_preserves_annotations() {
     // Pure renderer with the explicit compact=true switch; the env-adapter
     // path for compact mode is covered end-to-end by
     // `mcp_tools_list_returns_same_names_as_runtime`.
@@ -1299,7 +1410,7 @@ fn mcp_tools_list_compact_omits_output_schema_only() {
             "compact mode must omit outputSchema for {}",
             tool["name"]
         );
-        // Compact projection deliberately preserves annotations; only outputSchema is omitted.
+        // Description compaction must preserve effect/approval annotations.
         assert!(
             tool.get("annotations").is_some(),
             "compact mode keeps annotations for {}",
@@ -1308,29 +1419,254 @@ fn mcp_tools_list_compact_omits_output_schema_only() {
     }
 }
 
+fn strip_description_text(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if object.get("description").is_some_and(Value::is_string) {
+                object.remove("description");
+            }
+            for child in object.values_mut() {
+                strip_description_text(child);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                strip_description_text(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn description_chars(value: &Value) -> usize {
+    match value {
+        Value::Object(object) => object
+            .iter()
+            .map(|(key, child)| {
+                if key == "description" && child.is_string() {
+                    child.as_str().unwrap().chars().count()
+                } else {
+                    description_chars(child)
+                }
+            })
+            .sum(),
+        Value::Array(items) => items.iter().map(description_chars).sum(),
+        _ => 0,
+    }
+}
+
 #[test]
-fn mcp_tools_list_compact_is_smaller_than_full_serialized() {
-    // Explicit compact switches on the pure renderer: no env involvement.
-    let full =
-        serde_json::to_vec(&mcp_tools_list_payload_with_compact(false)).expect("full serialize");
-    let compact =
-        serde_json::to_vec(&mcp_tools_list_payload_with_compact(true)).expect("compact serialize");
-    assert!(
-        compact.len() < full.len(),
-        "compact={} full={}",
-        compact.len(),
-        full.len()
-    );
-    // Guard against accidental total collapse (must still list many tools).
-    assert!(
-        compact.len() > 10_000,
-        "compact unexpectedly tiny: {}",
-        compact.len()
-    );
+fn mcp_tools_list_inputs_equal_canonical_except_descriptions_and_host_file_overlay() {
+    let mut auth = crate::auth::shared_key_context("canonical-mcp-test");
+    auth.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
+    let specs = registered_tool_specs()
+        .into_iter()
+        .chain(crate::tool_runtime::stateless_operator_extension_tool_specs())
+        .map(|spec| (spec.name.clone(), spec))
+        .collect::<std::collections::HashMap<_, _>>();
+    for compact in [false, true] {
+        let payload =
+            mcp_tools_list_payload_with_features_for_auth(compact, false, true, true, Some(&auth));
+        for tool in payload["tools"].as_array().unwrap() {
+            let name = tool["name"].as_str().unwrap();
+            let canonical = &specs[name];
+            let mut expected = canonical.input_schema.clone();
+            // MCP Host rewrites these two required references; this is the only
+            // direct-input transport overlay, independent of description mode.
+            if name == "import_conversation_files_to_project" {
+                expected["properties"]["openaiFileIdRefs"]["items"]["required"] =
+                    json!(["download_url", "file_id"]);
+            }
+            let mut actual = tool["inputSchema"].clone();
+            if compact {
+                strip_description_text(&mut expected);
+                strip_description_text(&mut actual);
+            } else {
+                assert_eq!(tool["description"], canonical.description, "{name}");
+            }
+            assert_eq!(actual, expected, "{name} compact={compact}");
+            assert_eq!(tool["annotations"], canonical.annotations, "{name}");
+        }
+    }
 }
 
 #[tokio::test]
-async fn mcp_tools_list_stateless_serialized_size() {
+async fn mcp_compact_preserves_stateless_wrappers_app_metadata_and_exact_manifest() {
+    let mut auth = crate::auth::shared_key_context("compact-overlays-test");
+    auth.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
+    for stateless in [false, true] {
+        for app_enabled in [false, true] {
+            let mut payloads = Vec::new();
+            for compact in [false, true] {
+                let McpOutcome::Ok(value) = crate::mcp::tools::handle_list(
+                    Some(json!(1)),
+                    Some(&auth),
+                    stateless,
+                    compact,
+                    app_enabled,
+                )
+                .await
+                else {
+                    panic!("tools/list");
+                };
+                let mut result = value["result"].clone();
+                for tool in result["tools"].as_array_mut().unwrap() {
+                    if compact {
+                        assert!(tool.get("outputSchema").is_none());
+                    }
+                    tool.as_object_mut().unwrap().remove("outputSchema");
+                    strip_description_text(tool);
+                }
+                payloads.push(result);
+            }
+            assert_eq!(
+                payloads[0], payloads[1],
+                "stateless={stateless} app={app_enabled}"
+            );
+        }
+    }
+    let runtime = test_runtime();
+    let McpOutcome::Ok(value) = handle_mcp_request(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(2)),
+            mcp_2026_params(json!({
+                "name": "tool_manifest", "arguments": {"tool_name": "run_process"},
+            })),
+        ),
+        Some(&auth),
+    )
+    .await
+    else {
+        panic!("exact manifest");
+    };
+    let output = &value["result"]["structuredContent"]["output"];
+    let canonical = registered_tool_specs()
+        .into_iter()
+        .find(|spec| spec.name == "run_process")
+        .unwrap();
+    assert_eq!(output["description"], canonical.description);
+    assert_eq!(output["input_schema"], canonical.input_schema);
+}
+
+#[test]
+fn mcp_compact_descriptions_preserve_selection_and_schema_literals() {
+    use crate::mcp::discovery::{
+        bound_description, compact_tool, INPUT_DESCRIPTION_MAX_CHARS, TOOL_DESCRIPTION_MAX_CHARS,
+    };
+    let full = mcp_tools_list_payload_with_compact(false);
+    let compact = mcp_tools_list_payload_with_compact(true);
+    let tools = compact["tools"].as_array().unwrap();
+    for (name, phrases) in [
+        (
+            "run_process",
+            vec!["native executable", "literal argv", "observe_jobs"],
+        ),
+        (
+            "run_shell",
+            vec!["shell grammar", "related command chain", "observe_jobs"],
+        ),
+        (
+            "run_detached_process",
+            vec!["survives Runner", "idempotency_key", "same Job"],
+        ),
+        (
+            "observe_jobs",
+            vec![
+                "observation_token",
+                "after_observation_token",
+                "never redispatches",
+            ],
+        ),
+        (
+            "list_jobs",
+            vec!["Recover or inventory", "observe_jobs directly"],
+        ),
+        (
+            "wait_for_job_terminal",
+            vec![
+                "exact existing Job",
+                "returned continuation",
+                "Host continuation",
+            ],
+        ),
+        ("stop_job", vec!["confirm=true", "without stopping"]),
+    ] {
+        let description = tools.iter().find(|tool| tool["name"] == name).unwrap()["description"]
+            .as_str()
+            .unwrap();
+        for phrase in phrases {
+            assert!(description.contains(phrase), "{name}: {description}");
+        }
+    }
+    for tool in tools {
+        assert!(
+            tool["description"].as_str().unwrap().chars().count() <= TOOL_DESCRIPTION_MAX_CHARS
+        );
+    }
+    assert!(description_chars(&compact) < description_chars(&full));
+    let long = "Read foo.rs with v0.4.0. ".to_string() + &"Additional detail. ".repeat(100);
+    assert_eq!(bound_description(&long, 28), "Read foo.rs with v0.4.0.");
+    let unicode = bound_description(&"界".repeat(300), INPUT_DESCRIPTION_MAX_CHARS);
+    assert_eq!(unicode.chars().count(), INPUT_DESCRIPTION_MAX_CHARS);
+    assert!(unicode.ends_with('…'));
+    let mut tool = json!({
+        "name": "schema-fixture", "description": long,
+        "inputSchema": {
+            "type": "object", "additionalProperties": false,
+            "required": ["description"],
+            "properties": {"description": {"type": "string", "description": long, "minLength": 1, "maxLength": 400, "pattern": "^x"}},
+            "$defs": {"nested": {"description": long}},
+            "anyOf": [{"description": long, "properties": {"x": {"enum": ["a", "b"]}}}],
+            "oneOf": [{"description": long, "items": {"description": long, "maximum": 3}}],
+            "if": {"description": long}, "then": {"description": long}, "else": {"description": long},
+            "const": {"description": long}, "default": {"description": long},
+            "enum": [{"description": long}], "examples": [{"description": long}]
+        }
+    });
+    let original = tool.clone();
+    compact_tool(&mut tool);
+    for keyword in ["const", "default", "enum", "examples"] {
+        assert_eq!(
+            tool["inputSchema"][keyword],
+            original["inputSchema"][keyword]
+        );
+    }
+    for pointer in [
+        "/properties/description/description",
+        "/$defs/nested/description",
+        "/anyOf/0/description",
+        "/oneOf/0/items/description",
+        "/if/description",
+        "/then/description",
+        "/else/description",
+    ] {
+        assert!(
+            tool["inputSchema"]
+                .pointer(pointer)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .chars()
+                .count()
+                <= INPUT_DESCRIPTION_MAX_CHARS
+        );
+    }
+    let once = tool.clone();
+    compact_tool(&mut tool);
+    assert_eq!(
+        tool, once,
+        "projection must be idempotent across adapter overlays"
+    );
+    let mut original_schema = original["inputSchema"].clone();
+    strip_description_text(&mut original_schema);
+    strip_description_text(&mut tool["inputSchema"]);
+    assert_eq!(tool["inputSchema"], original_schema);
+}
+
+#[tokio::test]
+async fn mcp_tools_list_stateless_serialized_size_budget() {
     let mut scoped = crate::auth::shared_key_context("surface-size-test");
     scoped.scopes.extend([
         crate::auth::SCOPE_PLUGIN_INSPECT.to_string(),
@@ -1339,20 +1675,68 @@ async fn mcp_tools_list_stateless_serialized_size() {
     ]);
     let mut admin = scoped.clone();
     admin.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
-    for (label, auth) in [("anonymous", None), ("scoped", Some(&scoped)), ("admin", Some(&admin))] {
+    // Final Stateless result bytes (including wrappers/gateways, excluding the
+    // JSON-RPC envelope). Measurements: 95,307 / 98,271 / 110,788 bytes,
+    // plus 16,641 with Apps. About 10% byte headroom; new advertised tools
+    // require an explicit count-budget review, rather than silent growth.
+    for (label, auth, max_tools, max_bytes) in [
+        ("anonymous", None, 32, 105_000),
+        ("scoped", Some(&scoped), 33, 108_000),
+        ("admin", Some(&admin), 39, 122_000),
+    ] {
         for app_enabled in [false, true] {
             let mut sizes = Vec::new();
             for compact in [true, false] {
                 let McpOutcome::Ok(value) = crate::mcp::tools::handle_list(
-                    Some(json!(1)), auth, true, compact, app_enabled,
-                ).await else { panic!("tools/list"); };
+                    Some(json!(1)),
+                    auth,
+                    true,
+                    compact,
+                    app_enabled,
+                )
+                .await
+                else {
+                    panic!("tools/list");
+                };
                 let result = &value["result"];
                 let count = result["tools"].as_array().unwrap().len();
                 let bytes = serde_json::to_vec(result).unwrap().len();
-                eprintln!("MCP_SIZE {label} app={app_enabled} compact={compact} count={count} bytes={bytes}");
+                let tools = result["tools"].as_array().unwrap();
+                let top_chars: usize = tools
+                    .iter()
+                    .map(|tool| tool["description"].as_str().unwrap().chars().count())
+                    .sum();
+                let input_chars: usize = tools
+                    .iter()
+                    .map(|tool| description_chars(&tool["inputSchema"]))
+                    .sum();
+                eprintln!("MCP_SIZE {label} app={app_enabled} compact={compact} count={count} bytes={bytes} top_description_chars={top_chars} input_description_chars={input_chars}");
+                let feature_tools = if cfg!(feature = "experimental-code-mode") {
+                    3
+                } else {
+                    0
+                };
+                let count_budget = max_tools + if app_enabled { 16 } else { 0 } + feature_tools;
+                let byte_budget =
+                    max_bytes + if app_enabled { 18_000 } else { 0 } + feature_tools * 4096;
+                assert!(
+                    count <= count_budget,
+                    "{label} app={app_enabled}: {count} tools exceeds {count_budget}"
+                );
+                if compact {
+                    assert!(
+                        bytes <= byte_budget,
+                        "{label} app={app_enabled}: compact {bytes} bytes exceeds {byte_budget}"
+                    );
+                }
                 sizes.push(bytes);
             }
-            eprintln!("MCP_RATIO {label} app={app_enabled} {:.4}", sizes[0] as f64 / sizes[1] as f64);
+            let ratio = sizes[0] as f64 / sizes[1] as f64;
+            eprintln!("MCP_RATIO {label} app={app_enabled} {ratio:.4}");
+            assert!(
+                ratio <= 0.18,
+                "{label} app={app_enabled}: compact/full={ratio:.4}"
+            );
         }
     }
 }

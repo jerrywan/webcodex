@@ -1,3 +1,4 @@
+mod discovery;
 mod http_metadata;
 mod presentation;
 mod protocol;

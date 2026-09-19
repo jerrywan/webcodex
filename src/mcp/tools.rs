@@ -916,6 +916,9 @@ fn mcp_tool_spec_json(mut spec: ToolSpec, compact: bool, app_enabled: bool) -> V
         );
     }
     attach_job_terminal_resume_suggested_call_schema(&tool_name, app_enabled, &mut value);
+    if compact {
+        super::discovery::compact_tool(&mut value);
+    }
     value
 }
 
@@ -982,6 +985,15 @@ pub(super) async fn handle_list(
                 }
             }
             tools.push(spec);
+        }
+    }
+    if compact_schemas {
+        // Include adapter-added gateway and Session/context wrapper descriptions.
+        // Apply after overlays so none of their repeated full copy leaks into L1.
+        if let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) {
+            for tool in tools {
+                super::discovery::compact_tool(tool);
+            }
         }
     }
     McpOutcome::Ok(rpc_result(

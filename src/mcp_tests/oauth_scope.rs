@@ -846,10 +846,14 @@ async fn oauth2_memory_tools_require_canonical_project_and_memory_scopes() {
             json!({"name": tool, "arguments": arguments}),
             adaptive_gateway_params(tool, arguments),
         ] {
-            let (status, body, challenge) = oauth_mcp_request(
-                &service, &token, "tools/call", mcp_2026_params(params),
-            ).await;
-            assert_mcp_oauth_scope_rejected(status, &body, challenge.as_deref(), Some(missing_scope));
+            let (status, body, challenge) =
+                oauth_mcp_request(&service, &token, "tools/call", mcp_2026_params(params)).await;
+            assert_mcp_oauth_scope_rejected(
+                status,
+                &body,
+                challenge.as_deref(),
+                Some(missing_scope),
+            );
         }
     }
 }
