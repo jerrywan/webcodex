@@ -1,6 +1,8 @@
 import { useLocale } from "../../i18n/locale";
 import { productText, useProduct, type ProductKey } from "../../i18n/product";
 import type { DesktopState } from "../../models/topology";
+import { EMPTY_CONNECTIONS } from "../../models/connections-tools";
+import { useConnectionsTools } from "../../i18n/connections-tools";
 
 export function observationTime(timestamp: number | null | undefined, locale: string, now = Date.now()): string {
   if (!timestamp) return productText(locale, "noActivity");
@@ -19,11 +21,13 @@ export function statusKey(status: string | undefined): ProductKey {
   return "unknown";
 }
 export function WorkspaceStatus({ state }: { state: DesktopState }) {
-  const p = useProduct();
-  const tunnel = state.regular_tunnel?.status || (state.topology?.experience === "quick_share" && state.readiness.exposure === "remote_ready" ? "ready" : state.readiness.exposure === "starting" ? "starting" : state.readiness.exposure === "error" || state.readiness.exposure === "degraded" ? "unavailable" : state.readiness.exposure === "unknown" || state.topology?.server.kind === "remote" ? "unknown" : "stopped");
-  const values = [["Server", state.readiness.server], ["Runner", state.readiness.runner], ["Secure Tunnel", tunnel]];
+  const p = useProduct(); const c = useConnectionsTools();
+  const connections = state.connections ?? EMPTY_CONNECTIONS;
+  const values = [["Server", state.readiness.server], ["Runner", state.readiness.runner]];
+  if (state.topology?.experience === "quick_share") values.push(["Quick Share", state.readiness.exposure === "remote_ready" ? "ready" : state.readiness.exposure]);
   return <dl className="workspace-status-strip" aria-label={p("workspace")} role="status">
     {values.map(([name, status]) => <div key={name}><dt>{name}</dt><dd><i className={`status-dot ${status === "ready" ? "ready" : status === "error" ? "error" : "unknown"}`} aria-hidden="true" />{p(statusKey(status))}</dd></div>)}
+    {state.topology?.experience !== "quick_share" && <div><dt>{c("connections")}</dt><dd><i className={`status-dot ${connections.running > 0 ? "ready" : "unknown"}`} aria-hidden="true" />{connections.running} / {connections.profiles.length} {p("running")}</dd></div>}
   </dl>;
 }
 export function ChatgptObservation({ state }: { state: DesktopState }) {

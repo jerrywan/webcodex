@@ -216,10 +216,18 @@ async fn regular_tunnel_stop_observes_stdin_eof_before_group_termination() {
     let activity = ActivityLog::default();
     let mut supervisor = ProcessSupervisor::new(activity);
     supervisor
-        .spawn_owned(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT), command, false)
+        .spawn_owned(
+            ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT),
+            command,
+            false,
+        )
         .await
         .expect("start EOF fixture");
-    supervisor.stop(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT)).await;
+    supervisor
+        .stop(ProcessKey::RegularTunnel(
+            crate::connection_id::TunnelProfileId::DEFAULT,
+        ))
+        .await;
 
     assert!(
         marker.is_file(),

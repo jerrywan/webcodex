@@ -7,15 +7,28 @@ use std::time::Duration;
 
 fn fixture() -> Command {
     let mut command = Command::new("/bin/sh");
-    command.args(["-c", "printf '%s\\n' '{\"event\":\"ready\",\"tunnel_profile_id\":\"spoofed\"}'; cat >/dev/null"]);
+    command.args([
+        "-c",
+        "printf '%s\\n' '{\"event\":\"ready\",\"tunnel_profile_id\":\"spoofed\"}'; cat >/dev/null",
+    ]);
     command
 }
 
 async fn start(supervisor: &mut ProcessSupervisor, key: ProcessKey) -> u32 {
-    let mut events = supervisor.spawn_owned(key, fixture(), true).await.unwrap().unwrap();
-    let ready = tokio::time::timeout(Duration::from_secs(5), events.recv()).await.unwrap().unwrap();
+    let mut events = supervisor
+        .spawn_owned(key, fixture(), true)
+        .await
+        .unwrap()
+        .unwrap();
+    let ready = tokio::time::timeout(Duration::from_secs(5), events.recv())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(ready["event"], "ready");
-    assert_eq!(ready["tunnel_profile_id"], serde_json::json!(key.tunnel_profile_id().unwrap()));
+    assert_eq!(
+        ready["tunnel_profile_id"],
+        serde_json::json!(key.tunnel_profile_id().unwrap())
+    );
     let snapshot = supervisor.snapshot(key).unwrap();
     assert_eq!(snapshot.phase, ProcessPhase::Running);
     snapshot.pid.unwrap()
@@ -51,10 +64,17 @@ async fn profiles_run_stop_restart_and_shutdown_independently() {
     supervisor.stop_all().await;
     assert!(supervisor.keys().is_empty());
     for key in [a, b, c] {
-        assert!(activity.snapshot().iter().any(|entry| entry.tunnel_profile_id == key.tunnel_profile_id()));
+        assert!(activity
+            .snapshot()
+            .iter()
+            .any(|entry| entry.tunnel_profile_id == key.tunnel_profile_id()));
     }
     for pid in [a_pid, new_b_pid, c_pid] {
-        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1, "owned process survived shutdown");
+        assert_eq!(
+            unsafe { libc::kill(pid as i32, 0) },
+            -1,
+            "owned process survived shutdown"
+        );
     }
 }
 
@@ -66,8 +86,15 @@ async fn failed_profile_does_not_change_another_process_generation() {
     let a_pid = start(&mut supervisor, a).await;
     let mut failing = Command::new("/bin/sh");
     failing.args(["-c", "exit 7"]);
-    let mut events = supervisor.spawn_owned(b, failing, true).await.unwrap().unwrap();
-    assert!(tokio::time::timeout(Duration::from_secs(5), events.recv()).await.unwrap().is_none());
+    let mut events = supervisor
+        .spawn_owned(b, failing, true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(5), events.recv())
+        .await
+        .unwrap()
+        .is_none());
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while supervisor.snapshot(b).unwrap().phase != ProcessPhase::Failed {
         assert!(tokio::time::Instant::now() < deadline);

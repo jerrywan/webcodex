@@ -12,14 +12,14 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 
 const api = vi.hoisted(() => ({ runnerSettings: vi.fn(), updateRunnerSettings: vi.fn(), restartOwnedRunner: vi.fn(), addRunnerPlugin: vi.fn(), computerPermissions: vi.fn(), requestComputerPermission: vi.fn(), updateTunnelConfig: vi.fn(), getState: vi.fn() }));
 vi.mock("../lib/desktop-api", () => ({ desktopApi: api }));
-// These components consume only this subset; native state contracts are tested in Rust.
-const state = {
+const state: DesktopState = {
   project: { path: "/fixture/alpha", allowed_root: "/fixture/alpha", is_git_repository: false, runtime_project_id: "agent:fixture-runner:alpha" },
-  readiness: { runtime_ready: true },
+  readiness: { runtime_ready: true, ready_for_chatgpt: false, server: "ready", runner: "ready", exposure: "local_ready", project: "ready", summary: "Ready", summary_kind: "runtime_ready_local_only", next_action: "", next_action_kind: "choose_connection" },
+  activity_sequence: 0, openai_tunnel_configured: true, regular_tunnel_available: true, runtime_autostart: false, preferred_connection: "no_chat_gpt",
+  tunnel_proxy: { mode: "auto", custom_url: null, effective_source: "direct", effective_url: null, detected_url: null },
   current_operation: null,
-  regular_tunnel: { status: "ready" },
   openai_tunnel_config: { source: "file", saved_tunnel_id: "tunnel_fixture", effective_tunnel_id: "tunnel_fixture", tunnel_id_present: true, api_key_present: true },
-} as DesktopState;
+};
 const target = { config_path: "/fixture/runner.toml", client_id: "fixture-runner", server_url: "http://127.0.0.1:1" };
 let settings: RunnerSettings;
 const onState = vi.fn();
@@ -78,7 +78,8 @@ describe("workspace configuration boundaries", () => {
 
   it("validates native Plugin arguments and writes only a new explicit registration", async () => {
     render(wrap(<ExtensionsPanel state={state} onState={onState} />));
-    fireEvent.click(screen.getByRole("tab", { name: "Plugins" }));
+    fireEvent.click(screen.getByRole("tab", { name: "MCP Providers" }));
+    fireEvent.click(screen.getByText("Advanced: Native Tool Plugins", { selector: "summary" }));
     fireEvent.click(await screen.findByText("Add a native Tool Plugin"));
     fireEvent.change(screen.getByLabelText("Plugin ID"), { target: { value: "new-plugin" } });
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "New plugin" } });

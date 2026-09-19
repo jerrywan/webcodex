@@ -102,6 +102,9 @@ fn resolve_dialect(program: &str, explicit: Option<ShellDialect>) -> ShellDialec
         .unwrap_or_else(platform_default_dialect)
 }
 
+#[cfg(test)]
+mod desktop_mcp_env_tests;
+
 const SENSITIVE_ENV_KEYS: [&str; 5] = [
     "WEBCODEX_TOKEN",
     "WEBCODEX_PAT",
@@ -136,7 +139,11 @@ fn should_inherit_env_key(key: &str) -> bool {
     // reconstructed through `Command::env`; detached execution carries its
     // working directory explicitly, so dropping them preserves the intended
     // child environment without weakening launch-envelope validation.
-    !is_sensitive_env_key(key) && !(cfg!(windows) && key.starts_with('='))
+    !is_sensitive_env_key(key)
+        && !key
+            .to_ascii_uppercase()
+            .starts_with(webcodex_runner_config::DESKTOP_MCP_ENV_PREFIX)
+        && !(cfg!(windows) && key.starts_with('='))
 }
 
 /// Case-insensitive lookup on Windows (where environment names are

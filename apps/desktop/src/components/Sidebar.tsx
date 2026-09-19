@@ -3,12 +3,13 @@ import brandIcon from "../assets/brand.png";
 import type { DesktopState } from "../models/topology";
 import { LANGUAGES, useLocale } from "../i18n/locale";
 import { useProduct } from "../i18n/product";
+import { useConnectionsTools } from "../i18n/connections-tools";
 import { statusKey } from "../features/workspace/WorkspaceStatus";
 export type Navigation = "home" | "projects" | "connection" | "extensions" | "activity" | "settings";
 export const NAVIGATION: Navigation[] = ["home", "projects", "activity", "connection", "extensions", "settings"];
 export function Sidebar({ state, navigation, setNavigation }: { state: DesktopState; navigation: Navigation; setNavigation: (page: Navigation) => void }) {
   const { locale, setLocale, t } = useLocale();
-  const p = useProduct();
+  const p = useProduct(); const c = useConnectionsTools();
   return (
       <aside className="sidebar">
         <div className="brand"><img className="brand-mark" src={brandIcon} alt="" /><div><strong>WebCodex</strong><span>Desktop</span></div></div>
@@ -20,11 +21,11 @@ export function Sidebar({ state, navigation, setNavigation }: { state: DesktopSt
               onClick={() => setNavigation(item)}
               aria-current={navigation === item ? "page" : undefined}
               aria-keyshortcuts={`Control+${index + 1} Meta+${index + 1}`}
-              title={`${t(`nav.${item}`)} (⌘ / Ctrl + ${index + 1})`}
+              title={`${item === "connection" ? c("connections") : t(`nav.${item}`)} (⌘ / Ctrl + ${index + 1})`}
               data-webcodex-action={`navigate-${item}`}
             >
               <NavigationIcon name={item} />
-              {t(`nav.${item}`)}
+              {item === "connection" ? c("connections") : t(`nav.${item}`)}
               <kbd aria-hidden="true">{index + 1}</kbd>
             </button>
           ))}
@@ -43,7 +44,7 @@ export function Sidebar({ state, navigation, setNavigation }: { state: DesktopSt
         </div>
         <div className="sidebar-status">
           <i className={`status-dot ${state.readiness.runtime_ready ? "ready" : "unknown"}`} aria-hidden="true" />
-          <div><strong>Runner · {p(statusKey(state.readiness.runner))}</strong><span>Tunnel · {p(statusKey(state.regular_tunnel?.status))}</span></div>
+          <div><strong>Runner · {p(statusKey(state.readiness.runner))}</strong><span>{c("connections")} · {state.connections?.running ?? 0} / {state.connections?.profiles.length ?? 0}</span></div>
         </div>
       </aside>
   );

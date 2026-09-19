@@ -97,7 +97,9 @@ async fn credential_save_and_failed_tunnel_replacement_preserve_server_runner_pi
         .supervisor
         .lock()
         .await
-        .snapshot(ProcessKey::RegularTunnel(crate::connection_id::TunnelProfileId::DEFAULT))
+        .snapshot(ProcessKey::RegularTunnel(
+            crate::connection_id::TunnelProfileId::DEFAULT,
+        ))
         .is_none();
     state.shutdown().await;
     std::fs::remove_dir_all(data).unwrap();

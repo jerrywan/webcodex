@@ -80,7 +80,7 @@ impl AppState {
                 .await
                 .map_err(|_| desktop_state_unavailable("Settings worker stopped"))??;
             core.adapter.ensure_binaries(&cancellation).await?;
-            let command = core.adapter.local_runner_command(&identity.runner_config)?;
+            let command = core.prepare_runner_command(&identity).await?;
             core.supervisor
                 .lock()
                 .await
@@ -91,6 +91,7 @@ impl AppState {
             core.publish_snapshot();
             core.spawn_owned(ProcessKey::LocalRunner, command, false, &cancellation)
                 .await?;
+            core.mcp_applied_revision = Some(core.mcp_providers.revision());
             core.wait_for_runner(
                 &identity,
                 &cancellation,

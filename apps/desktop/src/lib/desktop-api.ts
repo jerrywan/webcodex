@@ -11,7 +11,13 @@ import type {
   TunnelProxyMode,
 } from "../models/topology";
 
+import type { McpProviderRequest, TunnelProfileAction, TunnelProfileRequest } from "../models/connections-tools";
+
 export const desktopApi = {
+  saveTunnelProfile: (request: TunnelProfileRequest) => invoke<DesktopState>("save_tunnel_profile", { request }),
+  tunnelProfileAction: (profileId: string, action: TunnelProfileAction) => invoke<DesktopState>("tunnel_profile_action", { profileId, action }),
+  saveMcpProvider: (request: McpProviderRequest) => invoke<DesktopState>("save_mcp_provider", { request }),
+  removeMcpProvider: (id: string, expectedRevision: number) => invoke<DesktopState>("remove_mcp_provider", { id, expectedRevision }),
   runnerSettings: () => invoke<RunnerSettings>("get_runner_settings"),
   updateRunnerSettings: (target: SettingsTarget, expected: RunnerPaths, paths: RunnerPaths) => invoke<DesktopState>("update_runner_settings", { request: { target, expected, paths } }),
   restartOwnedRunner: (target: SettingsTarget) => invoke<DesktopState>("restart_owned_runner", { target }),

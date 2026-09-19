@@ -1,5 +1,6 @@
 import type { DesktopState } from "../../models/topology";
 import { useProduct } from "../../i18n/product";
+import { useConnectionsTools } from "../../i18n/connections-tools";
 import { useLocale } from "../../i18n/locale";
 import { sessionTitle, useWorkspace } from "../workspace/WorkspaceContext";
 import { WorkspaceStatus, ChatgptObservation, observationTime } from "../workspace/WorkspaceStatus";
@@ -7,7 +8,7 @@ import { ProjectRows } from "../projects/ProjectRows";
 
 interface DashboardProps {
   state: DesktopState; refreshing: boolean; onRefresh: () => void;
-  onResumeRuntime: () => void; onConnectChatGpt: () => void;
+  onResumeRuntime: () => void;
   onChooseProject: () => void; onChangeSetup: () => void;
   onNavigate: (page: "projects" | "connection" | "activity" | "extensions") => void;
   onStopQuickShare: () => void; onStopRuntime: () => void;
@@ -15,7 +16,7 @@ interface DashboardProps {
 }
 export function Dashboard(props: DashboardProps) {
   const { state, onNavigate } = props;
-  const p = useProduct(); const { locale } = useLocale();
+  const p = useProduct(); const c = useConnectionsTools(); const { locale } = useLocale();
   const workspace = useWorkspace();
   const recent = workspace.sessions.slice(0, 3);
   const busy = Boolean(state.current_operation);
@@ -28,7 +29,7 @@ export function Dashboard(props: DashboardProps) {
     <div className="workspace-quick-actions">
       <span>{workspace.projects.length} {p("projects")}</span>
       <button className="primary-button" onClick={props.onChooseProject} disabled={busy}>{p("addProject")}</button>
-      <button className="secondary-button" onClick={() => onNavigate("connection")}>{p("configure")} Tunnel</button>
+      <button className="secondary-button" aria-label={`${p("manage")} ${c("connections")}`} onClick={() => onNavigate("connection")}>{c("connections")}</button>
       {!state.readiness.runtime_ready && <button className="secondary-button" onClick={state.readiness.next_action_kind === "restart_quick_share" ? props.onChangeSetup : props.onResumeRuntime} disabled={busy}>{state.readiness.next_action_kind === "restart_quick_share" ? p("restart") + " Quick Share" : p("start") + " WebCodex"}</button>}
       {(state.readiness.project === "error" || state.readiness.project === "reload_required") && <button className="secondary-button" onClick={props.onChooseProject} disabled={busy}>{p("setup")} {p("projects")}</button>}
     </div>

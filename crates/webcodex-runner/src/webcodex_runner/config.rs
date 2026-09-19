@@ -179,7 +179,7 @@ impl Default for AcpConfig {
     }
 }
 
-const MCP_GATEWAY_MAX_ENV_MAPPINGS: usize = 64;
+use webcodex_core::mcp_gateway::MCP_GATEWAY_MAX_ENV_MAPPINGS;
 const MCP_GATEWAY_MAX_ENV_NAME_BYTES: usize = 256;
 pub(crate) const MCP_GATEWAY_MAX_CWD_BYTES: usize = 4_096;
 

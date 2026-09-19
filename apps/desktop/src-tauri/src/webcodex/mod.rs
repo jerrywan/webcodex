@@ -8,4 +8,4 @@ pub use adapter::{
 };
 #[cfg(test)]
 pub(crate) use cli::run_test_bounded;
-pub use models::{QuickShareReadyEvent, RegularTunnelReadyEvent};
+pub use models::QuickShareReadyEvent;

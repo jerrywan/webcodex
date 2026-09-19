@@ -252,23 +252,6 @@ pub struct QuickShareState {
     pub ready_for_chatgpt: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RegularTunnelStatus {
-    Starting,
-    Ready,
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RegularTunnelState {
-    pub provider: String,
-    pub status: RegularTunnelStatus,
-    pub clipboard_state: String,
-    pub clipboard_contains: String,
-    pub ready_for_chatgpt: bool,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DesktopOperationKind {
@@ -411,7 +394,10 @@ pub struct DesktopStateSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chatgpt_activity: Option<ChatGptActivitySnapshot>,
     pub quick_share: Option<QuickShareState>,
-    pub regular_tunnel: Option<RegularTunnelState>,
+    #[serde(default)]
+    pub connections: crate::connections::ConnectionsSnapshot,
+    #[serde(default)]
+    pub mcp_providers: crate::mcp_providers::McpProvidersSnapshot,
     pub current_operation: Option<DesktopOperationSnapshot>,
     pub activity_sequence: u64,
     pub openai_tunnel_configured: bool,
@@ -433,7 +419,8 @@ impl Default for DesktopStateSnapshot {
             powershell_runtime: None,
             chatgpt_activity: None,
             quick_share: None,
-            regular_tunnel: None,
+            connections: Default::default(),
+            mcp_providers: Default::default(),
             current_operation: None,
             activity_sequence: 0,
             openai_tunnel_configured: false,

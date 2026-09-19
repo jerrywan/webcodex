@@ -1,0 +1,41 @@
+/* Shared Runtime control surfaces use the existing Desktop palette and spacing. */
+.connection-list { display: grid; gap: 18px; margin-top: 24px; }
+.connection-profile { padding: 22px; border: 1px solid #dfdfda; border-radius: 10px; background: #fff; min-width: 0; }
+.connection-profile h2 { margin: 0 0 4px; font-size: 17px; overflow-wrap: anywhere; }
+.connection-profile .connection-state { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.connection-profile .connection-id { margin: 18px 0; flex-wrap: wrap; }
+.connection-profile .connection-id code { flex: 1 1 180px; overflow-wrap: anywhere; }
+.connection-profile .connection-actions { flex-wrap: wrap; gap: 8px; }
+.connection-details { margin-top: 18px; padding-top: 14px; border-top: 1px solid #eeeeea; font-size: 12px; }
+.connection-details summary { color: #676c71; cursor: pointer; }
+.connection-details dl { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px 12px; }
+.connection-details dt { color: #676c71; }
+.connection-details dd { margin: 0; overflow-wrap: anywhere; }
+.connection-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.connection-events li { display: flex; gap: 16px; }
+.connection-events time { color: #676c71; font-variant-numeric: tabular-nums; }
+.profile-editor { display: grid; gap: 20px; padding-top: 12px; }
+.profile-editor .field-group { display: grid; gap: 7px; min-width: 0; }
+.profile-editor label, .profile-editor legend { font-weight: 600; font-size: 13px; }
+.profile-editor small { color: #676c71; font-size: 12px; line-height: 1.5; font-weight: normal; }
+.profile-editor textarea { width: 100%; resize: vertical; min-height: 84px; font: 13px/1.5 "SFMono-Regular", Consolas, monospace; border: 1px solid #d7d9d8; border-radius: 7px; background: #fff; color: inherit; padding: 10px 12px; }
+.profile-editor textarea:focus-visible { outline: 2px solid #606870; outline-offset: 2px; }
+.profile-editor .profile-checkbox { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.profile-editor details > .field-group { margin-top: 12px; }
+.mcp-environment { display: grid; gap: 14px; border: 1px solid #e1e2dd; border-radius: 8px; padding: 14px; margin: 0; min-width: 0; }
+.mcp-environment legend { padding: 0 5px; }
+.mcp-environment > button { justify-self: start; }
+.mcp-environment-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 12px; align-items: start; }
+.mcp-environment-row > button { margin-top: 26px; }
+.mcp-provider-row h3 { margin: 0 0 5px; font-size: 15px; overflow-wrap: anywhere; }
+.mcp-provider-row .mcp-command { margin: 8px 0; font-size: 12px; }
+.mcp-command code { overflow-wrap: anywhere; }
+.mcp-providers .extension-apply-bar { margin: 18px 0; flex-wrap: wrap; gap: 12px; }
+.mcp-provider-row .connection-actions { flex-shrink: 0; gap: 8px; }
+@media (max-width: 680px) {
+  .connection-profile { padding: 16px; }
+  .connection-profile .workspace-section-heading { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .mcp-environment-row { grid-template-columns: minmax(0, 1fr); }
+  .mcp-environment-row > button { margin-top: 0; justify-self: start; }
+  .mcp-provider-row { align-items: flex-start; flex-wrap: wrap; gap: 14px; }
+}

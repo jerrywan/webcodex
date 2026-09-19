@@ -78,7 +78,7 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
       if (mode === "local") {
         let next = await desktopApi.configureLocal(project.path);
         onState(next);
-        if (connectAfterSetup && next.openai_tunnel_configured && next.readiness.runtime_ready && !next.regular_tunnel) {
+        if (connectAfterSetup && next.openai_tunnel_configured && next.readiness.runtime_ready && !next.connections?.profiles.some(profile => profile.id === "default" && (profile.lifecycle === "starting" || profile.lifecycle === "running"))) {
           next = await desktopApi.startRegularTunnel();
           onState(next);
         }
@@ -263,7 +263,7 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
         </fieldset>
       )}
 
-      {mode === "local" && state.openai_tunnel_configured && !state.regular_tunnel && (
+      {mode === "local" && state.openai_tunnel_configured && !state.connections?.profiles.some(profile => profile.id === "default" && (profile.lifecycle === "starting" || profile.lifecycle === "running")) && (
         <label className="setup-choice-card" htmlFor="setup-connect-chatgpt">
           <input
             id="setup-connect-chatgpt"

@@ -95,7 +95,9 @@ describe("product workspace task flows", () => {
     expect(native.invoke).toHaveBeenCalledWith("workspace_query", { request: { kind: "instruction", project: alpha.id, source_scope: "project", path: "AGENTS.md", fingerprint: "revision-one" } });
     fireEvent.click(within(document).getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("tab", { name: "Skills" })); expect(screen.getByText("Review changes")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Plugins" })); expect(screen.getByText(/3 tools/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "MCP Providers" }));
+    fireEvent.click(screen.getByText("Advanced: Native Tool Plugins", { selector: "summary" }));
+    expect(screen.getByText(/3 tools/)).toBeInTheDocument();
     expect(native.invoke.mock.calls.some(([, value]) => value.request.kind === "plugin_reload")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     await waitFor(() => expect(native.invoke).toHaveBeenCalledWith("workspace_query", { request: { kind: "plugin_reload", project: alpha.id, plugin: "sample" } }));

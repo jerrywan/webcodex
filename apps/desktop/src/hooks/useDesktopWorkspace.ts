@@ -7,7 +7,7 @@ import { useLocale } from "../i18n/locale";
 import { normalizeDesktopError } from "../i18n/presentation";
 import { NAVIGATION, type Navigation } from "../components/Sidebar";
 
-const REGULAR_TUNNEL_OBSERVATION_INTERVAL_MS = 1_500;
+const DESKTOP_OBSERVATION_INTERVAL_MS = 1_500;
 const CHATGPT_ACTIVITY_OBSERVATION_INTERVAL_MS = 30_000;
 const ACTIVE_OPERATION_OBSERVATION_INTERVAL_MS = 1_000;
 
@@ -24,7 +24,6 @@ export function useDesktopWorkspace() {
   const [windowFocused, setWindowFocused] = useState(true);
   const stateVersionRef = useRef(0);
   const mainRef = useRef<HTMLElement>(null);
-  const hasRegularTunnel = Boolean(state?.regular_tunnel);
   const hasCurrentOperation = Boolean(state?.current_operation);
   const hasLoadedState = Boolean(state);
   const shouldObserveChatgptActivity = Boolean(
@@ -54,9 +53,9 @@ export function useDesktopWorkspace() {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<unknown>("desktop:navigate", (event) => {
-      if (event.payload !== "activity" && event.payload !== "settings") return;
+      if (event.payload !== "activity" && event.payload !== "settings" && event.payload !== "connections") return;
       setShowSetup(false);
-      setNavigation(event.payload);
+      setNavigation(event.payload === "connections" ? "connection" : event.payload);
     }).then((stopListening) => {
       if (disposed) stopListening();
       else unlisten = stopListening;
@@ -125,13 +124,10 @@ export function useDesktopWorkspace() {
 
         setRefreshing(true);
         try {
-          let next = await desktopApi.resumeSavedRuntime();
+          const next = await desktopApi.resumeSavedRuntime();
           if (cancelled) return;
+          // Backend reconciliation owns every profile's autostart policy.
           commitState(next);
-          if (shouldStartPreferredTunnel(next)) {
-            next = await desktopApi.startRegularTunnel();
-            if (!cancelled) commitState(next);
-          }
         } catch (value) {
           if (!cancelled) setError(normalizeDesktopError(value));
         } finally {
@@ -153,7 +149,7 @@ export function useDesktopWorkspace() {
     let timeoutId: number | undefined;
     const interval = hasCurrentOperation || refreshing
       ? ACTIVE_OPERATION_OBSERVATION_INTERVAL_MS
-      : REGULAR_TUNNEL_OBSERVATION_INTERVAL_MS;
+      : DESKTOP_OBSERVATION_INTERVAL_MS;
 
     const scheduleObservation = () => {
       timeoutId = window.setTimeout(() => {
@@ -179,7 +175,7 @@ export function useDesktopWorkspace() {
       cancelled = true;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [commitState, hasCurrentOperation, hasLoadedState, hasRegularTunnel, refreshing]);
+  }, [commitState, hasCurrentOperation, hasLoadedState, refreshing]);
 
   useEffect(() => {
     if (!shouldObserveChatgptActivity) return;
@@ -266,12 +262,7 @@ export function useDesktopWorkspace() {
     setRefreshing(true);
     setError(null);
     try {
-      let next = await desktopApi.resumeSavedRuntime();
-      commitState(next);
-      if (shouldStartPreferredTunnel(next)) {
-        next = await desktopApi.startRegularTunnel();
-        commitState(next);
-      }
+      commitState(await desktopApi.resumeSavedRuntime());
     } catch (value) {
       setError(normalizeDesktopError(value));
     } finally {
@@ -294,13 +285,4 @@ export function useDesktopWorkspace() {
   };
 
   return { state, activity, navigation, setNavigation, refreshing, error, setError, cancelSubmittingId, showSetup, setShowSetup, setStartupAttempt, mainRef, commitState, openSetup, chooseLocalProject, refresh, resumeRuntime, cancelCurrentOperation, runStateOperation };
-}
-
-function shouldStartPreferredTunnel(state: DesktopState) {
-  return state.preferred_connection === "open_ai_tunnel" &&
-    state.topology?.experience === "full" &&
-    state.topology.server.kind === "local" &&
-    state.readiness.runtime_ready &&
-    state.openai_tunnel_configured &&
-    !state.regular_tunnel;
 }

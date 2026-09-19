@@ -111,15 +111,7 @@ export interface QuickShareState {
   ready_for_chatgpt: boolean;
 }
 
-export type RegularTunnelStatus = "starting" | "ready" | "error";
-
-export interface RegularTunnelState {
-  provider: string;
-  status: RegularTunnelStatus;
-  clipboard_state: string;
-  clipboard_contains: string;
-  ready_for_chatgpt: boolean;
-}
+export type { ConnectionsSnapshot, TunnelConnection, McpProvidersSnapshot, McpProviderProfile } from "./connections-tools";
 
 export type RegularConnectionPreference = "no_chat_gpt" | "open_ai_tunnel";
 export type TunnelProxyMode = "auto" | "direct" | "custom";
@@ -185,7 +177,8 @@ export interface DesktopState {
   powershell_runtime?: PowerShellRuntimeSnapshot | null;
   chatgpt_activity?: ChatGptActivitySnapshot | null;
   quick_share?: QuickShareState | null;
-  regular_tunnel?: RegularTunnelState | null;
+  connections?: import("./connections-tools").ConnectionsSnapshot;
+  mcp_providers?: import("./connections-tools").McpProvidersSnapshot;
   current_operation?: DesktopOperation | null;
   activity_sequence: number;
   openai_tunnel_configured: boolean;
@@ -207,6 +200,7 @@ export interface ActivityEntry {
   sequence: number;
   timestamp_ms: number;
   source: string;
+  tunnel_profile_id?: string | null;
   level: "info" | "warning" | "error";
   event_kind:
     | "process_started"

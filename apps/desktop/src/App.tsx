@@ -108,7 +108,6 @@ export default function App() {
             refreshing={refreshing}
             onRefresh={() => void refresh()}
             onResumeRuntime={() => void resumeRuntime()}
-            onConnectChatGpt={() => void runStateOperation(desktopApi.startRegularTunnel)}
             onChooseProject={() => void chooseLocalProject()}
             onOpenProject={(path) => void runStateOperation(() => desktopApi.activateLocalProject(path))}
             onChangeSetup={openSetup}

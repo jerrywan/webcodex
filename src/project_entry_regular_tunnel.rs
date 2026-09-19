@@ -65,8 +65,18 @@ pub(crate) async fn run_regular_server_tunnel(
     )
     .await?;
 
-    let clipboard = copy_text_to_clipboard(&prerequisites.tunnel_id, true).await;
-    let ready = machine_regular_tunnel_ready_event(clipboard);
+    // Managed profiles use explicit Copy ID controls; concurrent starts must not
+    // race over the user's clipboard. Keep CLI handoff for an unmanaged invocation.
+    let managed = std::env::var("WEBCODEX_TUNNEL_PROFILE_ID").is_ok();
+    let clipboard = copy_text_to_clipboard(&prerequisites.tunnel_id, !managed).await;
+    let mut ready = machine_regular_tunnel_ready_event(clipboard);
+    ready["runtime"] = json!({
+        "directory": session.directory,
+        "health_url": tunnel.health_url,
+        "log_file": tunnel.log_file,
+        "tunnel_client_pid": tunnel.pid(),
+        "local_mcp_url": mcp_url(&local_server_url),
+    });
     let encoded = serde_json::to_string(&ready).map_err(|_| {
         ProductError::new(
             "machine_output_failed",
@@ -76,12 +86,76 @@ pub(crate) async fn run_regular_server_tunnel(
     })?;
     println!("{encoded}");
 
+    let health_url = tunnel.health_url.clone();
+    let local_mcp_url = mcp_url(&local_server_url);
     let outcome = tokio::select! {
         _ = wait_for_regular_tunnel_stop_signal() => Ok(()),
         result = tunnel.wait_for_exit() => result,
+        result = report_regular_tunnel_health(&health_url, &local_mcp_url, &options.bootstrap_token) => result,
     };
     tunnel.stop().await;
     outcome
+}
+
+/// A running daemon is not sufficient proof of a usable local MCP endpoint.
+/// No response body, credential, or network error text crosses the machine channel.
+async fn report_regular_tunnel_health(
+    health_url: &str,
+    local_mcp_url: &str,
+    bootstrap: &str,
+) -> Result<(), ProductError> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(1))
+        .timeout(Duration::from_secs(2))
+        .build()
+        .map_err(|_| tunnel_auth_error("Local connection health monitoring is unavailable"))?;
+    let mut interval = tokio::time::interval(Duration::from_secs(2));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let (tunnel_ready, local_mcp_ready) = tokio::join!(
+            async {
+                client
+                    .get(format!("{health_url}/readyz"))
+                    .send()
+                    .await
+                    .is_ok_and(|response| response.status().is_success())
+            },
+            probe_local_mcp(&client, local_mcp_url, bootstrap),
+        );
+        println!(
+            "{}",
+            json!({"event":"health", "schema_version":1, "tunnel_ready":tunnel_ready, "local_mcp_ready":local_mcp_ready})
+        );
+    }
+}
+
+async fn probe_local_mcp(client: &reqwest::Client, local_mcp_url: &str, bootstrap: &str) -> bool {
+    let Ok(mut response) = client
+        .get(local_mcp_url)
+        .bearer_auth(bootstrap.trim())
+        .send()
+        .await
+    else {
+        return false;
+    };
+    if !response.status().is_success() || response.content_length().is_some_and(|size| size > 8192)
+    {
+        return false;
+    }
+    let mut body = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) if body.len() + chunk.len() <= 8192 => body.extend_from_slice(&chunk),
+            Ok(None) => break,
+            _ => return false,
+        }
+    }
+    serde_json::from_slice::<Value>(&body).is_ok_and(|value| {
+        value["name"] == "webcodex" && value["protocol"] == "mcp" && value["endpoint"] == "/mcp"
+    })
 }
 
 fn machine_regular_tunnel_ready_event(clipboard: ClipboardCopyOutcome) -> Value {

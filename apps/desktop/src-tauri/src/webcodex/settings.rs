@@ -7,6 +7,9 @@ use std::path::Path;
 use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table};
 use webcodex_core::plugin::{validate_provider_id, validate_provider_name, PLUGIN_MAX_PROVIDERS};
 
+mod mcp;
+pub use mcp::reconcile_mcp;
+
 const MAX_BYTES: u64 = 256 * 1024;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]

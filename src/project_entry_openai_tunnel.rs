@@ -50,9 +50,15 @@ pub(super) struct OpenAiTunnelPrerequisites {
 #[derive(Debug)]
 pub(super) struct OpenAiTunnel {
     child: Child,
+    pub(super) health_url: String,
+    pub(super) log_file: PathBuf,
 }
 
 impl OpenAiTunnel {
+    pub(super) fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
     pub(super) async fn wait_for_exit(&mut self) -> Result<(), ProductError> {
         let status =
             self.child.wait().await.map_err(|_| {
@@ -118,7 +124,19 @@ pub(super) async fn start_openai_tunnel(
         let _ = child.wait().await;
         return Err(error);
     }
-    Ok(OpenAiTunnel { child })
+    let health_url = match read_loopback_health_url(&health_url_file) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            return Err(error);
+        }
+    };
+    Ok(OpenAiTunnel {
+        child,
+        health_url,
+        log_file,
+    })
 }
 
 fn configure_runtime_command(

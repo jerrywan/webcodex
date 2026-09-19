@@ -1,11 +1,49 @@
 use crate::activity::ActivityEntry;
 use crate::desktop_shell;
-use crate::error::DesktopError;
+use crate::error::{DesktopError, DesktopResult};
 use crate::models::{DesktopStateSnapshot, ProjectSelection, TunnelProxyMode};
 use crate::state::AppState;
 use crate::tray;
 use serde::Deserialize;
 use tauri::{AppHandle, State};
+
+#[tauri::command]
+pub async fn save_mcp_provider(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: crate::mcp_providers::McpProviderRequest,
+) -> DesktopResult<DesktopStateSnapshot> {
+    project_state_result(&app, state.save_mcp_provider(request).await)
+}
+
+#[tauri::command]
+pub async fn remove_mcp_provider(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    expected_revision: u64,
+) -> DesktopResult<DesktopStateSnapshot> {
+    project_state_result(&app, state.remove_mcp_provider(id, expected_revision).await)
+}
+
+#[tauri::command]
+pub async fn save_tunnel_profile(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: crate::tunnel_config::TunnelProfileRequest,
+) -> DesktopResult<DesktopStateSnapshot> {
+    project_state_result(&app, state.save_tunnel_profile(request).await)
+}
+
+#[tauri::command]
+pub async fn tunnel_profile_action(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    profile_id: crate::connection_id::TunnelProfileId,
+    action: crate::state::ConnectionAction,
+) -> DesktopResult<DesktopStateSnapshot> {
+    project_state_result(&app, state.tunnel_profile_action(profile_id, action).await)
+}
 
 #[tauri::command]
 pub async fn update_tunnel_config(
