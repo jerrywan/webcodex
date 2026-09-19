@@ -38,6 +38,7 @@ fn wait_schema() -> Value {
         "properties": {
             "wait_id":{"type":"string","pattern":"^wc_agent_wait_[A-Za-z0-9_-]{16}$"},
             "target_agent_id":{"type":"string","pattern":"^wc_dagent_[A-Za-z0-9_-]{16}$"},
+            "goal_id":{"anyOf":[{"type":"string","pattern":"^wc_goal_[A-Za-z0-9_-]{16}$"},{"type":"null"}],"description":"Optional exact Goal correlation reference only; grants no Goal or source authority."},
             "state":{"type":"string","enum":["waiting","triggered","resumed","cancelled"]},
             "mode":{"type":"string","enum":["any","all"]},
             "revision":{"type":"integer","minimum":1},
@@ -52,7 +53,7 @@ fn wait_schema() -> Value {
             "sources":{"type":"array","maxItems":8,"items":wait_source_schema(),"description":"Bounded source references only; references grant no source authority."},
             "matches":{"type":"array","maxItems":8,"items":wait_match_schema(),"description":"Bounded semantic fact references only; no Task instruction/result/reason/log/fence/token payloads."}
         },
-        "required":["wait_id","target_agent_id","state","mode","revision","created_at_unix_ms","updated_at_unix_ms","triggered_at_unix_ms","resumed_at_unix_ms","cancelled_at_unix_ms","source_count","match_count","match_sequence","sources","matches"]
+        "required":["wait_id","target_agent_id","goal_id","state","mode","revision","created_at_unix_ms","updated_at_unix_ms","triggered_at_unix_ms","resumed_at_unix_ms","cancelled_at_unix_ms","source_count","match_count","match_sequence","sources","matches"]
     })
 }
 
@@ -62,7 +63,14 @@ fn wait_model_schema() -> Value {
     properties.retain(|key, _| {
         matches!(
             key.as_str(),
-            "wait_id" | "state" | "mode" | "source_count" | "match_count" | "sources" | "matches"
+            "wait_id"
+                | "goal_id"
+                | "state"
+                | "mode"
+                | "source_count"
+                | "match_count"
+                | "sources"
+                | "matches"
         )
     });
     let sources = properties.get_mut("sources").unwrap();
@@ -84,6 +92,7 @@ fn wait_model_schema() -> Value {
     matches["items"]["required"] = json!(["task_id", "task_attempt_id", "terminal_task_state"]);
     schema["required"] = json!([
         "wait_id",
+        "goal_id",
         "state",
         "mode",
         "source_count",

@@ -727,58 +727,89 @@ authority.
 `AgentWait` is the small model-facing rendezvous built on that distinction. It is not a
 Task, Goal, Event log, Conversation, Workflow Session, or Host binding, and it never owns
 or inherits authority over its sources. A Wait durably records only the caller-owned
-target Agent, its bounded source selectors, and bounded semantic match references. The
-Endpoint/generation supplied at creation is re-authorized only as the current Host
-presentation/carrier selector and is not persisted as Wait execution ownership.
+target Agent, an optional exact `goal_id` correlation context, its bounded source
+selectors, and bounded semantic match references. `goal_id` is an exact reference only:
+it does not copy Goal objective/title/lifecycle/controller metadata and grants no Goal,
+Task, Project, Session, or execution authority. The Endpoint/generation supplied at
+creation is re-authorized only as the current Host presentation/carrier selector and is
+not persisted as Wait execution ownership.
 
 Wait v1 is deliberately one-shot with lifecycle
 `waiting -> triggered -> resumed` or `waiting|triggered -> cancelled`. It supports only
 1..8 exact `agent_task_terminal` selectors and one closed durable mode: `any` or `all`.
-`any` is the default and omission is exactly equivalent to `any`; it preserves the original
-v1 behavior in which the first source match triggers. `all` is only a bounded join/barrier:
-every registered exact source Task must be terminal before the Wait triggers. It is not a
-Task dependency, runnable-frontier rule, or successor-execution policy.
+`any` is the default and omission is exactly equivalent to `any`; the first source match
+triggers. `all` is only a bounded join/barrier: every registered exact source Task must be
+terminal before the Wait triggers. Neither mode is a Task dependency, runnable-frontier
+rule, successor-execution policy, or source-discovery query.
 
-Registration and the current authoritative Task terminal snapshot occur in one SQLite
-IMMEDIATE transaction, and both explicit TaskAttempt completion and CodingAgentRun
-terminal reconciliation write matching Wait facts in their same source-terminal
-transaction. Every legitimate new match is durable and advances bounded Wait revision
-metadata. Under `all`, partial matches leave the Wait in `waiting` and create no queueable
-Wake; the final required match performs the one `waiting -> triggered` transition and
-creates one `agent_wait_events` Wake. If all sources are already terminal at registration,
-the same registration transaction records all matches and creates exactly one Wake.
-Admission bounds active Waits per Agent and active Waits per source before terminalization,
-so a normal accepted Wait cannot turn Task completion into unbounded fanout.
+Generic Wait registration (`goal_id = null`) preserves the existing atomic Task snapshot:
+already-terminal exact sources may match immediately in the SQLite IMMEDIATE registration
+transaction. Goal-scoped registration is intentionally stricter. The exact Goal must be
+owned by the same principal and `active`, must have an explicit `controller_agent_id`
+equal to the Wait target Agent, every selected exact Task must be owned by the same
+principal and already explicitly correlated to that exact Goal, and every selected Task
+must still be non-terminal. The model supplies the exact 1..8 Task ids; WebCodex never
+discovers them from Goal correlations. A late Goal-scoped registration fails closed with
+`Goal-scoped rendezvous must be registered before selected source Tasks terminalize.`
+rather than retracting prior attention, rewriting Event/Wake history, or guessing whether
+a Host received an earlier continuation.
 
-Under `any`, further matching facts update the same Wake only while it is `pending` or
-`claimed`; `prepared`, `delivered`, and `delivery_unknown` are the durable batch seal
-because the Host may already have received the resume envelope. A sealed one-shot Wait
-never manufactures a successor turn for later matches. Under `all`, a Wake exists only
-after the final required match, so its initial snapshot contains the complete registered
-join. Exact Wake consume atomically changes `triggered -> resumed`; consume replay is
-inert. A resumed model reads the bounded Wait mode/counts, every registered source Task
-identity, and semantic match references, then independently re-reads each authoritative
-source Task. Task identity remains a reference and transfers no Task, Project, Goal,
-Session, Endpoint, or execution authority. If the model still needs future attention it
-creates a new Wait.
+Registration and terminalization both use SQLite IMMEDIATE transactions, giving the race
+a simple linearization point. If scoped registration commits first, later terminalization
+sees the explicit rendezvous owner. If terminalization commits first, ordinary Goal
+attention is already durable and the later scoped registration observes a terminal source
+and fails. No timestamp ordering is used. Both explicit TaskAttempt completion and
+CodingAgentRun terminal reconciliation write matching Wait facts in their same
+source-terminal transaction. Admission still bounds active Waits per Agent and per source,
+so accepted Waits cannot turn Task completion into unbounded fanout.
 
-Cancellation is similarly bounded: `waiting`, `pending`, or `claimed` work can be
-cancelled/revoked before Host dispatch preparation; cancellation fails closed after the
-prepare fence because WebCodex can no longer prove that the Host did not receive the
-resume message. Server restart preserves Waits, sources, matches, and Wakes but does not
-reconstruct process-local Host ownership. The MCP App card reuses the existing Agent
-Continuation controller/dispatcher and may poll an exact read-only Wait projection for
-presentation; card, Window, Endpoint, Goal, or polling activity grants no source authority
-and cannot renew a TaskAttempt lease.
+Terminal routing has one explicit precedence rule for each active exact Goal/Task
+correlation: an active Goal-scoped Wait (`waiting` or `triggered`) whose `goal_id` and
+registered source include that Task owns terminal attention for that correlation; otherwise
+normal per-Task Goal terminal attention is created. A generic Wait never suppresses Goal
+attention merely because the same Agent is also waiting on the same Task. Goal-scoped
+`any` uses the ordinary ANY one-shot/coalescing state machine: the first selected terminal
+fact triggers one Wait Wake and does not also create a duplicate Goal attention Wake.
+Goal-scoped `all` records each partial terminal fact durably while remaining `waiting` and
+creates neither a Wait Wake nor a per-Task Goal attention Event/Wake; the final selected
+source records the complete match set, performs `waiting -> triggered`, and creates the
+single Wait-origin reasoning opportunity.
+
+Further ANY matches continue to obey the existing seal: they update the same Wake only
+while it is `pending` or `claimed`; `prepared`, `delivered`, and `delivery_unknown` mean
+the Host may already have received the envelope and no successor Wait turn is invented.
+Exact Wait Wake consume atomically changes `triggered -> resumed`; consume replay is inert.
+A resumed Goal-scoped continuation reads the bounded Wait (including only exact
+`goal_id`), calls normal `get_goal(goal_id)`, independently re-reads every authoritative
+source Task, and explicitly decides whether/how to update the Goal from current durable
+truth. The compact automatic message carries those exact references and instructions but
+never copies Goal objective or Task terminal bodies.
+
+Cancellation is forward-looking. Cancelling a Goal-scoped Wait before any selected Task
+terminalizes restores ordinary Goal terminal attention for later terminals. Cancelling an
+ALL Wait after partial matches preserves those matches as durable history but does not
+retroactively synthesize attention Events/Wakes for Task terminals the active Wait already
+owned; later source terminals fall back to ordinary Goal attention. Cancellation still
+fails closed after Host dispatch preparation. Server restart preserves `goal_id`, sources,
+matches, state, and Wakes. A Goal controller change after registration does not retarget an
+existing Wait or rewrite historical matches: the Wait target Agent remains the durable
+historical subscription target validated at registration, and Window/Endpoint state is not
+used to choose Goal routing.
+
+Recommended bounded orchestration order is: make Coordinator/Workers continuation-ready;
+create a Goal with explicit controller; create exact Tasks with explicit workers; explicitly
+associate the selected Tasks to the Goal; register the Goal-scoped `any` or `all` Wait with
+those exact 1..8 Task ids; **only then** start worker execution. On resume, consume the exact
+Wake, read the Wait, read the Goal, re-read every source Task, and explicitly decide the
+next Goal action. Do not dispatch workers first and try to add the rendezvous afterward.
 
 Natural future source kinds include `deadline_reached`, Job terminal state,
 Plugin/external completion, and human approval. They should be added only when each has an
 authoritative source transition and bounded registration/fanout contract. Wait v1 does
 not introduce a timer scheduler, generic event bus, public `publish_event`, recurring
 subscription, generic predicate/expression language, nested boolean conditions, DAG,
-reducer, automatic Goal progression, or automatic successor Task creation. The closed
-`mode=all` join does not change Goal terminal attention routing and never auto-discovers
-Goal-correlated Tasks.
+reducer, automatic Goal progression, automatic successor Task creation, or automatic Task
+discovery from Goal correlations.
 
 Goal should remain the deliberately small `active | completed | cancelled` lifecycle.
 States such as `implementing`, `waiting_ci`, `waiting_human`, `blocked`, or

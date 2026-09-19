@@ -2797,6 +2797,13 @@ pub enum ToolCall {
         #[serde(default)]
         #[schemars(schema_with = "agent_wait_mode_schema")]
         mode: AgentWaitModeCall,
+        /// Optional exact Goal correlation context. When present, the Goal must be active, owned by the
+        /// same principal, have `agent_id` as its explicit controller, and every selected source Task must
+        /// already be explicitly correlated to this exact Goal and still be non-terminal. This reference
+        /// grants no Goal, Task, Project, Session, or execution authority.
+        #[serde(default)]
+        #[schemars(regex(pattern = "^wc_goal_[A-Za-z0-9_-]{16}$"))]
+        goal_id: Option<String>,
         /// One to eight exact AgentTask terminal selectors. Matching facts are recorded durably; under
         /// `any` the first match triggers, while under `all` only the final required match triggers.
         #[schemars(length(min = 1, max = 8))]

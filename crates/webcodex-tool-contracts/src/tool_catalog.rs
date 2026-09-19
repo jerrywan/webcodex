@@ -353,6 +353,27 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
         ],
     },
     ToolRecommendedFlow {
+        name: "goal_agent_wait_orchestration",
+        summary: "Goal-scoped AgentWait orchestration: ready Coordinator/Workers -> create controlled Goal -> create and associate exact Tasks -> register goal-scoped any|all Wait before workers can terminalize -> start workers -> on resume consume Wake, read Wait/Goal/source Tasks, and explicitly decide Goal state.",
+        manifest_purpose: "For bounded Goal fan-in, keep identities explicit. First establish exact Coordinator/Worker Agents and continuation readiness. Create the Goal with an explicit controller, create exact AgentTasks with explicit workers, and associate each selected Task to that exact Goal. Then call wait_for_agent_events with goal_id plus an explicit 1..8 Task selector list before any selected worker can terminalize; use any for first-result continuation or all for fan-in. Only after registration start worker execution. On resume consume the exact Wake immediately, read_agent_wait(wait_id), get_goal(goal_id), re-read every authoritative source Task, and explicitly decide/update Goal state from current durable truth. Never derive the Wait source list from Goal correlations and do not treat this flow as a scheduler, dependency DAG, auto-spawn rule, or automatic Goal progression.",
+        tools: &[
+            "create_agent_identity",
+            "rotate_agent_continuation_endpoint",
+            "present_agent_continuation",
+            "list_agent_identities",
+            "create_goal",
+            "create_agent_task",
+            "associate_goal_agent_task",
+            "wait_for_agent_events",
+            "start_agent_task_attempt",
+            "consume_agent_wake",
+            "read_agent_wait",
+            "get_goal",
+            "read_agent_task",
+            "update_goal",
+        ],
+    },
+    ToolRecommendedFlow {
         name: "persistent_shell",
         summary: "Persistent shell: primarily reuse one shell for repeated commands on an active named SSH resource and keep remote shell state. New target: ssh_resource list/register -> restart -> list -> bind -> open/reuse. Local persistent shell is only for true same-process state; one-shot SSH uses run_process.",
         manifest_purpose:

@@ -6,6 +6,7 @@ use super::communication::{
     validate_communication_principal, validate_id, validate_idempotency_key,
     CommunicationPrincipal, CommunicationStoreError,
 };
+use super::goal::GOAL_ID_PREFIX;
 use super::Database;
 use rusqlite::{
     params, types::Type, Connection, OptionalExtension, Transaction, TransactionBehavior,
@@ -94,6 +95,7 @@ pub struct AgentWaitEventSelector {
 #[derive(Debug, Clone)]
 pub struct NewAgentWait {
     pub target_agent_id: String,
+    pub goal_id: Option<String>,
     pub endpoint_id: String,
     pub expected_controller_generation: i64,
     pub mode: AgentWaitMode,
@@ -122,6 +124,7 @@ pub struct AgentWaitMatchRecord {
 pub struct AgentWaitDetail {
     pub wait_id: String,
     pub target_agent_id: String,
+    pub goal_id: Option<String>,
     pub state: AgentWaitState,
     pub mode: AgentWaitMode,
     pub revision: i64,
@@ -156,6 +159,7 @@ pub(crate) struct AgentWaitTerminalMatches {
 pub(crate) struct AgentWaitWakeSnapshot {
     pub wait_id: String,
     pub target_agent_id: String,
+    pub goal_id: Option<String>,
     pub state: AgentWaitState,
     pub mode: AgentWaitMode,
     pub source_count: i64,
@@ -172,6 +176,7 @@ impl Database {
                 owner_principal_kind TEXT NOT NULL,
                 owner_principal_digest TEXT NOT NULL,
                 target_agent_id TEXT NOT NULL,
+                goal_id TEXT,
                 mode TEXT NOT NULL DEFAULT 'any' CHECK(mode IN ('any', 'all')),
                 state TEXT NOT NULL CHECK(state IN ('waiting', 'triggered', 'resumed', 'cancelled')),
                 revision INTEGER NOT NULL CHECK(revision >= 1),
@@ -235,6 +240,17 @@ impl Database {
                 [],
             )?;
         }
+        let has_goal_id: i64 = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('wc_agent_waits')
+                WHERE name = 'goal_id'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_goal_id == 0 {
+            conn.execute("ALTER TABLE wc_agent_waits ADD COLUMN goal_id TEXT", [])?;
+        }
         Ok(())
     }
 
@@ -254,6 +270,9 @@ impl Database {
             super::communication::AGENT_ENDPOINT_ID_PREFIX,
             "invalid_endpoint_id",
         )?;
+        if let Some(goal_id) = input.goal_id.as_deref() {
+            validate_id(goal_id, GOAL_ID_PREFIX, "invalid_goal_id")?;
+        }
         if input.expected_controller_generation < 1 {
             return Err(CommunicationStoreError::new(
                 "invalid_controller_generation",
@@ -287,19 +306,27 @@ impl Database {
             }
         }
         let idempotency_key = validate_idempotency_key(&input.idempotency_key)?;
-        let request_hash_payload = match input.mode {
-            AgentWaitMode::Any => json!({
+        let request_hash_payload = match (input.mode, input.goal_id.as_deref()) {
+            (AgentWaitMode::Any, None) => json!({
                 "agent_id": input.target_agent_id,
                 "endpoint_id": input.endpoint_id,
                 "expected_controller_generation": input.expected_controller_generation,
                 "events": input.events,
             }),
-            AgentWaitMode::All => json!({
+            (AgentWaitMode::All, None) => json!({
                 "agent_id": input.target_agent_id,
                 "endpoint_id": input.endpoint_id,
                 "expected_controller_generation": input.expected_controller_generation,
                 "events": input.events,
                 "mode": "all",
+            }),
+            (mode, Some(goal_id)) => json!({
+                "agent_id": input.target_agent_id,
+                "endpoint_id": input.endpoint_id,
+                "expected_controller_generation": input.expected_controller_generation,
+                "events": input.events,
+                "mode": mode.as_str(),
+                "goal_id": goal_id,
             }),
         };
         let request_hash = digest_json("webcodex.agent-wait.request.v1", &request_hash_payload)
@@ -337,6 +364,43 @@ impl Database {
                 state_changed: false,
                 schedule_required: false,
             });
+        }
+
+        if let Some(goal_id) = input.goal_id.as_deref() {
+            let goal: Option<(String, Option<String>)> = transaction
+                .query_row(
+                    "SELECT lifecycle, controller_agent_id
+                     FROM wc_goals
+                     WHERE goal_id = ?1 AND owner_principal_kind = ?2 AND owner_principal_digest = ?3",
+                    params![goal_id, principal.kind, principal.digest],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(store_error)?;
+            let Some((lifecycle, controller_agent_id)) = goal else {
+                return Err(CommunicationStoreError::new(
+                    "goal_not_found",
+                    "Goal does not exist",
+                ));
+            };
+            if lifecycle != "active" {
+                return Err(CommunicationStoreError::new(
+                    "goal_scoped_agent_wait_goal_not_active",
+                    "Goal-scoped AgentWait requires an active Goal",
+                ));
+            }
+            let Some(controller_agent_id) = controller_agent_id else {
+                return Err(CommunicationStoreError::new(
+                    "goal_scoped_agent_wait_controller_required",
+                    "Goal-scoped AgentWait requires the Goal to have an explicit controller_agent_id",
+                ));
+            };
+            if controller_agent_id != input.target_agent_id {
+                return Err(CommunicationStoreError::new(
+                    "goal_scoped_agent_wait_controller_mismatch",
+                    "Goal-scoped AgentWait target_agent_id must equal the Goal controller_agent_id",
+                ));
+            }
         }
 
         let active_count: i64 = transaction
@@ -392,6 +456,30 @@ impl Database {
                 ));
             };
             let task_state = AgentTaskState::from_db(&state_text, 0).map_err(store_error)?;
+            if let Some(goal_id) = input.goal_id.as_deref() {
+                if task_state.terminal() {
+                    return Err(CommunicationStoreError::new(
+                        "goal_scoped_agent_wait_source_already_terminal",
+                        "Goal-scoped rendezvous must be registered before selected source Tasks terminalize.",
+                    ));
+                }
+                let correlated: bool = transaction
+                    .query_row(
+                        "SELECT EXISTS(
+                            SELECT 1 FROM wc_goal_correlations
+                            WHERE goal_id = ?1 AND kind = 'agent_task' AND reference_id = ?2
+                         )",
+                        params![goal_id, event.task_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(store_error)?;
+                if !correlated {
+                    return Err(CommunicationStoreError::new(
+                        "goal_scoped_agent_wait_source_not_correlated",
+                        "Every Goal-scoped AgentWait source must be explicitly correlated to the exact Goal",
+                    ));
+                }
+            }
             terminal_snapshots.push((event.clone(), task_state, terminal_attempt_id, terminal_at));
         }
 
@@ -404,15 +492,16 @@ impl Database {
         transaction
             .execute(
                 "INSERT INTO wc_agent_waits (
-                    wait_id, owner_principal_kind, owner_principal_digest, target_agent_id, mode,
+                    wait_id, owner_principal_kind, owner_principal_digest, target_agent_id, goal_id, mode,
                     state, revision, created_at_unix_ms, updated_at_unix_ms,
                     triggered_at_unix_ms, resumed_at_unix_ms, cancelled_at_unix_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'waiting', 1, ?6, ?6, NULL, NULL, NULL)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'waiting', 1, ?7, ?7, NULL, NULL, NULL)",
                 params![
                     wait_id,
                     principal.kind,
                     principal.digest,
                     input.target_agent_id,
+                    input.goal_id,
                     input.mode.as_str(),
                     now
                 ],
@@ -622,6 +711,34 @@ impl Database {
             schedule_required: false,
         })
     }
+}
+
+pub(crate) fn goal_scoped_wait_owns_terminal_attention_in_transaction(
+    transaction: &Transaction<'_>,
+    principal: &CommunicationPrincipal,
+    goal_id: &str,
+    task_id: &str,
+) -> Result<bool, CommunicationStoreError> {
+    let active_owner_count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*)
+             FROM wc_agent_wait_sources s
+             JOIN wc_agent_waits w ON w.wait_id = s.wait_id
+             WHERE s.kind = 'agent_task_terminal' AND s.task_id = ?1
+               AND w.goal_id = ?2
+               AND w.owner_principal_kind = ?3 AND w.owner_principal_digest = ?4
+               AND w.state IN ('waiting', 'triggered')",
+            params![task_id, goal_id, principal.kind, principal.digest],
+            |row| row.get(0),
+        )
+        .map_err(store_error)?;
+    if active_owner_count > MAX_AGENT_WAITS_PER_SOURCE {
+        return Err(CommunicationStoreError::new(
+            "agent_wait_source_capacity_invariant",
+            "accepted Goal-scoped AgentWait source fanout exceeds the durable admission bound",
+        ));
+    }
+    Ok(active_owner_count > 0)
 }
 
 pub(crate) fn record_agent_task_terminal_wait_matches_in_transaction(
@@ -936,9 +1053,9 @@ pub(crate) fn require_agent_wait_for_wake(
             "Agent Wait Wake is missing source_wait_id",
         )
     })?;
-    let row: Option<(String, String, String, i64, i64, i64)> = conn
+    let row: Option<(String, Option<String>, String, String, i64, i64, i64)> = conn
         .query_row(
-            "SELECT target_agent_id, state, mode,
+            "SELECT target_agent_id, goal_id, state, mode,
                     (SELECT COUNT(*) FROM wc_agent_wait_sources s WHERE s.wait_id = w.wait_id),
                     (SELECT COUNT(*) FROM wc_agent_wait_matches m WHERE m.wait_id = w.wait_id),
                     (SELECT COALESCE(MAX(sequence), 0) FROM wc_agent_wait_matches m WHERE m.wait_id = w.wait_id)
@@ -953,13 +1070,21 @@ pub(crate) fn require_agent_wait_for_wake(
                     row.get(3)?,
                     row.get(4)?,
                     row.get(5)?,
+                    row.get(6)?,
                 ))
             },
         )
         .optional()
         .map_err(store_error)?;
-    let Some((stored_target, state_text, mode_text, source_count, match_count, match_sequence)) =
-        row
+    let Some((
+        stored_target,
+        goal_id,
+        state_text,
+        mode_text,
+        source_count,
+        match_count,
+        match_sequence,
+    )) = row
     else {
         return Err(CommunicationStoreError::new(
             "agent_wait_not_found",
@@ -972,8 +1097,11 @@ pub(crate) fn require_agent_wait_for_wake(
             "Agent Wait Wake target does not match its durable Wait",
         ));
     }
-    let state = AgentWaitState::from_db(&state_text, 1).map_err(store_error)?;
-    let mode = AgentWaitMode::from_db(&mode_text, 2).map_err(store_error)?;
+    if let Some(goal_id) = goal_id.as_deref() {
+        validate_id(goal_id, GOAL_ID_PREFIX, "agent_wait_storage_invariant")?;
+    }
+    let state = AgentWaitState::from_db(&state_text, 2).map_err(store_error)?;
+    let mode = AgentWaitMode::from_db(&mode_text, 3).map_err(store_error)?;
     validate_wait_join_invariants(mode, state, source_count, match_count, match_sequence)?;
     validate_wait_match_source_membership(conn, wait_id)?;
     if state != AgentWaitState::Triggered {
@@ -985,6 +1113,7 @@ pub(crate) fn require_agent_wait_for_wake(
     Ok(AgentWaitWakeSnapshot {
         wait_id: wait_id.to_string(),
         target_agent_id: stored_target,
+        goal_id,
         state,
         mode,
         source_count,
@@ -1067,6 +1196,7 @@ fn load_owned_agent_wait_detail(
 ) -> Result<AgentWaitDetail, CommunicationStoreError> {
     let row: Option<(
         String,
+        Option<String>,
         String,
         String,
         i64,
@@ -1077,7 +1207,7 @@ fn load_owned_agent_wait_detail(
         Option<i64>,
     )> = conn
         .query_row(
-            "SELECT target_agent_id, state, mode, revision, created_at_unix_ms, updated_at_unix_ms,
+            "SELECT target_agent_id, goal_id, state, mode, revision, created_at_unix_ms, updated_at_unix_ms,
                     triggered_at_unix_ms, resumed_at_unix_ms, cancelled_at_unix_ms
              FROM wc_agent_waits
              WHERE wait_id = ?1 AND owner_principal_kind = ?2 AND owner_principal_digest = ?3",
@@ -1093,6 +1223,7 @@ fn load_owned_agent_wait_detail(
                     row.get(6)?,
                     row.get(7)?,
                     row.get(8)?,
+                    row.get(9)?,
                 ))
             },
         )
@@ -1100,6 +1231,7 @@ fn load_owned_agent_wait_detail(
         .map_err(store_error)?;
     let Some((
         target_agent_id,
+        goal_id,
         state_text,
         mode_text,
         revision,
@@ -1115,8 +1247,11 @@ fn load_owned_agent_wait_detail(
             "Agent Wait does not exist",
         ));
     };
-    let state = AgentWaitState::from_db(&state_text, 1).map_err(store_error)?;
-    let mode = AgentWaitMode::from_db(&mode_text, 2).map_err(store_error)?;
+    if let Some(goal_id) = goal_id.as_deref() {
+        validate_id(goal_id, GOAL_ID_PREFIX, "agent_wait_storage_invariant")?;
+    }
+    let state = AgentWaitState::from_db(&state_text, 2).map_err(store_error)?;
+    let mode = AgentWaitMode::from_db(&mode_text, 3).map_err(store_error)?;
 
     let mut source_stmt = conn
         .prepare(
@@ -1186,6 +1321,7 @@ fn load_owned_agent_wait_detail(
         wait_id: wait_id.to_string(),
         target_agent_id,
         state,
+        goal_id,
         mode,
         revision,
         created_at_unix_ms: created_at,

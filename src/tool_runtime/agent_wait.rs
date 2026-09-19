@@ -23,7 +23,14 @@ pub(super) fn agent_wait_model_projection(result: &mut ToolResult) {
     wait.retain(|key, _| {
         matches!(
             key.as_str(),
-            "wait_id" | "state" | "mode" | "source_count" | "match_count" | "sources" | "matches"
+            "wait_id"
+                | "goal_id"
+                | "state"
+                | "mode"
+                | "source_count"
+                | "match_count"
+                | "sources"
+                | "matches"
         )
     });
     if let Some(sources) = wait
@@ -62,6 +69,7 @@ impl ToolRuntime {
         endpoint_id: String,
         expected_controller_generation: i64,
         mode: AgentWaitModeCall,
+        goal_id: Option<String>,
         events: Vec<AgentWaitEventSelectorCall>,
         idempotency_key: String,
     ) -> ToolResult {
@@ -87,6 +95,7 @@ impl ToolRuntime {
             &principal,
             NewAgentWait {
                 target_agent_id: agent_id.clone(),
+                goal_id,
                 endpoint_id: endpoint_id.clone(),
                 expected_controller_generation,
                 mode,

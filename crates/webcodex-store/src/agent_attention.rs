@@ -1,4 +1,5 @@
 use super::agent_task::AgentTaskState;
+use super::agent_wait::goal_scoped_wait_owns_terminal_attention_in_transaction;
 use super::agent_wake::{AGENT_WAKE_ID_PREFIX, WAKE_TRIGGER_ATTENTION_EVENT};
 use super::communication::{
     allocate_identity, store_error, CommunicationPrincipal, CommunicationStoreError,
@@ -107,7 +108,16 @@ pub(super) fn create_agent_task_terminal_attention_in_transaction(
     }
 
     let mut schedule_agent_ids = Vec::new();
+    let mut attention_event_count = 0usize;
     for (goal_id, controller_agent_id) in &goal_routes {
+        if goal_scoped_wait_owns_terminal_attention_in_transaction(
+            transaction,
+            principal,
+            goal_id,
+            task_id,
+        )? {
+            continue;
+        }
         let target_agent_id = controller_agent_id
             .as_deref()
             .unwrap_or(fallback_worker_agent_id);
@@ -174,8 +184,9 @@ pub(super) fn create_agent_task_terminal_attention_in_transaction(
                 ],
             )
             .map_err(store_error)?;
+        attention_event_count += 1;
     }
-    Ok((goal_routes.len(), schedule_agent_ids))
+    Ok((attention_event_count, schedule_agent_ids))
 }
 
 fn require_owned_attention_target(
