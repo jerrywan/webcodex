@@ -70,18 +70,31 @@ async fn poll_mcp_export_request(
     registry: &Arc<crate::runner_http::RunnerRegistry>,
 ) -> crate::runner_protocol::RunnerRequest {
     use crate::runner_protocol::RunnerPollRequest;
-    loop {
-        if let Some(request) = registry
-            .poll(RunnerPollRequest {
-                client_id: "exporter".to_string(),
-                runner_instance_id: "inst-export".to_string(),
-            })
-            .await
-            .unwrap()
-        {
-            return request;
+    let request = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Some(request) = registry
+                .poll(RunnerPollRequest {
+                    client_id: "exporter".to_string(),
+                    runner_instance_id: "inst-export".to_string(),
+                })
+                .await
+                .unwrap()
+            {
+                return request;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    })
+    .await;
+    match request {
+        Ok(request) => request,
+        Err(_) => {
+            let pending = registry
+                .get_runner_view("exporter")
+                .await
+                .map(|view| view.pending_requests);
+            panic!("timed out polling MCP export Runner request; pending_requests={pending:?}");
+        }
     }
 }
 
@@ -119,7 +132,7 @@ fn mcp_export_optimized_chunk_range(
     assert_eq!(payload["expected_file_bytes"], file_bytes);
     let offset = payload["offset"].as_u64().unwrap() as usize;
     let length = payload["length"].as_u64().unwrap() as usize;
-    assert!(length <= MAX_READ_PROJECT_ARTIFACT_LENGTH);
+    assert!(length <= INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES);
     let end = offset.saturating_add(length).min(file_bytes);
     (offset, end)
 }
@@ -265,7 +278,7 @@ async fn complete_mcp_export_resource_read(
         let offset = payload["offset"].as_u64().unwrap() as usize;
         let length = payload["length"].as_u64().unwrap() as usize;
         assert_eq!(offset, expected_offset);
-        assert!(length <= MAX_READ_PROJECT_ARTIFACT_LENGTH);
+        assert!(length <= INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES);
         let end = offset.saturating_add(length).min(bytes.len());
         let mut chunk = bytes[offset..end].to_vec();
         if (fault == McpExportChunkFault::MutateFirstChunk && offset == 0)
@@ -1081,7 +1094,7 @@ async fn mcp_artifact_export_optimized_pipeline_is_four_way_bounded_and_offset_o
     let (runtime, registry) = mcp_export_runtime(tmp.path(), Some("alice")).await;
     let auth = mcp_export_api_auth("key-pipeline", "alice");
     let path = "paper/pipeline.pdf";
-    let size = MAX_READ_PROJECT_ARTIFACT_LENGTH * 9 + 123;
+    let size = INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES * 9 + 123;
     let bytes: Vec<u8> = (0..size).map(|index| (index % 251) as u8).collect();
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
     let export = issue_mcp_artifact_export(
@@ -1143,7 +1156,7 @@ async fn mcp_artifact_export_optimized_pipeline_is_four_way_bounded_and_offset_o
     assert_eq!(
         first_offsets,
         (1..=4)
-            .map(|index| index * MAX_READ_PROJECT_ARTIFACT_LENGTH)
+            .map(|index| index * INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES)
             .collect::<Vec<_>>()
     );
     assert!(
@@ -1191,7 +1204,7 @@ async fn mcp_artifact_export_optimized_pipeline_is_four_way_bounded_and_offset_o
             .map(|request| mcp_export_optimized_chunk_range(request, path, bytes.len()).0)
             .collect::<Vec<_>>(),
         (5..=8)
-            .map(|index| index * MAX_READ_PROJECT_ARTIFACT_LENGTH)
+            .map(|index| index * INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES)
             .collect::<Vec<_>>()
     );
     assert!(
@@ -1212,7 +1225,7 @@ async fn mcp_artifact_export_optimized_pipeline_is_four_way_bounded_and_offset_o
     let final_chunk = poll_mcp_export_request(&registry).await;
     assert_eq!(
         mcp_export_optimized_chunk_range(&final_chunk, path, bytes.len()).0,
-        9 * MAX_READ_PROJECT_ARTIFACT_LENGTH
+        9 * INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES
     );
     complete_mcp_export_optimized_chunk(&registry, final_chunk, path, &bytes).await;
 
@@ -1240,7 +1253,7 @@ async fn mcp_artifact_export_total_timeout_cleans_abandoned_pending_reads() {
     let (runtime, registry) = mcp_export_runtime(tmp.path(), Some("alice")).await;
     let auth = mcp_export_api_auth("key-pipeline-timeout", "alice");
     let path = "paper/pipeline-timeout.pdf";
-    let bytes: Vec<u8> = (0..MAX_READ_PROJECT_ARTIFACT_LENGTH * 5)
+    let bytes: Vec<u8> = (0..INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES * 5)
         .map(|index| (index % 233) as u8)
         .collect();
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
@@ -1349,7 +1362,7 @@ async fn mcp_artifact_export_optimized_batch_drains_before_offset_ordered_error(
     let (runtime, registry) = mcp_export_runtime(tmp.path(), Some("alice")).await;
     let auth = mcp_export_api_auth("key-pipeline-error", "alice");
     let path = "paper/pipeline-error.pdf";
-    let bytes: Vec<u8> = (0..MAX_READ_PROJECT_ARTIFACT_LENGTH * 5)
+    let bytes: Vec<u8> = (0..INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES * 5)
         .map(|index| (index % 239) as u8)
         .collect();
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
@@ -1467,7 +1480,7 @@ async fn mcp_artifact_export_same_size_mutations_fail_final_sha() {
     let tmp = tempfile::tempdir().unwrap();
     let (runtime, registry) = mcp_export_runtime(tmp.path(), Some("alice")).await;
     let auth = mcp_export_api_auth("key-mutation", "alice");
-    let bytes = vec![0x5a; 70 * 1024];
+    let bytes = vec![0x5a; INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES + 17];
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
     for fault in [
         McpExportChunkFault::MutateFirstChunk,
@@ -1968,13 +1981,13 @@ fn mcp_artifact_export_preserves_streaming_bound_and_durable_projection_has_no_h
 
 #[test]
 fn mcp_artifact_export_incremental_base64_matches_whole_encoding() {
-    let bytes: Vec<u8> = (0..(2 * MAX_READ_PROJECT_ARTIFACT_LENGTH + 17))
+    let bytes: Vec<u8> = (0..(2 * INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES + 17))
         .map(|index| (index % 251) as u8)
         .collect();
     let mut encoder = McpArtifactExportBase64Encoder::default();
     let mut encoded = String::new();
     let mut offset = 0usize;
-    for length in [1usize, 2, 7, MAX_READ_PROJECT_ARTIFACT_LENGTH, 11, 65531] {
+    for length in [1usize, 2, 7, INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES, 11, 65531] {
         if offset >= bytes.len() {
             break;
         }

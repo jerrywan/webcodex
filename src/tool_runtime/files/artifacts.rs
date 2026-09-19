@@ -24,6 +24,10 @@ pub(crate) const DEFAULT_READ_PROJECT_ARTIFACT_LENGTH: usize = 32 * 1024; // 32 
 /// Maximum returned segment size for `read_project_artifact`.
 pub(crate) const MAX_READ_PROJECT_ARTIFACT_LENGTH: usize = 64 * 1024; // 64 KiB
 
+/// Internal Control↔Runner artifact streaming chunk size. This is deliberately
+/// separate from the model-facing inspection bound above.
+pub(crate) const INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES: usize = 1024 * 1024; // 1 MiB
+
 /// Maximum decoded size accepted for one `artifact_upload_chunk` request.
 pub(crate) const MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES: usize = 1024 * 1024; // 1 MiB
 
@@ -376,10 +380,10 @@ impl ToolRuntime {
                     .to_string(),
             );
         }
-        if length == 0 || length > MAX_READ_PROJECT_ARTIFACT_LENGTH {
+        if length == 0 || length > INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES {
             return Err(format!(
                 "artifact export chunk length must be between 1 and {} bytes",
-                MAX_READ_PROJECT_ARTIFACT_LENGTH
+                INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES
             ));
         }
         offset

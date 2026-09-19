@@ -41,7 +41,7 @@ use upload::{
 const DEFAULT_MAX_ARTIFACT_BYTES: usize = 10 * 1024 * 1024;
 const MAX_ARTIFACT_EXPORT_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_ARTIFACT_READ_LENGTH: usize = 32 * 1024;
-const MAX_ARTIFACT_EXPORT_CHUNK_BYTES: usize = 64 * 1024;
+const MAX_ARTIFACT_EXPORT_CHUNK_BYTES: usize = 1024 * 1024;
 static ARTIFACT_UPLOAD_STATE_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]

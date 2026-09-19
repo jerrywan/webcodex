@@ -5,7 +5,7 @@
 
 use super::files::{
     artifact_upload_begin_failure_is_definite, artifact_upload_failure_is_definite,
-    validate_project_artifact_export_snapshot, MAX_READ_PROJECT_ARTIFACT_LENGTH,
+    validate_project_artifact_export_snapshot, INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES,
 };
 use super::sessions::SessionTransport;
 use super::{ToolCall, ToolResult, ToolRuntime};
@@ -206,7 +206,8 @@ impl ToolRuntime {
 
         let mut offset = 0usize;
         while offset < snapshot.bytes {
-            let length = (snapshot.bytes - offset).min(MAX_READ_PROJECT_ARTIFACT_LENGTH);
+            let length =
+                (snapshot.bytes - offset).min(INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES);
             let chunk = match self
                 .read_project_artifact_export_chunk_internal(
                     &source_project,

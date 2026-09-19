@@ -693,6 +693,13 @@ impl RunnerOperation {
             _ => false,
         }
     }
+
+    pub fn is_large_internal_artifact_chunk_request(&self) -> bool {
+        matches!(
+            self,
+            Self::File(RunnerFileOperation::ReadProjectArtifactExportChunk(_))
+        )
+    }
 }
 
 impl RunnerRequest {

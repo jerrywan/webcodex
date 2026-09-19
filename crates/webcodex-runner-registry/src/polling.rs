@@ -936,6 +936,11 @@ impl RunnerRegistry {
                 raw_stdout.clone(),
                 webcodex_core::artifact_policy::MAX_MCP_IMAGE_RESPONSE_BYTES,
             )
+        } else if pending.operation.is_large_internal_artifact_chunk_request() {
+            retain_result_stream_to_with_evidence(
+                raw_stdout.clone(),
+                webcodex_core::artifact_policy::MAX_INTERNAL_ARTIFACT_CHUNK_RESPONSE_BYTES,
+            )
         } else {
             retain_ordinary_result_stream_with_evidence(raw_stdout.clone())
         };

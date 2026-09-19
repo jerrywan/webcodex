@@ -273,9 +273,10 @@ async fn transfer_project_artifact_streams_markdown_across_runners() {
     let destination_project = agent_test_project_id("transfer-destination");
     let source_path = "paper/README.md";
     let destination_path = "artifacts/README.md";
-    let bytes: Vec<u8> = (0..(super::super::MAX_READ_PROJECT_ARTIFACT_LENGTH + 17))
-        .map(|index| b'a' + (index % 23) as u8)
-        .collect();
+    let bytes: Vec<u8> =
+        (0..(super::super::INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES + 17))
+            .map(|index| b'a' + (index % 23) as u8)
+            .collect();
     let expected_sha = sha256_hex(&bytes);
     let upload_id = "wc_upload_transfer_markdown";
 
@@ -319,6 +320,7 @@ async fn transfer_project_artifact_streams_markdown_across_runners() {
     )
     .await;
     let mut offset = 0;
+    let mut chunk_count = 0;
     while offset < bytes.len() {
         offset = complete_one_transfer_chunk(
             &runtime,
@@ -331,7 +333,10 @@ async fn transfer_project_artifact_streams_markdown_across_runners() {
             upload_id,
         )
         .await;
+        chunk_count += 1;
     }
+    assert_eq!(chunk_count, 2, "1 MiB internal streaming should require two chunks");
+
     complete_destination_finish(
         &runtime,
         "transfer-destination",

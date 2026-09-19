@@ -240,6 +240,11 @@ pub const MAX_MCP_IMAGE_BYTES: usize = 1024 * 1024;
 /// server-generated `mcp_image` marker.
 pub const MAX_MCP_IMAGE_RESPONSE_BYTES: usize = 1536 * 1024;
 
+/// Maximum retained Runner stdout for one internal 1 MiB artifact transfer
+/// chunk encoded as base64 JSON. This is an internal transport envelope, not a
+/// model-facing artifact inspection bound.
+pub const MAX_INTERNAL_ARTIFACT_CHUNK_RESPONSE_BYTES: usize = 1536 * 1024;
+
 #[cfg(test)]
 mod tests {
     use super::*;

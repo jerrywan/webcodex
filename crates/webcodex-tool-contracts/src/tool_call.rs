@@ -4030,6 +4030,7 @@ pub enum ToolCall {
         #[serde(default)]
         offset: Option<usize>,
         /// inspect only; bytes (default 32768, max 65536).
+        #[schemars(range(min = 1, max = 65536))]
         #[serde(default)]
         length: Option<usize>,
         /// inspect only; 64-char lowercase SHA-256 fence.
@@ -4093,6 +4094,7 @@ pub enum ToolCall {
         #[serde(default)]
         offset: Option<usize>,
         /// Optional chunk length in bytes; defaults to 32768 and cannot exceed 65536.
+        #[schemars(range(min = 1, max = 65536))]
         #[serde(default)]
         length: Option<usize>,
         /// Optional exact full-file snapshot fence. Normally do not invent or manually transfer it: Runtime

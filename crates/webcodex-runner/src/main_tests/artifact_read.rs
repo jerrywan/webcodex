@@ -512,7 +512,8 @@ fn file_read_project_artifact_rejects_invalid_expected_sha256_without_bytes() {
 fn file_read_project_artifact_export_chunk_reads_only_requested_segments() {
     let tmp = tempfile::tempdir().unwrap();
     let policy = project_policy(tmp.path());
-    let bytes = vec![0x5a; 70 * 1024];
+    let internal_chunk = 1024 * 1024;
+    let bytes = vec![0x5a; internal_chunk + 17];
     let expected_sha256 = sha256_hex_bytes(&bytes);
     std::fs::write(tmp.path().join("export.bin"), &bytes).unwrap();
 
@@ -527,14 +528,14 @@ fn file_read_project_artifact_export_chunk_reads_only_requested_segments() {
                 "expected_file_bytes": bytes.len(),
                 "expected_sha256": expected_sha256,
                 "offset": 0,
-                "length": 64 * 1024
+                "length": internal_chunk
             }),
         ),
     ));
     assert_eq!(first["file_bytes"], bytes.len());
     assert_eq!(first["offset"], 0);
-    assert_eq!(first["bytes_returned"], 64 * 1024);
-    assert_eq!(first["next_offset"], 64 * 1024);
+    assert_eq!(first["bytes_returned"], internal_chunk);
+    assert_eq!(first["next_offset"], internal_chunk);
     assert_eq!(first["truncated"], true);
     assert_eq!(first["eof"], false);
     assert!(first.get("sha256").is_none());
@@ -544,7 +545,7 @@ fn file_read_project_artifact_export_chunk_reads_only_requested_segments() {
         first["content_base64"].as_str().unwrap(),
     )
     .unwrap();
-    assert_eq!(first_bytes, bytes[..64 * 1024]);
+    assert_eq!(first_bytes, bytes[..internal_chunk]);
 
     let final_chunk = line_edit_json(handle_file_request(
         &policy,
@@ -556,13 +557,13 @@ fn file_read_project_artifact_export_chunk_reads_only_requested_segments() {
                 "path": "export.bin",
                 "expected_file_bytes": bytes.len(),
                 "expected_sha256": expected_sha256,
-                "offset": 64 * 1024,
-                "length": 64 * 1024
+                "offset": internal_chunk,
+                "length": internal_chunk
             }),
         ),
     ));
-    assert_eq!(final_chunk["offset"], 64 * 1024);
-    assert_eq!(final_chunk["bytes_returned"], 6 * 1024);
+    assert_eq!(final_chunk["offset"], internal_chunk);
+    assert_eq!(final_chunk["bytes_returned"], 17);
     assert_eq!(final_chunk["next_offset"], bytes.len());
     assert_eq!(final_chunk["truncated"], false);
     assert_eq!(final_chunk["eof"], true);
@@ -571,7 +572,7 @@ fn file_read_project_artifact_export_chunk_reads_only_requested_segments() {
         final_chunk["content_base64"].as_str().unwrap(),
     )
     .unwrap();
-    assert_eq!(final_bytes, bytes[64 * 1024..]);
+    assert_eq!(final_bytes, bytes[internal_chunk..]);
 
     std::fs::write(tmp.path().join("export.bin"), vec![0x59; bytes.len()]).unwrap();
     let same_size_changed = line_edit_json(handle_file_request(
@@ -608,6 +609,79 @@ fn file_read_project_artifact_export_chunk_reads_only_requested_segments() {
         ),
     ));
     assert_eq!(wrong_size["error_kind"], "snapshot_changed");
+
+    let oversized_chunk = line_edit_json(handle_file_request(
+        &policy,
+        &json_file_op_request(
+            tmp.path(),
+            "file_read_project_artifact_export_chunk",
+            "export.bin",
+            serde_json::json!({
+                "path": "export.bin",
+                "expected_file_bytes": bytes.len(),
+                "expected_sha256": expected_sha256,
+                "offset": 0,
+                "length": internal_chunk + 1
+            }),
+        ),
+    ));
+    assert!(oversized_chunk["error"]
+        .as_str()
+        .unwrap()
+        .contains("length must be between"));
+
+    for size in [internal_chunk - 1, internal_chunk, internal_chunk + 1] {
+        let path = format!("chunk-boundary-{size}.bin");
+        let content = vec![0x33; size];
+        let sha256 = sha256_hex_bytes(&content);
+        std::fs::write(tmp.path().join(&path), &content).unwrap();
+        let output = line_edit_json(handle_file_request(
+            &policy,
+            &json_file_op_request(
+                tmp.path(),
+                "file_read_project_artifact_export_chunk",
+                &path,
+                serde_json::json!({
+                    "path": path,
+                    "expected_file_bytes": size,
+                    "expected_sha256": sha256,
+                    "offset": 0,
+                    "length": internal_chunk
+                }),
+            ),
+        ));
+        assert_eq!(output["bytes_returned"], size.min(internal_chunk));
+        assert_eq!(output["next_offset"], size.min(internal_chunk));
+        assert_eq!(output["eof"], size <= internal_chunk);
+        let decoded = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            output["content_base64"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded, content[..size.min(internal_chunk)]);
+    }
+
+    let empty_sha256 = sha256_hex_bytes(b"");
+    std::fs::write(tmp.path().join("empty.bin"), b"").unwrap();
+    let empty = line_edit_json(handle_file_request(
+        &policy,
+        &json_file_op_request(
+            tmp.path(),
+            "file_read_project_artifact_export_chunk",
+            "empty.bin",
+            serde_json::json!({
+                "path": "empty.bin",
+                "expected_file_bytes": 0,
+                "expected_sha256": empty_sha256,
+                "offset": 0,
+                "length": internal_chunk
+            }),
+        ),
+    ));
+    assert_eq!(empty["bytes_returned"], 0);
+    assert_eq!(empty["next_offset"], 0);
+    assert_eq!(empty["eof"], true);
+    assert_eq!(empty["content_base64"], "");
 
     let ten_mib = 10 * 1024 * 1024;
     let ten_mib_sha256 = zero_bytes_sha256(ten_mib);
