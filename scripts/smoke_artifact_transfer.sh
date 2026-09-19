@@ -490,7 +490,7 @@ if check_success "tool_manifest(category=artifact) succeeds" "$body"; then
     fi
 fi
 
-body="$(api_post /api/projects/list '{}')"
+body="$(api_post /api/tools/call '{"tool":"list_projects","params":{}}')"
 if check_success "listProjects succeeds" "$body"; then
     if json_contains_strings "$body" "$PROJECT_ID"; then
         pass "listProjects includes $PROJECT_ID"

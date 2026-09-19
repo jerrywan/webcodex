@@ -479,7 +479,7 @@ body="$(api_post /api/runtime/status '{}')"
 assert_success "getRuntimeStatus" "$body" || true
 
 # listProjects — must include the agent-registered project id.
-body="$(api_post /api/projects/list '{}')"
+body="$(runtime_tool_call "list_projects" '{}')"
 assert_success "listProjects" "$body" || true
 # Verify the runtime project id appears in the list.
 list_json="$(json_get "$body" output)"
@@ -1682,7 +1682,7 @@ LOOP_MARKER_OLD="Smoke Project"
 LOOP_MARKER_NEW="Smoke Project [auto-loop]"
 
 # Step 1: listProjects — find the agent project (re-check as part of the loop).
-body="$(api_post /api/projects/list '{}')"
+body="$(runtime_tool_call "list_projects" '{}')"
 loop_list_json="$(json_get "$body" output)"
 if echo "$loop_list_json" | grep -q "\"$RUNTIME_PROJECT_ID\""; then
     pass "loop: listProjects found $RUNTIME_PROJECT_ID"
