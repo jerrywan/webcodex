@@ -30,7 +30,9 @@ export function McpProvidersPanel({ state, onState, settings, onRestarted }: { s
     catch { setFailed(true); }
     finally { submitting.current = false; setBusy(false); }
   };
-  return <section className="mcp-providers" aria-label={c("mcpProviders")}>
+  // The enclosing tabpanel already names this group. Avoid redundant native AX
+  // landmarks that bury launch controls below the bounded Computer Use tree.
+  return <div className="mcp-providers" role="presentation">
     <div className="extension-toolbar"><button type="button" className="primary-button" disabled={disabled || providers.config_error} onClick={() => setEditor({ profile: null, revision: providers.revision })}>{c("addMcpProvider")}</button></div>
     <p className="workspace-notice">{c("sharedProviders")}</p>
     {(saved || providers.restart_required) && <div className="extension-apply-bar" role="status"><span>{c("saved")}{providers.restart_required ? ` · ${p("needsRestart")}` : ""}</span>{providers.restart_required && <button type="button" className="secondary-button" disabled={disabled || !settings?.can_restart} onClick={() => void restart()}>{p("restartRunner")}</button>}</div>}
@@ -44,5 +46,5 @@ export function McpProvidersPanel({ state, onState, settings, onRestarted }: { s
     <details className="workspace-technical"><summary>{p("advanced")}</summary><p>{c("capacity")}: {providers.profiles.filter(profile => profile.enabled).length} / {providers.max_enabled}</p>{settings && <code>{settings.target.config_path}</code>}</details>
     {editor && <McpProviderEditor profile={editor.profile} revision={editor.revision} onState={next => { onState(next); setSaved(true); }} onClose={() => setEditor(null)} />}
     {deleting && <WorkspaceDialog title={`${c("delete")} ${deleting.profile.name}`} onClose={() => setDeleting(null)} busy={busy}><p>{c("deleteProviderHelp")}</p>{failed && <p role="alert" className="workspace-notice">{c("operationFailed")}</p>}<div className="connection-actions"><button type="button" className="primary-button" disabled={disabled} onClick={() => void remove()}>{c("delete")}</button><button type="button" className="secondary-button" disabled={disabled} onClick={() => setDeleting(null)}>{p("cancel")}</button></div></WorkspaceDialog>}
-  </section>;
+  </div>;
 }

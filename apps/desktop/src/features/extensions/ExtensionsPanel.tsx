@@ -72,7 +72,7 @@ export function ExtensionsPanel({ state, onState }: { state: DesktopState; onSta
   };
   const plugins = catalog?.plugins.catalog?.plugins || catalog?.plugins.catalog?.providers || [];
   const skills = catalog?.skills.catalog?.skills || [];
-  return <section className="page-section workspace-page" aria-labelledby="extensions-title" data-webcodex-page="extensions">
+  return <div className="page-section workspace-page" data-webcodex-page="extensions">
     <header className="page-heading-row"><h1 id="extensions-title">{t("extensions.title")}</h1><button className="secondary-button" onClick={refresh} disabled={disabled || loading}>{p("refresh")}</button></header>
     {tab !== "mcpProviders" && <div className="activity-project-filter"><label htmlFor="extensions-project">{p("projects")}</label><select id="extensions-project" value={project} onChange={event => setProject(event.target.value)} disabled={disabled}>{workspace.projects.filter(row => row.id).map(row => <option key={row.id} value={row.id}>{projectName(row)}</option>)}</select></div>}
     <div className="workspace-tabs" role="tablist" aria-label={t("extensions.title")}>
@@ -120,7 +120,7 @@ export function ExtensionsPanel({ state, onState }: { state: DesktopState; onSta
       {settings && tab !== "mcpProviders" && <div className="workspace-technical"><button className="text-button" onClick={() => setManage(value => !value)} aria-expanded={manage}>{p("manage")}</button>{manage && <ExtensionPathsEditor settings={settings} disabled={disabled} onSave={updatePaths} />}</div>}
     </section>}
     {document && <InstructionDocument key={document.fingerprint} project={project} file={document} onClose={() => setDocument(null)} />}
-  </section>;
+  </div>;
 }
 function InstructionDocument({ project, file, onClose }: { project: string; file: InstructionSummary; onClose: () => void }) {
   const p = useProduct(); const [content, setContent] = useState<string | null>(null); const [failed, setFailed] = useState(false);
