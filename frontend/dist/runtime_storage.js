@@ -29,7 +29,7 @@ export function resolvedAppearance(preference, prefersLight) {
     return prefersLight ? "light" : "dark";
 }
 export function workspaceViewPreference(value) {
-    return value === "sessions" || value === "operations" || value === "windows" || value === "projects" || value === "activity" || value === "extensions" ? value : "home";
+    return value === "sessions" || value === "operations" || value === "windows" || value === "projects" || value === "activity" ? value : "home";
 }
 export function loadWorkspaceViewPreference() {
     try {

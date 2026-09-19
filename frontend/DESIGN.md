@@ -1,13 +1,13 @@
 # WebCodex Runtime UI
 
-This document is the visual contract for the Runtime Console. It is deliberately product-specific: WebCodex is a dense, local-first control surface for the hierarchy **Runner → Project → Session → Conversation**, not a generic AI landing page.
+This document is the product and visual contract for the Runtime WebUI: a remote runtime workspace and workflow observability console. One Server coordinates many Runners and their Projects; neither Server nor Runner is assumed to run on the browser's computer. Desktop owns local lifecycle, connections/tunnels, extensions and Computer Use permissions. The WebUI observes and operates Projects, Window Activity, Workflow Sessions and Runtime activity, not Desktop settings.
 
 ## Design synthesis
 
 The system combines the useful parts of the repositories in the owner's `develop-ui` list without copying any one product:
 
 - **Ant Design, Arco Design, Element Plus, and TDesign**: token-driven controls, predictable states, compact enterprise density, and the same component behavior in light/dark and desktop/mobile layouts.
-- **developer-roadmap**: progressive disclosure. Show the current branch of the Runner/Project/Session hierarchy and keep fleet-wide detail one level deeper.
+- **developer-roadmap**: progressive disclosure. Keep workflow navigation direct and disclose diagnostic implementation details one level deeper.
 - **awesome-design-md**: record decisions as a durable design contract. Linear contributes the restrained dark surface ladder and single accent; Cursor contributes the warm light canvas; Apple contributes translucent functional chrome rather than decorative glass.
 - **ui-skills and Emil Kowalski's skills**: spacing before dividers, one accent per view, 44 px coarse-pointer targets, visible focus, responsive press feedback, origin-aware popovers, short compositor-only motion, and reduced-motion/transparency fallbacks.
 
@@ -48,11 +48,15 @@ Surfaces form a stable ladder in both themes:
 
 ## Components
 
-### Daily workspace (issue #470)
+### Daily workspace
 
-The default destination is **Project overview**, with meaningful work and attention ahead of message history. Work Sessions, Window activity, and Diagnostics & Agents remain explicit destinations. Project names always have their own full-width line; activity badges wrap below rather than squeezing away identity. The selected Project's overview summarizes loaded attention, running work, recently closed Sessions, and Window observations. Closed is not successful; no call is not disconnected. The Session work summary describes retained edits, Jobs, and terminal evidence, not a live Git diff.
+The default destination is **Home**, with Server connectivity, connected Runners, Projects, active/running Workflow Sessions, recent global Window activity and recent work. Primary navigation is **Home / Projects / Window Activity / Workflow Sessions / Activity**. Diagnostics is a secondary sidebar-footer entry. Instructions, Skills, Plugins and MCP Providers remain Desktop responsibilities; removing their WebUI consumer does not remove backend APIs or Desktop extensions.
 
-The `runtime_workspace.ts` module owns the overview, bounded evidence summaries, and command dialog rather than expanding the main controller. `Command/Ctrl+Shift+K` opens commands; Escape restores the trigger focus. Stable semantic buttons and `data-action` hooks serve human keyboard use and Browser/Computer Use without exposing credentials or changing authority.
+Projects is a searchable, Runner-filtered inventory with health, branch, recent activity and Session counts. Opening a Project is never required to discover Windows or Sessions. Workflow Sessions lists actual running work first and recent Sessions second, with Runner/Project/search filters. Project filters load the authorized Project inventory independently of the selected Session; bounded results remain explicitly bounded. Rows show title, Project, Runner, liveness, activity time, Jobs and available attention counts, never fabricated zeros for unavailable data. An exact remembered tab-local Session may be restored; otherwise the most recent visible candidate is selected. A closed Session is not necessarily successful, and no active tool call does not mean disconnected.
+
+`runtime_window_state.ts` owns list/detail refresh, explicit filtering, cancellation and cached-observation availability. `runtime_sessions.ts` owns the workflow inventory and filters. `runtime_workspace.ts` owns Home, bounded work summaries and the command dialog. `Command/Ctrl+Shift+K` opens commands; Escape restores trigger focus. Semantic controls and stable destination identities support keyboards and Browser Use without granting authority.
+
+Window Activity displays opaque keys and observed source, last-seen/tool activity, Project, linked Sessions and active request counts. Raw request `_meta` values never appear. The Server remains authoritative for principal and Project visibility. Loading, empty, stale and denied are different states; a denied scope explains required access without revealing another principal's data. Failed refresh retains last successful evidence with a stale label, but revocation removes cached evidence. Exact request ownership fences late responses even when aborted transports return success. Empty Window data has one concise main-pane message, not duplicate sidebar/detail placeholders.
 
 ### Information hierarchy
 
@@ -66,10 +70,11 @@ Navigation answers “where am I?”, conversation answers “what was said?”,
 
 ### Navigation hierarchy
 
-- A Runner header shows device identity, textual connection state, Project count, and a disclosure affordance.
-- A Project row emphasizes its name first, then Session count/update time, then exceptional status. Workspace path belongs to the context evidence layer, not the navigation tree.
-- Sessions live directly under their selected Project. A Session row shows only the title, liveness, and update time; validation and activity previews belong to context. Never wrap the entire hierarchy in one heavy card.
-- Search and Runner filtering are proper controls, not hidden diagnostics.
+- Global navigation is independent of the selected Runner, Project, Session or Window.
+- The Session sidebar contains the workflow list and its filters, not a permanent Project tree. Its list scrolls as one navigation region.
+- Project names have their own readable line. Long paths and opaque IDs wrap or truncate with accessible full identity instead of widening a pane.
+- Runtime-wide counts are never derived from a selected Project's bounded Window list. Unavailable counts are unknown, not zero.
+- Refresh is available in every primary view. Account, language and appearance actions live in an accessible overflow menu.
 
 ### Conversation
 
@@ -87,7 +92,7 @@ Navigation answers “where am I?”, conversation answers “what was said?”,
 
 ### Composer
 
-- The composer is the primary floating material. It may use restrained translucency because content scrolls behind it.
+- The composer is the primary floating material but occupies its own bottom layout row. Main history ends above it, never behind it; opening context reserves the composer area.
 - Text input owns most of the area and grows with content. `Enter` sends on every device, while `Shift+Enter` inserts a newline; IME composition Enter is never treated as submit.
 - The default surface exposes one tools entry and one send action. Kind, priority, and acknowledgement live in an upward disclosure so default note/normal messages do not carry permanent form chrome.
 - The send action becomes visually active only when content exists. Native selects remain native for keyboard and mobile reliability, but share the same disclosed control shell and focus treatment.
@@ -103,17 +108,21 @@ Navigation answers “where am I?”, conversation answers “what was said?”,
 
 ### Runtime and Session context
 
-- The primary navigation exposes **Project overview**, **Work Sessions**, **Window activity**, and **Diagnostics & Agents**. Server metrics, Runner diagnostics, Agent identity, inboxes, and durable conversations live in the second space instead of competing with a Session conversation.
+- Diagnostics preserves Server metrics, Runner health and durable Agent tooling below the primary navigation; these do not compete with the workflow workspace.
 - The Session context inspector contains only evidence about the selected Session: identity, workspace path, validation, reported progress, and activity. Current work and attention stay near the top while raw evidence is disclosed one level deeper.
-- At `1600 px` and above, the otherwise empty right-side remainder docks a Session context rail by default, but remains user-collapsible. Below that breakpoint context is a non-blocking popover, then a full-width edge sheet on smaller screens.
+- At `1600 px` and above, the otherwise empty right-side remainder docks a Session context rail by default, but remains user-collapsible. Below the wide breakpoint context is a dismissible overlay/drawer. Its bottom edge is measured against the composer, including textarea growth, rather than assuming a fixed browser viewport. Escape and close work in both docked and floating modes.
 - Runtime administration is a scrollable card grid with stable anchors for overview, Runner fleet, and Agent communication. On narrow screens it becomes a single column; it never shares the conversational composer or message canvas.
+
+## Scroll model
+
+Session summary and conversation share one main history scroller. The composer is its sibling bottom row. Navigation owns one independent scroller. Context Overview/Details use the context scroller; Activity uses its own list instead of nesting two competing scroll regions. Scrolling history pauses follow-latest, and polling preserves the reader's position. Only an explicit jump resumes following. Context cannot shrink the main grid below a usable reading measure; all main grid tracks use `minmax(0, 1fr)` and `min-width: 0`.
 
 ## Responsive behavior
 
 - At 900 px and below, navigation becomes a dismissible drawer and the main conversation remains full width.
 - At 1600 px and above, navigation, conversation, and context form a bounded three-column working surface when context is open; the context rail can be collapsed by the user or disappears before it can crowd the primary task.
 - At 600 px and below, optional labels collapse, controls wrap without horizontal scrolling, bubbles can use up to 92% width, and safe-area insets are respected.
-- At 600 px and below, language, appearance, refresh, and lock move into one labelled overflow menu. The menu closes on outside press and Escape and restores focus to its trigger.
+- Language, appearance and lock live in one labelled overflow menu; refresh remains directly available. The menu closes on outside press and Escape and restores focus to its trigger.
 - Coarse pointers receive at least 44 px targets.
 - `prefers-reduced-motion`, `prefers-reduced-transparency`, `prefers-contrast`, and forced colors receive explicit fallbacks.
 

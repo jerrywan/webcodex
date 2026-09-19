@@ -37,7 +37,8 @@ const requiredAssets = [
   "runtime_collaboration.js",
   "runtime_product_view.js",
   "runtime_product.js",
-  "runtime_extensions.js",
+  "runtime_window_state.js",
+  "runtime_sessions.js",
   "runtime_workspace.js",
   "runtime.html",
   "runtime.js",
@@ -73,11 +74,9 @@ async function assertRequiredAssets(outputDirectory) {
   }
   const runtimeHtml = await readFile(resolve(outputDirectory, "runtime.html"), "utf8");
   assert.match(runtimeHtml, /WebCodex — Workspace/);
-  assert.match(runtimeHtml, /runtime-device-select/);
-  assert.match(runtimeHtml, /runtime-project-list/);
+  assert.match(runtimeHtml, /runtime-global-sessions/);
+  assert.match(runtimeHtml, /runtime-projects-content/);
   assert.equal(runtimeHtml.includes("runtime-project-" + "select"), false);
-  assert.match(runtimeHtml, /runtime-project-search/);
-  assert.match(runtimeHtml, /runtime-project-search[^>]*maxlength="200"/);
   assert.match(runtimeHtml, /runtime-collaboration-form/);
   assert.match(runtimeHtml, /id="runtime-chat-scroll" class="chat-scroll"/);
   assert.match(runtimeHtml, /id="runtime-message-body" rows="1" maxlength="4000" enterkeyhint="send"/);
@@ -122,6 +121,8 @@ async function assertRequiredAssets(outputDirectory) {
   assert.match(runtimeHtml, /Reported progress/);
   assert.match(runtimeHtml, /Model-reported; informational only\./);
   const runtime = await readFile(resolve(outputDirectory, "runtime.js"), "utf8");
+  assert.match(runtime, /product-project-query/);
+  assert.match(runtime, /search.maxLength = 200/);
   assert.match(runtime, /\/api\/runtime-console\//);
   assert.match(runtime, /runtimeDeviceIds/);
   assert.match(runtime, /runtimeProjectsForDevice/);
@@ -256,7 +257,8 @@ async function copySources(sourceDirectory) {
     "runtime_collaboration.ts",
     "runtime_product_view.ts",
     "runtime_product.ts",
-    "runtime_extensions.ts",
+    "runtime_window_state.ts",
+  "runtime_sessions.ts",
     "runtime_workspace.ts",
     "runtime.css",
     "runtime.html",

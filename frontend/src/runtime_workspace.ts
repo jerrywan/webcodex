@@ -60,6 +60,9 @@ export interface WorkspaceHomeOptions {
   onWindows: () => void;
   onSearch: () => void;
   overview?: any;
+  windowTotal?: number;
+  windowTruncated?: boolean;
+  overviewStale?: boolean;
   onAddProject?: () => void;
   git?: (project: string, node: HTMLElement) => void;
 }
@@ -68,7 +71,7 @@ export function renderWorkspaceHome(node: HTMLElement | null, options: Workspace
   if (!node) return;
   // Preserve focused controls on polling when the evidence has not changed.
   const signature = JSON.stringify([options.language, options.projects, options.project, options.sessions,
-    options.sessionsAvailable, options.sessionsStatus, options.windows, options.windowAvailability, options.windowStatus, options.overview]);
+    options.sessionsAvailable, options.sessionsStatus, options.windows, options.windowAvailability, options.windowStatus, options.overview, options.windowTotal, options.windowTruncated, options.overviewStale]);
   if (workspaceHomeSignatures.get(node) === signature) return;
   workspaceHomeSignatures.set(node, signature);
   const focusedKey = node.contains(document.activeElement) ? workspaceControlKeys.get(document.activeElement as HTMLElement) : null;
@@ -76,14 +79,22 @@ export function renderWorkspaceHome(node: HTMLElement | null, options: Workspace
   const tr = (text: string): string => translate(text, options.language);
   const heading = workspaceNode("header", "", "product-page-heading");
   const title = workspaceNode("div"); title.appendChild(workspaceNode("p", tr("Workspace"), "eyebrow"));
-  title.appendChild(workspaceNode("h2", tr(options.overview ? "WebCodex Ready" : "Workspace"))); heading.appendChild(title);
+  title.appendChild(workspaceNode("h2", tr("Current Runtime"))); heading.appendChild(title);
   heading.appendChild(workspaceButton(tr("Add Project"), "workspace-add-project", options.onAddProject || options.onSearch)); node.appendChild(heading);
   const status = workspaceNode("dl", "", "product-status-strip"); status.setAttribute("aria-label", tr("Workspace status"));
   const runners = Array.isArray(options.overview?.runners) ? options.overview.runners : [];
-  for (const [label, value] of [["Server", tr(options.overview ? "Running" : "Not checked")], ["Runner", options.overview ? String(runners.filter((runner: any) => runner.connected).length) + " " + tr("online") : tr("Not checked")], ["Projects", String(options.projects.length)]]) {
+  for (const [label, value] of [
+    ["Server", tr(options.overviewStale ? "STALE" : options.overview ? "Connected" : "Not checked")],
+    ["Runners online", options.overview ? String(options.overview.runners_online ?? runners.filter((runner: any) => runner.connected).length) + " / " + String(options.overview.runner_count ?? runners.length) : "—"],
+    ["Projects", options.overview?.projects_available ? String(options.overview.visible_projects ?? options.projects.length) + (options.overview.projects_truncated ? "+" : "") : "—"],
+    ["Active Sessions", options.overview ? String(options.overview.workflow_sessions?.active ?? "—") + (options.overview.workflow_sessions?.truncated ? "+" : "") : "—"],
+    ["Running Sessions", options.overview ? String(options.overview.workflow_sessions?.running ?? "—") : "—"],
+    ["Window Activity", options.windowAvailability === "available" || options.windowAvailability === "stale" ? String(options.windowTotal ?? options.windows.length) + (options.windowTruncated ? "+" : "") + (options.windowAvailability === "stale" ? " · " + tr("STALE") : "") : "—"],
+  ]) {
     const item = workspaceNode("div"); item.appendChild(workspaceNode("dt", tr(label))); item.appendChild(workspaceNode("dd", value)); status.appendChild(item);
   }
   node.appendChild(status);
+  node.appendChild(workspaceNode("p", tr("One Server coordinates connected Runners and their Projects."), "muted small product-runtime-context"));
   const projects = workspaceNode("section", "", "product-section");
   const projectHeading = workspaceNode("header", "", "product-section-heading"); projectHeading.appendChild(workspaceNode("h3", tr("Recent Projects"))); projectHeading.appendChild(workspaceButton(tr("All Projects"), "workspace-find-project", options.onSearch)); projects.appendChild(projectHeading);
   const recentProjects = [...options.projects].sort((a, b) => Number(b.sessions?.latest_updated_at || 0) - Number(a.sessions?.latest_updated_at || 0));
@@ -91,7 +102,7 @@ export function renderWorkspaceHome(node: HTMLElement | null, options: Workspace
   if (!recentProjects.length) projects.appendChild(workspaceNode("p", tr(options.overview ? "No projects yet" : "Loading projects…"), "muted"));
   node.appendChild(projects);
   const activity = workspaceNode("section", "", "product-section");
-  const activityHeading = workspaceNode("header", "", "product-section-heading"); activityHeading.appendChild(workspaceNode("h3", tr("Recent Activity"))); activityHeading.appendChild(workspaceButton(tr("Windows"), "workspace-open-windows", options.onWindows)); activity.appendChild(activityHeading);
+  const activityHeading = workspaceNode("header", "", "product-section-heading"); activityHeading.appendChild(workspaceNode("h3", tr("Recent Activity"))); activityHeading.appendChild(workspaceButton(tr("Window Activity"), "workspace-open-windows", options.onWindows)); activity.appendChild(activityHeading);
   if (!options.sessionsAvailable) activity.appendChild(workspaceNode("p", options.sessionsStatus || tr("Activity unavailable. Refresh to try again."), "muted"));
   const sessions = workspaceSessionGroups(options.sessions).recent.slice(0, 5);
   for (const session of sessions) {
@@ -100,8 +111,9 @@ export function renderWorkspaceHome(node: HTMLElement | null, options: Workspace
   }
   for (const window of options.windows.slice(0, 2)) {
     const button = workspaceButton("", "workspace-open-window", () => options.onWindow(String(window.client_window_key))); workspaceControlKeys.set(button, "window:" + String(window.client_window_key)); button.className = "product-activity-row";
-    button.appendChild(workspaceNode("span", tr("Windows"), "product-badge")); button.appendChild(workspaceNode("strong", String(window.client_window_key).slice(-12))); button.appendChild(workspaceNode("span", productTime(window.last_meaningful_activity_at_ms || window.last_seen_at_ms, options.language), "muted small")); activity.appendChild(button);
+    button.appendChild(workspaceNode("span", tr("Window Activity"), "product-badge")); button.appendChild(workspaceNode("strong", String(window.client_window_key).slice(-12))); button.appendChild(workspaceNode("span", productTime(window.last_meaningful_activity_at_ms || window.last_seen_at_ms, options.language), "muted small")); activity.appendChild(button);
   }
+  if (options.windowAvailability === "unavailable" || options.windowAvailability === "stale") activity.appendChild(workspaceNode("p", formatWindowEmptyState(options.windowAvailability, options.windowScope, false, options.language), "muted small"));
   if (options.sessionsAvailable && !sessions.length && !options.windows.length) activity.appendChild(workspaceNode("p", tr("No activity observed yet"), "muted"));
   node.appendChild(activity);
   if (focusedKey) Array.from(node.querySelectorAll<HTMLElement>("button")).find(button => workspaceControlKeys.get(button) === focusedKey)?.focus();
@@ -182,7 +194,7 @@ export function installWorkspaceCommands(options: {
   available: () => boolean;
   projects: () => any[];
   onProject: (runner: string, project: string) => void;
-  onView: (view: "home" | "projects" | "sessions" | "windows" | "activity" | "extensions" | "operations") => void;
+  onView: (view: "home" | "projects" | "sessions" | "windows" | "activity" | "operations") => void;
 }): void {
   const dialog = document.getElementById("runtime-command-dialog") as HTMLDialogElement | null;
   const input = document.getElementById("runtime-command-query") as HTMLInputElement | null;
@@ -194,7 +206,7 @@ export function installWorkspaceCommands(options: {
     const query = input.value.trim().toLocaleLowerCase();
     results.replaceChildren();
     const entries: { label: string; action: string; run: () => void }[] = [
-      ...([ ["Home", "home"], ["Projects", "projects"], ["Workflow Sessions", "sessions"], ["Windows", "windows"], ["Activity", "activity"], ["Extensions", "extensions"], ["Advanced", "operations"] ] as const)
+      ...([ ["Home", "home"], ["Projects", "projects"], ["Workflow Sessions", "sessions"], ["Window Activity", "windows"], ["Activity", "activity"], ["Diagnostics", "operations"] ] as const)
         .map(([label, view]) => ({ label: translate(label, language), action: "command-" + view, run: () => options.onView(view) })),
       ...options.projects().map(project => ({ label: String(project.name || project.id) + " · " + String(project.client_id || ""), action: "command-project", run: () => options.onProject(String(project.client_id || ""), String(project.id || "")) })),
     ];

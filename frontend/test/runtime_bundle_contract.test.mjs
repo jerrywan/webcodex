@@ -32,7 +32,8 @@ const EXPECTED_RUNTIME_INLINE_MODULES = [
   "runtime_collaboration.ts",
   "runtime_product_view.ts",
   "runtime_product.ts",
-  "runtime_extensions.ts",
+  "runtime_window_state.ts",
+  "runtime_sessions.ts",
   "runtime_workspace.ts",
   "runtime.ts",
 ];

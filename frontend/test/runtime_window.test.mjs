@@ -494,7 +494,7 @@ test("renderProjectWindowCards populates project-scoped window cards with inspec
     const card = container.children[0];
     assert.equal(card.title, "Open Window inspector");
     assert.equal(card.className.includes("selected"), false);
-    assert.equal(card.querySelector(".chip")?.textContent, "openai-session");
+    assert.equal(card.querySelector(".chip")?.textContent, "No active request");
     assert.match(card.textContent, /0 linked Sessions/);
 
     card.click();

@@ -4,6 +4,7 @@ import { translate, localizedWorkflowText } from "./runtime_i18n.js";
 import { workflowSessionOverviewPresentation } from "./workflow_session_state.js";
 import { activityDescription, formatLivenessPresentation, formatUpdatedTime } from "./runtime_activity.js";
 import { pendingAttentionCount } from "./runtime_overview.js";
+import { formatWindowEmptyState } from "./runtime_window.js";
 // These projections use only authorized Workflow Session evidence. Window
 // observations never contribute to Session status, completion or authority.
 export function workspaceSessionGroups(sessions) {
@@ -42,7 +43,7 @@ export function renderWorkspaceHome(node, options) {
         return;
     // Preserve focused controls on polling when the evidence has not changed.
     const signature = JSON.stringify([options.language, options.projects, options.project, options.sessions,
-        options.sessionsAvailable, options.sessionsStatus, options.windows, options.windowAvailability, options.windowStatus, options.overview]);
+        options.sessionsAvailable, options.sessionsStatus, options.windows, options.windowAvailability, options.windowStatus, options.overview, options.windowTotal, options.windowTruncated, options.overviewStale]);
     if (workspaceHomeSignatures.get(node) === signature)
         return;
     workspaceHomeSignatures.set(node, signature);
@@ -52,20 +53,28 @@ export function renderWorkspaceHome(node, options) {
     const heading = workspaceNode("header", "", "product-page-heading");
     const title = workspaceNode("div");
     title.appendChild(workspaceNode("p", tr("Workspace"), "eyebrow"));
-    title.appendChild(workspaceNode("h2", tr(options.overview ? "WebCodex Ready" : "Workspace")));
+    title.appendChild(workspaceNode("h2", tr("Current Runtime")));
     heading.appendChild(title);
     heading.appendChild(workspaceButton(tr("Add Project"), "workspace-add-project", options.onAddProject || options.onSearch));
     node.appendChild(heading);
     const status = workspaceNode("dl", "", "product-status-strip");
     status.setAttribute("aria-label", tr("Workspace status"));
     const runners = Array.isArray(options.overview?.runners) ? options.overview.runners : [];
-    for (const [label, value] of [["Server", tr(options.overview ? "Running" : "Not checked")], ["Runner", options.overview ? String(runners.filter((runner) => runner.connected).length) + " " + tr("online") : tr("Not checked")], ["Projects", String(options.projects.length)]]) {
+    for (const [label, value] of [
+        ["Server", tr(options.overviewStale ? "STALE" : options.overview ? "Connected" : "Not checked")],
+        ["Runners online", options.overview ? String(options.overview.runners_online ?? runners.filter((runner) => runner.connected).length) + " / " + String(options.overview.runner_count ?? runners.length) : "—"],
+        ["Projects", options.overview?.projects_available ? String(options.overview.visible_projects ?? options.projects.length) + (options.overview.projects_truncated ? "+" : "") : "—"],
+        ["Active Sessions", options.overview ? String(options.overview.workflow_sessions?.active ?? "—") + (options.overview.workflow_sessions?.truncated ? "+" : "") : "—"],
+        ["Running Sessions", options.overview ? String(options.overview.workflow_sessions?.running ?? "—") : "—"],
+        ["Window Activity", options.windowAvailability === "available" || options.windowAvailability === "stale" ? String(options.windowTotal ?? options.windows.length) + (options.windowTruncated ? "+" : "") + (options.windowAvailability === "stale" ? " · " + tr("STALE") : "") : "—"],
+    ]) {
         const item = workspaceNode("div");
         item.appendChild(workspaceNode("dt", tr(label)));
         item.appendChild(workspaceNode("dd", value));
         status.appendChild(item);
     }
     node.appendChild(status);
+    node.appendChild(workspaceNode("p", tr("One Server coordinates connected Runners and their Projects."), "muted small product-runtime-context"));
     const projects = workspaceNode("section", "", "product-section");
     const projectHeading = workspaceNode("header", "", "product-section-heading");
     projectHeading.appendChild(workspaceNode("h3", tr("Recent Projects")));
@@ -80,7 +89,7 @@ export function renderWorkspaceHome(node, options) {
     const activity = workspaceNode("section", "", "product-section");
     const activityHeading = workspaceNode("header", "", "product-section-heading");
     activityHeading.appendChild(workspaceNode("h3", tr("Recent Activity")));
-    activityHeading.appendChild(workspaceButton(tr("Windows"), "workspace-open-windows", options.onWindows));
+    activityHeading.appendChild(workspaceButton(tr("Window Activity"), "workspace-open-windows", options.onWindows));
     activity.appendChild(activityHeading);
     if (!options.sessionsAvailable)
         activity.appendChild(workspaceNode("p", options.sessionsStatus || tr("Activity unavailable. Refresh to try again."), "muted"));
@@ -98,11 +107,13 @@ export function renderWorkspaceHome(node, options) {
         const button = workspaceButton("", "workspace-open-window", () => options.onWindow(String(window.client_window_key)));
         workspaceControlKeys.set(button, "window:" + String(window.client_window_key));
         button.className = "product-activity-row";
-        button.appendChild(workspaceNode("span", tr("Windows"), "product-badge"));
+        button.appendChild(workspaceNode("span", tr("Window Activity"), "product-badge"));
         button.appendChild(workspaceNode("strong", String(window.client_window_key).slice(-12)));
         button.appendChild(workspaceNode("span", productTime(window.last_meaningful_activity_at_ms || window.last_seen_at_ms, options.language), "muted small"));
         activity.appendChild(button);
     }
+    if (options.windowAvailability === "unavailable" || options.windowAvailability === "stale")
+        activity.appendChild(workspaceNode("p", formatWindowEmptyState(options.windowAvailability, options.windowScope, false, options.language), "muted small"));
     if (options.sessionsAvailable && !sessions.length && !options.windows.length)
         activity.appendChild(workspaceNode("p", tr("No activity observed yet"), "muted"));
     node.appendChild(activity);
@@ -201,7 +212,7 @@ export function installWorkspaceCommands(options) {
         const query = input.value.trim().toLocaleLowerCase();
         results.replaceChildren();
         const entries = [
-            ...[["Home", "home"], ["Projects", "projects"], ["Workflow Sessions", "sessions"], ["Windows", "windows"], ["Activity", "activity"], ["Extensions", "extensions"], ["Advanced", "operations"]]
+            ...[["Home", "home"], ["Projects", "projects"], ["Workflow Sessions", "sessions"], ["Window Activity", "windows"], ["Activity", "activity"], ["Diagnostics", "operations"]]
                 .map(([label, view]) => ({ label: translate(label, language), action: "command-" + view, run: () => options.onView(view) })),
             ...options.projects().map(project => ({ label: String(project.name || project.id) + " · " + String(project.client_id || ""), action: "command-project", run: () => options.onProject(String(project.client_id || ""), String(project.id || "")) })),
         ];

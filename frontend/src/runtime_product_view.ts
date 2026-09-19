@@ -29,8 +29,8 @@ export function productTitle(value: unknown): string {
 }
 export function productActivity(activity: any, language: RuntimeLanguage): string {
   if (!activity) return translate("No activity observed yet", language);
-  if (typeof activity.summary === "string" && activity.summary) return productTitle(activity.summary);
-  const kind = String(activity.kind || activity.tool_name || activity.tool || "");
+  if (typeof activity.summary === "string" && activity.summary && !/^execution (completed|running)/i.test(activity.summary)) return productTitle(activity.summary);
+  const kind = String(activity.activity_kind || activity.kind || activity.tool_name || activity.tool || "");
   const label = /Explor|read|search|inspect/i.test(kind) ? "Reading project files"
     : /Edit|write|patch/i.test(kind) ? "Editing files" : /Validat|test|check|build/i.test(kind) ? "Running checks"
     : /Review|changes|diff/i.test(kind) ? "Reviewing changes" : /Running|job|process/i.test(kind) ? "Running tasks" : "Workspace activity";
@@ -53,6 +53,8 @@ export function createProductProjectRow(project: ProductProject, options: {
   const meta = productNode("div", "", "product-project-meta");
   const branch = productNode("span", "—"); branch.title = tr("Git branch"); meta.appendChild(branch);
   if (project.connected && options.git) options.git(project.id, branch);
+  meta.appendChild(productNode("span", tr(project.connected ? "Connected" : "Runner unavailable")));
+  meta.appendChild(productNode("span", tr("Runner") + " · " + project.client_id));
   meta.appendChild(productNode("span", project.sessions ? String(project.sessions.active_sessions ?? 0) + (project.sessions.sessions_truncated ? "+" : "") + " " + tr("active sessions") : tr("Not checked")));
   meta.appendChild(productNode("span", productTime(project.sessions?.latest_updated_at ? project.sessions.latest_updated_at * 1000 : null, options.language)));
   body.appendChild(meta); row.appendChild(body);

@@ -6,7 +6,7 @@ export const DEVICE_DISCLOSURE_STORAGE_PREFIX = "webcodex.runtime.runner-open.v1
 export const APPEARANCE_MEDIA_QUERY = "(prefers-color-scheme: light)";
 
 export type AppearancePreference = "system" | "light" | "dark";
-export type RuntimeWorkspaceView = "home" | "projects" | "sessions" | "operations" | "windows" | "activity" | "extensions";
+export type RuntimeWorkspaceView = "home" | "projects" | "sessions" | "operations" | "windows" | "activity";
 
 export function appearancePreference(value: unknown): AppearancePreference {
   return value === "light" || value === "dark" || value === "system" ? value : "system";
@@ -37,7 +37,7 @@ export function resolvedAppearance(
 }
 
 export function workspaceViewPreference(value: unknown): RuntimeWorkspaceView {
-  return value === "sessions" || value === "operations" || value === "windows" || value === "projects" || value === "activity" || value === "extensions" ? value : "home";
+  return value === "sessions" || value === "operations" || value === "windows" || value === "projects" || value === "activity" ? value : "home";
 }
 
 export function loadWorkspaceViewPreference(): RuntimeWorkspaceView {

@@ -85,7 +85,7 @@
             <strong>WebCodex</strong>
           </div>
           <div class="sidebar-brand-tools">
-            <span class="sidebar-runtime-status"><i aria-hidden="true"></i><span>Local</span></span>
+            <span class="sidebar-runtime-status"><i aria-hidden="true"></i><span>Connected</span></span>
             <button data-testid="runtime-mobile-nav-close" id="runtime-mobile-nav-close" class="mobile-nav-control" type="button" aria-label="Close project navigation">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
             </button>
@@ -95,75 +95,21 @@
         <nav class="sidebar-view-switch" aria-label="Workspace views">
           <button data-testid="runtime-view-home" id="runtime-view-home" class="sidebar-view-item" type="button" data-runtime-view="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10h-6v-7H9v7H3Z" /></svg><span>Home</span></button>
           <button data-testid="runtime-view-projects" id="runtime-view-projects" class="sidebar-view-item" type="button" data-runtime-view="projects"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 3h9v11H3Z" /></svg><span>Projects</span></button>
-          <button data-testid="runtime-view-windows" id="runtime-view-windows" class="sidebar-view-item" type="button" data-runtime-view="windows"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></svg><span>Windows</span></button>
+          <button data-testid="runtime-view-windows" id="runtime-view-windows" class="sidebar-view-item" type="button" data-runtime-view="windows"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></svg><span>Window Activity</span></button>
           <button data-testid="runtime-view-sessions" id="runtime-view-sessions" class="sidebar-view-item" type="button" data-runtime-view="sessions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v12H9l-4 3V5Z" /></svg><span>Workflow Sessions</span></button>
           <button data-testid="runtime-view-activity" id="runtime-view-activity" class="sidebar-view-item" type="button" data-runtime-view="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg><span>Activity</span></button>
-          <button data-testid="runtime-view-extensions" id="runtime-view-extensions" class="sidebar-view-item" type="button" data-runtime-view="extensions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" /></svg><span>Extensions</span></button>
-          <button data-testid="runtime-view-operations" id="runtime-view-operations" class="sidebar-view-item" type="button" data-runtime-view="operations"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" /><path d="M12 8v8m-4-4h8" /></svg><span>Advanced</span></button>
         </nav>
 
         <div class="sidebar-scroll">
           <div id="runtime-navigation-sessions" class="sidebar-view-panel">
-          <section class="sidebar-section projects-panel">
-            <div class="sidebar-section-head">
-              <h2>Projects</h2>
-              <span id="runtime-project-status" class="muted small">—</span>
-            </div>
-            <div class="sidebar-filter-row">
-              <label class="runner-filter" for="runtime-device-select">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8m-4-4v4" /></svg>
-                <span class="visually-hidden">Runner</span>
-                <select data-testid="runtime-device-select" id="runtime-device-select" aria-label="Runner"><option value="">All Runners</option></select>
-              </label>
-              <span id="runtime-device-status" class="muted small sidebar-status">—</span>
-            </div>
-            <div class="sidebar-search">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m16.5 16.5 4 4" /></svg>
-              <input data-testid="runtime-project-search" id="runtime-project-search" type="search" maxlength="200" placeholder="Find a project…" aria-label="Filter by Project name, id, Runner, or workspace path" aria-keyshortcuts="Meta+k Control+k" autocomplete="off" spellcheck="false" />
-            </div>
-            <span id="runtime-selected-project" class="selected-project muted small">No project selected</span>
-            <div id="runtime-project-list" class="project-list" role="group" aria-label="Projects"></div>
-            <p id="runtime-projects-empty" class="muted small empty-copy" hidden>No Projects match this filter.</p>
-          </section>
-
-          <section id="runtime-workflow-sessions-panel" class="sidebar-section sessions-panel">
-            <div class="sidebar-section-head">
-              <h2>Sessions</h2>
-              <span id="runtime-sessions-count" class="count-badge">0</span>
-            </div>
-            <label class="runtime-search-field"><span>Search loaded Sessions</span><input data-testid="runtime-session-search" id="runtime-session-search" type="search" maxlength="200" placeholder="Title, id, or lifecycle" /></label>
-            <span id="runtime-session-search-status" class="muted small" role="status"></span>
-            <ul id="runtime-session-list" class="session-list" aria-label="Workflow Sessions"></ul>
-            <p id="runtime-sessions-empty" class="muted small empty-copy" hidden>No retained Workflow Sessions for this project.</p>
-          </section>
-
-          <section id="runtime-project-window-activity-panel" class="sidebar-section project-window-panel" hidden>
-            <div class="sidebar-section-head">
-              <h2>Window activity</h2>
-              <span id="runtime-project-windows-count" class="count-badge">0</span>
-            </div>
-            <span id="runtime-project-windows-status" class="muted small" role="status"></span>
-            <div id="runtime-project-windows-list" class="runtime-window-list project-window-list" role="group" aria-label="Project Window activity"></div>
-            <p id="runtime-project-windows-empty" class="muted small empty-copy" hidden>No Window activity recorded for this project.</p>
-            <p id="runtime-project-windows-unavailable" class="muted small empty-copy" hidden>Window activity requires runtime:read. Project-scoped Session access remains available.</p>
-          </section>
-
-          <details id="runtime-recent-panel" class="recent-panel" open>
-            <summary class="recent-panel-summary">
-              <span class="recent-panel-title">Recent Sessions</span>
-              <span id="runtime-recent-status" class="muted small recent-panel-meta">—</span>
-            </summary>
-            <div id="runtime-recent-session-list" class="recent-session-list" role="group" aria-label="Working and recently updated Workflow Sessions"></div>
-            <p id="runtime-recent-empty" class="muted small" hidden>No recent Workflow Sessions are visible.</p>
-            <p id="runtime-recent-unavailable" class="muted small" hidden>Fleet-wide recent Sessions require runtime:read. Project-scoped Session access remains available.</p>
-          </details>
+            <section id="runtime-global-sessions" class="sidebar-section runtime-global-sessions" aria-label="Workflow Sessions"></section>
           </div>
 
           <div id="runtime-navigation-operations" class="sidebar-view-panel" hidden>
             <section class="sidebar-section operations-navigation">
               <div class="sidebar-section-head">
                 <h2>Runtime workspace</h2>
-                <span class="muted small">Local</span>
+                <span class="muted small">Current Runtime</span>
               </div>
               <p class="operations-navigation-copy muted small">Inspect infrastructure and manage durable Agents without mixing administration into the current Session.</p>
               <button class="operations-nav-item selected" type="button" data-operations-target="runtime-operations-overview" aria-controls="runtime-operations-overview" aria-current="page">
@@ -188,6 +134,7 @@
                 <span id="runtime-window-list-count" class="count-badge">0</span>
               </div>
               <p class="operations-navigation-copy muted small">Client calls, separate from work Sessions. Observation does not mean the host is online.</p>
+              <label class="runtime-window-filter" for="runtime-window-project-filter">Project filter<select id="runtime-window-project-filter"><option value="">All Projects</option></select></label>
               <span id="runtime-window-list-status" class="muted small" role="status">Window activity has not been loaded yet.</span>
               <div id="runtime-window-list" class="runtime-window-list" role="group" aria-label="WebCodex Window activity"></div>
               <p id="runtime-window-list-empty" class="muted small empty-copy" hidden>No WebCodex activity is available.</p>
@@ -195,10 +142,11 @@
           </div>
         </div>
 
+          <button data-testid="runtime-view-operations" id="runtime-view-operations" class="sidebar-view-item" type="button" data-runtime-view="operations"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" /><path d="M12 8v8m-4-4h8" /></svg><span>Diagnostics</span></button>
         <button id="runtime-open-commands" data-testid="runtime-open-commands" data-action="open-commands" class="workspace-action" type="button" aria-keyshortcuts="Meta+Shift+k Control+Shift+k">Commands · ⇧⌘ / Ctrl K</button>
         <footer class="sidebar-footer">
           <span class="local-avatar" aria-hidden="true">W</span>
-          <span><strong>Local Runtime</strong><small>Credential stays in this tab only</small></span>
+          <span><strong>Current Runtime</strong><small>Credential stays in this tab only</small></span>
         </footer>
       </aside>
 
@@ -227,8 +175,11 @@
               <span id="runtime-session-mode" class="chip">—</span>
               <span id="runtime-session-running" class="chip">—</span>
             </div>
+                <button data-testid="runtime-refresh" id="runtime-refresh" class="icon-btn" type="button" title="Refresh runtime" aria-label="Refresh runtime">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15" /></svg><span class="topbar-action-label">Refresh</span>
+                </button>
             <details id="runtime-topbar-more" class="topbar-more">
-              <summary class="icon-btn topbar-more-trigger" title="More actions" aria-label="More actions">
+              <summary class="icon-btn topbar-more-trigger" role="button" title="More actions" aria-label="More actions">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg>
               </summary>
               <div class="topbar-more-popover">
@@ -247,9 +198,6 @@
                     <button class="theme-option" type="button" data-theme-option="dark" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.1A8.5 8.5 0 0 1 8.9 4a8.5 8.5 0 1 0 11.1 11.1Z" /></svg><span>Dark</span><i aria-hidden="true"></i></button>
                   </div>
                 </details>
-                <button data-testid="runtime-refresh" id="runtime-refresh" class="icon-btn" type="button" title="Refresh runtime" aria-label="Refresh runtime">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15" /></svg><span class="topbar-action-label">Refresh</span>
-                </button>
                 <button data-testid="runtime-lock" id="runtime-lock" class="btn subtle lock-button" type="button">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3m-11 0h12a2 2 0 0 1 2 2v7H4v-7a2 2 0 0 1 2-2Z" /></svg>
                   <span>Lock</span>
@@ -266,32 +214,27 @@
         </section>
         <section id="runtime-projects-stage" class="workspace-home-stage" aria-label="Projects" hidden><div id="runtime-projects-content" class="workspace-home-content"></div></section>
         <section id="runtime-activity-stage" class="workspace-home-stage" aria-label="Activity" hidden><div id="runtime-activity-content" class="workspace-home-content"></div></section>
-        <section id="runtime-extensions-stage" class="workspace-home-stage" aria-label="Extensions" hidden><div id="runtime-extensions-content" class="workspace-home-content"></div></section>
         <div id="runtime-conversation-stage" class="conversation-stage">
-          <div id="runtime-session-detail-empty" class="conversation-empty">
-            <div class="empty-orbit" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 5h14v11H9l-4 3V5Z" /><path d="M9 9h6m-6 3h4" /></svg>
-            </div>
-            <p class="eyebrow">Your workspace</p>
+          <div id="runtime-session-detail-empty" class="product-empty session-selection-empty" role="status">
             <h2>Workflow Sessions</h2>
-            <p>Open a project, then choose a Workflow Session.</p>
-            <button data-testid="runtime-find-project" id="runtime-find-project" class="btn primary welcome-primary" type="button"><span>Find a project</span><kbd aria-hidden="true">⌘ / Ctrl K</kbd></button>
-
+            <p>Select an active or recent Session from the list. Runner and Project are filters, not prerequisites.</p>
           </div>
 
           <article id="runtime-session-detail" class="session-conversation" hidden>
-            <details class="workspace-session-summary" open>
-              <summary>Work summary</summary>
-              <dl id="runtime-work-evidence" class="workspace-evidence"></dl>
-              <p class="muted small">Session activity and associated Windows are available in Details.</p>
-            </details>
             <section class="session-chat" aria-labelledby="runtime-collaboration-heading">
               <div class="chat-section-head">
                 <strong id="runtime-collaboration-heading" class="visually-hidden">Conversation</strong>
                 <span id="runtime-collaboration-status" class="muted small">—</span>
               </div>
               <p id="runtime-collaboration-unavailable" class="muted small unavailable-note" hidden>Session messages are not available with this access key.</p>
-              <div id="runtime-chat-scroll" class="chat-scroll">
+              <div id="runtime-chat-scroll" class="chat-scroll" tabindex="0" aria-label="Session history">
+            <details class="workspace-session-summary" open>
+              <summary>Work summary</summary>
+              <h2 id="runtime-session-work-title" class="session-work-title"></h2>
+              <dl id="runtime-work-evidence" class="workspace-evidence"></dl>
+              <p class="muted small">Session activity and associated Windows are available in Details.</p>
+            </details>
+
                 <details class="product-auth-advanced"><summary>About Session messages</summary><p class="muted small">This board shows retained Session messages. ACK is not a reply or completion. Host chat replies appear here only when explicitly posted to this Session.</p></details>
                 <details class="message-search-disclosure">
                   <summary><span>Search retained messages</span><span id="runtime-message-search-status" class="muted small" role="status"></span></summary>
@@ -370,18 +313,18 @@
 
         <section id="runtime-windows-stage" class="windows-stage" aria-labelledby="runtime-windows-heading" hidden>
           <div class="windows-scroll product-windows-scroll">
-            <header class="product-page-heading"><h2 id="runtime-windows-heading">Windows</h2><span id="runtime-window-live-badge" class="muted small">Updates automatically</span></header>
-            <div id="runtime-window-detail-empty" class="product-empty"><h3>Select a Window</h3><p>Open a Window to see its project and Workflow Sessions.</p></div>
+            <header class="product-page-heading"><h2 id="runtime-windows-heading">Window Activity</h2><span id="runtime-window-live-badge" class="muted small">Updates automatically</span></header>
+            <div id="runtime-window-detail-empty" class="product-empty" role="status"><h3 id="runtime-window-empty-title">Loading Window activity…</h3><p id="runtime-window-empty-copy"></p></div>
             <article id="runtime-window-detail" class="window-detail" hidden>
               <header class="product-window-heading"><div><h3 id="runtime-window-title">Window</h3><p id="runtime-window-project" class="muted">—</p></div><span id="runtime-window-product-state" class="product-badge">Observed</span></header>
               <p class="muted small"><span>Last activity</span> · <span id="runtime-window-last-meaningful">—</span></p>
               <section class="product-section"><header class="product-section-heading"><h3>Workflow Sessions</h3><span id="runtime-window-linked-status" class="muted small">—</span></header><div id="runtime-window-linked-sessions" class="window-session-list"></div></section>
               <section class="product-section"><header class="product-section-heading"><h3>Recent Activity</h3></header><div id="runtime-window-product-activity" class="product-window-timeline"></div></section>
-              <details class="product-auth-advanced"><summary>Advanced</summary>
+              <section class="operations-card"><div class="operations-card-head"><h3>Active requests</h3><span id="runtime-window-active-status" class="muted small">—</span></div><div id="runtime-window-active-requests" class="window-request-list"></div></section>
+              <details class="product-auth-advanced"><summary>Window Details</summary>
                 <section class="operations-card window-overview-card"><div class="operations-card-head"><h3>Window Details</h3><button data-testid="runtime-window-copy-key" id="runtime-window-copy-key" class="btn subtle" type="button">Copy hashed key</button></div><code id="runtime-window-key" class="communication-id">—</code>
                   <div class="metric-grid window-metrics"><div class="metric"><span class="metric-label">Source</span><strong id="runtime-window-source">—</strong></div><div class="metric"><span class="metric-label">Active requests</span><strong id="runtime-window-active-count">0</strong></div><div class="metric"><span class="metric-label">Last WebCodex call</span><strong id="runtime-window-last-call">—</strong></div></div>
                 </section>
-                <section class="operations-card"><div class="operations-card-head"><h3>Active requests</h3><span id="runtime-window-active-status" class="muted small">—</span></div><div id="runtime-window-active-requests" class="window-request-list"></div></section>
                 <section class="operations-card"><div class="operations-card-head"><h3>Tool diagnostics</h3><span id="runtime-window-activity-status" class="muted small">—</span></div><div id="runtime-window-activity" class="window-activity-list"></div></section>
               </details>
             </article>
@@ -392,7 +335,7 @@
           <div class="operations-scroll">
             <header class="operations-heading">
               <div>
-                <p class="eyebrow">Local control plane</p>
+                <p class="eyebrow">Diagnostics</p>
                 <h2 id="runtime-operations-heading">Runtime &amp; Agents</h2>
                 <p class="muted">Server health, Runner capacity, durable Agent identity, inboxes, and conversations.</p>
               </div>
@@ -515,7 +458,7 @@
       </section>
 
       <details class="runtime-inspector">
-        <summary class="context-trigger" title="Session context" aria-label="Session context" aria-controls="runtime-inspector-panel">
+        <summary class="context-trigger" role="button" title="Session context" aria-label="Session context" aria-controls="runtime-inspector-panel">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="8" cy="6" r="1.5" /><circle cx="16" cy="12" r="1.5" /><circle cx="10" cy="18" r="1.5" /></svg>
           <span>Context</span>
         </summary>
@@ -542,7 +485,6 @@
               <button type="button" data-context-target="runtime-context-details" aria-controls="runtime-context-details" aria-pressed="false">Details</button>
             </div>
             <section id="runtime-context-overview" aria-label="Overview">
-              <dl id="runtime-context-evidence" class="workspace-evidence context-evidence"></dl>
               <section class="overview-card"><h4>Latest Agent message</h4><div id="runtime-latest-agent-message"></div></section>
               <div class="overview context-primary-overview" aria-label="Workflow Session overview">
                 <section class="overview-card runtime-fact"><h4>Work</h4><p id="runtime-overview-work">—</p></section>

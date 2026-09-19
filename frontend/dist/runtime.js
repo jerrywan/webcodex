@@ -831,6 +831,42 @@ function runtimeWindowActivityLabel(timestampMs, nowMs, language) {
 
 const LANGUAGE_STORAGE_KEY = "webcodex.runtime.language.v1";
 const RUNTIME_ZH_TEXT = {
+    "Session list unavailable. Check access to this Project.": "会话列表不可用，请检查此项目的访问权限。",
+    "Source": "来源",
+    "Current Runtime": "当前运行时",
+    "Diagnostics": "诊断",
+    "Window": "窗口",
+    "Active Sessions": "活动会话",
+    "Running Sessions": "进行中的会话",
+    "Runners online": "在线运行器",
+    "Search Sessions": "搜索会话",
+    "Filter Sessions by Runner": "按运行器筛选会话",
+    "Filter Sessions by Project": "按项目筛选会话",
+    "Project filter": "项目筛选",
+    "Loading Sessions…": "正在加载会话…",
+    "Open Session": "打开会话",
+    "No matching Sessions": "没有匹配的会话",
+    "No active or recent Workflow Sessions.": "暂无活动中或最近的工作会话。",
+    "Runtime-wide Sessions require runtime:read. Open an authorized Project to inspect its Sessions.": "查看运行时会话总览需要 runtime:read 权限。仍可从有权访问的项目查看其会话。",
+    "Recent results are bounded; filter a Project for its Sessions.": "最近结果有数量限制，可筛选项目查看其会话。",
+    "Select an active or recent Session from the list. Runner and Project are filters, not prerequisites.": "从列表选择活动中或最近的会话。运行器和项目仅用于筛选，无需先打开项目。",
+    "No Window activity observed yet.": "尚未观察到窗口活动",
+    "Window activity unavailable": "窗口活动不可用",
+    "Observing the connected Runtime.": "正在读取已连接运行时的活动。",
+    "Check runtime:read and access to the selected Project.": "请检查 runtime:read 权限以及所选项目的访问权限。",
+    "This Window is no longer visible to the current credential. Refresh to check available activity.": "当前凭证已无法查看此窗口。请刷新以检查可用活动。",
+    "No observed activity matches this Project filter.": "当前项目筛选范围内尚未观察到窗口活动。",
+    "This credential sees only its own principal's Windows in authorized Projects. Other principals are not included; global observation requires an administrator Runtime credential.": "当前凭证仅能查看其所属身份在授权项目内的窗口，不包含其他身份的活动。全局观察需要管理员运行时凭证。",
+    "Global Runtime scope. Only observed WebCodex requests appear here; no Project selection is required.": "当前为运行时全局范围。这里仅显示已观察到的 WebCodex 请求，无需先选择项目。",
+    "One Server coordinates connected Runners and their Projects.": "一个服务器协调已连接的运行器及其项目。",
+    "Runner unavailable": "运行器不可用",
+    "Session history": "会话历史",
+    "Last seen": "最后观察时间",
+    "Todos": "待办",
+    "Questions": "问题",
+    "Risks": "风险",
+    "Active": "活动中",
+    "Closed": "已结束",
     "Updates automatically": "自动更新",
     "Open a Window to see its project and Workflow Sessions.": "打开窗口，查看关联项目与工作会话。",
     "Window Details": "窗口详情",
@@ -891,7 +927,7 @@ const RUNTIME_ZH_TEXT = {
     "Reload": "重新加载",
     "Reload could not be confirmed. Refresh before trying again.": "无法确认重新加载的结果，请刷新后再重试。",
     "tools": "个工具",
-    "Windows": "窗口",
+    "Windows": "窗口活动",
     "Open": "打开",
     "Close": "关闭",
     "Workspace status": "工作区状态",
@@ -962,8 +998,8 @@ const RUNTIME_ZH_TEXT = {
     "Connect": "连接",
     "Keep me signed in for this tab (survives refresh, clears on Lock or tab close)": "在此标签页保持登录（刷新后仍有效，锁定或关闭标签页时清除）",
     "Project and Session navigation": "项目与会话导航",
-    "Local": "本地",
-    "Close project navigation": "关闭项目导航",
+    "Local": "当前运行时",
+    "Close project navigation": "关闭工作区导航",
     "Projects & Sessions": "项目与会话",
     "Workspace views": "工作空间视图",
     "Connected": "已连接",
@@ -973,11 +1009,11 @@ const RUNTIME_ZH_TEXT = {
     "Overview": "概览",
     "Details": "详情",
     "Session context views": "会话上下文视图",
-    "Server health and fleet capacity": "服务器健康状态与设备群容量",
-    "Runner fleet": "运行器设备群",
-    "Devices, builds and current load": "设备、构建与当前负载",
+    "Server health and fleet capacity": "服务器健康状态与运行器容量",
+    "Runner fleet": "运行器列表",
+    "Devices, builds and current load": "运行器、构建与当前负载",
     "Agents, inboxes and conversations": "Agent、收件箱与对话",
-    "Local control plane": "本地控制平面",
+    "Local control plane": "运行时诊断",
     "Server health, Runner capacity, durable Agent identity, inboxes, and conversations.": "查看服务器健康状态、运行器容量、持久 Agent 标识、收件箱与对话。",
     "Live updates": "实时更新",
     "Infrastructure": "基础设施",
@@ -1017,11 +1053,11 @@ const RUNTIME_ZH_TEXT = {
     "Working and recently updated Workflow Sessions": "正在工作与最近更新的工作流会话",
     "No recent Workflow Sessions are visible.": "当前没有可见的最近工作流会话。",
     "Fleet-wide recent Sessions require runtime:read. Project-scoped Session access remains available.": "查看整个设备群的最近会话需要 runtime:read；仍可访问项目范围内的会话。",
-    "Local Runtime": "本地运行时",
+    "Local Runtime": "当前运行时",
     "Credential stays in this tab only": "凭证仅保留在此标签页",
-    "Open project navigation": "打开项目导航",
+    "Open project navigation": "打开工作区导航",
     "Current location": "当前位置",
-    "Fleet": "设备群",
+    "Fleet": "运行时",
     "Select a Session": "选择一个会话",
     "Refresh runtime": "刷新运行时",
     "Lock": "锁定",
@@ -1850,21 +1886,32 @@ function createWindowCard(row, selectedWindowKey, onSelect, now = Date.now(), la
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.action = "open-window";
+    button.dataset.windowKey = key;
+    button.title = key;
+    button.setAttribute("aria-label", translate("Window", language) + " " + runtimeWindowShortKey(key));
     button.className = "runtime-window-card" + (key === selectedWindowKey ? " selected" : "");
     if (key === selectedWindowKey)
         button.setAttribute("aria-current", "true");
     const head = document.createElement("div");
     head.className = "runtime-window-card-head";
     const title = document.createElement("strong");
-    title.textContent = "Window " + runtimeWindowShortKey(key);
+    title.textContent = translate("Window", language) + " " + runtimeWindowShortKey(key);
     const active = document.createElement("span");
     active.className = "chip" + (Number(row?.active_count || 0) > 0 ? " tone-runtime" : "");
     active.textContent = Number(row?.active_count || 0) > 0
         ? (language === "zh-CN" ? String(row.active_count) + " 个活跃" : String(row.active_count) + " active")
-        : String(row?.source || "window");
+        : translate("No active request", language);
     head.appendChild(title);
     head.appendChild(active);
     button.appendChild(head);
+    const source = document.createElement("span");
+    source.className = "muted small";
+    source.textContent = translate("Source", language) + " · " + String(row.source || "—");
+    button.appendChild(source);
+    const seen = document.createElement("span");
+    seen.className = "muted small";
+    seen.textContent = translate("Last seen", language) + " · " + windowAgeLabel(row.last_seen_at_ms, now, language);
+    button.appendChild(seen);
     if (row.last_project_name && row.last_project_name !== "—") {
         const project = document.createElement("p");
         project.className = "window-project-label";
@@ -1979,7 +2026,7 @@ function renderSessionWindowCorrelationLinks(linkedNode, links, onSelectWindow, 
         button.type = "button";
         button.className = "window-session-card" + (Number(link?.recorder_gap_count || 0) ? " recorder-gap" : "");
         const title = document.createElement("strong");
-        title.textContent = "Window " + runtimeWindowShortKey(key);
+        title.textContent = translate("Window", language) + " " + runtimeWindowShortKey(key);
         const meta = document.createElement("span");
         meta.className = "muted small";
         meta.textContent = [
@@ -2004,7 +2051,7 @@ function formatWindowDetailFields(detail, fallbackKey = "", now = Date.now(), la
         return null;
     const key = String(detail.client_window_key || fallbackKey || "");
     return {
-        title: "Window " + runtimeWindowShortKey(key),
+        title: translate("Window", language) + " " + runtimeWindowShortKey(key),
         key: key || "—",
         source: String(detail.source || "—"),
         activeCount: String(Number(detail.active_count || 0)),
@@ -2471,7 +2518,7 @@ function resolvedAppearance(preference, prefersLight) {
     return prefersLight ? "light" : "dark";
 }
 function workspaceViewPreference(value) {
-    return value === "sessions" || value === "operations" || value === "windows" || value === "projects" || value === "activity" || value === "extensions" ? value : "home";
+    return value === "sessions" || value === "operations" || value === "windows" || value === "projects" || value === "activity" ? value : "home";
 }
 function loadWorkspaceViewPreference() {
     try {
@@ -3586,9 +3633,9 @@ function productTitle(value) {
 function productActivity(activity, language) {
     if (!activity)
         return translate("No activity observed yet", language);
-    if (typeof activity.summary === "string" && activity.summary)
+    if (typeof activity.summary === "string" && activity.summary && !/^execution (completed|running)/i.test(activity.summary))
         return productTitle(activity.summary);
-    const kind = String(activity.kind || activity.tool_name || activity.tool || "");
+    const kind = String(activity.activity_kind || activity.kind || activity.tool_name || activity.tool || "");
     const label = /Explor|read|search|inspect/i.test(kind) ? "Reading project files"
         : /Edit|write|patch/i.test(kind) ? "Editing files" : /Validat|test|check|build/i.test(kind) ? "Running checks"
             : /Review|changes|diff/i.test(kind) ? "Reviewing changes" : /Running|job|process/i.test(kind) ? "Running tasks" : "Workspace activity";
@@ -3615,6 +3662,8 @@ function createProductProjectRow(project, options) {
     meta.appendChild(branch);
     if (project.connected && options.git)
         options.git(project.id, branch);
+    meta.appendChild(productNode("span", tr(project.connected ? "Connected" : "Runner unavailable")));
+    meta.appendChild(productNode("span", tr("Runner") + " · " + project.client_id));
     meta.appendChild(productNode("span", project.sessions ? String(project.sessions.active_sessions ?? 0) + (project.sessions.sessions_truncated ? "+" : "") + " " + tr("active sessions") : tr("Not checked")));
     meta.appendChild(productNode("span", productTime(project.sessions?.latest_updated_at ? project.sessions.latest_updated_at * 1000 : null, options.language)));
     body.appendChild(meta);
@@ -3658,6 +3707,8 @@ class ProductWorkspace {
         this.runner = "";
         this.projectLanguage = "";
         this.projectSignature = "";
+        this.runnerSignature = "";
+        this.activitySignature = "";
         this.projectList = null;
     }
     reset() {
@@ -3675,6 +3726,8 @@ class ProductWorkspace {
         this.projectLanguage = "";
         this.projectSignature = "";
         this.projectList = null;
+        this.runnerSignature = "";
+        this.activitySignature = "";
         document.getElementById("runtime-projects-content")?.replaceChildren();
         document.getElementById("runtime-activity-content")?.replaceChildren();
     }
@@ -3745,11 +3798,11 @@ class ProductWorkspace {
             heading.appendChild(add);
             root.appendChild(heading);
             const filters = productNode("div", "", "product-filters");
-            const runnerLabel = productNode("label", "Runner");
+            const runnerLabel = productNode("label", tr("Runner"));
             runnerLabel.htmlFor = "product-project-runner";
             const select = productNode("select");
             select.id = "product-project-runner";
-            select.setAttribute("aria-label", "Runner");
+            select.setAttribute("aria-label", tr("Runner"));
             select.appendChild(new Option(tr("All Runners"), ""));
             for (const runner of context.runners)
                 select.appendChild(new Option(runner.client_id, runner.client_id));
@@ -3768,6 +3821,19 @@ class ProductWorkspace {
             this.projectList = productNode("div", "", "product-project-list");
             root.appendChild(this.projectList);
         }
+        const runnersSignature = JSON.stringify([context.language, context.runners.map(row => row.client_id)]);
+        if (runnersSignature !== this.runnerSignature) {
+            this.runnerSignature = runnersSignature;
+            const select = document.getElementById("product-project-runner");
+            if (select) {
+                select.replaceChildren(new Option(tr("All Runners"), ""));
+                for (const row of context.runners)
+                    select.appendChild(new Option(row.client_id, row.client_id));
+                if (!context.runners.some(row => row.client_id === this.runner))
+                    this.runner = "";
+                select.value = this.runner;
+            }
+        }
         const signature = JSON.stringify([context.projects, context.selectedProject, context.available, this.query, this.runner]);
         if (signature === this.projectSignature)
             return;
@@ -3775,11 +3841,11 @@ class ProductWorkspace {
         const activeName = this.projectList.contains(document.activeElement) ? document.activeElement?.getAttribute("aria-label") : null;
         this.projectList.replaceChildren();
         const rows = context.projects.filter(project => (!this.runner || this.runner === project.client_id) && `${productName(project)} ${project.path || ""}`.toLocaleLowerCase().includes(this.query.trim().toLocaleLowerCase()))
-            .sort((a, b) => (b.sessions?.latest_updated_at || 0) - (a.sessions?.latest_updated_at || 0));
+            .sort((a, b) => a.client_id.localeCompare(b.client_id) || (b.sessions?.latest_updated_at || 0) - (a.sessions?.latest_updated_at || 0));
         let lastRunner = "";
         for (const project of rows) {
             if (context.runners.length > 1 && project.client_id !== lastRunner) {
-                this.projectList.appendChild(productNode("p", "Runner · " + project.client_id, "product-runner-label"));
+                this.projectList.appendChild(productNode("p", tr("Runner") + " · " + project.client_id, "product-runner-label"));
                 lastRunner = project.client_id;
             }
             this.projectList.appendChild(createProductProjectRow(project, { language: context.language, selected: context.selectedProject, onOpen: this.services.onProject, git: (project, target) => this.attachGit(project, target) }));
@@ -3797,7 +3863,7 @@ class ProductWorkspace {
         this.dialogs.add(popup);
         const form = productNode("form");
         const request = new AbortController();
-        const runnerLabel = productNode("label", "Runner");
+        const runnerLabel = productNode("label", tr("Runner"));
         runnerLabel.htmlFor = "product-add-runner";
         const runner = productNode("select");
         runner.id = "product-add-runner";
@@ -3870,6 +3936,11 @@ class ProductWorkspace {
             return;
         const context = this.services.context();
         const tr = (text) => translate(text, context.language);
+        const signature = JSON.stringify([context.language, context.sessions, context.windows, context.available, context.runners]);
+        if (signature === this.activitySignature)
+            return;
+        this.activitySignature = signature;
+        const focusedKey = root.contains(document.activeElement) ? document.activeElement.dataset.activityKey : null;
         root.replaceChildren();
         const heading = productNode("header", "", "product-page-heading");
         heading.appendChild(productNode("h2", tr("Activity")));
@@ -3878,265 +3949,495 @@ class ProductWorkspace {
             .sort((a, b) => b.at - a.at).slice(0, 40);
         for (const row of rows) {
             const entry = productButton("", () => row.kind === "session" ? this.services.onSession(row.value) : this.services.onWindow(row.value.client_window_key), "product-activity-entry");
+            entry.dataset.activityKey = row.kind + ":" + (row.value.session_id || row.value.client_window_key);
             const body = productNode("div");
-            body.appendChild(productNode("strong", row.kind === "session" ? productTitle(row.value.title) : tr("Windows") + " · " + String(row.value.client_window_key).slice(-12)));
+            body.appendChild(productNode("strong", row.kind === "session" ? productTitle(row.value.title) : tr("Window Activity") + " · " + String(row.value.client_window_key).slice(-12)));
             body.appendChild(productNode("span", row.kind === "session" ? productActivity(row.value.current_activity || row.value.last_activity, context.language) : productName(context.projects.find(project => project.id === row.value.last_project) || {}), "muted"));
+            const projectId = row.kind === "session" ? row.value.project_id : row.value.last_project;
+            const project = context.projects.find(project => project.id === projectId);
+            body.appendChild(productNode("span", tr(row.kind === "session" ? "Workflow Session" : "Window Activity") + " · " + productName(project || { id: projectId }) + " · " + (row.value.client_id || project?.client_id || "—"), "muted small"));
             entry.setAttribute("aria-label", body.textContent || tr("Activity"));
             entry.append(body, productNode("time", productTime(row.at, context.language)));
             root.appendChild(entry);
         }
+        if (focusedKey)
+            Array.from(root.querySelectorAll("button")).find(button => button.dataset.activityKey === focusedKey)?.focus({ preventScroll: true });
         if (!rows.length)
             root.appendChild(productNode("p", tr(context.available ? "No activity observed yet" : "Activity unavailable. Refresh to try again."), "product-empty"));
     }
 }
 
-const PRODUCT_EXTENSION_TABS = ["instructions", "skills", "plugins"];
-class ProductExtensions {
+function initialWindowSnapshot() {
+    return { rows: [], globalRows: [], total: 0, globalTotal: 0, truncated: false, globalTruncated: false,
+        availability: "idle", globalAvailability: "idle", scope: "principal", project: "", selectedKey: "",
+        detail: null, detailAvailability: "idle" };
+}
+function preferredWindowKey(rows, selected, truncated = false) {
+    if (selected && (truncated || rows.some(row => row.client_window_key === selected)))
+        return selected;
+    return String(rows[0]?.client_window_key || "");
+}
+// A response must still own its request slot even when an aborted transport
+// resolves successfully. Window identity alone is not a same-key refresh fence.
+function ownsWindowResponse(current, request) {
+    return current === request && !request.signal.aborted;
+}
+class RuntimeWindowController {
     constructor(services) {
         this.services = services;
-        this.project = "";
-        this.tab = "instructions";
-        this.generation = 0;
-        this.request = null;
-        this.catalog = null;
-        this.failed = false;
-        this.loading = false;
-        this.language = "";
-        this.body = null;
-        this.dialogs = new Set();
+        this.snapshot = initialWindowSnapshot();
+        this.listRequest = null;
+        this.detailRequest = null;
+        this.globalRequest = null;
+        this.globalRevision = 0;
+    }
+    publish() { this.services.changed(this.snapshot); }
+    reset() {
+        this.listRequest?.abort();
+        this.detailRequest?.abort();
+        this.globalRequest?.abort();
+        this.listRequest = this.detailRequest = this.globalRequest = null;
+        this.snapshot = initialWindowSnapshot();
+        this.globalRevision++;
+    }
+    denyRuntime() {
+        this.reset();
+        this.snapshot.availability = this.snapshot.globalAvailability = this.snapshot.detailAvailability = "unavailable";
+        this.publish();
+    }
+    adoptGlobal(data) {
+        this.snapshot.globalRows = Array.isArray(data.windows) ? data.windows : [];
+        this.snapshot.globalTotal = Math.max(this.snapshot.globalRows.length, Number(data.total) || 0);
+        this.snapshot.globalTruncated = !!data.truncated;
+        this.snapshot.globalAvailability = "available";
+        if (data.visibility?.scope === "global" || data.visibility?.scope === "principal")
+            this.snapshot.scope = data.visibility.scope;
+    }
+    async refreshGlobal() {
+        this.globalRequest?.abort();
+        const request = new AbortController();
+        this.globalRequest = request;
+        const revision = ++this.globalRevision;
+        if (this.snapshot.globalAvailability === "idle") {
+            this.snapshot.globalAvailability = "loading";
+            this.publish();
+        }
+        const response = await this.services.post("windows", { limit: 100 }, request.signal);
+        if (!ownsWindowResponse(this.globalRequest, request) || revision !== this.globalRevision)
+            return;
+        this.globalRequest = null;
+        if (!response)
+            return;
+        if (response.status === 401) {
+            this.services.unauthorized();
+            return;
+        }
+        if (response.status === 403) {
+            this.denyRuntime();
+            return;
+        }
+        else if (!response.ok || !Array.isArray(response.data?.windows)) {
+            this.snapshot.globalAvailability = "stale";
+        }
+        else {
+            this.adoptGlobal(response.data);
+        }
+        this.publish();
+    }
+    async filter(project) {
+        if (project === this.snapshot.project)
+            return;
+        this.listRequest?.abort();
+        this.detailRequest?.abort();
+        this.detailRequest = null;
+        Object.assign(this.snapshot, { project, rows: [], selectedKey: "", detail: null, availability: "loading", detailAvailability: "idle" });
+        this.publish();
+        await this.refresh();
+    }
+    async refresh(refreshDetail = true) {
+        this.listRequest?.abort();
+        const request = new AbortController();
+        this.listRequest = request;
+        if (this.snapshot.availability === "idle") {
+            this.snapshot.availability = "loading";
+            this.publish();
+        }
+        const project = this.snapshot.project;
+        const globalRevision = project ? this.globalRevision : ++this.globalRevision;
+        if (!project) {
+            this.globalRequest?.abort();
+            this.globalRequest = null;
+        }
+        const response = await this.services.post("windows", { limit: 100, ...(project ? { project } : {}) }, request.signal);
+        if (!ownsWindowResponse(this.listRequest, request))
+            return;
+        this.listRequest = null;
+        if (!response)
+            return;
+        if (response.status === 401) {
+            this.services.unauthorized();
+            return;
+        }
+        if (response.status === 403 && !project) {
+            this.denyRuntime();
+            return;
+        }
+        if (response.status === 403 || response.status === 404) {
+            this.detailRequest?.abort();
+            this.detailRequest = null;
+            Object.assign(this.snapshot, { rows: [], selectedKey: "", detail: null, availability: "unavailable", detailAvailability: "unavailable" });
+            if (!project) {
+                this.snapshot.globalRows = [];
+                this.snapshot.globalTotal = 0;
+                this.snapshot.globalAvailability = "unavailable";
+            }
+            this.publish();
+            return;
+        }
+        if (!response.ok || !Array.isArray(response.data?.windows)) {
+            this.snapshot.availability = "stale";
+            if (!project && globalRevision === this.globalRevision)
+                this.snapshot.globalAvailability = "stale";
+            this.publish();
+            return;
+        }
+        const data = response.data;
+        this.snapshot.rows = Array.isArray(data.windows) ? data.windows : [];
+        this.snapshot.total = Math.max(this.snapshot.rows.length, Number(data.total) || 0);
+        this.snapshot.truncated = !!data.truncated;
+        this.snapshot.availability = "available";
+        if (data.visibility?.scope === "global" || data.visibility?.scope === "principal")
+            this.snapshot.scope = data.visibility.scope;
+        if (!project && globalRevision === this.globalRevision)
+            this.adoptGlobal(data);
+        const key = preferredWindowKey(this.snapshot.rows, this.snapshot.selectedKey, this.snapshot.truncated);
+        if (key !== this.snapshot.selectedKey) {
+            this.detailRequest?.abort();
+            this.detailRequest = null;
+            this.snapshot.detail = null;
+            this.snapshot.detailAvailability = "idle";
+        }
+        this.snapshot.selectedKey = key;
+        this.publish();
+        if (refreshDetail && key)
+            await this.refreshDetail();
+    }
+    async open(key) {
+        if (this.snapshot.project) {
+            this.listRequest?.abort();
+            this.listRequest = null;
+            this.snapshot.project = "";
+            this.snapshot.rows = this.snapshot.globalRows;
+        }
+        await this.select(key);
+    }
+    async select(key) {
+        if (!/^[0-9a-f]{64}$/i.test(key))
+            return;
+        if (key !== this.snapshot.selectedKey) {
+            this.detailRequest?.abort();
+            this.detailRequest = null;
+            this.snapshot.detail = null;
+        }
+        this.snapshot.selectedKey = key;
+        this.snapshot.detailAvailability = "loading";
+        this.publish();
+        await this.refreshDetail();
+    }
+    async refreshDetail() {
+        const key = this.snapshot.selectedKey;
+        if (!key)
+            return;
+        this.detailRequest?.abort();
+        const request = new AbortController();
+        this.detailRequest = request;
+        if (!this.snapshot.detail) {
+            this.snapshot.detailAvailability = "loading";
+            this.publish();
+        }
+        const response = await this.services.post("window", { client_window_key: key, activity_limit: 100, session_limit: 50 }, request.signal);
+        if (!ownsWindowResponse(this.detailRequest, request) || key !== this.snapshot.selectedKey)
+            return;
+        this.detailRequest = null;
+        if (!response)
+            return;
+        if (response.status === 401) {
+            this.services.unauthorized();
+            return;
+        }
+        if (response.status === 403) {
+            this.denyRuntime();
+            return;
+        }
+        if (response.status === 404) {
+            this.snapshot.detail = null;
+            this.snapshot.detailAvailability = "unavailable";
+            // Revoked/deleted rows must not keep presenting old detail. Try another
+            // authorized row at most once per removed key; the API remains authoritative.
+            this.snapshot.rows = this.snapshot.rows.filter(row => row.client_window_key !== key);
+            this.snapshot.globalRows = this.snapshot.globalRows.filter(row => row.client_window_key !== key);
+            this.snapshot.total = this.snapshot.rows.length;
+            this.snapshot.globalTotal = this.snapshot.globalRows.length;
+            this.snapshot.selectedKey = String(this.snapshot.rows[0]?.client_window_key || "");
+            this.publish();
+            if (this.snapshot.selectedKey)
+                await this.refreshDetail();
+            return;
+        }
+        if (!response.ok || !response.data) {
+            this.snapshot.detailAvailability = "stale";
+            this.publish();
+            return;
+        }
+        // Do not project a malformed or misrouted detail as the selected Window.
+        if (response.data.client_window_key !== key) {
+            this.snapshot.detailAvailability = "stale";
+            this.publish();
+            return;
+        }
+        this.snapshot.detail = response.data;
+        this.snapshot.detailAvailability = "available";
+        this.publish();
+    }
+}
+
+function runtimeSessionIsWorking(row) { return row.running_call === true || Number(row.running_jobs) > 0; }
+function runtimeSessionIdentity(row) { return String(row.project_id || "") + ":" + String(row.session_id || ""); }
+function runtimeSessionInventory(recent, projectRows = []) {
+    const rows = new Map();
+    for (const row of [...recent, ...projectRows]) {
+        if (!row.session_id || !row.project_id || !row.client_id)
+            continue;
+        const key = runtimeSessionIdentity(row);
+        const previous = rows.get(key);
+        if (!previous || Number(row.updated_at || 0) >= Number(previous.updated_at || 0))
+            rows.set(key, row);
+    }
+    return [...rows.values()].sort((a, b) => Number(runtimeSessionIsWorking(b)) - Number(runtimeSessionIsWorking(a)) || Number(b.updated_at || 0) - Number(a.updated_at || 0));
+}
+function filterRuntimeSessions(rows, filter) {
+    const query = filter.query.trim().toLocaleLowerCase();
+    return rows.filter(row => (!filter.runner || row.client_id === filter.runner) && (!filter.project || row.project_id === filter.project)
+        && `${row.title || ""} ${row.project_name || ""} ${row.project_id} ${row.client_id} ${row.session_id}`.toLocaleLowerCase().includes(query));
+}
+function preferredRuntimeSession(rows, remembered, filter) {
+    const visible = filterRuntimeSessions(rows, filter);
+    return visible.find(row => runtimeSessionIdentity(row) === remembered) || visible[0] || null;
+}
+function createRuntimeSessionRow(row, selected, language, onSelect) {
+    const tr = (source) => translate(source, language);
+    const title = String(row.title || tr("Untitled Session"));
+    const button = productButton(tr("Open Session") + " " + title, () => onSelect(row), "runtime-session-row");
+    button.textContent = "";
+    button.dataset.action = "open-runtime-session";
+    button.dataset.sessionId = String(row.session_id);
+    button.dataset.projectId = String(row.project_id);
+    if (runtimeSessionIdentity(row) === selected) {
+        button.classList.add("selected");
+        button.setAttribute("aria-current", "true");
+    }
+    const name = productNode("strong", title);
+    name.title = title;
+    button.appendChild(name);
+    button.appendChild(productNode("span", row.project_name || productName({ id: row.project_id }), "runtime-session-project"));
+    const runner = productNode("span", tr("Runner") + " · " + String(row.client_id), "muted small runtime-session-runner");
+    runner.title = String(row.client_id);
+    button.appendChild(runner);
+    const liveness = formatLivenessPresentation(row, language);
+    const status = productNode("span", String(liveness.label || tr(row.lifecycle === "closed" ? "Closed" : "Active")) + " · " + productTime(Number(row.updated_at) * 1000, language), "muted small");
+    button.appendChild(status);
+    const jobs = typeof row.running_jobs === "number" ? String(row.running_jobs) + (row.running_jobs_complete === false ? "+" : "") : "—";
+    const attention = row.overview?.attention;
+    const facts = [tr("Running Jobs") + " " + jobs];
+    for (const [key, label] of [["open_todos", "Todos"], ["open_questions", "Questions"], ["open_risks", "Risks"]]) {
+        if (typeof attention?.[key] === "number")
+            facts.push(tr(label) + " " + attention[key]);
+    }
+    button.appendChild(productNode("span", facts.join(" · "), "muted small runtime-session-facts"));
+    return button;
+}
+class RuntimeSessionNavigation {
+    constructor(services) {
+        this.services = services;
+        this.filters = { runner: "", project: "", query: "" };
+        this.root = null;
+        this.list = null;
+        this.signature = "";
+        this.language = null;
+        this.optionsSignature = "";
+        this.projectRequest = null;
+        this.scopedProject = "";
+        this.scopedRows = [];
+        this.scopedState = "loading";
+        this.scopedTruncated = false;
+        this.rowButtons = new Map();
     }
     reset() {
-        this.generation++;
-        this.request?.abort();
-        this.request = null;
-        for (const dialog of this.dialogs)
-            dialog.close();
-        this.dialogs.clear();
-        this.project = "";
-        this.catalog = null;
-        this.failed = false;
-        this.loading = false;
-        this.body = null;
-        this.language = "";
-        document.getElementById("runtime-extensions-content")?.replaceChildren();
+        this.projectRequest?.abort();
+        this.projectRequest = null;
+        this.scopedProject = "";
+        this.scopedRows = [];
+        this.scopedState = "loading";
+        this.rowButtons.clear();
+        this.root?.replaceChildren();
+        this.root = this.list = null;
+        this.signature = this.optionsSignature = "";
+        this.language = null;
+        Object.assign(this.filters, { runner: "", project: "", query: "" });
     }
-    open() {
-        const context = this.services.context();
-        const project = context.projects.some(row => row.id === this.project) ? this.project : context.selectedProject || context.projects[0]?.id || "";
-        if (this.project !== project || this.language !== context.language || !this.body?.isConnected) {
-            this.request?.abort();
-            this.generation++;
-            this.project = project;
-            this.catalog = null;
-            this.language = context.language;
-            this.renderShell();
-            void this.refresh();
+    async refreshProject() {
+        const project = this.filters.project;
+        this.projectRequest?.abort();
+        this.projectRequest = null;
+        if (project !== this.scopedProject) {
+            this.scopedRows = [];
+            this.scopedState = "loading";
         }
-    }
-    async refresh() {
-        this.request?.abort();
+        this.scopedProject = project;
+        if (!project) {
+            this.render();
+            return;
+        }
         const request = new AbortController();
-        this.request = request;
-        const generation = ++this.generation;
-        const project = this.project;
-        this.loading = Boolean(project);
-        this.failed = false;
-        this.catalog = null;
+        this.projectRequest = request;
         this.render();
-        if (!project)
+        const response = await this.services.projectSessions(project, request.signal);
+        if (request !== this.projectRequest || request.signal.aborted || project !== this.filters.project)
             return;
-        const result = await this.services.post("extensions", { project }, request.signal);
-        if (generation !== this.generation || request.signal.aborted)
-            return;
-        this.loading = false;
-        if (result?.status === 401) {
+        this.projectRequest = null;
+        if (response?.status === 401) {
             this.services.unauthorized();
             return;
         }
-        this.failed = !result?.ok;
-        this.catalog = result?.ok ? result.data : null;
-        this.render();
-    }
-    renderShell() {
-        const root = document.getElementById("runtime-extensions-content");
-        if (!root)
-            return;
-        const context = this.services.context();
-        const tr = (text) => translate(text, context.language);
-        root.replaceChildren();
-        const heading = productNode("header", "", "product-page-heading");
-        heading.appendChild(productNode("h2", tr("Extensions")));
-        heading.appendChild(productButton(tr("Refresh"), () => { void this.refresh(); }));
-        root.appendChild(heading);
-        const filter = productNode("div", "", "product-filters");
-        const label = productNode("label", tr("Project"));
-        label.htmlFor = "product-extensions-project";
-        const select = productNode("select");
-        select.id = "product-extensions-project";
-        for (const project of context.projects)
-            select.appendChild(new Option(productName(project), project.id));
-        select.value = this.project;
-        select.addEventListener("change", () => { this.project = select.value; void this.refresh(); });
-        filter.append(label, select);
-        root.appendChild(filter);
-        const tabs = productNode("div", "", "product-tabs");
-        tabs.setAttribute("role", "tablist");
-        tabs.setAttribute("aria-label", tr("Extensions"));
-        const selectTab = (tab) => {
-            this.tab = tab;
-            for (const control of Array.from(tabs.querySelectorAll("button"))) {
-                const selected = control.dataset.tab === tab;
-                control.setAttribute("aria-selected", String(selected));
-                control.tabIndex = selected ? 0 : -1;
-            }
-            this.render();
-        };
-        for (const tab of PRODUCT_EXTENSION_TABS) {
-            const control = productButton(tr(tab === "instructions" ? "Instructions" : tab === "skills" ? "Skills" : "Plugins"), () => selectTab(tab), "product-tab");
-            control.id = "product-tab-" + tab;
-            control.dataset.tab = tab;
-            control.setAttribute("role", "tab");
-            control.setAttribute("aria-controls", "product-extensions-panel");
-            control.setAttribute("aria-selected", String(this.tab === tab));
-            control.tabIndex = this.tab === tab ? 0 : -1;
-            control.addEventListener("keydown", event => { if (!['ArrowLeft', 'ArrowRight'].includes(event.key))
-                return; event.preventDefault(); const next = PRODUCT_EXTENSION_TABS[(PRODUCT_EXTENSION_TABS.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; selectTab(next); document.getElementById("product-tab-" + next)?.focus(); });
-            tabs.appendChild(control);
+        if (response?.status === 403 || response?.status === 404) {
+            this.scopedRows = [];
+            this.scopedState = "unavailable";
         }
-        root.appendChild(tabs);
-        this.body = productNode("section");
-        this.body.id = "product-extensions-panel";
-        this.body.setAttribute("role", "tabpanel");
-        root.appendChild(this.body);
+        else if (!response?.ok || !Array.isArray(response.data?.sessions))
+            this.scopedState = "stale";
+        else {
+            const projectRow = this.services.context().projects.find(row => row.id === project);
+            this.scopedRows = (Array.isArray(response.data.sessions) ? response.data.sessions : []).map((row) => ({ ...row, project_id: project, project_name: projectRow?.name || productName(projectRow || { id: project }), client_id: projectRow?.client_id }));
+            this.scopedState = "available";
+            this.scopedTruncated = !!response.data.truncated;
+        }
+        this.render();
     }
     render() {
-        if (!this.body)
+        const root = document.getElementById("runtime-global-sessions");
+        if (!root)
             return;
-        const context = this.services.context();
+        const context = { ...this.services.context() };
         const tr = (text) => translate(text, context.language);
-        this.body.replaceChildren();
-        this.body.setAttribute("aria-labelledby", "product-tab-" + this.tab);
-        if (this.loading) {
-            const status = productNode("p", tr("Refreshing…"), "muted");
+        if (this.filters.project !== this.scopedProject) {
+            void this.refreshProject();
+            return;
+        }
+        if (this.scopedProject) {
+            context.rows = runtimeSessionInventory(this.scopedRows);
+            context.loading = this.scopedState === "loading";
+            context.available = this.scopedState !== "unavailable";
+            context.stale = this.scopedState === "stale";
+            context.truncated = this.scopedTruncated;
+        }
+        if (this.root !== root || this.language !== context.language || !this.list) {
+            this.root = root;
+            this.language = context.language;
+            this.signature = this.optionsSignature = "";
+            root.replaceChildren();
+            const heading = productNode("h2", tr("Workflow Sessions"));
+            root.appendChild(heading);
+            const filters = productNode("div", "", "runtime-session-filters");
+            const addSelect = (id, label, key) => {
+                const field = productNode("label", tr(label));
+                field.htmlFor = id;
+                const select = productNode("select");
+                select.id = id;
+                select.setAttribute("aria-label", tr(label));
+                select.addEventListener("change", () => { this.filters[key] = select.value; if (key === "runner")
+                    this.filters.project = ""; this.render(); });
+                field.appendChild(select);
+                filters.appendChild(field);
+            };
+            addSelect("runtime-session-runner-filter", "Filter Sessions by Runner", "runner");
+            addSelect("runtime-session-project-filter", "Filter Sessions by Project", "project");
+            const label = productNode("label", tr("Search Sessions"));
+            label.htmlFor = "runtime-global-session-query";
+            const search = productNode("input");
+            search.id = "runtime-global-session-query";
+            search.type = "search";
+            search.maxLength = 200;
+            search.value = this.filters.query;
+            search.addEventListener("input", () => { this.filters.query = search.value; this.render(); });
+            label.appendChild(search);
+            filters.appendChild(label);
+            root.appendChild(filters);
+            const status = productNode("p", "", "muted small");
+            status.id = "runtime-global-session-status";
             status.setAttribute("role", "status");
-            this.body.appendChild(status);
-            return;
+            root.appendChild(status);
+            this.list = productNode("div", "", "runtime-session-inventory");
+            this.list.setAttribute("aria-label", tr("Workflow Sessions"));
+            root.appendChild(this.list);
         }
-        if (this.failed) {
-            const error = productNode("p", tr("Could not refresh. Check the connection and try again."), "error");
-            error.setAttribute("role", "alert");
-            this.body.appendChild(error);
-            return;
+        const optionsSignature = JSON.stringify([context.projects.map(row => [row.id, row.name]), context.runners.map(row => row.client_id), this.filters.runner, this.filters.project]);
+        if (optionsSignature !== this.optionsSignature) {
+            this.optionsSignature = optionsSignature;
+            const runner = document.getElementById("runtime-session-runner-filter");
+            const project = document.getElementById("runtime-session-project-filter");
+            runner.replaceChildren(new Option(tr("All Runners"), ""));
+            for (const row of context.runners)
+                runner.appendChild(new Option(row.client_id, row.client_id));
+            runner.value = this.filters.runner;
+            project.replaceChildren(new Option(tr("All Projects"), ""));
+            for (const row of context.projects.filter(row => !this.filters.runner || row.client_id === this.filters.runner))
+                project.appendChild(new Option(productName(row), row.id));
+            project.value = this.filters.project;
         }
-        if (!this.project) {
-            this.body.appendChild(productNode("p", tr("Add a project to manage its extensions."), "product-empty"));
+        const rows = filterRuntimeSessions(context.rows, this.filters);
+        const status = document.getElementById("runtime-global-session-status");
+        if (status)
+            status.textContent = context.loading ? tr("Loading Sessions…") : !context.available ? tr(this.scopedProject ? "Session list unavailable. Check access to this Project." : "Runtime-wide Sessions require runtime:read. Open an authorized Project to inspect its Sessions.")
+                : (context.stale ? tr("Refresh failed · showing previous data") + " · " : "") + rows.length + " / " + context.rows.length + (context.truncated ? " · " + tr("Recent results are bounded; filter a Project for its Sessions.") : "");
+        const signature = JSON.stringify([context.language, rows, context.selected, context.available]);
+        if (signature === this.signature)
             return;
-        }
-        if (!this.catalog)
-            return;
-        if (this.tab === "instructions") {
-            const files = Array.isArray(this.catalog.instructions?.files) ? this.catalog.instructions.files : [];
-            for (const file of files) {
-                const title = file.source_scope === "runner" ? tr("Global instructions") : "Project " + String(file.path).split(/[\\/]/).pop();
-                const row = this.row(title, (file.source_scope === "runner" ? "Runner" : productName(context.projects.find(project => project.id === this.project) || {})) + " · " + tr("Available"));
-                const details = productNode("details");
-                details.append(productNode("summary", tr("Details")), productNode("code", String(file.path)));
-                row.firstElementChild?.appendChild(details);
-                const open = productButton(tr("Open"), () => { void this.openInstruction(file); });
-                open.setAttribute("aria-label", tr("Open") + " " + title);
-                row.appendChild(open);
-                this.body.appendChild(row);
+        this.signature = signature;
+        const focused = this.list.contains(document.activeElement) ? document.activeElement.dataset.sessionId : null;
+        const entries = [];
+        const visibleKeys = new Set(rows.map(runtimeSessionIdentity));
+        for (const key of this.rowButtons.keys())
+            if (!visibleKeys.has(key))
+                this.rowButtons.delete(key);
+        for (const [working, title] of [[true, "Active Sessions"], [false, "Recent Sessions"]]) {
+            const group = rows.filter(row => runtimeSessionIsWorking(row) === working);
+            if (!group.length)
+                continue;
+            entries.push(productNode("h3", tr(title) + " · " + group.length, "runtime-session-group"));
+            for (const row of group) {
+                const fresh = createRuntimeSessionRow(row, context.selected, context.language, this.services.select);
+                const key = runtimeSessionIdentity(row);
+                const button = this.rowButtons.get(key) || fresh;
+                if (button !== fresh) {
+                    button.replaceChildren(...Array.from(fresh.childNodes));
+                    button.className = fresh.className;
+                    for (const name of ["aria-label", "aria-current"]) {
+                        const value = fresh.getAttribute(name);
+                        if (value === null)
+                            button.removeAttribute(name);
+                        else
+                            button.setAttribute(name, value);
+                    }
+                }
+                this.rowButtons.set(key, button);
+                entries.push(button);
             }
-            if (!files.length)
-                this.body.appendChild(productNode("p", tr(this.catalog.instructions?.scan_complete ? "No instructions configured" : "Unavailable"), "product-empty"));
-            if (this.catalog.instructions?.truncated)
-                this.body.appendChild(productNode("p", tr("Showing recent results"), "muted small"));
         }
-        else if (this.tab === "skills") {
-            const result = this.catalog.skills;
-            const skills = Array.isArray(result?.catalog?.skills) ? result.catalog.skills : [];
-            for (const skill of skills) {
-                const row = this.row(String(skill.name), tr("Available") + " · " + (skill.source_scope === "project" ? tr("Project") : "Runner"));
-                if (skill.description)
-                    row.firstElementChild?.appendChild(productNode("p", String(skill.description), "muted"));
-                this.body.appendChild(row);
-            }
-            if (!skills.length)
-                this.body.appendChild(productNode("p", tr(result?.available ? "Nothing installed yet" : "Unavailable"), "product-empty"));
-            if (result?.catalog?.truncated)
-                this.body.appendChild(productNode("p", tr("Showing recent results"), "muted small"));
-        }
-        else {
-            const result = this.catalog.plugins;
-            const plugins = result?.catalog?.plugins || result?.catalog?.providers || [];
-            for (const plugin of Array.isArray(plugins) ? plugins : []) {
-                const id = String(plugin.id || plugin.plugin || "");
-                const status = plugin.status === "error" ? "Unavailable" : plugin.status === "ready" || plugin.status === "available" ? "Available" : "Registered";
-                const row = this.row(String(plugin.name || id), tr(status) + " · " + (plugin.tool_count ?? plugin.tools?.length ?? "—") + " " + tr("tools"));
-                if (id && this.catalog.can_reload_plugins)
-                    row.appendChild(productButton(tr("Reload"), () => { void this.reloadPlugin(id, row); }));
-                this.body.appendChild(row);
-            }
-            if (!plugins.length)
-                this.body.appendChild(productNode("p", tr(result?.available ? "Nothing installed yet" : "Unavailable"), "product-empty"));
-        }
-    }
-    row(title, subtitle) {
-        const row = productNode("article", "", "product-extension-row");
-        const body = productNode("div");
-        body.append(productNode("h3", title), productNode("span", subtitle, "muted small"));
-        row.appendChild(body);
-        return row;
-    }
-    async openInstruction(file) {
-        const project = this.project;
-        const generation = this.generation;
-        const language = this.services.context().language;
-        const popup = productDialog(file.source_scope === "runner" ? translate("Global instructions", language) : String(file.path), language);
-        this.dialogs.add(popup);
-        popup.body.appendChild(productNode("p", translate("Refreshing…", language)));
-        const result = await this.services.post("instruction", { project, source_scope: file.source_scope, path: file.path, fingerprint: file.fingerprint }, this.request?.signal);
-        if (generation !== this.generation || !popup.dialog.isConnected) {
-            popup.close();
-            this.dialogs.delete(popup);
-            return;
-        }
-        if (result?.status === 401) {
-            this.services.unauthorized();
-            return;
-        }
-        popup.body.replaceChildren();
-        if (!result?.ok)
-            popup.body.appendChild(productNode("p", translate("Could not refresh. Check the connection and try again.", language), "error"));
-        else {
-            popup.body.appendChild(productNode("pre", String(result.data?.content || ""), "product-instructions"));
-            if (result.data?.truncated)
-                popup.body.appendChild(productNode("p", translate("Showing recent results", language)));
-        }
-    }
-    async reloadPlugin(plugin, row) {
-        const project = this.project;
-        const generation = this.generation;
-        const language = this.services.context().language;
-        const control = row.querySelector("button");
-        if (!control || control.disabled)
-            return;
-        control.disabled = true;
-        const result = await this.services.post("plugin-reload", { project, plugin }, this.request?.signal);
-        if (generation !== this.generation || !row.isConnected)
-            return;
-        if (result?.status === 401) {
-            this.services.unauthorized();
-            return;
-        }
-        if (result?.ok) {
-            await this.refresh();
-            return;
-        }
-        const error = productNode("p", translate("Reload could not be confirmed. Refresh before trying again.", language), "error");
-        error.setAttribute("role", "alert");
-        row.appendChild(error);
-        control.disabled = false;
+        if (!rows.length && context.available && !context.loading && !context.stale)
+            entries.push(productNode("p", tr(this.filters.query || this.filters.project || this.filters.runner ? "No matching Sessions" : "No active or recent Workflow Sessions."), "muted small"));
+        this.list.replaceChildren(...entries);
+        if (focused)
+            Array.from(this.list.querySelectorAll("button")).find(button => button.dataset.sessionId === focused)?.focus({ preventScroll: true });
     }
 }
 
@@ -4178,7 +4479,7 @@ function renderWorkspaceHome(node, options) {
         return;
     // Preserve focused controls on polling when the evidence has not changed.
     const signature = JSON.stringify([options.language, options.projects, options.project, options.sessions,
-        options.sessionsAvailable, options.sessionsStatus, options.windows, options.windowAvailability, options.windowStatus, options.overview]);
+        options.sessionsAvailable, options.sessionsStatus, options.windows, options.windowAvailability, options.windowStatus, options.overview, options.windowTotal, options.windowTruncated, options.overviewStale]);
     if (workspaceHomeSignatures.get(node) === signature)
         return;
     workspaceHomeSignatures.set(node, signature);
@@ -4188,20 +4489,28 @@ function renderWorkspaceHome(node, options) {
     const heading = workspaceNode("header", "", "product-page-heading");
     const title = workspaceNode("div");
     title.appendChild(workspaceNode("p", tr("Workspace"), "eyebrow"));
-    title.appendChild(workspaceNode("h2", tr(options.overview ? "WebCodex Ready" : "Workspace")));
+    title.appendChild(workspaceNode("h2", tr("Current Runtime")));
     heading.appendChild(title);
     heading.appendChild(workspaceButton(tr("Add Project"), "workspace-add-project", options.onAddProject || options.onSearch));
     node.appendChild(heading);
     const status = workspaceNode("dl", "", "product-status-strip");
     status.setAttribute("aria-label", tr("Workspace status"));
     const runners = Array.isArray(options.overview?.runners) ? options.overview.runners : [];
-    for (const [label, value] of [["Server", tr(options.overview ? "Running" : "Not checked")], ["Runner", options.overview ? String(runners.filter((runner) => runner.connected).length) + " " + tr("online") : tr("Not checked")], ["Projects", String(options.projects.length)]]) {
+    for (const [label, value] of [
+        ["Server", tr(options.overviewStale ? "STALE" : options.overview ? "Connected" : "Not checked")],
+        ["Runners online", options.overview ? String(options.overview.runners_online ?? runners.filter((runner) => runner.connected).length) + " / " + String(options.overview.runner_count ?? runners.length) : "—"],
+        ["Projects", options.overview?.projects_available ? String(options.overview.visible_projects ?? options.projects.length) + (options.overview.projects_truncated ? "+" : "") : "—"],
+        ["Active Sessions", options.overview ? String(options.overview.workflow_sessions?.active ?? "—") + (options.overview.workflow_sessions?.truncated ? "+" : "") : "—"],
+        ["Running Sessions", options.overview ? String(options.overview.workflow_sessions?.running ?? "—") : "—"],
+        ["Window Activity", options.windowAvailability === "available" || options.windowAvailability === "stale" ? String(options.windowTotal ?? options.windows.length) + (options.windowTruncated ? "+" : "") + (options.windowAvailability === "stale" ? " · " + tr("STALE") : "") : "—"],
+    ]) {
         const item = workspaceNode("div");
         item.appendChild(workspaceNode("dt", tr(label)));
         item.appendChild(workspaceNode("dd", value));
         status.appendChild(item);
     }
     node.appendChild(status);
+    node.appendChild(workspaceNode("p", tr("One Server coordinates connected Runners and their Projects."), "muted small product-runtime-context"));
     const projects = workspaceNode("section", "", "product-section");
     const projectHeading = workspaceNode("header", "", "product-section-heading");
     projectHeading.appendChild(workspaceNode("h3", tr("Recent Projects")));
@@ -4216,7 +4525,7 @@ function renderWorkspaceHome(node, options) {
     const activity = workspaceNode("section", "", "product-section");
     const activityHeading = workspaceNode("header", "", "product-section-heading");
     activityHeading.appendChild(workspaceNode("h3", tr("Recent Activity")));
-    activityHeading.appendChild(workspaceButton(tr("Windows"), "workspace-open-windows", options.onWindows));
+    activityHeading.appendChild(workspaceButton(tr("Window Activity"), "workspace-open-windows", options.onWindows));
     activity.appendChild(activityHeading);
     if (!options.sessionsAvailable)
         activity.appendChild(workspaceNode("p", options.sessionsStatus || tr("Activity unavailable. Refresh to try again."), "muted"));
@@ -4234,11 +4543,13 @@ function renderWorkspaceHome(node, options) {
         const button = workspaceButton("", "workspace-open-window", () => options.onWindow(String(window.client_window_key)));
         workspaceControlKeys.set(button, "window:" + String(window.client_window_key));
         button.className = "product-activity-row";
-        button.appendChild(workspaceNode("span", tr("Windows"), "product-badge"));
+        button.appendChild(workspaceNode("span", tr("Window Activity"), "product-badge"));
         button.appendChild(workspaceNode("strong", String(window.client_window_key).slice(-12)));
         button.appendChild(workspaceNode("span", productTime(window.last_meaningful_activity_at_ms || window.last_seen_at_ms, options.language), "muted small"));
         activity.appendChild(button);
     }
+    if (options.windowAvailability === "unavailable" || options.windowAvailability === "stale")
+        activity.appendChild(workspaceNode("p", formatWindowEmptyState(options.windowAvailability, options.windowScope, false, options.language), "muted small"));
     if (options.sessionsAvailable && !sessions.length && !options.windows.length)
         activity.appendChild(workspaceNode("p", tr("No activity observed yet"), "muted"));
     node.appendChild(activity);
@@ -4337,7 +4648,7 @@ function installWorkspaceCommands(options) {
         const query = input.value.trim().toLocaleLowerCase();
         results.replaceChildren();
         const entries = [
-            ...[["Home", "home"], ["Projects", "projects"], ["Workflow Sessions", "sessions"], ["Windows", "windows"], ["Activity", "activity"], ["Extensions", "extensions"], ["Advanced", "operations"]]
+            ...[["Home", "home"], ["Projects", "projects"], ["Workflow Sessions", "sessions"], ["Window Activity", "windows"], ["Activity", "activity"], ["Diagnostics", "operations"]]
                 .map(([label, view]) => ({ label: translate(label, language), action: "command-" + view, run: () => options.onView(view) })),
             ...options.projects().map(project => ({ label: String(project.name || project.id) + " · " + String(project.client_id || ""), action: "command-project", run: () => options.onProject(String(project.client_id || ""), String(project.id || "")) })),
         ];
@@ -4485,17 +4796,83 @@ const pageAttachmentId = "runtime-console-" + operationKey("page");
 const productProjectApi = new RuntimeApiClient("/api/projects/");
 const productServices = {
     context: () => ({ language: runtimeLanguage, projects: homeProjectRows, runners: runnerRows,
-        sessions: recentSessionRows, windows: windowRows.length ? windowRows : projectWindowRows,
+        sessions: recentSessionRows, windows: windowController.snapshot.globalRows,
         selectedProject: state.selectedProject || "", available: Boolean(runtimeOverviewSnapshot),
     }),
     post: (path, payload, signal) => api(path, payload, signal),
     registerProject: (payload, signal) => { productProjectApi.setToken(token); return productProjectApi.post("resolve-or-register", payload, signal); },
-    onProject: (runner, project) => { switchProject(runner, project); applyWorkspaceView("sessions"); },
+    onProject: (runner, project) => { sessionNavigation.filters.project = project; sessionNavigation.filters.runner = ""; switchProject(runner, project); applyWorkspaceView("sessions"); },
     onSession: session => selectRecentSession(session), onWindow: openWindowInspector,
     refresh: () => { void refreshAll(); }, unauthorized: () => lock(tr("Your access key is no longer valid. Connect again.")),
 };
 const productWorkspace = new ProductWorkspace(productServices);
-const productExtensions = new ProductExtensions(productServices);
+let runtimeOverviewAvailability = "idle";
+let selectingRuntimeSession = false;
+let windowFilterSignature = "";
+const SESSION_LOCATION_KEY = "webcodex.runtime.session-location.v1";
+const windowController = new RuntimeWindowController({
+    post: (path, payload, signal) => api(path, payload, signal),
+    unauthorized: () => lock("Credential rejected."),
+    changed: snapshot => {
+        windowRows = snapshot.rows;
+        windowAvailability = snapshot.availability;
+        windowVisibilityScope = snapshot.scope;
+        selectedWindowKey = snapshot.selectedKey;
+        renderWindowList();
+        renderWindowDetail(snapshot.detail);
+        renderHome();
+    },
+});
+function runtimeSessionRows() {
+    const project = selectedProjectRow();
+    const local = state.selectedProject ? sessionRows.map(row => ({ ...row, project_id: state.selectedProject,
+        client_id: state.selectedDevice || runtimeProjectClientId(state.selectedProject), project_name: project ? productName(project) : state.selectedProject })) : [];
+    return runtimeSessionInventory(recentSessionRows, local);
+}
+const sessionNavigation = new RuntimeSessionNavigation({
+    context: () => ({ language: runtimeLanguage, rows: runtimeSessionRows(), projects: effectiveProjects(projectRows), runners: runnerRows,
+        selected: String(state.selectedProject || "") + ":" + String(state.workflow.selectedSessionId || ""),
+        available: !!runtimeOverviewSnapshot || sessionAvailability === "available", stale: runtimeOverviewAvailability === "stale",
+        loading: runtimeOverviewAvailability === "loading" || runtimeOverviewAvailability === "idle",
+        truncated: !!recentSessionMetaSnapshot?.truncated || !!recentSessionMetaSnapshot?.scan_truncated }),
+    select: row => selectRecentSession(row),
+    projectSessions: (project, signal) => api("workflow-sessions", { project, limit: 100 }, signal),
+    unauthorized: () => lock("Credential rejected."),
+});
+function rememberedSessionLocation() {
+    try {
+        return window.sessionStorage.getItem(SESSION_LOCATION_KEY) || "";
+    }
+    catch {
+        return "";
+    }
+}
+function ensureRuntimeSessionSelection() {
+    sessionNavigation.render();
+    if (!token || workspaceView !== "sessions" || state.workflow.selectedSessionId || selectingRuntimeSession)
+        return;
+    const row = preferredRuntimeSession(runtimeSessionRows(), rememberedSessionLocation(), sessionNavigation.filters);
+    if (!row)
+        return;
+    queueMicrotask(() => {
+        if (token && workspaceView === "sessions" && !state.workflow.selectedSessionId && !selectingRuntimeSession)
+            selectRecentSession(row);
+    });
+}
+function renderWindowProjectFilter() {
+    const select = el("runtime-window-project-filter");
+    if (!select)
+        return;
+    const projects = effectiveProjects(projectRows);
+    const signature = JSON.stringify([runtimeLanguage, projects.map(row => [row.id, row.name]), windowController.snapshot.project]);
+    if (signature === windowFilterSignature)
+        return;
+    windowFilterSignature = signature;
+    select.replaceChildren(new Option(tr("All Projects"), ""));
+    for (const project of projects)
+        select.appendChild(new Option(productName(project), project.id));
+    select.value = windowController.snapshot.project;
+}
 function el(id) {
     return document.getElementById(id);
 }
@@ -4631,8 +5008,8 @@ function renderHome() {
         language: runtimeLanguage, projects: homeProjectRows, project: selectedProjectRow(),
         sessions: recentSessionRows, sessionsAvailable: Boolean(runtimeOverviewSnapshot),
         sessionsStatus: runtimeOverviewSnapshot ? "" : tr("Activity unavailable. Refresh to try again."),
-        windows: projectWindowRows, windowAvailability: projectWindowAvailability, windowScope: windowVisibilityScope,
-        windowStatus: "", overview: runtimeOverviewSnapshot,
+        windows: windowController.snapshot.globalRows, windowAvailability: windowController.snapshot.globalAvailability, windowScope: windowVisibilityScope,
+        windowStatus: "", overview: runtimeOverviewSnapshot, windowTotal: windowController.snapshot.globalTotal, windowTruncated: windowController.snapshot.globalTruncated, overviewStale: runtimeOverviewAvailability === "stale",
         onProject: productServices.onProject, onSession: productServices.onSession,
         onWindow: openWindowInspector, onWindows: () => applyWorkspaceView("windows"),
         onSearch: () => applyWorkspaceView("projects"), onAddProject: () => productWorkspace.addProject(),
@@ -4642,25 +5019,27 @@ function renderHome() {
         productWorkspace.renderProjects();
     if (workspaceView === "activity")
         productWorkspace.renderActivity();
-    if (workspaceView === "extensions")
-        productExtensions.open();
+    renderWindowProjectFilter();
+    sessionNavigation.render();
 }
 function renderWorkspaceHeading() {
     if (workspaceView === "operations") {
         setText("runtime-breadcrumb-runner", tr("Runtime workspace"));
-        setText("runtime-breadcrumb-project", tr("Local control plane"));
+        setText("runtime-breadcrumb-project", tr("Diagnostics"));
         setText("runtime-session-title", tr("Runtime & Agents"));
         return;
     }
     if (workspaceView === "windows") {
         setText("runtime-breadcrumb-runner", tr("Runtime workspace"));
         setText("runtime-breadcrumb-project", tr("Window Activity"));
-        setText("runtime-session-title", selectedWindowKey ? "Window " + runtimeWindowShortKey(selectedWindowKey) : tr("Window activity"));
+        setText("runtime-session-title", selectedWindowKey ? tr("Window") + " " + runtimeWindowShortKey(selectedWindowKey) : tr("Window Activity"));
         return;
     }
     renderWorkspaceBreadcrumb();
-    const productHeading = { home: "Home", projects: "Projects", activity: "Activity", extensions: "Extensions" }[workspaceView];
+    const productHeading = { home: "Home", projects: "Projects", activity: "Activity" }[workspaceView];
     if (productHeading) {
+        setText("runtime-breadcrumb-runner", tr("Current Runtime"));
+        setText("runtime-breadcrumb-project", tr("Workspace"));
         setText("runtime-session-title", tr(productHeading));
         return;
     }
@@ -4678,7 +5057,7 @@ function applyWorkspaceView(view, persist = true) {
     document.body.classList.toggle("runtime-operations-view", operations);
     document.body.classList.toggle("runtime-windows-view", windows);
     show("runtime-navigation-sessions", sessions);
-    for (const view of ["projects", "activity", "extensions"])
+    for (const view of ["projects", "activity"])
         show(`runtime-${view}-stage`, workspaceView === view);
     show("runtime-home-stage", workspaceView === "home");
     renderHome();
@@ -4709,6 +5088,10 @@ function applyWorkspaceView(view, persist = true) {
     setMobileNavigationOpen(false, false);
     if (persist)
         persistWorkspaceViewPreference(workspaceView);
+    if (token && (workspaceView === "home" || workspaceView === "activity"))
+        void windowController.refreshGlobal();
+    if (sessions)
+        ensureRuntimeSessionSelection();
 }
 function revealOperationsSection(targetId) {
     applyWorkspaceView("operations");
@@ -4740,9 +5123,7 @@ function setRuntimeConnectionState(connection) {
     document.querySelectorAll(".sidebar-runtime-status, .sidebar-connection, .operations-live").forEach((node) => {
         node.dataset.connection = connection;
     });
-    const connectionLabel = document.querySelector(".sidebar-connection > span");
-    if (connectionLabel)
-        connectionLabel.textContent = label;
+    document.querySelectorAll(".sidebar-connection > span, .sidebar-runtime-status > span").forEach(node => { node.textContent = label; });
     setText("runtime-navigation-health", label);
 }
 function closeAppearanceMenus(restoreFocus = false, except = null) {
@@ -4795,6 +5176,7 @@ function syncContextUi(restoreFocus = false) {
         workspaceView,
     });
     shell?.classList.toggle("context-docked", resolved.isDocked);
+    syncContextGeometry();
     if (inspector && inspector.open !== resolved.visible) {
         inspector.open = resolved.visible;
     }
@@ -4809,6 +5191,16 @@ function syncContextUi(restoreFocus = false) {
     else if (restoreFocus && !resolved.visible && trigger) {
         trigger.focus();
     }
+}
+function syncContextGeometry() {
+    const shell = el("runtime-console");
+    const composer = el("runtime-collaboration-form");
+    if (!shell || !composer || !composer.getClientRects().length)
+        return;
+    const shellBox = shell.getBoundingClientRect();
+    const composerBox = composer.getBoundingClientRect();
+    shell.style.setProperty("--runtime-pane-height", shellBox.height + "px");
+    shell.style.setProperty("--context-bottom-gap", Math.max(128, shellBox.bottom - composerBox.top + 12) + "px");
 }
 function closeRuntimeInspector(restoreFocus = false, forceDocked = false) {
     if (isContextDocked() && !forceDocked)
@@ -4850,9 +5242,9 @@ function setMobileNavigationOpen(open, restoreFocus = false, focusTarget = "runt
 function focusProjectNavigation() {
     applyWorkspaceView("sessions");
     if (mobileNavigationViewport())
-        setMobileNavigationOpen(true, false, "runtime-project-search");
+        setMobileNavigationOpen(true, false, "runtime-global-session-query");
     else
-        el("runtime-project-search")?.focus();
+        el("runtime-global-session-query")?.focus();
 }
 function syncResponsiveNavigation() {
     const shell = el("runtime-console");
@@ -4992,6 +5384,7 @@ function stopProjectSearchTimer() {
     projectSearchTimer = 0;
 }
 function abortAll() {
+    windowController.reset();
     abort(overviewAbort);
     abort(projectsAbort);
     overviewAbort = null;
@@ -5031,21 +5424,39 @@ function renderWindowActivities(node, activities, compact = false) {
     });
 }
 function renderWindowList() {
-    const node = el("runtime-window-list");
-    setText("runtime-window-list-count", String(windowRows.length));
-    const emptyCopy = formatWindowEmptyState(windowAvailability, windowVisibilityScope, false, runtimeLanguage);
-    setText("runtime-window-list-empty", emptyCopy);
-    show("runtime-window-list-empty", windowRows.length === 0);
-    setText("runtime-window-list-status", formatWindowListStatusText(windowAvailability, windowRows.length, windowVisibilityScope, runtimeLanguage));
-    renderWindowCards(node, windowRows.map(row => ({ ...row, last_project_name: productName(homeProjectRows.find(project => project.id === row.last_project) || { id: row.last_project }) })), selectedWindowKey, (key) => void selectWindow(key), Date.now(), runtimeLanguage);
+    const snapshot = windowController.snapshot;
+    setText("runtime-window-list-count", windowAvailability === "loading" || windowAvailability === "idle" ? "—" : String(snapshot.total));
+    // Empty/unavailable states live in one main-pane message, not three surfaces.
+    show("runtime-window-list-empty", false);
+    setText("runtime-window-list-status", windowRows.length ? formatWindowListStatusText(windowAvailability, windowRows.length, windowVisibilityScope, runtimeLanguage)
+        + (snapshot.truncated ? " · " + tr("bounded") : "") : "");
+    renderWindowProjectFilter();
+    const list = el("runtime-window-list");
+    const focused = list?.contains(document.activeElement) ? document.activeElement.dataset.windowKey : null;
+    renderWindowCards(list, windowRows.map(row => ({ ...row, last_project_name: productName(homeProjectRows.find(project => project.id === row.last_project) || { id: row.last_project }) })), selectedWindowKey, key => void selectWindow(key), Date.now(), runtimeLanguage);
+    if (focused)
+        Array.from(list?.querySelectorAll("button") || []).find(button => button.dataset.windowKey === focused)?.focus({ preventScroll: true });
+    const unavailable = snapshot.availability === "unavailable";
+    const detailUnavailable = snapshot.detailAvailability === "unavailable";
+    const loading = snapshot.availability === "idle" || snapshot.availability === "loading" || (!!selectedWindowKey && snapshot.detailAvailability === "loading");
+    const stale = snapshot.availability === "stale" || snapshot.detailAvailability === "stale";
+    setText("runtime-window-empty-title", tr(unavailable || detailUnavailable ? "Window activity unavailable" : loading ? "Loading Window activity…" : stale ? "Window activity could not be refreshed." : "No Window activity observed yet."));
+    setText("runtime-window-empty-copy", tr(unavailable ? (snapshot.project ? "Check runtime:read and access to the selected Project." : "Window activity requires runtime:read.")
+        : detailUnavailable ? "This Window is no longer visible to the current credential. Refresh to check available activity."
+            : loading ? "Observing the connected Runtime." : snapshot.project ? "No observed activity matches this Project filter."
+                : windowVisibilityScope === "principal" ? "This credential sees only its own principal's Windows in authorized Projects. Other principals are not included; global observation requires an administrator Runtime credential."
+                    : "Global Runtime scope. Only observed WebCodex requests appear here; no Project selection is required."));
+    setText("runtime-window-live-badge", tr(stale ? "Refresh failed · showing previous data" : "Updates automatically"));
 }
 function renderWindowDetail(detail) {
     selectedWindowDetail = detail;
     const present = !!detail;
     show("runtime-window-detail-empty", !present);
     show("runtime-window-detail", present);
-    if (!detail)
+    if (!detail) {
+        renderWorkspaceHeading();
         return;
+    }
     const fields = formatWindowDetailFields(detail, selectedWindowKey, Date.now(), runtimeLanguage);
     if (!fields)
         return;
@@ -5073,7 +5484,8 @@ function renderWindowDetail(detail) {
     for (const entry of observed.slice(0, 20)) {
         const row = productNode("article");
         const text = productNode("div");
-        text.appendChild(productNode("strong", productActivity(entry, runtimeLanguage)));
+        text.appendChild(productNode("strong", String(entry.tool_name || entry.method || productActivity(entry, runtimeLanguage))));
+        text.appendChild(productNode("span", productActivity(entry, runtimeLanguage), "muted small"));
         text.appendChild(productNode("span", productName(homeProjectRows.find(project => project.id === entry.project) || { id: entry.project }), "muted small"));
         row.append(text, productNode("time", productTime(entry.at, runtimeLanguage)));
         timeline?.appendChild(row);
@@ -5083,96 +5495,23 @@ function renderWindowDetail(detail) {
     renderWorkspaceHeading();
 }
 async function refreshWindowDetail() {
-    if (!token || !selectedWindowKey)
-        return renderWindowDetail(null);
-    abort(windowDetailAbort);
-    const controller = new AbortController();
-    windowDetailAbort = controller;
-    const key = selectedWindowKey;
-    const response = await api("window", { client_window_key: key, activity_limit: 100, session_limit: 50 }, controller.signal);
-    if (windowDetailAbort === controller)
-        windowDetailAbort = null;
-    if (!response || key !== selectedWindowKey)
-        return;
-    if (response.status === 401)
-        return lock("Credential rejected.");
-    if (response.status === 404) {
-        selectedWindowKey = "";
-        renderWindowList();
-        renderWindowDetail(null);
-        return;
-    }
-    if (!response.ok || !response.data) {
-        setText("runtime-window-list-status", response.status === 403 ? "runtime:read required" : "Could not refresh Window detail.");
-        return;
-    }
-    renderWindowDetail(response.data);
+    if (token)
+        await windowController.refreshDetail();
 }
 async function selectWindow(key) {
-    if (!/^[0-9a-fA-F]{64}$/.test(key))
-        return;
-    if (key !== selectedWindowKey)
-        renderWindowDetail(null);
-    selectedWindowKey = key;
-    renderWindowList();
-    renderWorkspaceHeading();
     setMobileNavigationOpen(false, true);
-    await refreshWindowDetail();
+    if (token)
+        await windowController.select(key);
 }
 async function refreshWindows(refreshSelected = true) {
-    if (!token || workspaceView !== "windows")
-        return;
-    abort(windowsAbort);
-    const controller = new AbortController();
-    windowsAbort = controller;
-    if (windowAvailability === "idle") {
-        windowAvailability = "loading";
-        renderWindowList();
-    }
-    const response = await api("windows", { limit: 100 }, controller.signal);
-    // A superseded or navigation-cancelled request must not overwrite the newer Window state.
-    if (windowsAbort !== controller)
-        return;
-    windowsAbort = null;
-    // RuntimeApiClient returns null only for AbortError. Cancellation is not a refresh failure.
-    if (!response)
-        return;
-    if (response.status === 401)
-        return lock("Credential rejected.");
-    const nextAvailability = runtimeWindowAvailabilityAfterHttpResponse(response.status, response.ok, !!response.data);
-    if (nextAvailability === "unavailable") {
-        windowRows = [];
-        selectedWindowKey = "";
-        windowAvailability = nextAvailability;
-        renderWindowList();
-        renderWindowDetail(null);
-        return;
-    }
-    if (nextAvailability === "stale") {
-        windowAvailability = nextAvailability;
-        renderWindowList();
-        return;
-    }
-    windowAvailability = nextAvailability;
-    if (response.data.visibility?.scope === "global" || response.data.visibility?.scope === "principal") {
-        windowVisibilityScope = response.data.visibility.scope;
-    }
-    windowRows = Array.isArray(response.data.windows) ? response.data.windows : [];
-    if (!selectedWindowKey && windowRows.length)
-        selectedWindowKey = String(windowRows[0]?.client_window_key || "");
-    renderWindowList();
-    if (refreshSelected && selectedWindowKey) {
-        await refreshWindowDetail();
-    }
-    else if (!selectedWindowKey) {
-        renderWindowDetail(null);
-    }
+    if (token && workspaceView === "windows")
+        await windowController.refresh(refreshSelected);
 }
 function openWindowInspector(key) {
-    selectedWindowKey = key;
+    if (!token)
+        return;
+    void windowController.open(key);
     applyWorkspaceView("windows");
-    renderWindowList();
-    void refreshWindowDetail();
 }
 function renderSessionWindowCorrelation(detail) {
     const available = detail?.window_activity_available === true;
@@ -5330,7 +5669,8 @@ function clearSessionSurface() {
 }
 function lock(message = "", clearRemembered = true) {
     productWorkspace.reset();
-    productExtensions.reset();
+    sessionNavigation.reset();
+    windowController.reset();
     productProjectApi.clearToken();
     el("runtime-command-dialog")?.close();
     el("runtime-command-results")?.replaceChildren();
@@ -5342,6 +5682,10 @@ function lock(message = "", clearRemembered = true) {
     if (clearRemembered) {
         eraseStoredCredential();
         eraseAllDrafts();
+        try {
+            window.sessionStorage.removeItem(SESSION_LOCATION_KEY);
+        }
+        catch { /* Storage may be unavailable. */ }
     }
     abortAll();
     invalidateRuntimeCredential(state);
@@ -5350,6 +5694,7 @@ function lock(message = "", clearRemembered = true) {
     runnerRows = [];
     recentSessionRows = [];
     runtimeOverviewSnapshot = null;
+    runtimeOverviewAvailability = "idle";
     recentSessionMetaSnapshot = null;
     projectRowsTotal = 0;
     projectRowsTruncated = false;
@@ -5448,6 +5793,9 @@ async function fetchOverview(request) {
     abort(overviewAbort);
     const controller = new AbortController();
     overviewAbort = controller;
+    if (!runtimeOverviewSnapshot)
+        runtimeOverviewAvailability = "loading";
+    sessionNavigation.render();
     const response = await api("overview", {}, controller.signal);
     if (overviewAbort === controller)
         overviewAbort = null;
@@ -5458,6 +5806,7 @@ async function fetchOverview(request) {
         return false;
     }
     if (response.status === 403) {
+        runtimeOverviewAvailability = "unavailable";
         homeProjectRows = [];
         runnerRows = [];
         recentSessionRows = [];
@@ -5476,6 +5825,9 @@ async function fetchOverview(request) {
         return true;
     }
     if (!response.ok || !response.data) {
+        runtimeOverviewAvailability = "stale";
+        sessionNavigation.render();
+        renderHome();
         setText("runtime-overview-access", tr("refresh unavailable"));
         setText("runtime-runner-access", tr("refresh unavailable"));
         setText("runtime-recent-status", tr("refresh unavailable"));
@@ -5489,6 +5841,7 @@ async function fetchOverview(request) {
     setText("runtime-runner-access", "runtime:read");
     const data = response.data;
     runtimeOverviewSnapshot = data;
+    runtimeOverviewAvailability = "available";
     homeProjectRows = Array.isArray(data.projects) ? data.projects : [];
     runnerRows = Array.isArray(data.runners) ? data.runners : [];
     recentSessionRows = Array.isArray(data.recent_sessions?.sessions) ? data.recent_sessions.sessions : [];
@@ -5738,39 +6091,24 @@ function renderRunnerFleet(runners) {
     });
     setText("runtime-runner-count", formatRunnerCountText(runners.length, runtimeLanguage));
 }
-function renderRecentSessions(sessions, meta) {
+function renderRecentSessions(_sessions, _meta) {
     renderHome();
-    const node = el("runtime-recent-session-list");
-    if (!node)
-        return;
-    const signature = renderFingerprint([
-        runtimeLanguage,
-        state.selectedProject,
-        state.workflow.selectedSessionId,
-        sessions,
-        meta,
-    ]);
-    if (signature === renderedRecentSessionsSignature)
-        return;
-    renderedRecentSessionsSignature = signature;
-    show("runtime-recent-empty", sessions.length === 0 && !!el("runtime-recent-unavailable")?.hidden);
-    renderRecentSessionRows(node, sessions, {
-        selectedProject: state.selectedProject,
-        selectedSessionId: state.workflow.selectedSessionId,
-        language: runtimeLanguage,
-        onSelectSession: (session) => selectRecentSession(session),
-    });
-    if (meta) {
-        setText("runtime-recent-status", formatRecentSessionStatusText(meta, runtimeLanguage));
-    }
+    ensureRuntimeSessionSelection();
 }
 function selectRecentSession(session) {
+    selectingRuntimeSession = true;
     applyWorkspaceView("sessions");
     const clientId = String(session?.client_id || "");
     const projectId = String(session?.project_id || "");
     const sessionId = String(session?.session_id || "");
-    if (!clientId || !projectId || !sessionId)
+    if (!clientId || !projectId || !sessionId) {
+        selectingRuntimeSession = false;
         return;
+    }
+    try {
+        window.sessionStorage.setItem(SESSION_LOCATION_KEY, runtimeSessionIdentity(session));
+    }
+    catch { /* Storage may be unavailable. */ }
     if (projectDeviceFilter && projectDeviceFilter !== clientId)
         projectDeviceFilter = "";
     const knownProject = effectiveProjects(projectRows).find((row) => String(row?.id || "") === projectId)
@@ -5793,6 +6131,8 @@ function selectRecentSession(session) {
     renderRecentSessions(recentSessionRows, null);
     renderSelectedProjectIdentity();
     revealWorkflowSessionDetail();
+    selectingRuntimeSession = false;
+    sessionNavigation.render();
     if (location.sessionListRequest)
         void fetchSessions(location.sessionListRequest);
     const windowRequest = refreshRuntimeProjectWindows(state);
@@ -5852,7 +6192,7 @@ async function fetchSessions(request) {
                 void fetchSessionDetail(detailRequest);
         }
     }
-    else if (selected) {
+    else if (selected && !response.data.truncated) {
         abortCollaboration();
         clearRuntimeWorkflowSession(state);
         hideDetail();
@@ -5871,6 +6211,8 @@ function localWorkflowText(value) {
     return localizedWorkflowText(value, runtimeLanguage);
 }
 function renderSessionList(sessions, payload) {
+    sessionNavigation.render();
+    ensureRuntimeSessionSelection();
     const node = el("runtime-session-list");
     if (!node)
         return;
@@ -5915,8 +6257,9 @@ async function fetchSessionDetail(request) {
     const controller = new AbortController();
     detailAbort = controller;
     const response = await api("workflow-session", { project: request.project, session_id: request.sessionId, limit: 100 }, controller.signal);
-    if (detailAbort === controller)
-        detailAbort = null;
+    if (detailAbort !== controller || controller.signal.aborted)
+        return;
+    detailAbort = null;
     if (!response || !isCurrentRuntimeWorkflowSessionRequest(state, request))
         return;
     if (response.status === 401)
@@ -5968,7 +6311,7 @@ function renderDetail(detail, consumeCollaborationNotice = true) {
     renderSessionWindowCorrelation(detail);
     renderWorkspaceOverview(detail.overview, runtimeLanguage);
     renderWorkspaceEvidence(el("runtime-work-evidence"), detail, runtimeLanguage);
-    renderWorkspaceEvidence(el("runtime-context-evidence"), detail, runtimeLanguage);
+    setText("runtime-session-work-title", String(detail.title || tr("Workflow Session")));
     renderCollaboration(undefined, consumeCollaborationNotice);
     syncResponsiveNavigation();
     const activities = Array.isArray(detail.activity) ? detail.activity : [];
@@ -7389,8 +7732,6 @@ function setRefreshBusy(active) {
 }
 async function refreshAll() {
     productWorkspace.invalidateGit();
-    if (workspaceView === "extensions")
-        void productExtensions.refresh();
     if (!token || refreshInFlight)
         return;
     setRefreshBusy(true);
@@ -7405,10 +7746,16 @@ async function refreshAll() {
             fetchProjects(projectsRequest),
             refreshCommunication(),
             windowRequest ? fetchProjectWindows(windowRequest) : Promise.resolve(true),
+            workspaceView === "windows" ? refreshWindows(true) : windowController.refreshGlobal(),
+            sessionNavigation.filters.project ? sessionNavigation.refreshProject() : Promise.resolve(),
         ]);
         if (!token)
             return;
-        if (overviewOk && projectsOk && communicationOk) {
+        const windowState = windowController.snapshot;
+        const windowsOk = workspaceView === "windows"
+            ? windowState.availability === "available" && (!windowState.selectedKey || windowState.detailAvailability === "available")
+            : windowState.globalAvailability === "available";
+        if (overviewOk && projectsOk && communicationOk && windowsOk) {
             setText("runtime-refresh-status", tr("Refreshed") + " " + new Date().toLocaleTimeString());
         }
         else {
@@ -7432,6 +7779,10 @@ function refreshAutoSurfaces() {
         return;
     }
     void fetchOverview(refreshRuntimeOverview(state));
+    if (workspaceView === "home" || workspaceView === "activity")
+        void windowController.refreshGlobal();
+    if (workspaceView === "sessions" && sessionNavigation.filters.project)
+        void sessionNavigation.refreshProject();
     const request = refreshRuntimeSessionList(state);
     if (request)
         void fetchSessions(request);
@@ -7459,7 +7810,8 @@ function stopWindowAuto() {
 }
 function connectRuntimeCredential(nextToken, rememberForTab) {
     productWorkspace.reset();
-    productExtensions.reset();
+    sessionNavigation.reset();
+    windowController.reset();
     productProjectApi.clearToken();
     rememberCredentialForTab = rememberForTab;
     token = nextToken;
@@ -7470,6 +7822,7 @@ function connectRuntimeCredential(nextToken, rememberForTab) {
     const request = beginRuntimeCredential(state);
     void fetchOverview(refreshRuntimeOverview(state));
     void fetchProjects(request, true);
+    void windowController.refreshGlobal();
     void refreshCommunication(workspaceView === "operations");
     if (workspaceView === "windows") {
         void refreshWindows(true);
@@ -7490,6 +7843,10 @@ el("runtime-token-form")?.addEventListener("submit", (event) => {
     connectRuntimeCredential(nextToken, remember?.checked !== false);
 });
 el("runtime-agent-create-form")?.addEventListener("submit", (event) => void createCommunicationAgent(event));
+el("runtime-window-project-filter")?.addEventListener("change", event => {
+    if (token)
+        void windowController.filter(event.target.value);
+});
 el("runtime-window-copy-key")?.addEventListener("click", () => {
     const key = String(selectedWindowDetail?.client_window_key || selectedWindowKey || "");
     void copyRuntimeValue(key, "runtime-window-list-status");
@@ -7727,6 +8084,15 @@ document.addEventListener("keydown", (event) => {
     }
 });
 window.addEventListener("resize", syncResponsiveNavigation, { passive: true });
+if (typeof ResizeObserver !== "undefined") {
+    const contextResize = new ResizeObserver(syncContextGeometry);
+    const composer = el("runtime-collaboration-form");
+    if (composer)
+        contextResize.observe(composer);
+    const shell = el("runtime-console");
+    if (shell)
+        contextResize.observe(shell);
+}
 document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
         stopWindowAuto();

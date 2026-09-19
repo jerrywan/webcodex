@@ -292,8 +292,8 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   const html = await readFile(new URL("../src/runtime.html", import.meta.url), "utf8");
   const css = await readFile(new URL("../src/runtime.css", import.meta.url), "utf8");
   assert.equal(html.includes("runtime-project-" + "select"), false);
-  assert.match(html, /runtime-project-list/);
-  assert.match(html, /runtime-project-search/);
+
+
   assert.match(html, /runtime-token-remember/);
   assert.match(html, /data-theme-option="system"/);
   assert.match(html, /data-theme-option="light"/);
@@ -309,7 +309,9 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   assert.match(html, /runtime-operations-runners/);
   assert.match(html, /runtime-operations-agents/);
   assert.match(html, /runtime-session-workspace/);
-  assert.match(html, /runtime-workflow-sessions-panel/);
+  assert.match(html, /id="runtime-global-sessions"/);
+  assert.match(html, /id="runtime-projects-content"/);
+
   assert.match(html, /runtime-session-id/);
   assert.match(html, /runtime-session-created/);
   assert.match(html, /runtime-session-updated/);
@@ -318,13 +320,13 @@ test("runtime collaboration rendering uses textContent and explicitly reloads on
   assert.match(css, /\.session-identity/);
   assert.match(html, /class="context-navigation"/);
   assert.match(html, /data-context-target="runtime-context-activity"/);
-  assert.match(html, /workspace path/);
-  assert.match(html, /class="recent-panel-title">Recent Sessions<\/span>/);
+  assert.match(html, /runtime-session-workspace/);
+
   assert.match(html, /id="runtime-inspector-close"[^>]*aria-label="Close session context"/);
-  assert.match(html, /runtime-recent-session-list/);
-  assert.match(html, /Runner Fleet/);
-  assert.match(html, /runtime-runner-list/);
-  assert.match(html, /All Runners/);
+
+
+
+
   assert.match(html, /runtime-collaboration-form/);
   assert.match(html, /runtime-collaboration-board[^>]*role="log"/);
   assert.match(html, /runtime-message-announcer[^>]*aria-live="polite"/);
@@ -607,14 +609,10 @@ test("navigation and inspector source contracts maintain disclosure hierarchy an
     readFile(new URL("../src/runtime_navigation.ts", import.meta.url), "utf8"),
   ]);
 
-  // P3: Recent Sessions component semantics - clean class, no legacy sidebar-details overrides
-  assert.match(html, /<details id="runtime-recent-panel" class="recent-panel" open>/);
-  assert.match(html, /<span class="recent-panel-title">Recent Sessions<\/span>/);
-  assert.doesNotMatch(html, /class="[^"]*sidebar-details/);
-  assert.doesNotMatch(css, /\.sidebar-details/);
-  assert.doesNotMatch(css, /summary::before\s*\{\s*content:\s*"Show more"/);
-  assert.doesNotMatch(css, /summary\[open\]::before\s*\{\s*content:\s*"Recent Sessions"/);
-  assert.match(css, /\.recent-panel\s*\{[^}]*border-top:/);
+  // Runtime-wide Sessions replace the old Project tree appendix.
+  assert.match(html, /id="runtime-global-sessions"[^>]*aria-label="Workflow Sessions"/);
+  assert.doesNotMatch(html, /id="runtime-recent-panel"|id="runtime-project-list"/);
+  assert.match(css, /\.runtime-session-inventory/);
 
   // P1 & P2: Inspector triggers and close controls with deterministic user intent handling
   assert.match(html, /id="runtime-inspector-close"[^>]*aria-label="Close session context"/);
@@ -644,20 +642,10 @@ test("project-scoped window activity contracts maintain separation, fencing, and
     readFile(new URL("../src/runtime_navigation.ts", import.meta.url), "utf8"),
   ]);
 
-  // HTML hierarchy: project window panel mounted directly above sessions panel
-  assert.match(html, /<section id="runtime-project-window-activity-panel"[^>]*class="[^"]*project-window-panel/);
-  assert.match(html, /id="runtime-project-windows-count"/);
-  assert.match(html, /id="runtime-project-windows-status"/);
-  assert.match(html, /id="runtime-project-windows-list"/);
-  assert.match(html, /id="runtime-project-windows-empty"/);
-  assert.match(html, /id="runtime-project-windows-unavailable"/);
-  const windowPanelIndex = html.indexOf('id="runtime-project-window-activity-panel"');
-  const sessionsPanelIndex = html.indexOf('id="runtime-workflow-sessions-panel"');
-  assert.ok(sessionsPanelIndex > 0 && windowPanelIndex > sessionsPanelIndex, "Workflow Sessions panel must precede Window activity panel in HTML");
-
-  // CSS styling
-  assert.match(css, /\.project-window-panel,\s*\.sessions-panel/);
-  assert.match(css, /\.project-window-list\s*\{[^}]*gap:\s*4px/);
+  // Project is a Window filter, never a prerequisite or a duplicate Session sidebar.
+  assert.match(html, /id="runtime-window-project-filter"/);
+  assert.match(html, /id="runtime-window-empty-title"/);
+  assert.doesNotMatch(html, /id="runtime-project-window-activity-panel"/);
 
   // Source contract: fetchProjectWindows fences by project and limits to 10
   const fetchProjWindowsStart = source.indexOf("async function fetchProjectWindows");
@@ -671,12 +659,11 @@ test("project-scoped window activity contracts maintain separation, fencing, and
   assert.match(fetchProjWindows, /!response\.ok \|\| !response\.data[\s\S]*projectWindowAvailability = "stale"/);
   assert.match(source, /function projectWindowActiveCount\(\)[\s\S]*projectWindowAvailability !== "available"[\s\S]*return 0/);
 
-  // Global windows fetch contract remains decoupled (limit 100, no project scope)
-  const refreshWindowsStart = source.indexOf("async function refreshWindows");
-  const refreshWindowsEnd = source.indexOf("function openWindowInspector", refreshWindowsStart);
-  const refreshWindows = source.slice(refreshWindowsStart, refreshWindowsEnd);
-  assert.match(refreshWindows, /api\("windows",\s*\{\s*limit:\s*100\s*\}/);
-  assert.doesNotMatch(refreshWindows, /project:/);
+  // Global windows are fetched independently; the controller owns refresh fences.
+  const windowStateSource = await readFile(new URL("../src/runtime_window_state.ts", import.meta.url), "utf8");
+  assert.match(windowStateSource, /post\("windows", \{ limit: 100 \}/);
+  assert.match(windowStateSource, /ownsWindowResponse\(this.detailRequest, request\)/);
+  assert.match(source, /windowController.refresh\(refreshSelected\)/);
 
   // Navigation: windowPanel mounting before sessionsPanel, and WINDOW ACTIVE signal
   assert.match(navigationSource, /if \(options\.windowPanel\) \{\s*options\.windowPanel\.hidden = false;\s*workspace\.appendChild\(options\.windowPanel\);\s*windowsAttached = true;\s*\}/);
@@ -689,6 +676,6 @@ test("project-scoped window activity contracts maintain separation, fencing, and
   const openInspectorEnd = source.indexOf("function projectWindowActiveCount", openInspectorStart);
   const openInspector = source.slice(openInspectorStart, openInspectorEnd);
   assert.match(openInspector, /applyWorkspaceView\("windows"\)/);
-  assert.match(openInspector, /selectedWindowKey = key/);
+  assert.match(openInspector, /windowController.open\(key\)/);
 });
 

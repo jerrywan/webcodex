@@ -31,7 +31,7 @@ test("translateStaticNodeValue preserves leading and trailing whitespace", () =>
   );
   assert.equal(
     translateStaticNodeValue("\n  Local  \n", "zh-CN"),
-    "\n  本地  \n"
+    "\n  当前运行时  \n"
   );
 });
 

@@ -91,7 +91,7 @@ test("loading and denied evidence never renders a zero-work assertion; Chinese h
   const node = new Element();
   renderWorkspaceHome(node, options({ sessions: [], sessionsAvailable: false, sessionsStatus: "Loading work Sessions…", windowAvailability: "unavailable" }));
   assert.ok(node.textContent.includes("Loading work Sessions"));
-  assert.ok(!node.textContent.includes("runtime:read"));
+  assert.ok(node.textContent.includes("runtime:read"), "denied Window evidence explains the required permission");
   assert.ok(!node.textContent.includes("No activity observed yet"));
   assert.ok(!node.textContent.includes("No attention requests"));
   renderWorkspaceHome(node, options({ language: "zh-CN" }));
@@ -112,7 +112,7 @@ test("home is a real view, hides Session context and keeps conversation drafts m
   const panel = { hidden: false, draft: "unsent work", children: ["composer"] };
   const shown = new Map();
   const buttons = ["home", "sessions", "windows", "operations"].map(view => ({ dataset: { runtimeView: view }, classList: { toggle() {} }, setAttribute(key, value) { this[key] = value; }, removeAttribute(key) { delete this[key]; } }));
-  const context = vm.createContext({ workspaceView: "sessions", token: "", document: { body: { classList: { toggle() {} } }, querySelectorAll: () => buttons }, parseWorkspaceViewPreference: workspaceViewPreference, el: () => ({ dataset: {} }), show(id, visible) { shown.set(id, visible); if (id === "runtime-conversation-stage") panel.hidden = !visible; }, renderHome() {}, stopWindowAuto() {}, renderWorkspaceHeading() {}, syncResponsiveNavigation() {}, setMobileNavigationOpen() {}, persistWorkspaceViewPreference() {} });
+  const context = vm.createContext({ workspaceView: "sessions", token: "", document: { body: { classList: { toggle() {} } }, querySelectorAll: () => buttons }, parseWorkspaceViewPreference: workspaceViewPreference, el: () => ({ dataset: {} }), show(id, visible) { shown.set(id, visible); if (id === "runtime-conversation-stage") panel.hidden = !visible; }, renderHome() {}, stopWindowAuto() {}, renderWorkspaceHeading() {}, syncResponsiveNavigation() {}, setMobileNavigationOpen() {}, persistWorkspaceViewPreference() {}, ensureRuntimeSessionSelection() {} });
   vm.runInContext(source.slice(start, end), context);
   for (const view of ["home", "windows", "operations", "sessions"]) {
     context.applyWorkspaceView(view);
@@ -147,7 +147,7 @@ test("command search honors locking, IME, Enter navigation and close focus retur
 
 test("daily navigation and settings expose semantic automation hooks and labelled inputs", async () => {
   const html = await readFile(new URL("../src/runtime.html", import.meta.url), "utf8");
-  for (const id of ["runtime-view-home", "runtime-view-windows", "runtime-open-commands", "runtime-refresh", "runtime-lock", "runtime-mobile-nav-toggle", "runtime-project-search"]) {
+  for (const id of ["runtime-view-home", "runtime-view-windows", "runtime-open-commands", "runtime-refresh", "runtime-lock", "runtime-mobile-nav-toggle"]) {
     assert.match(html, new RegExp('(?:data-testid="' + id + '"|id="' + id + '"[^>]*data-action=)'));
   }
   assert.match(html, /<dialog[^>]+aria-label="Commands"/);

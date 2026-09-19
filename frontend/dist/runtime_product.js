@@ -15,6 +15,8 @@ export class ProductWorkspace {
         this.runner = "";
         this.projectLanguage = "";
         this.projectSignature = "";
+        this.runnerSignature = "";
+        this.activitySignature = "";
         this.projectList = null;
     }
     reset() {
@@ -32,6 +34,8 @@ export class ProductWorkspace {
         this.projectLanguage = "";
         this.projectSignature = "";
         this.projectList = null;
+        this.runnerSignature = "";
+        this.activitySignature = "";
         document.getElementById("runtime-projects-content")?.replaceChildren();
         document.getElementById("runtime-activity-content")?.replaceChildren();
     }
@@ -102,11 +106,11 @@ export class ProductWorkspace {
             heading.appendChild(add);
             root.appendChild(heading);
             const filters = productNode("div", "", "product-filters");
-            const runnerLabel = productNode("label", "Runner");
+            const runnerLabel = productNode("label", tr("Runner"));
             runnerLabel.htmlFor = "product-project-runner";
             const select = productNode("select");
             select.id = "product-project-runner";
-            select.setAttribute("aria-label", "Runner");
+            select.setAttribute("aria-label", tr("Runner"));
             select.appendChild(new Option(tr("All Runners"), ""));
             for (const runner of context.runners)
                 select.appendChild(new Option(runner.client_id, runner.client_id));
@@ -125,6 +129,19 @@ export class ProductWorkspace {
             this.projectList = productNode("div", "", "product-project-list");
             root.appendChild(this.projectList);
         }
+        const runnersSignature = JSON.stringify([context.language, context.runners.map(row => row.client_id)]);
+        if (runnersSignature !== this.runnerSignature) {
+            this.runnerSignature = runnersSignature;
+            const select = document.getElementById("product-project-runner");
+            if (select) {
+                select.replaceChildren(new Option(tr("All Runners"), ""));
+                for (const row of context.runners)
+                    select.appendChild(new Option(row.client_id, row.client_id));
+                if (!context.runners.some(row => row.client_id === this.runner))
+                    this.runner = "";
+                select.value = this.runner;
+            }
+        }
         const signature = JSON.stringify([context.projects, context.selectedProject, context.available, this.query, this.runner]);
         if (signature === this.projectSignature)
             return;
@@ -132,11 +149,11 @@ export class ProductWorkspace {
         const activeName = this.projectList.contains(document.activeElement) ? document.activeElement?.getAttribute("aria-label") : null;
         this.projectList.replaceChildren();
         const rows = context.projects.filter(project => (!this.runner || this.runner === project.client_id) && `${productName(project)} ${project.path || ""}`.toLocaleLowerCase().includes(this.query.trim().toLocaleLowerCase()))
-            .sort((a, b) => (b.sessions?.latest_updated_at || 0) - (a.sessions?.latest_updated_at || 0));
+            .sort((a, b) => a.client_id.localeCompare(b.client_id) || (b.sessions?.latest_updated_at || 0) - (a.sessions?.latest_updated_at || 0));
         let lastRunner = "";
         for (const project of rows) {
             if (context.runners.length > 1 && project.client_id !== lastRunner) {
-                this.projectList.appendChild(productNode("p", "Runner · " + project.client_id, "product-runner-label"));
+                this.projectList.appendChild(productNode("p", tr("Runner") + " · " + project.client_id, "product-runner-label"));
                 lastRunner = project.client_id;
             }
             this.projectList.appendChild(createProductProjectRow(project, { language: context.language, selected: context.selectedProject, onOpen: this.services.onProject, git: (project, target) => this.attachGit(project, target) }));
@@ -154,7 +171,7 @@ export class ProductWorkspace {
         this.dialogs.add(popup);
         const form = productNode("form");
         const request = new AbortController();
-        const runnerLabel = productNode("label", "Runner");
+        const runnerLabel = productNode("label", tr("Runner"));
         runnerLabel.htmlFor = "product-add-runner";
         const runner = productNode("select");
         runner.id = "product-add-runner";
@@ -227,6 +244,11 @@ export class ProductWorkspace {
             return;
         const context = this.services.context();
         const tr = (text) => translate(text, context.language);
+        const signature = JSON.stringify([context.language, context.sessions, context.windows, context.available, context.runners]);
+        if (signature === this.activitySignature)
+            return;
+        this.activitySignature = signature;
+        const focusedKey = root.contains(document.activeElement) ? document.activeElement.dataset.activityKey : null;
         root.replaceChildren();
         const heading = productNode("header", "", "product-page-heading");
         heading.appendChild(productNode("h2", tr("Activity")));
@@ -235,13 +257,19 @@ export class ProductWorkspace {
             .sort((a, b) => b.at - a.at).slice(0, 40);
         for (const row of rows) {
             const entry = productButton("", () => row.kind === "session" ? this.services.onSession(row.value) : this.services.onWindow(row.value.client_window_key), "product-activity-entry");
+            entry.dataset.activityKey = row.kind + ":" + (row.value.session_id || row.value.client_window_key);
             const body = productNode("div");
-            body.appendChild(productNode("strong", row.kind === "session" ? productTitle(row.value.title) : tr("Windows") + " · " + String(row.value.client_window_key).slice(-12)));
+            body.appendChild(productNode("strong", row.kind === "session" ? productTitle(row.value.title) : tr("Window Activity") + " · " + String(row.value.client_window_key).slice(-12)));
             body.appendChild(productNode("span", row.kind === "session" ? productActivity(row.value.current_activity || row.value.last_activity, context.language) : productName(context.projects.find(project => project.id === row.value.last_project) || {}), "muted"));
+            const projectId = row.kind === "session" ? row.value.project_id : row.value.last_project;
+            const project = context.projects.find(project => project.id === projectId);
+            body.appendChild(productNode("span", tr(row.kind === "session" ? "Workflow Session" : "Window Activity") + " · " + productName(project || { id: projectId }) + " · " + (row.value.client_id || project?.client_id || "—"), "muted small"));
             entry.setAttribute("aria-label", body.textContent || tr("Activity"));
             entry.append(body, productNode("time", productTime(row.at, context.language)));
             root.appendChild(entry);
         }
+        if (focusedKey)
+            Array.from(root.querySelectorAll("button")).find(button => button.dataset.activityKey === focusedKey)?.focus({ preventScroll: true });
         if (!rows.length)
             root.appendChild(productNode("p", tr(context.available ? "No activity observed yet" : "Activity unavailable. Refresh to try again."), "product-empty"));
     }

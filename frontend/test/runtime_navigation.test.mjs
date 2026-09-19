@@ -96,7 +96,7 @@ test("closing mobile navigation fences its delayed focus callback", async () => 
   assert.equal(focused, true);
 });
 
-test("project search opens the correct view and focuses the search on desktop and mobile", async () => {
+test("Session search opens the workflow view and focuses its inventory on desktop and mobile", async () => {
   const source = await readFile(new URL("../dist/runtime.js", import.meta.url), "utf8");
   const start = source.indexOf("function focusProjectNavigation(");
   const end = source.indexOf("\n}", start) + 2;
@@ -110,10 +110,10 @@ test("project search opens the correct view and focuses the search on desktop an
   });
   vm.runInContext(source.slice(start, end), context);
   context.focusProjectNavigation();
-  assert.deepEqual(calls.splice(0), ["sessions", "runtime-project-search"]);
+  assert.deepEqual(calls.splice(0), ["sessions", "runtime-global-session-query"]);
   mobile = true;
   context.focusProjectNavigation();
-  assert.deepEqual(calls, ["sessions", [true, false, "runtime-project-search"]]);
+  assert.deepEqual(calls, ["sessions", [true, false, "runtime-global-session-query"]]);
 });
 
 test("project shortcut respects locked state, composition, and unmodified typing", async () => {
@@ -167,13 +167,13 @@ test("mobile project search only receives focus while navigation remains open", 
     window: { setTimeout(callback) { callbacks.push(callback); } },
   });
   vm.runInContext(source.slice(start, end), context);
-  context.setMobileNavigationOpen(true, false, "runtime-project-search");
+  context.setMobileNavigationOpen(true, false, "runtime-global-session-query");
   context.setMobileNavigationOpen(false);
   callbacks.shift()();
   assert.deepEqual(focused, []);
-  context.setMobileNavigationOpen(true, false, "runtime-project-search");
+  context.setMobileNavigationOpen(true, false, "runtime-global-session-query");
   callbacks.shift()();
-  assert.deepEqual(focused, ["runtime-project-search"]);
+  assert.deepEqual(focused, ["runtime-global-session-query"]);
 });
 
 test("workspace disclosure survives rerender and ignores detached toggle events", async () => {
@@ -215,7 +215,7 @@ test("formatWorkspaceBreadcrumb formats runner and project breadcrumb labels", (
     projectText: "Projects",
   });
   assert.deepEqual(formatWorkspaceBreadcrumb(null, "zh-CN"), {
-    runnerText: "设备群",
+    runnerText: "运行时",
     projectText: "项目",
   });
   assert.deepEqual(
