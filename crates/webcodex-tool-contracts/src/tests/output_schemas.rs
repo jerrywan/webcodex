@@ -292,6 +292,64 @@ fn inspection_truthfulness_schemas_keep_typed_missing_and_canonical_diff_recover
     }
 }
 
+#[test]
+fn search_batch_omitted_summary_schema_is_bounded_and_content_free() {
+    let schema = output_schema_for_tool("search_project_texts");
+    let result = json!({
+        "success": true,
+        "output": {
+            "project": "agent:oe:demo",
+            "requested_count": 4,
+            "returned_count": 0,
+            "succeeded_count": 0,
+            "failed_count": 0,
+            "items": [],
+            "output_truncated": true,
+            "truncation_reason": "batch_response_budget",
+            "remaining_summaries": [
+                {"index": 0, "success": true, "result_mode": "matches", "returned_match_count": 0, "truncated": false},
+                {"index": 1, "success": true, "result_mode": "files_with_matches", "returned_file_count": 4, "truncated": false},
+                {"index": 2, "success": true, "result_mode": "count", "total_matches": 17, "truncated": false},
+                {"index": 3, "success": false, "reason_code": "timeout", "failure_stage": "agent_transport", "detail_code": "timeout"}
+            ],
+            "suggested_call": {
+                "tool": "search_project_texts",
+                "arguments": {
+                    "project": "agent:oe:demo",
+                    "queries": [
+                        {"pattern": "needle-0"},
+                        {"pattern": "needle-1", "result_mode": "files_with_matches"},
+                        {"pattern": "needle-2", "result_mode": "count"},
+                        {"pattern": "needle-3"}
+                    ]
+                }
+            }
+        },
+        "error": null
+    });
+    test_support::validate_schema_instance(&result, &schema).unwrap();
+
+    let mut content_leak = result.clone();
+    content_leak["output"]["remaining_summaries"][0]["path"] = json!("src/private.rs");
+    assert!(test_support::validate_schema_instance(&content_leak, &schema).is_err());
+    let mut raw_error = result.clone();
+    raw_error["output"]["remaining_summaries"][3]["error"] = json!("raw backend body");
+    assert!(test_support::validate_schema_instance(&raw_error, &schema).is_err());
+    let mut incomplete_failure = result.clone();
+    incomplete_failure["output"]["remaining_summaries"][3]
+        .as_object_mut()
+        .unwrap()
+        .remove("failure_stage");
+    assert!(test_support::validate_schema_instance(&incomplete_failure, &schema).is_err());
+
+    let full = &schema["properties"]["output"]["anyOf"][0]["anyOf"][0];
+    let summaries = &full["properties"]["remaining_summaries"];
+    assert_eq!(summaries["maxItems"], 8);
+    let description = summaries["description"].as_str().unwrap();
+    assert!(description.contains("supplementary"));
+    assert!(description.contains("canonical whole-query continuation"));
+}
+
 fn continuation_feedback_subschema(specs: &[ToolSpec], tool: &str) -> Value {
     let spec = spec_named(specs, tool);
     spec.output_schema["properties"]["output"]["properties"]["continuation_feedback"].clone()

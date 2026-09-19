@@ -276,6 +276,29 @@ fn search_project_texts_output_schema() -> Value {
             "error_kind", "reason_code", "failure_stage", "detail_code", "state_changed"
         ]
     });
+    let omitted_summary_schema = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Bounded machine-only facts for an already-completed query omitted from the returned full-item suffix. Informational only: it is not a substitute for the query body and does not consume the query from the parser-ready continuation, which still starts at next_index.",
+        "properties": {
+            "index": {"type": "integer", "minimum": 0, "maximum": 7},
+            "success": {"type": "boolean"},
+            "result_mode": {"type": "string", "enum": ["matches", "files_with_matches", "count"]},
+            "returned_match_count": {"type": "integer", "minimum": 0},
+            "returned_file_count": {"type": "integer", "minimum": 0},
+            "total_matches": {"type": "integer", "minimum": 0},
+            "truncated": {"type": "boolean"},
+            "reason_code": search_failure["properties"]["reason_code"].clone(),
+            "failure_stage": search_failure["properties"]["failure_stage"].clone(),
+            "detail_code": search_failure["properties"]["detail_code"].clone()
+        },
+        "required": ["index", "success"],
+        "allOf": [{
+            "if": {"properties": {"success": {"const": true}}, "required": ["success"]},
+            "then": {"required": ["result_mode", "truncated"]},
+            "else": {"required": ["reason_code", "failure_stage", "detail_code"]}
+        }]
+    });
     let item_schema = json!({
         "type": "object",
         "additionalProperties": false,
@@ -304,6 +327,12 @@ fn search_project_texts_output_schema() -> Value {
             "items": {"type": "array", "maxItems": 8, "items": item_schema.clone()},
             "output_truncated": {"type": "boolean"},
             "truncation_reason": {"type": "string", "enum": ["batch_response_budget", "hard_result_cap"]},
+            "remaining_summaries": {
+                "type": "array",
+                "maxItems": 8,
+                "items": omitted_summary_schema,
+                "description": "Optional bounded summaries for completed queries at or after the omitted suffix boundary. These facts are supplementary UX only; suggested_call remains the canonical whole-query continuation and starts from the same omitted query."
+            },
             "suggested_call": suggested_tool_call_schema(
                 "search_project_texts",
                 crate::input_schema_for_tool("search_project_texts"),
