@@ -483,6 +483,30 @@ fn file_apply_patch_rejects_legacy_strict_matching_field() {
 }
 
 #[test]
+fn file_apply_patch_rejects_missing_matching_mode() {
+    let tmp = tempfile::tempdir().unwrap();
+    let policy = project_policy(tmp.path());
+    std::fs::write(tmp.path().join("target.txt"), "old\n").unwrap();
+    let patch = "*** Begin Patch\n*** Update File: target.txt\n-old\n+new\n*** End Patch";
+    let mut request = apply_patch_request(tmp.path(), patch, false);
+    request.content = Some(
+        serde_json::json!({
+            "patch": patch,
+            "dry_run": false,
+        })
+        .to_string(),
+    );
+
+    let out = line_edit_json(handle_file_request(&policy, &request));
+    assert_eq!(out["error_kind"], "invalid_payload");
+    assert_eq!(out["state_changed"], false);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("target.txt")).unwrap(),
+        "old\n"
+    );
+}
+
+#[test]
 fn file_apply_patch_rejects_sensitive_paths_before_write() {
     let tmp = tempfile::tempdir().unwrap();
     let policy = project_policy(tmp.path());

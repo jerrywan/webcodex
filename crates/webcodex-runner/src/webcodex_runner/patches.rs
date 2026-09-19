@@ -402,14 +402,7 @@ struct ApplyPatchPayload {
     patch: String,
     #[serde(default)]
     dry_run: Option<bool>,
-    #[serde(default)]
-    matching_mode: Option<ApplyPatchMatchingMode>,
-}
-
-fn apply_patch_matching_mode(payload: &ApplyPatchPayload) -> ApplyPatchMatchingMode {
-    payload
-        .matching_mode
-        .unwrap_or(ApplyPatchMatchingMode::FirstMatch)
+    matching_mode: ApplyPatchMatchingMode,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1421,7 +1414,7 @@ pub(crate) fn handle_apply_patch_file_request(
         }
     };
     let dry_run = payload.dry_run.unwrap_or(false);
-    let matching_mode = apply_patch_matching_mode(&payload);
+    let matching_mode = payload.matching_mode;
     let mut touched = HashSet::new();
     let mut plans = Vec::with_capacity(patch.hunks.len());
 
