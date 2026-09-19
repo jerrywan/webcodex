@@ -160,6 +160,54 @@ fn all_wait_model_projection_keeps_every_registered_source_identity_bounded() {
     }
 }
 
+#[test]
+fn any_resumed_projection_keeps_unmatched_source_identity_for_authoritative_reread() {
+    let mut result = super::super::ToolResult {
+        success: true,
+        output: serde_json::json!({
+            "agent_wait": {
+                "wait_id": "wc_agent_wait_AAAAAAAAAAAAAAAA",
+                "target_agent_id": "wc_dagent_BBBBBBBBBBBBBBBB",
+                "state": "resumed",
+                "mode": "any",
+                "revision": 4,
+                "created_at_unix_ms": 1,
+                "updated_at_unix_ms": 4,
+                "triggered_at_unix_ms": 2,
+                "resumed_at_unix_ms": 4,
+                "cancelled_at_unix_ms": null,
+                "source_count": 2,
+                "match_count": 1,
+                "match_sequence": 1,
+                "sources": [
+                    {"ordinal":0,"kind":"agent_task_terminal","task_id":"wc_agent_task_CCCCCCCCCCCCCCCC"},
+                    {"ordinal":1,"kind":"agent_task_terminal","task_id":"wc_agent_task_DDDDDDDDDDDDDDDD"}
+                ],
+                "matches": [{
+                    "sequence":1,
+                    "kind":"agent_task_terminal",
+                    "task_id":"wc_agent_task_CCCCCCCCCCCCCCCC",
+                    "task_attempt_id":"wc_agent_task_attempt_EEEEEEEEEEEEEEEE",
+                    "terminal_task_state":"succeeded",
+                    "occurred_at_unix_ms":2
+                }]
+            }
+        }),
+        error: None,
+    };
+    super::super::agent_wait::agent_wait_model_projection(&mut result);
+    let wait = &result.output["agent_wait"];
+    assert_eq!(wait["state"], "resumed");
+    assert_eq!(wait["mode"], "any");
+    assert_eq!(wait["source_count"], 2);
+    assert_eq!(wait["match_count"], 1);
+    assert_eq!(
+        wait["sources"][1]["task_id"], "wc_agent_task_DDDDDDDDDDDDDDDD",
+        "fresh ANY continuation must retain the unmatched registered source identity"
+    );
+    assert_eq!(wait["matches"].as_array().unwrap().len(), 1);
+}
+
 fn runtime_with_db() -> (tempfile::TempDir, Arc<crate::db::Database>, ToolRuntime) {
     let temp = tempfile::tempdir().unwrap();
     let db = Arc::new(crate::db::Database::open(&temp.path().join("agent-waits.db")).unwrap());
