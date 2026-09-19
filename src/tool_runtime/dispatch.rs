@@ -12,6 +12,85 @@ use crate::tool_runtime::tool_audit::ToolCallAuditProjection;
 use crate::tool_runtime::tool_inputs::CodingGuidanceProfile;
 use serde_json::Value;
 
+/// Select only inner adapters that still perform an auth-less legacy Project
+/// lookup. The outer dispatcher has already resolved and authorized the caller's
+/// selector under the current principal; these adapters need that canonical id
+/// for execution without changing every Project-bearing ToolCall's semantics.
+fn canonical_execution_project_mut(call: &mut ToolCall) -> Option<&mut String> {
+    match call {
+        ToolCall::RunProcess { project, .. }
+        | ToolCall::RunDetachedProcess { project, .. }
+        | ToolCall::StartAgentTaskCodingRun { project, .. }
+        | ToolCall::RunScript { project, .. }
+        | ToolCall::RunShell { project, .. }
+        | ToolCall::OpenSessionShell { project, .. }
+        | ToolCall::SessionShellExec { project, .. }
+        | ToolCall::SessionShellStatus { project, .. }
+        | ToolCall::CloseSessionShell { project, .. }
+        | ToolCall::ApplyPatch { project, .. }
+        | ToolCall::ApplyUnifiedDiff { project, .. }
+        | ToolCall::DeleteProjectFiles { project, .. }
+        | ToolCall::GitRestorePaths { project, .. }
+        | ToolCall::DiscardUntracked { project, .. }
+        | ToolCall::GitCommitPaths { project, .. }
+        | ToolCall::GitStatus { project, .. }
+        | ToolCall::GitDiffHunks { project, .. }
+        | ToolCall::GitReviewSummary { project, .. }
+        | ToolCall::GitLog { project, .. }
+        | ToolCall::ShowChanges { project, .. }
+        | ToolCall::CargoFmt { project, .. }
+        | ToolCall::CargoCheck { project, .. }
+        | ToolCall::CargoTest { project, .. }
+        | ToolCall::GoTest { project, .. }
+        | ToolCall::ListProjectFiles { project, .. }
+        | ToolCall::ListProjectTrackedFiles { project, .. }
+        | ToolCall::ProjectOverview { project, .. }
+        | ToolCall::WriteProjectFile { project, .. }
+        | ToolCall::SaveProjectArtifact { project, .. }
+        | ToolCall::ProjectArtifact { project, .. }
+        | ToolCall::ReadProjectArtifactMetadata { project, .. }
+        | ToolCall::ReadProjectArtifact { project, .. }
+        | ToolCall::ArtifactUploadBegin { project, .. }
+        | ToolCall::ArtifactUploadChunk { project, .. }
+        | ToolCall::ArtifactUploadFinish { project, .. }
+        | ToolCall::ArtifactUploadAbort { project, .. }
+        | ToolCall::ApplyTextEdits { project, .. }
+        | ToolCall::WorkspaceHygieneCheck { project, .. }
+        | ToolCall::LspStatus { project, .. }
+        | ToolCall::DocumentSymbols { project, .. }
+        | ToolCall::DocumentDiagnostics { project, .. }
+        | ToolCall::Hover { project, .. }
+        | ToolCall::WorkspaceSymbols { project, .. }
+        | ToolCall::GotoDefinition { project, .. }
+        | ToolCall::FindReferences { project, .. }
+        | ToolCall::CallHierarchy { project, .. } => Some(project),
+        #[cfg(feature = "workspace-checkpoints")]
+        ToolCall::WorkspaceCheckpointCreate { project, .. }
+        | ToolCall::WorkspaceCheckpointList { project, .. }
+        | ToolCall::WorkspaceCheckpointShow { project, .. }
+        | ToolCall::WorkspaceCheckpointRestore { project, .. }
+        | ToolCall::WorkspaceCheckpointDelete { project, .. } => Some(project),
+        _ => None,
+    }
+}
+
+/// Some legacy adapters echo the caller's accepted Project selector as an output
+/// field even though execution must use the canonical id internally.
+fn preserves_requested_project_in_output(call: &ToolCall) -> bool {
+    match call {
+        ToolCall::GitDiffHunks { .. }
+        | ToolCall::GitReviewSummary { .. }
+        | ToolCall::WorkspaceHygieneCheck { .. } => true,
+        #[cfg(feature = "workspace-checkpoints")]
+        ToolCall::WorkspaceCheckpointCreate { .. }
+        | ToolCall::WorkspaceCheckpointList { .. }
+        | ToolCall::WorkspaceCheckpointShow { .. }
+        | ToolCall::WorkspaceCheckpointRestore { .. }
+        | ToolCall::WorkspaceCheckpointDelete { .. } => true,
+        _ => false,
+    }
+}
+
 /// Add the Phase A lifecycle tuple to a definite pre-execution structured
 /// execution denial without changing generic denial helpers used by unrelated
 /// tools.
@@ -1715,18 +1794,22 @@ impl ToolRuntime {
             None
         };
         // Resolve model-facing Project selectors exactly once under the current
-        // authenticated principal, then bind only the internal execution call to
-        // that canonical identity. Several specialized adapters still perform
-        // legacy ProjectConfig lookups without an AuthContext; feeding them the
-        // raw caller-scoped `~pN` selector would incorrectly re-resolve it in the
-        // local-dev principal namespace. The retained `project_resolution` keeps
-        // the canonical id + Runner root fingerprint fence used by authorization,
-        // context projection, and adapters that consume ResolvedProject directly.
+        // authenticated principal, then bind only legacy inner adapters that still
+        // perform auth-less ProjectConfig lookups to the authorized canonical id.
+        // Do not rewrite every Project-bearing ToolCall: work_on_project preserves
+        // the caller selector in its output, Work Result deliberately requires an
+        // exact canonical input, and newer adapters consume the retained
+        // ResolvedProject or re-resolve with the current AuthContext themselves.
+        let requested_project_output = if preserves_requested_project_in_output(&call) {
+            call.project().map(str::to_string)
+        } else {
+            None
+        };
         if let Some(resolved) = project_resolution
             .as_ref()
             .and_then(|resolution| resolution.as_ref().ok())
         {
-            if let Some(project) = call.project_mut() {
+            if let Some(project) = canonical_execution_project_mut(&mut call) {
                 project.clone_from(&resolved.resolved_id);
             }
         }
@@ -1746,6 +1829,13 @@ impl ToolRuntime {
                 correlation,
             )
             .await;
+        if result.success {
+            if let Some(requested_project) = requested_project_output {
+                if result.output.get("project").is_some() {
+                    result.output["project"] = serde_json::Value::String(requested_project);
+                }
+            }
+        }
         if let Some(observation) = source_mutation {
             observation.finish(&result);
         }
@@ -3031,6 +3121,56 @@ impl ToolRuntime {
 mod structured_execution_sparse_projection_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn project_execution_binding_preserves_specialized_selector_semantics() {
+        let mut shell = ToolCall::RunShell {
+            project: "~p7".to_string(),
+            command: "true".to_string(),
+            session_id: None,
+            timeout_secs: None,
+            sync_wait_secs: None,
+            cwd: None,
+            purpose: None,
+            shell: None,
+        };
+        let shell_project = canonical_execution_project_mut(&mut shell)
+            .expect("legacy shell execution needs canonical binding");
+        shell_project.clone_from(&"agent:special:webcodex".to_string());
+        assert_eq!(shell.project(), Some("agent:special:webcodex"));
+        assert!(!preserves_requested_project_in_output(&shell));
+
+        let mut hygiene = ToolCall::WorkspaceHygieneCheck {
+            project: "~p7".to_string(),
+            max_findings: None,
+            include_tracked: None,
+            session_id: None,
+        };
+        assert!(canonical_execution_project_mut(&mut hygiene).is_some());
+        assert!(preserves_requested_project_in_output(&hygiene));
+
+        let mut work_on_project = ToolCall::WorkOnProject {
+            project: "~p7".to_string(),
+            client_id: None,
+            path: None,
+            mode: None,
+            base_ref: None,
+            instruction: "inspect".to_string(),
+            guidance_profile: CodingGuidanceProfile::default(),
+            include_extension_catalog: false,
+            session_id: None,
+        };
+        assert!(canonical_execution_project_mut(&mut work_on_project).is_none());
+        assert_eq!(work_on_project.project(), Some("~p7"));
+        assert!(!preserves_requested_project_in_output(&work_on_project));
+
+        let mut work_result = ToolCall::WorkResultState {
+            project: "demo".to_string(),
+            session_id: "wc_sess_x".to_string(),
+        };
+        assert!(canonical_execution_project_mut(&mut work_result).is_none());
+        assert_eq!(work_result.project(), Some("demo"));
+    }
 
     fn terminal_process_result(execution_source: &str) -> ToolResult {
         ToolResult::ok(json!({

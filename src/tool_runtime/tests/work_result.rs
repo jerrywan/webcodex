@@ -351,11 +351,25 @@ async fn work_result_state_reauthorizes_exact_identity_and_refresh_does_not_reco
         alias_present.output["error_kind"],
         "work_result_project_not_exact"
     );
+    let dispatched_alias = runtime
+        .dispatch_with_auth(
+            ToolCall::WorkResultState {
+                project: "demo".to_string(),
+                session_id: session.session_id.clone(),
+            },
+            Some(&auth),
+        )
+        .await;
+    assert!(!dispatched_alias.success);
+    assert_eq!(
+        dispatched_alias.output["error_kind"],
+        "work_result_project_not_exact"
+    );
     assert!(
         probe_patch_agent_request(&runtime, "work-result")
             .await
             .is_none(),
-        "a non-canonical project alias must fail before workspace observation"
+        "a non-canonical project alias must fail before workspace observation, including through top-level dispatch"
     );
 
     let after = runtime.sessions.summary(&session.session_id, None).unwrap();

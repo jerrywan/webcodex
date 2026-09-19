@@ -5304,10 +5304,8 @@ impl ToolCall {
     }
 
     /// Return the mutable Project selector carried by this call, when the tool is
-    /// Project-scoped. Runtime dispatch may use this only after authoritative
-    /// Project resolution to bind downstream adapters to the already-resolved
-    /// canonical identity; this accessor itself performs no resolution or
-    /// authorization.
+    /// Project-scoped. This is only a structural accessor; callers must not infer
+    /// resolution, authorization, or permission semantics from its presence.
     pub fn project_mut(&mut self) -> Option<&mut String> {
         match self {
             #[cfg(feature = "experimental-code-mode")]
