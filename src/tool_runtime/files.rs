@@ -45,9 +45,8 @@ mod search;
 
 pub(crate) use artifacts::{
     artifact_upload_begin_failure_is_definite, artifact_upload_failure_is_definite,
-    validate_artifact_file_path,
-    validate_artifact_mime_for_path, validate_project_artifact_export_snapshot,
-    ProjectArtifactExportSnapshot,
+    validate_artifact_file_path, validate_artifact_mime_for_path,
+    validate_project_artifact_export_snapshot, ProjectArtifactExportSnapshot,
     INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES, MAX_PROJECT_ARTIFACT_EXPORT_BYTES,
     MAX_PROJECT_ARTIFACT_UPLOAD_BYTES, MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES,
 };

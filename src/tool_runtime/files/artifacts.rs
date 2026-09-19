@@ -262,10 +262,7 @@ pub(crate) fn validate_project_artifact_export_snapshot(
     })
 }
 
-pub(crate) fn artifact_upload_failure_is_definite(
-    result: &ToolResult,
-    upload_id: &str,
-) -> bool {
+pub(crate) fn artifact_upload_failure_is_definite(result: &ToolResult, upload_id: &str) -> bool {
     result
         .output
         .get("upload_id")

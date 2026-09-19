@@ -4830,11 +4830,7 @@ async fn office_artifact_mime_policy_accepts_matching_save_and_upload_paths() {
             .await;
         assert!(!octet.success, "{path}");
         assert!(
-            !octet
-                .error
-                .as_deref()
-                .unwrap()
-                .contains("policy"),
+            !octet.error.as_deref().unwrap().contains("policy"),
             "generic binary MIME should pass policy before project resolution: {:?}",
             octet.error
         );
@@ -4942,11 +4938,7 @@ async fn common_media_artifact_mime_policy_accepts_save_upload_and_octet_paths()
             .await;
         assert!(!octet.success, "{path}");
         assert!(
-            !octet
-                .error
-                .as_deref()
-                .unwrap()
-                .contains("mime_type"),
+            !octet.error.as_deref().unwrap().contains("mime_type"),
             "generic binary MIME should pass policy before project resolution: {:?}",
             octet.error
         );

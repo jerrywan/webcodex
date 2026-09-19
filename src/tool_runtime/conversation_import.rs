@@ -108,15 +108,12 @@ fn sanitize_import_name(name: &str, fallback: &str) -> String {
         || stem
             .strip_prefix("COM")
             .or_else(|| stem.strip_prefix("LPT"))
-            .is_some_and(|suffix| {
-                suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9')
-            });
+            .is_some_and(|suffix| suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9'));
     if windows_reserved {
         out.insert(0, '_');
     }
     out
 }
-
 
 fn default_import_leaf(file_ref: &OpenAiFileIdRef, index: usize, mime: &str) -> String {
     let fallback = format!("artifact-{}", index + 1);
@@ -516,10 +513,7 @@ impl ToolRuntime {
             .as_deref()
             .or(file_ref.id.as_deref())
             .unwrap_or("artifact");
-        let reported_mime = file_ref
-            .mime_type
-            .as_deref()
-            .unwrap_or(GENERIC_BINARY_MIME);
+        let reported_mime = file_ref.mime_type.as_deref().unwrap_or(GENERIC_BINARY_MIME);
         let fallback = format!("artifact-{}", idx + 1);
         let leaf = input
             .targets
@@ -844,10 +838,9 @@ impl ToolRuntime {
             (SessionTransport::Mcp, HostFileImportProvenance::TrustedMcpHostFile) => {
                 ConversationImportDownloadPolicy::TrustedMcpHostFile
             }
-            (
-                SessionTransport::Mcp,
-                HostFileImportProvenance::AuthenticatedMcpOpenAiHostFile,
-            ) => ConversationImportDownloadPolicy::AuthenticatedMcpOpenAiHostFile,
+            (SessionTransport::Mcp, HostFileImportProvenance::AuthenticatedMcpOpenAiHostFile) => {
+                ConversationImportDownloadPolicy::AuthenticatedMcpOpenAiHostFile
+            }
             (SessionTransport::Api, HostFileImportProvenance::GptActionOpenAiHost) => {
                 ConversationImportDownloadPolicy::GptActionOpenAiHost
             }

@@ -1987,7 +1987,14 @@ fn mcp_artifact_export_incremental_base64_matches_whole_encoding() {
     let mut encoder = McpArtifactExportBase64Encoder::default();
     let mut encoded = String::new();
     let mut offset = 0usize;
-    for length in [1usize, 2, 7, INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES, 11, 65531] {
+    for length in [
+        1usize,
+        2,
+        7,
+        INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES,
+        11,
+        65531,
+    ] {
         if offset >= bytes.len() {
             break;
         }

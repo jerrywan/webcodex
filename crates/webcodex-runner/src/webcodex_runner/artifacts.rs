@@ -19,12 +19,12 @@ use webcodex_core::runner_operation::{RunnerFileOperation, RunnerFilePayload};
 mod inspection;
 mod upload;
 
+#[cfg(test)]
+use inspection::ARTIFACT_STREAM_BUFFER_BYTES;
 use inspection::{
     artifact_mime, artifact_mime_from_file, image_size, magic_mime, read_file_range_with_digest,
     read_limited, verify_upload_file, zip_entry_count,
 };
-#[cfg(test)]
-use inspection::ARTIFACT_STREAM_BUFFER_BYTES;
 #[cfg(test)]
 use upload::{
     commit_artifact_upload_part, enforce_artifact_upload_begin_admission, read_upload_state,
@@ -678,18 +678,17 @@ fn handle_read_project_artifact_export_chunk(
         Ok(value) => value,
         Err(e) => return line_edit_stdout(read_error(Some(path), e), start),
     };
-    let expected_sha256 = match payload.get("expected_sha256") {
-        Some(Value::String(value)) if is_hex_sha256(value) => value.as_str(),
-        _ => {
-            return line_edit_stdout(
+    let expected_sha256 =
+        match payload.get("expected_sha256") {
+            Some(Value::String(value)) if is_hex_sha256(value) => value.as_str(),
+            _ => return line_edit_stdout(
                 read_error(
                     Some(path),
                     "expected_sha256 is required and must be a lowercase 64-character hex digest",
                 ),
                 start,
-            )
-        }
-    };
+            ),
+        };
     if expected_file_bytes > MAX_ARTIFACT_EXPORT_BYTES {
         return line_edit_stdout(
             read_error(

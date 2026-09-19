@@ -124,7 +124,10 @@ async fn complete_one_transfer_chunk(
     upload_id: &str,
 ) -> usize {
     let source_request = wait_for_patch_agent_request(runtime, source_client).await;
-    assert_eq!(source_request.kind, "file_read_project_artifact_export_chunk");
+    assert_eq!(
+        source_request.kind,
+        "file_read_project_artifact_export_chunk"
+    );
     let source_payload: Value =
         serde_json::from_str(source_request.content.as_deref().unwrap()).unwrap();
     assert_eq!(source_payload["path"], source_path);
@@ -273,10 +276,9 @@ async fn transfer_project_artifact_streams_markdown_across_runners() {
     let destination_project = agent_test_project_id("transfer-destination");
     let source_path = "paper/README.md";
     let destination_path = "artifacts/README.md";
-    let bytes: Vec<u8> =
-        (0..(super::super::INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES + 17))
-            .map(|index| b'a' + (index % 23) as u8)
-            .collect();
+    let bytes: Vec<u8> = (0..(super::super::INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES + 17))
+        .map(|index| b'a' + (index % 23) as u8)
+        .collect();
     let expected_sha = sha256_hex(&bytes);
     let upload_id = "wc_upload_transfer_markdown";
 
@@ -335,7 +337,10 @@ async fn transfer_project_artifact_streams_markdown_across_runners() {
         .await;
         chunk_count += 1;
     }
-    assert_eq!(chunk_count, 2, "1 MiB internal streaming should require two chunks");
+    assert_eq!(
+        chunk_count, 2,
+        "1 MiB internal streaming should require two chunks"
+    );
 
     complete_destination_finish(
         &runtime,
@@ -615,9 +620,11 @@ async fn transfer_project_artifact_source_missing_stops_before_destination_write
     let result = task.await.unwrap();
     assert!(!result.success);
     assert_eq!(result.output["error_kind"], "source_read_failed");
-    assert!(probe_agent_request_for_instance(&runtime, "missing-destination", "inst")
-        .await
-        .is_none());
+    assert!(
+        probe_agent_request_for_instance(&runtime, "missing-destination", "inst")
+            .await
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -688,13 +695,7 @@ async fn transfer_project_artifact_source_snapshot_change_aborts_destination_upl
         "",
     )
     .await;
-    complete_destination_abort(
-        &runtime,
-        "snapshot-destination",
-        "copy.bin",
-        upload_id,
-    )
-    .await;
+    complete_destination_abort(&runtime, "snapshot-destination", "copy.bin", upload_id).await;
     let result = task.await.unwrap();
     assert!(!result.success);
     assert_eq!(result.output["error_kind"], "source_snapshot_changed");
@@ -846,7 +847,9 @@ async fn transfer_project_artifact_independently_authorizes_source_and_destinati
         )
         .await;
     assert!(!destination_denied.success);
-    assert!(probe_agent_request_for_instance(&runtime, "auth-source-bob", "inst")
-        .await
-        .is_none());
+    assert!(
+        probe_agent_request_for_instance(&runtime, "auth-source-bob", "inst")
+            .await
+            .is_none()
+    );
 }

@@ -287,10 +287,7 @@ mod tests {
             normalize_host_import_presentation_mime("README.md", Some(GENERIC_BINARY_MIME)),
             "text/markdown"
         );
-        assert_eq!(
-            export_presentation_mime("README.md", None),
-            "text/markdown"
-        );
+        assert_eq!(export_presentation_mime("README.md", None), "text/markdown");
     }
 
     #[test]
@@ -300,13 +297,19 @@ mod tests {
             Some("text/markdown")
         );
         assert_eq!(canonical_extension_for_mime("text/markdown"), Some(".md"));
-        assert_eq!(canonical_extension_for_mime("application/yaml"), Some(".yaml"));
+        assert_eq!(
+            canonical_extension_for_mime("application/yaml"),
+            Some(".yaml")
+        );
     }
 
     #[test]
     fn ooxml_keeps_matching_extension_requirement() {
         assert!(mime_is_compatible_with_path(DOCX_MIME, "paper.docx"));
         assert!(!mime_is_compatible_with_path(DOCX_MIME, "paper.bin"));
-        assert!(mime_is_compatible_with_path(GENERIC_BINARY_MIME, "paper.custom"));
+        assert!(mime_is_compatible_with_path(
+            GENERIC_BINARY_MIME,
+            "paper.custom"
+        ));
     }
 }

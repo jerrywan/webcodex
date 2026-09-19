@@ -949,8 +949,7 @@ async fn oauth_mcp_file_import_unallowlisted_active_client_saves_openai_host_fil
         runtime,
     ));
     let agent = tokio::spawn(complete_mcp_import_save(registry, bytes.clone()));
-    let temporary_url =
-        "https://files.oaiusercontent.com/temporary-secret-token/tier2-import.pptx";
+    let temporary_url = "https://files.oaiusercontent.com/temporary-secret-token/tier2-import.pptx";
 
     let (status, body, _) = oauth_mcp_request(
         &service,

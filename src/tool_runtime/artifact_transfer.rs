@@ -112,20 +112,20 @@ impl ToolRuntime {
                 }),
             );
         }
-        let snapshot = match validate_project_artifact_export_snapshot(&source_path, &metadata.output)
-        {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                return transfer_error(
-                    "invalid_source_snapshot",
-                    error,
-                    &source_project,
-                    &source_path,
-                    &destination_project,
-                    &destination_path,
-                )
-            }
-        };
+        let snapshot =
+            match validate_project_artifact_export_snapshot(&source_path, &metadata.output) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return transfer_error(
+                        "invalid_source_snapshot",
+                        error,
+                        &source_project,
+                        &source_path,
+                        &destination_project,
+                        &destination_path,
+                    )
+                }
+            };
 
         let begin = self
             .dispatch_transfer_artifact_write(
@@ -206,8 +206,7 @@ impl ToolRuntime {
 
         let mut offset = 0usize;
         while offset < snapshot.bytes {
-            let length =
-                (snapshot.bytes - offset).min(INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES);
+            let length = (snapshot.bytes - offset).min(INTERNAL_ARTIFACT_TRANSFER_CHUNK_BYTES);
             let chunk = match self
                 .read_project_artifact_export_chunk_internal(
                     &source_project,
@@ -338,18 +337,16 @@ impl ToolRuntime {
                     )
                 }
             };
-            let valid_source_chunk =
-                chunk.get("path").and_then(Value::as_str) == Some(source_path.as_str())
-                    && chunk.get("file_bytes").and_then(Value::as_u64)
-                        == Some(snapshot.bytes as u64)
-                    && chunk.get("offset").and_then(Value::as_u64) == Some(offset as u64)
-                    && chunk.get("bytes_returned").and_then(Value::as_u64)
-                        == Some(decoded.len() as u64)
-                    && chunk.get("next_offset").and_then(Value::as_u64)
-                        == Some(expected_next as u64)
-                    && !decoded.is_empty()
-                    && decoded.len() <= length
-                    && expected_next <= snapshot.bytes;
+            let valid_source_chunk = chunk.get("path").and_then(Value::as_str)
+                == Some(source_path.as_str())
+                && chunk.get("file_bytes").and_then(Value::as_u64) == Some(snapshot.bytes as u64)
+                && chunk.get("offset").and_then(Value::as_u64) == Some(offset as u64)
+                && chunk.get("bytes_returned").and_then(Value::as_u64)
+                    == Some(decoded.len() as u64)
+                && chunk.get("next_offset").and_then(Value::as_u64) == Some(expected_next as u64)
+                && !decoded.is_empty()
+                && decoded.len() <= length
+                && expected_next <= snapshot.bytes;
             if !valid_source_chunk {
                 let cleaned = self
                     .abort_transfer_upload(
@@ -421,8 +418,7 @@ impl ToolRuntime {
                     }),
                 );
             }
-            if write.output.get("next_offset").and_then(Value::as_u64)
-                != Some(expected_next as u64)
+            if write.output.get("next_offset").and_then(Value::as_u64) != Some(expected_next as u64)
             {
                 let cleaned = self
                     .abort_transfer_upload(

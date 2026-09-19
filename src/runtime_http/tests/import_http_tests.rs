@@ -441,16 +441,15 @@ async fn import_http_accepts_office_mime_and_extension_policy() {
 
     for path in ["payload.dat", "payload.artifact", "payload.customblob"] {
         let service = import_test_service_with_local_runtime().await;
-        let mut accepted_by_mime_policy =
-            TestClient::post("http://localhost/api/artifacts/import")
-                .bearer_auth("secret")
-                .json(&import_body(
-                    "https://example.com/file",
-                    "application/octet-stream",
-                    path,
-                ))
-                .send(&service)
-                .await;
+        let mut accepted_by_mime_policy = TestClient::post("http://localhost/api/artifacts/import")
+            .bearer_auth("secret")
+            .json(&import_body(
+                "https://example.com/file",
+                "application/octet-stream",
+                path,
+            ))
+            .send(&service)
+            .await;
         assert_eq!(
             super::effective_status(&accepted_by_mime_policy),
             salvo::http::StatusCode::BAD_REQUEST

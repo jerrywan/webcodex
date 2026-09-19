@@ -13,7 +13,6 @@ fn zero_bytes_sha256(len: usize) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-
 #[cfg(unix)]
 #[test]
 fn file_project_artifact_reads_reject_canonical_sensitive_paths() {
