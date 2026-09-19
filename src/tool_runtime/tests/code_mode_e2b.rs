@@ -225,7 +225,7 @@ async fn complete_mutation_fixture(
                 }],
                 "changed_paths": [],
             })
-        },
+        }
         MutationFixtureReply::ShaConflict { replacement } => {
             fs::write(&full, replacement).unwrap();
             let expected = change["expected_sha256"]

@@ -1072,7 +1072,10 @@ async fn apply_text_edits_success_mints_final_revisions_and_continues_without_re
     let continuation_request = wait_for_patch_agent_request(&runtime, client_id).await;
     let continuation_payload: Value =
         serde_json::from_str(continuation_request.content.as_deref().unwrap()).unwrap();
-    assert_eq!(continuation_payload["changes"][0]["expected_sha256"], edit_new);
+    assert_eq!(
+        continuation_payload["changes"][0]["expected_sha256"],
+        edit_new
+    );
     let edit_newer = "8".repeat(64);
     runtime
         .runner_registry
@@ -1098,7 +1101,11 @@ async fn apply_text_edits_success_mints_final_revisions_and_continues_without_re
         .await
         .unwrap();
     let continuation_result = continuation_task.await.unwrap();
-    assert!(continuation_result.success, "{:?}", continuation_result.error);
+    assert!(
+        continuation_result.success,
+        "{:?}",
+        continuation_result.error
+    );
     let edit_newer_revision = continuation_result.output["files"][0]["read_revision"]
         .as_u64()
         .unwrap();
@@ -1116,7 +1123,10 @@ async fn apply_text_edits_success_mints_final_revisions_and_continues_without_re
         )
         .await;
     assert!(!source_rejected.success);
-    assert_eq!(source_rejected.output["error_kind"], "read_revision_path_mismatch");
+    assert_eq!(
+        source_rejected.output["error_kind"],
+        "read_revision_path_mismatch"
+    );
     assert_no_apply_text_edits_runner_request(&runtime, client_id).await;
 
     let destination_continuation = guarded_edit(
@@ -1225,7 +1235,10 @@ async fn apply_text_edits_success_mints_final_revisions_and_continues_without_re
         )
         .await;
     assert!(!owner_rejected.success);
-    assert_eq!(owner_rejected.output["error_kind"], "read_revision_owner_mismatch");
+    assert_eq!(
+        owner_rejected.output["error_kind"],
+        "read_revision_owner_mismatch"
+    );
     let replacement_request = runtime
         .runner_registry
         .poll(RunnerPollRequest {
@@ -1873,8 +1886,13 @@ async fn apply_text_edits_dry_run_does_not_write() {
     assert!(result.output["files"][0]["read_revision"].is_null());
     assert!(result.output["files"][0].get("old_sha256").is_none());
     assert!(result.output["files"][0].get("new_sha256").is_none());
-    let next_revision = seed_read_revision(&runtime, &project, "after-dry-run.txt", &"c".repeat(64)).await;
-    assert_eq!(next_revision, before_revision + 1, "dry-run must not mutate the read revision registry");
+    let next_revision =
+        seed_read_revision(&runtime, &project, "after-dry-run.txt", &"c".repeat(64)).await;
+    assert_eq!(
+        next_revision,
+        before_revision + 1,
+        "dry-run must not mutate the read revision registry"
+    );
 }
 
 #[tokio::test]

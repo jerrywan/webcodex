@@ -656,23 +656,31 @@ pub(crate) fn apply_model_facing_output_budget(
         max_result_bytes,
     ) <= payload_budget;
     if continuation_fits {
-        attach_bounded_remaining_summaries(&mut budgeted, &summaries, payload_budget, |candidate| {
-            projected_batch_serialized_len_with_continuation(
-                candidate,
-                default_timeouts,
-                project,
-                original_queries,
-                session_id,
-                max_result_bytes,
-            )
-        });
+        attach_bounded_remaining_summaries(
+            &mut budgeted,
+            &summaries,
+            payload_budget,
+            |candidate| {
+                projected_batch_serialized_len_with_continuation(
+                    candidate,
+                    default_timeouts,
+                    project,
+                    original_queries,
+                    session_id,
+                    max_result_bytes,
+                )
+            },
+        );
     } else {
         if let Some(root) = budgeted.as_object_mut() {
             root.remove("next_index");
         }
-        attach_bounded_remaining_summaries(&mut budgeted, &summaries, payload_budget, |candidate| {
-            projected_batch_serialized_len(candidate, default_timeouts)
-        });
+        attach_bounded_remaining_summaries(
+            &mut budgeted,
+            &summaries,
+            payload_budget,
+            |candidate| projected_batch_serialized_len(candidate, default_timeouts),
+        );
     }
 
     let Some(root) = result.output.as_object_mut() else {
@@ -1009,7 +1017,10 @@ mod tests {
         item
     }
 
-    fn test_query(index: usize, result_mode: Option<super::super::SearchResultMode>) -> SearchProjectTextsQuery {
+    fn test_query(
+        index: usize,
+        result_mode: Option<super::super::SearchResultMode>,
+    ) -> SearchProjectTextsQuery {
         SearchProjectTextsQuery {
             pattern: format!("needle-{index}"),
             pattern_mode: None,
@@ -1264,7 +1275,10 @@ mod tests {
         assert_eq!(result.output["next_index"], 1);
         let summaries = result.output["remaining_summaries"].as_array().unwrap();
         assert_eq!(
-            summaries.iter().map(|summary| summary["index"].as_u64().unwrap()).collect::<Vec<_>>(),
+            summaries
+                .iter()
+                .map(|summary| summary["index"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
         assert_eq!(summaries[0]["returned_match_count"], 120);
@@ -1287,7 +1301,9 @@ mod tests {
 
     #[test]
     fn continuation_budget_has_priority_over_remaining_summaries() {
-        let queries = (0..4).map(|index| test_query(index, None)).collect::<Vec<_>>();
+        let queries = (0..4)
+            .map(|index| test_query(index, None))
+            .collect::<Vec<_>>();
         let completed = vec![
             default_matches_item(0, 1, 12_000),
             default_matches_item(1, 1, 12),
@@ -1355,7 +1371,10 @@ mod tests {
         let mut result = ToolResult::ok(output);
         super::super::dispatch::sparsify_search_batch_success_for_model(&[true; 4], &mut result);
         add_actionable_search_continuation(&mut result, "agent:oe:demo", &queries, None, None);
-        assert_eq!(result.output["suggested_call"]["tool"], "search_project_texts");
+        assert_eq!(
+            result.output["suggested_call"]["tool"],
+            "search_project_texts"
+        );
     }
 
     #[test]

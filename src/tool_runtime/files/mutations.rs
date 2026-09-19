@@ -684,15 +684,13 @@ fn validate_apply_text_edits_success_metadata(
         let new_sha256 = file.get("new_sha256");
         let sha_shape_valid = match change.kind {
             ApplyFileChangeKind::Create => {
-                matches!(old_sha256, Some(Value::Null))
-                    && apply_text_edits_sha256(new_sha256)
+                matches!(old_sha256, Some(Value::Null)) && apply_text_edits_sha256(new_sha256)
             }
             ApplyFileChangeKind::Edit | ApplyFileChangeKind::Rename => {
                 apply_text_edits_sha256(old_sha256) && apply_text_edits_sha256(new_sha256)
             }
             ApplyFileChangeKind::Delete => {
-                apply_text_edits_sha256(old_sha256)
-                    && matches!(new_sha256, Some(Value::Null))
+                apply_text_edits_sha256(old_sha256) && matches!(new_sha256, Some(Value::Null))
             }
         };
         if !sha_shape_valid {
@@ -3226,7 +3224,8 @@ impl ToolRuntime {
                         .expect("validated rename destination"),
                     _ => change.path.as_str(),
                 };
-                let target = read_revision_target(&resolved, final_path, &runner.runner_instance_id);
+                let target =
+                    read_revision_target(&resolved, final_path, &runner.runner_instance_id);
                 Some(self.read_revisions.observe(
                     target,
                     new_sha256.expect("validated final apply_text_edits sha256"),
@@ -4361,7 +4360,10 @@ mod tests {
         invalid.push(missing_files);
         let mut duplicate_file = valid_payload();
         let duplicate = duplicate_file["files"][0].clone();
-        duplicate_file["files"].as_array_mut().unwrap().push(duplicate);
+        duplicate_file["files"]
+            .as_array_mut()
+            .unwrap()
+            .push(duplicate);
         invalid.push(duplicate_file);
         let mut malformed_new_sha = valid_payload();
         malformed_new_sha["files"][0]["new_sha256"] = json!("ABC");
