@@ -206,8 +206,26 @@ fn goal_agent_wait_orchestration_flow_registers_before_worker_execution_without_
         .iter()
         .position(|tool| *tool == "start_agent_task_attempt")
         .unwrap();
-    assert!(associate < wait && wait < start);
+    let dispatch = flow
+        .tools
+        .iter()
+        .position(|tool| *tool == "start_agent_task_endpoint_continuation")
+        .unwrap();
+    let bootstrap = flow
+        .tools
+        .iter()
+        .position(|tool| *tool == "bootstrap_agent_conversation")
+        .unwrap();
+    let consume = flow
+        .tools
+        .iter()
+        .position(|tool| *tool == "consume_agent_wake")
+        .unwrap();
+    assert!(associate < wait && wait < start && start < dispatch);
+    assert!(dispatch < bootstrap && bootstrap < consume);
     for required in [
+        "start_agent_task_endpoint_continuation",
+        "bootstrap_agent_conversation",
         "consume_agent_wake",
         "read_agent_wait",
         "get_goal",
@@ -222,7 +240,9 @@ fn goal_agent_wait_orchestration_flow_registers_before_worker_execution_without_
         "explicit 1..8 task selector list",
         "any for first-result continuation",
         "all for fan-in",
-        "only after registration start worker execution",
+        "only after registration start each worker with start_agent_task_attempt followed by start_agent_task_endpoint_continuation",
+        "fresh resumed coordinator turn bootstrap the exact wake",
+        "consume it immediately",
         "never derive the wait source list from goal correlations",
         "not treat this flow as a scheduler",
         "explicitly decide/update goal state",
