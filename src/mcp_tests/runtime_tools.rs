@@ -113,14 +113,15 @@ async fn mcp_tools_list_exposes_canonical_coding_bootstrap_and_runtime_status_ux
         );
     }
 
-    let finish_props = tool("finish_coding_task")["inputSchema"]["properties"]
+    let finish_schema = webcodex_tool_contracts::input_schema_for_tool("finish_coding_task");
+    let finish_props = finish_schema["properties"]
         .as_object()
         .expect("finish_coding_task inputSchema properties");
     assert!(
         finish_props.contains_key("include_workspace"),
         "MCP finish_coding_task schema should expose include_workspace"
     );
-    let finish_required = tool("finish_coding_task")["inputSchema"]["required"]
+    let finish_required = finish_schema["required"]
         .as_array()
         .expect("finish_coding_task required fields");
     assert!(

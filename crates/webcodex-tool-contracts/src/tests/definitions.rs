@@ -624,6 +624,8 @@ fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
     }
 
     for name in [
+        "workspace_hygiene_check",
+        "finish_coding_task",
         "runner_config_check",
         "runner_config_reload",
         "ssh_resource",
@@ -644,6 +646,7 @@ fn adaptive_runtime_direct_declarations_are_visible_ranked_and_unique() {
         "go_test",
     ] {
         let definition = lookup_tool_definition(name).expect("model-visible long-tail definition");
+        assert!(definition.visibility.is_model_visible(), "{name}");
         assert_eq!(
             definition.adaptive_runtime_direct_rank(),
             None,

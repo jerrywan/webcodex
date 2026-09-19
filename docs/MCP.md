@@ -305,6 +305,8 @@ and execute through `call_runtime_tool` with unchanged scope, Project, permissio
 and capability checks. Existing direct protocol compatibility and the
 `memory.bootstrap` context sidecar remain supported. Ordinary Skill selection
 and execution keep the direct `skill_load` and `run_skill_resource` paths.
+The optional closeout helpers `workspace_hygiene_check` and `finish_coding_task`
+are model-visible gateway tools; review/coding catalogs still recommend them.
 
 ### ChatGPT file bridge
 

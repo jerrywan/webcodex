@@ -1201,7 +1201,14 @@ async fn tool_manifest_intent_coding_returns_ranked_compact_tools() {
             "coding intent should not recommend {compatibility_or_overlap}: {names:?}"
         );
     }
-    for gateway_specialist in ["apply_patch", "run_script", "cargo_fmt", "go_test"] {
+    for gateway_specialist in [
+        "apply_patch",
+        "run_script",
+        "cargo_fmt",
+        "go_test",
+        "workspace_hygiene_check",
+        "finish_coding_task",
+    ] {
         let tool = result.output["tools"]
             .as_array()
             .unwrap()
@@ -1228,8 +1235,6 @@ async fn tool_manifest_intent_coding_returns_ranked_compact_tools() {
         "cargo_test",
         "show_changes",
         "git_diff_hunks",
-        "workspace_hygiene_check",
-        "finish_coding_task",
     ] {
         let tool = result.output["tools"]
             .as_array()
@@ -2320,6 +2325,12 @@ async fn tool_manifest_routing_metadata_uses_canonical_adaptive_routes() {
         ("git_diff_hunks", "direct", None),
         ("run_script", "gateway", Some("call_runtime_tool")),
         (
+            "workspace_hygiene_check",
+            "gateway",
+            Some("call_runtime_tool"),
+        ),
+        ("finish_coding_task", "gateway", Some("call_runtime_tool")),
+        (
             "save_project_artifact",
             "gateway",
             Some("call_runtime_tool"),
@@ -2396,9 +2407,16 @@ async fn tool_manifest_operator_extensions_require_explicit_family_capabilities(
         let skill = manifest(name, skill_only).await;
         assert!(skill.success, "{:?}", skill.error);
         assert_eq!(skill.output["contract"]["availability"], "gateway");
-        assert_eq!(skill.output["contract"]["gateway_tool"], "call_runtime_tool");
+        assert_eq!(
+            skill.output["contract"]["gateway_tool"],
+            "call_runtime_tool"
+        );
         assert!(skill.output["contract"]["input_schema"].is_object());
-        assert!(!manifest(name, ToolProtocolCapabilities::default()).await.success);
+        assert!(
+            !manifest(name, ToolProtocolCapabilities::default())
+                .await
+                .success
+        );
     }
     for hidden_without_skill_cap in ["skill_install", "memory_search", "read_tool_trace"] {
         let hidden = manifest(hidden_without_skill_cap, skill_only).await;
@@ -2416,10 +2434,19 @@ async fn tool_manifest_operator_extensions_require_explicit_family_capabilities(
     let memory = manifest("memory_search", memory_only).await;
     assert!(memory.success, "{:?}", memory.error);
     assert_eq!(memory.output["contract"]["availability"], "gateway");
-    assert_eq!(memory.output["contract"]["gateway_tool"], "call_runtime_tool");
+    assert_eq!(
+        memory.output["contract"]["gateway_tool"],
+        "call_runtime_tool"
+    );
     let canonical = crate::tool_runtime::memory_runtime_tool_specs().remove(0);
-    assert_eq!(memory.output["contract"]["description"], canonical.description);
-    assert_eq!(memory.output["contract"]["input_schema"], canonical.input_schema);
+    assert_eq!(
+        memory.output["contract"]["description"],
+        canonical.description
+    );
+    assert_eq!(
+        memory.output["contract"]["input_schema"],
+        canonical.input_schema
+    );
     assert!(!manifest("skill_list", memory_only).await.success);
     assert!(!manifest("read_tool_trace", memory_only).await.success);
 

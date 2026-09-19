@@ -60,33 +60,30 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
         ).with_gpt_action_description("Start or resume exact project work. Use project or client_id+path; omit session_id for a fresh Workflow Session. Defaults return project/workflow/extension context. worktree mode creates an isolated Runner-managed Git worktree without widening authority."),
         10,
     ),
-    adaptive_runtime_direct(
-        requires_explicit_business_session(model_spec(
-            def(
-                "finish_coding_task",
-                super::ToolAuditPolicy::TYPED_CANONICAL,
-                ModelVisible,
-                "workflow",
-                Some(GitOrShell),
-                TOOL_PROVIDER_CONTROL,
-                super::ToolSemanticContract {
-                    effect: super::ToolEffect::Observe,
-                    risk: Read,
-                    approval: super::ToolApprovalPolicy::None,
-                    idempotency: super::ToolIdempotency::PureRead,
-                },
-                Some(RUNTIME_READ),
-                true,
-                NoPath,
-                false,
-                false,
-                super::ToolSessionEvidencePolicy::NONE,
-            )
-            .with_activity_kind(super::ToolActivityKind::Review),
-            "Return an optional deterministic evidence snapshot for model review, including workspace, validation, jobs, and recorded tool events. The result is advisory: it does not decide task completion, replace direct diff or test review, or generate the user-facing final report.",
-        )),
-        150,
-    ),
+    requires_explicit_business_session(model_spec(
+        def(
+            "finish_coding_task",
+            super::ToolAuditPolicy::TYPED_CANONICAL,
+            ModelVisible,
+            "workflow",
+            Some(GitOrShell),
+            TOOL_PROVIDER_CONTROL,
+            super::ToolSemanticContract {
+                effect: super::ToolEffect::Observe,
+                risk: Read,
+                approval: super::ToolApprovalPolicy::None,
+                idempotency: super::ToolIdempotency::PureRead,
+            },
+            Some(RUNTIME_READ),
+            true,
+            NoPath,
+            false,
+            false,
+            super::ToolSessionEvidencePolicy::NONE,
+        )
+        .with_activity_kind(super::ToolActivityKind::Review),
+        "Return an optional deterministic evidence snapshot for model review, including workspace, validation, jobs, and recorded tool events. The result is advisory: it does not decide task completion, replace direct diff or test review, or generate the user-facing final report.",
+    )),
     adaptive_runtime_direct(
         requires_explicit_business_session(model_spec(
             def(
