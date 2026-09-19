@@ -43,6 +43,10 @@ const MAX_OPEN_ITEMS: usize = 20;
 #[cfg(feature = "workspace-checkpoints")]
 const MAX_RECENT_CHECKPOINTS: usize = 10;
 const HANDOFF_MESSAGE_CHARS: usize = 240;
+// Result-side changed-path evidence is sanitized by the workflow-session recorder
+// to at most 201 project-relative paths per event. Hitting that bound cannot
+// prove completeness, so continuity attribution must fail closed.
+const SESSION_CHANGED_PATH_RECORDER_BOUND: usize = 201;
 
 /// Actionable guidance only for a validation failure that still belongs to the
 /// current evidence window. Identity reuse is conditional: it strengthens
@@ -50,6 +54,103 @@ const HANDOFF_MESSAGE_CHARS: usize = 240;
 /// never a requirement to clean stale audit history.
 pub(crate) const VALIDATION_IDENTITY_REUSE_ACTION: &str =
     "address the current validation failure; when intentionally rerunning it, reuse the original assertion_name when supplied and the same validation identity";
+
+fn session_changed_path_evidence(events: &[SessionEvent]) -> (Vec<Value>, bool) {
+    let mut paths = HashSet::<String>::new();
+    let mut complete = true;
+    for event in canonical_tool_call_finished_events(events) {
+        if event.changed_paths.len() >= SESSION_CHANGED_PATH_RECORDER_BOUND {
+            // The per-event recorder silently stops at this bound, so equality
+            // to the bound cannot prove that the source list was complete.
+            complete = false;
+        }
+        paths.extend(event.changed_paths.iter().cloned());
+    }
+    let mut paths = paths.into_iter().collect::<Vec<_>>();
+    paths.sort();
+    (paths.into_iter().map(Value::String).collect(), complete)
+}
+
+fn workspace_continuity_projection(
+    workspace: &Value,
+    session_changed_paths: &[Value],
+    history_complete: bool,
+) -> Value {
+    let session_paths = session_changed_paths
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    let current_paths = workspace
+        .get("files")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("path").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    let current_total = workspace
+        .get("files_total")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or(current_paths.len());
+    let files_returned = workspace
+        .get("files_returned")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or(current_paths.len());
+    let files_truncated = workspace
+        .get("files_truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(current_total != files_returned);
+    let git_available = workspace
+        .get("git_available")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let clean = workspace
+        .get("clean")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let overlap_count = current_paths.intersection(&session_paths).count();
+    let unattributed_paths_count = current_paths.len().saturating_sub(overlap_count);
+    let complete_workspace_paths =
+        git_available && !files_truncated && current_total == current_paths.len();
+
+    let status = if !history_complete || !complete_workspace_paths {
+        "unproven"
+    } else if current_paths.is_empty() {
+        if clean {
+            "clean"
+        } else {
+            "unproven"
+        }
+    } else if clean {
+        "unproven"
+    } else if overlap_count == current_paths.len() {
+        "consistent_with_session_history"
+    } else if overlap_count > 0 {
+        "partially_attributed"
+    } else {
+        "unattributed"
+    };
+
+    json!({
+        "status": status,
+        "current_dirty_paths_count": current_paths.len(),
+        "session_changed_paths_count": session_paths.len(),
+        "overlap_count": overlap_count,
+        "unattributed_paths_count": unattributed_paths_count,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn workspace_continuity_projection_for_test(
+    workspace: &Value,
+    session_changed_paths: &[Value],
+    history_complete: bool,
+) -> Value {
+    workspace_continuity_projection(workspace, session_changed_paths, history_complete)
+}
 
 impl ToolRuntime {
     pub(crate) async fn session_handoff_summary(
@@ -296,8 +397,16 @@ impl ToolRuntime {
             .unwrap_or(false);
         if has_project && include_workspace {
             let project = project.clone().unwrap_or_default();
-            let workspace = self.handoff_workspace_summary(&project).await;
+            let (continuity_changed_paths, changed_paths_complete) =
+                session_changed_path_evidence(&closeout_session.events);
+            let history_complete = !closeout_session.retention_truncated
+                && !closeout_session.events_truncated
+                && changed_paths_complete;
+            let (workspace, continuity) = self
+                .handoff_workspace_summary(&project, &continuity_changed_paths, history_complete)
+                .await;
             output["workspace"] = workspace;
+            output["workspace_continuity"] = continuity;
         }
 
         // --- optional checkpoint candidates ---
@@ -387,11 +496,15 @@ impl ToolRuntime {
         });
 
         if !diagnostic {
-            return ToolResult::ok(json!({
+            let mut handoff = json!({
                 "session_id": output["session_id"],
                 "project": output["project"],
                 "handoff_brief": output["handoff_brief"],
-            }));
+            });
+            if let Some(workspace_continuity) = output.get("workspace_continuity") {
+                handoff["workspace_continuity"] = workspace_continuity.clone();
+            }
+            return ToolResult::ok(handoff);
         }
         let compact = compact_handoff_output(&output);
         for (key, value) in compact.as_object().unwrap() {
@@ -410,7 +523,12 @@ impl ToolRuntime {
     /// Build a bounded workspace summary reusing the read-only `show_changes`
     /// git inspection path. Returns only clean/branch/head/counts/warnings/
     /// suggested_next_actions — never hunks, full diffs, or file contents.
-    async fn handoff_workspace_summary(&self, project: &str) -> Value {
+    async fn handoff_workspace_summary(
+        &self,
+        project: &str,
+        session_changed_paths: &[Value],
+        history_complete: bool,
+    ) -> (Value, Value) {
         let show_result = self
             .show_changes(project.to_string(), None, Some(false), None, None, None)
             .await;
@@ -427,18 +545,21 @@ impl ToolRuntime {
                 "kind": "git_unavailable",
                 "message": "git-backed workspace inspection unavailable; project may not be a git repository",
             }));
-            return json!({
-                "project": project,
-                "git_available": false,
-                "non_git_project": show_result.output.get("non_git_project").cloned().unwrap_or(json!(false)),
-                "clean": true,
-                "branch": null,
-                "head": null,
-                "changed_files_count": 0,
-                "counts": {},
-                "warnings": json!(warnings),
-                "suggested_next_actions": [],
-            });
+            return (
+                json!({
+                    "project": project,
+                    "git_available": false,
+                    "non_git_project": show_result.output.get("non_git_project").cloned().unwrap_or(json!(false)),
+                    "clean": true,
+                    "branch": null,
+                    "head": null,
+                    "changed_files_count": 0,
+                    "counts": {},
+                    "warnings": json!(warnings),
+                    "suggested_next_actions": [],
+                }),
+                workspace_continuity_projection(&show_result.output, session_changed_paths, false),
+            );
         }
         let counts = show_result
             .output
@@ -479,18 +600,26 @@ impl ToolRuntime {
             }));
         }
 
-        json!({
-            "project": project,
-            "git_available": json!(git_available),
-            "non_git_project": show_result.output.get("non_git_project").cloned().unwrap_or(json!(false)),
-            "clean": show_result.output.get("clean").cloned().unwrap_or(json!(true)),
-            "branch": show_result.output.get("branch").cloned().unwrap_or(Value::Null),
-            "head": show_result.output.get("head").cloned().unwrap_or(Value::Null),
-            "changed_files_count": changed_files_count,
-            "counts": counts,
-            "warnings": json!(warnings),
-            "suggested_next_actions": show_result.output.get("suggested_next_actions").cloned().unwrap_or_else(|| json!([])),
-        })
+        let continuity = workspace_continuity_projection(
+            &show_result.output,
+            session_changed_paths,
+            history_complete,
+        );
+        (
+            json!({
+                "project": project,
+                "git_available": json!(git_available),
+                "non_git_project": show_result.output.get("non_git_project").cloned().unwrap_or(json!(false)),
+                "clean": show_result.output.get("clean").cloned().unwrap_or(json!(true)),
+                "branch": show_result.output.get("branch").cloned().unwrap_or(Value::Null),
+                "head": show_result.output.get("head").cloned().unwrap_or(Value::Null),
+                "changed_files_count": changed_files_count,
+                "counts": counts,
+                "warnings": json!(warnings),
+                "suggested_next_actions": show_result.output.get("suggested_next_actions").cloned().unwrap_or_else(|| json!([])),
+            }),
+            continuity,
+        )
     }
 
     /// Build a bounded checkpoint summary using the read-only
