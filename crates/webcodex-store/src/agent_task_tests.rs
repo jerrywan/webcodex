@@ -723,6 +723,7 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
             &owner,
             NewAgentWait {
                 target_agent_id: waiter.clone(),
+                goal_id: None,
                 endpoint_id: wait_endpoint.endpoint_id.clone(),
                 expected_controller_generation: wait_endpoint.controller_generation,
                 mode: AgentWaitMode::Any,
@@ -904,6 +905,147 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
         )
         .unwrap();
     assert_eq!(replay_attention_count, 1);
+}
+
+#[test]
+fn backend_terminal_truth_routes_goal_scoped_wait_without_duplicate_attention() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("agent-task-coding-goal-scoped-wait.db")).unwrap();
+    let owner = principal('5');
+    let worker = agent(&db, &owner, "coding-goal-scoped-worker");
+    let controller = agent(&db, &owner, "coding-goal-scoped-controller");
+    let endpoint = db
+        .attach_agent_endpoint(
+            &owner,
+            NewAgentEndpoint {
+                agent_id: controller.clone(),
+                host: "ChatGPT".to_string(),
+                client_attachment_id: Some("coding-goal-scoped-controller-view".to_string()),
+                wake_capable: true,
+                idempotency_key: "coding-goal-scoped-endpoint".to_string(),
+            },
+        )
+        .unwrap()
+        .endpoint;
+    let now = wall_now_ms();
+    let task_id = create_assigned_task(&db, &owner, &worker, "coding-goal-scoped-task");
+    let goal_id = db
+        .create_goal_at(
+            &owner,
+            NewGoal {
+                title: "Coding Goal-scoped rendezvous".to_string(),
+                objective: "Route exact terminal attention through the explicit rendezvous."
+                    .to_string(),
+                controller_agent_id: Some(controller.clone()),
+                idempotency_key: "coding-goal-scoped-goal".to_string(),
+            },
+            now,
+        )
+        .unwrap()
+        .goal
+        .summary
+        .goal_id;
+    db.associate_goal_reference_at(
+        &owner,
+        &goal_id,
+        GoalCorrelationKind::AgentTask,
+        &task_id,
+        "coding-goal-scoped-link",
+        now + 1,
+    )
+    .unwrap();
+    let agent_wait = db
+        .create_agent_wait(
+            &owner,
+            NewAgentWait {
+                target_agent_id: controller.clone(),
+                goal_id: Some(goal_id.clone()),
+                endpoint_id: endpoint.endpoint_id.clone(),
+                expected_controller_generation: endpoint.controller_generation,
+                mode: AgentWaitMode::All,
+                events: vec![AgentWaitEventSelector {
+                    kind: AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL.to_string(),
+                    task_id: task_id.clone(),
+                }],
+                idempotency_key: "coding-goal-scoped-wait".to_string(),
+            },
+        )
+        .unwrap()
+        .agent_wait;
+    assert_eq!(agent_wait.state, AgentWaitState::Waiting);
+    assert_eq!(agent_wait.match_count, 0);
+
+    let started = start(
+        &db,
+        &owner,
+        &task_id,
+        &worker,
+        "coding-goal-scoped-start",
+        now + 2,
+    );
+    let intent = coding_binding_intent("goal-scoped-terminal-completed");
+    prepare_coding_binding(&db, &owner, &task_id, &worker, &started, &intent, now + 3);
+    db.claim_agent_task_coding_run_dispatch(
+        &owner,
+        &task_id,
+        &started.attempt.attempt_id,
+        &worker,
+        &started.attempt_fence,
+        1,
+        &intent.binding_intent_fingerprint,
+    )
+    .unwrap();
+    let completed = coding_observation(&intent, "completed", "completed", 9);
+    db.record_agent_task_coding_run_observation(
+        &owner,
+        &task_id,
+        &started.attempt.attempt_id,
+        &completed,
+    )
+    .unwrap();
+
+    let reconciled = db
+        .terminalize_agent_task_coding_run(
+            &owner,
+            &task_id,
+            &started.attempt.attempt_id,
+            &completed,
+            Some("bounded coding result"),
+            Some("coding_agent_completed"),
+        )
+        .unwrap();
+    assert!(reconciled.state_changed);
+    assert_eq!(reconciled.attention_event_count, 0);
+    assert!(reconciled.attention_target_agent_ids.is_empty());
+    assert_eq!(
+        reconciled.wait_target_agent_ids,
+        vec![controller.clone()],
+        "CodingAgent terminal reconciliation must schedule only the explicit scoped Wait"
+    );
+    let triggered = db.read_agent_wait(&owner, &agent_wait.wait_id).unwrap();
+    assert_eq!(triggered.state, AgentWaitState::Triggered);
+    assert_eq!(triggered.match_count, 1);
+    assert_eq!(triggered.goal_id.as_deref(), Some(goal_id.as_str()));
+    let attention_count: i64 = db
+        .conn_for_tests()
+        .query_row(
+            "SELECT COUNT(*) FROM wc_agent_attention_events
+             WHERE goal_id = ?1 AND task_id = ?2 AND task_attempt_id = ?3",
+            params![goal_id, task_id, started.attempt.attempt_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(attention_count, 0);
+    let wait_wake_count: i64 = db
+        .conn_for_tests()
+        .query_row(
+            "SELECT COUNT(*) FROM wc_agent_wakes
+             WHERE trigger_kind = 'agent_wait_events' AND source_wait_id = ?1 AND state = 'pending'",
+            [agent_wait.wait_id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(wait_wake_count, 1);
 }
 
 #[test]

@@ -2867,6 +2867,7 @@ fn agent_wait_model_schema_preserves_bounded_join_sources_without_private_bookke
             ["agent_wait"];
         let wait = serde_json::json!({
             "wait_id": wait_id,
+            "goal_id": null,
             "state": "waiting",
             "mode": "all",
             "source_count": 2,
@@ -2875,11 +2876,25 @@ fn agent_wait_model_schema_preserves_bounded_join_sources_without_private_bookke
             "matches": [matched]
         });
         test_support::validate_schema_instance(&wait, schema).unwrap();
-        for required in ["mode", "source_count", "match_count", "sources", "matches"] {
+        for required in [
+            "goal_id",
+            "mode",
+            "source_count",
+            "match_count",
+            "sources",
+            "matches",
+        ] {
             let mut missing = wait.clone();
             missing.as_object_mut().unwrap().remove(required);
             assert!(test_support::validate_schema_instance(&missing, schema).is_err());
         }
+        let mut scoped = wait.clone();
+        scoped["goal_id"] = serde_json::json!("wc_goal_GoGoGoGoGoGoGoGo");
+        test_support::validate_schema_instance(&scoped, schema).unwrap();
+        assert_eq!(
+            schema["properties"]["goal_id"]["anyOf"][0]["pattern"],
+            "^wc_goal_[A-Za-z0-9_-]{16}$"
+        );
         let mut private_source = wait.clone();
         private_source["sources"][0]["ordinal"] = serde_json::json!(0);
         assert!(test_support::validate_schema_instance(&private_source, schema).is_err());

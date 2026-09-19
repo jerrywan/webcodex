@@ -15,7 +15,14 @@ fn assert_sparse_wait(
     super::super::dispatch::ModelFacingProjectionPlan::capture(&call).project(&mut model);
     let durable = &canonical.output["agent_wait"];
     let wait = &model.output["agent_wait"];
-    for key in ["wait_id", "state", "mode", "source_count", "match_count"] {
+    for key in [
+        "wait_id",
+        "goal_id",
+        "state",
+        "mode",
+        "source_count",
+        "match_count",
+    ] {
         assert_eq!(wait[key], durable[key], "model must preserve {key}");
     }
     assert_eq!(model.output["replayed"], canonical.output["replayed"]);
@@ -43,7 +50,7 @@ fn assert_sparse_wait(
         );
         assert!(wait.get(key).is_none(), "model must not receive {key}");
     }
-    assert_eq!(wait.as_object().unwrap().len(), 7);
+    assert_eq!(wait.as_object().unwrap().len(), 8);
     for (source, original) in wait["sources"]
         .as_array()
         .unwrap()
@@ -318,6 +325,7 @@ fn wait_runtime_surface_returns_exact_wait_and_existing_continuation_projection(
         endpoint_id.clone(),
         generation,
         AgentWaitModeCall::Any,
+        None,
         vec![
             AgentWaitEventSelectorCall {
                 kind: "agent_task_terminal".to_string(),
@@ -409,6 +417,111 @@ fn wait_runtime_surface_returns_exact_wait_and_existing_continuation_projection(
     assert!(replay.success, "{:?}", replay.output);
     assert_eq!(replay.output["replayed"], true);
     assert_eq!(replay.output["state_changed"], false);
+}
+
+#[test]
+fn goal_scoped_wait_model_projection_exposes_only_exact_goal_reference() {
+    let (_temp, _db, runtime) = runtime_with_db();
+    let controller = create_agent(&runtime, "goal-scoped-projection-controller");
+    let worker = create_agent(&runtime, "goal-scoped-projection-worker");
+    let endpoint = runtime.attach_agent_endpoint(
+        None,
+        controller.clone(),
+        "ChatGPT".to_string(),
+        Some("goal-scoped-projection-view".to_string()),
+        "goal-scoped-projection-endpoint".to_string(),
+    );
+    assert!(endpoint.success, "{:?}", endpoint.output);
+    let endpoint_id = endpoint.output["endpoint"]["endpoint_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let generation = endpoint.output["endpoint"]["controller_generation"]
+        .as_i64()
+        .unwrap();
+
+    let created_goal = runtime.create_goal_with_controller(
+        None,
+        "PRIVATE GOAL TITLE MUST NOT LEAK".to_string(),
+        "PRIVATE GOAL OBJECTIVE MUST NOT LEAK".to_string(),
+        Some(controller.clone()),
+        "goal-scoped-projection-goal".to_string(),
+    );
+    assert!(created_goal.success, "{:?}", created_goal.output);
+    let goal_id = created_goal.output["goal"]["summary"]["goal_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let created_task = runtime.create_agent_task(
+        None,
+        "Goal scoped projection source".to_string(),
+        "PRIVATE TASK INSTRUCTION MUST NOT LEAK".to_string(),
+        Some(worker),
+        None,
+        None,
+        Some("agent:special:PRIVATE_PROJECT_MUST_NOT_LEAK".to_string()),
+        "goal-scoped-projection-task".to_string(),
+    );
+    assert!(created_task.success, "{:?}", created_task.output);
+    let task_id = created_task.output["task"]["summary"]["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let linked = runtime.associate_goal_agent_task(
+        None,
+        goal_id.clone(),
+        task_id.clone(),
+        "goal-scoped-projection-link".to_string(),
+    );
+    assert!(linked.success, "{:?}", linked.output);
+
+    let waited = runtime.wait_for_agent_events(
+        None,
+        controller.clone(),
+        endpoint_id.clone(),
+        generation,
+        AgentWaitModeCall::All,
+        Some(goal_id.clone()),
+        vec![AgentWaitEventSelectorCall {
+            kind: "agent_task_terminal".to_string(),
+            task_id: task_id.clone(),
+        }],
+        "goal-scoped-projection-wait".to_string(),
+    );
+    assert!(waited.success, "{:?}", waited.output);
+    assert_eq!(waited.output["agent_wait"]["goal_id"], goal_id);
+    assert_eq!(waited.output["agent_wait"]["state"], "waiting");
+    assert_sparse_wait(
+        "wait_for_agent_events",
+        serde_json::json!({
+            "agent_id": controller,
+            "endpoint_id": endpoint_id,
+            "expected_controller_generation": generation,
+            "mode": "all",
+            "goal_id": goal_id,
+            "events": [{"kind":"agent_task_terminal","task_id":task_id}],
+            "idempotency_key": "goal-scoped-projection-wait"
+        }),
+        &waited,
+    );
+    let serialized = waited.output["agent_wait"].to_string();
+    for private in [
+        "PRIVATE GOAL TITLE MUST NOT LEAK",
+        "PRIVATE GOAL OBJECTIVE MUST NOT LEAK",
+        "PRIVATE TASK INSTRUCTION MUST NOT LEAK",
+        "PRIVATE_PROJECT_MUST_NOT_LEAK",
+        "controller_generation",
+        "terminal_result",
+        "terminal_reason",
+        "attempt_fence",
+        "consume_token",
+    ] {
+        assert!(
+            !serialized.contains(private),
+            "Goal-scoped Wait model output leaked {private}"
+        );
+    }
 }
 
 #[test]

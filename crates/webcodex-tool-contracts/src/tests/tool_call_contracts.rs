@@ -220,6 +220,7 @@ fn agent_wait_calls_parse_closed_selectors() {
         ToolCall::WaitForAgentEvents {
             expected_controller_generation: 4,
             mode: AgentWaitModeCall::Any,
+            goal_id: None,
             ref events,
             ..
         } if events.len() == 1 && events[0].kind == "agent_task_terminal" && events[0].task_id == PRIVATE_TASK
@@ -262,6 +263,27 @@ fn agent_wait_calls_parse_closed_selectors() {
             ..
         }
     ));
+    let scoped = ToolCall::from_tool_name(
+        "wait_for_agent_events",
+        json!({
+            "agent_id": "wc_dagent_iavN7wEjRWeJq83v",
+            "endpoint_id": "wc_endpoint_iavN7wEjRWeJq83v",
+            "expected_controller_generation": 4,
+            "mode": "all",
+            "goal_id": "wc_goal_GoGoGoGoGoGoGoGo",
+            "events": [{"kind":"agent_task_terminal","task_id":PRIVATE_TASK}],
+            "idempotency_key": PRIVATE_KEY,
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        scoped,
+        ToolCall::WaitForAgentEvents {
+            mode: AgentWaitModeCall::All,
+            goal_id: Some(ref goal_id),
+            ..
+        } if goal_id == "wc_goal_GoGoGoGoGoGoGoGo"
+    ));
     let specs = crate::registered_tool_specs();
     let wait_spec = specs
         .iter()
@@ -270,6 +292,14 @@ fn agent_wait_calls_parse_closed_selectors() {
     let mode_schema = &wait_spec.input_schema["properties"]["mode"];
     assert_eq!(mode_schema["enum"], json!(["any", "all"]));
     assert_eq!(mode_schema["default"], "any");
+    assert_eq!(
+        wait_spec.input_schema["properties"]["goal_id"]["type"],
+        "string"
+    );
+    assert_eq!(
+        wait_spec.input_schema["properties"]["goal_id"]["pattern"],
+        "^wc_goal_[A-Za-z0-9_-]{16}$"
+    );
 
     let read = ToolCall::from_tool_name(
         "read_agent_wait",

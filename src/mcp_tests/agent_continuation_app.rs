@@ -1530,6 +1530,7 @@ async fn all_agent_wait_mcp_automatic_message_is_compact_and_guides_authoritativ
         watcher_endpoint.clone(),
         watcher_generation,
         AgentWaitModeCall::All,
+        None,
         task_ids
             .iter()
             .map(|task_id| AgentWaitEventSelectorCall {
@@ -1640,6 +1641,271 @@ async fn all_agent_wait_mcp_automatic_message_is_compact_and_guides_authoritativ
         assert!(
             !automatic_message.contains(forbidden),
             "ALL Wait continuation leaked or re-expanded {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn goal_scoped_agent_wait_mcp_message_names_goal_and_authoritative_rereads_compactly() {
+    use crate::tool_runtime::{AgentWaitEventSelectorCall, AgentWaitModeCall};
+
+    let binding_id = "wc_host_binding_GoGoGoGoGoGoGoGoGoGoGw".to_string();
+    let (_temp, _db, runtime) = continuation_runtime();
+    let owner = continuation_auth("continuation-goal-scoped-wait-owner");
+    let controller = create_agent(
+        &runtime,
+        &owner,
+        "continuation-goal-scoped-controller",
+        "Goal Scoped Controller",
+        "continuation-goal-scoped-controller-create",
+    );
+    let worker = create_agent(
+        &runtime,
+        &owner,
+        "continuation-goal-scoped-worker",
+        "Goal Scoped Worker",
+        "continuation-goal-scoped-worker-create",
+    );
+    let (controller_endpoint, controller_generation) = attach(
+        &runtime,
+        &owner,
+        &controller,
+        "continuation-goal-scoped-endpoint",
+    );
+
+    let present = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5401)),
+            mcp_2026_ui_params(json!({
+                "name": "present_agent_continuation",
+                "arguments": {
+                    "agent_id": controller,
+                    "endpoint_id": controller_endpoint,
+                    "expected_controller_generation": controller_generation
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(present) = present else {
+        panic!("Goal-scoped Wait continuation presentation failed")
+    };
+    assert_eq!(present["result"]["structuredContent"]["success"], true);
+
+    let bind = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5402)),
+            mcp_2026_params(json!({
+                "name": "agent_continuation_bind",
+                "arguments": {
+                    "agent_id": controller,
+                    "endpoint_id": controller_endpoint,
+                    "expected_controller_generation": controller_generation,
+                    "binding_id": binding_id,
+                    "app_call_id": "wc_app_call_0123456789abcdef_3"
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(bind) = bind else {
+        panic!("Goal-scoped Wait continuation bind failed")
+    };
+    assert_eq!(bind["result"]["structuredContent"]["success"], true);
+
+    let goal = runtime.create_goal_with_controller(
+        Some(&owner),
+        "PRIVATE GOAL TITLE MUST NOT ENTER AUTOMATIC MESSAGE".to_string(),
+        "PRIVATE GOAL OBJECTIVE MUST NOT ENTER AUTOMATIC MESSAGE".to_string(),
+        Some(controller.clone()),
+        "continuation-goal-scoped-goal".to_string(),
+    );
+    assert!(goal.success, "{:?}", goal.output);
+    let goal_id = goal.output["goal"]["summary"]["goal_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let task = runtime.create_agent_task(
+        Some(&owner),
+        "Goal-scoped ALL source".to_string(),
+        "PRIVATE GOAL SCOPED TASK INSTRUCTION".to_string(),
+        Some(worker.clone()),
+        None,
+        None,
+        Some("agent:special:PRIVATE_GOAL_SCOPED_PROJECT".to_string()),
+        "continuation-goal-scoped-task".to_string(),
+    );
+    assert!(task.success, "{:?}", task.output);
+    let task_id = task.output["task"]["summary"]["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let linked = runtime.associate_goal_agent_task(
+        Some(&owner),
+        goal_id.clone(),
+        task_id.clone(),
+        "continuation-goal-scoped-link".to_string(),
+    );
+    assert!(linked.success, "{:?}", linked.output);
+
+    let started = runtime.start_agent_task_attempt(
+        Some(&owner),
+        task_id.clone(),
+        worker.clone(),
+        "continuation-goal-scoped-start".to_string(),
+    );
+    assert!(started.success, "{:?}", started.output);
+
+    let waited = runtime.wait_for_agent_events(
+        Some(&owner),
+        controller.clone(),
+        controller_endpoint.clone(),
+        controller_generation,
+        AgentWaitModeCall::All,
+        Some(goal_id.clone()),
+        vec![AgentWaitEventSelectorCall {
+            kind: "agent_task_terminal".to_string(),
+            task_id: task_id.clone(),
+        }],
+        "continuation-goal-scoped-wait".to_string(),
+    );
+    assert!(waited.success, "{:?}", waited.output);
+    assert_eq!(waited.output["agent_wait"]["goal_id"], goal_id);
+    assert_eq!(waited.output["agent_wait"]["state"], "waiting");
+    assert_eq!(waited.output["agent_wait"]["match_count"], 0);
+
+    let completed = runtime.complete_agent_task_attempt(
+        Some(&owner),
+        task_id,
+        started.output["attempt"]["attempt_id"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        worker,
+        started.output["attempt_fence"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        started.output["attempt"]["attempt_controller_generation"]
+            .as_i64()
+            .unwrap(),
+        "succeeded".to_string(),
+        Some("PRIVATE GOAL SCOPED TERMINAL RESULT".to_string()),
+        Some("PRIVATE GOAL SCOPED TERMINAL REASON".to_string()),
+        "continuation-goal-scoped-complete".to_string(),
+    );
+    assert!(completed.success, "{:?}", completed.output);
+    let wait_id = waited.output["agent_wait"]["wait_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let acquire = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5403)),
+            mcp_2026_params(json!({
+                "name": "agent_continuation_wake_acquire",
+                "arguments": {
+                    "agent_id": controller,
+                    "endpoint_id": controller_endpoint,
+                    "expected_controller_generation": controller_generation,
+                    "binding_id": binding_id
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(acquire) = acquire else {
+        panic!("Goal-scoped Wait Wake acquire failed")
+    };
+    assert_eq!(acquire["result"]["structuredContent"]["success"], true);
+    let wake_id = acquire["result"]["structuredContent"]["output"]["wake"]["wake_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let attempt_id = acquire["result"]["structuredContent"]["output"]["wake"]["attempt_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let prepare = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5404)),
+            mcp_2026_params(json!({
+                "name": "agent_continuation_wake_prepare",
+                "arguments": {
+                    "agent_id": controller,
+                    "endpoint_id": controller_endpoint,
+                    "expected_controller_generation": controller_generation,
+                    "binding_id": binding_id,
+                    "wake_id": wake_id,
+                    "attempt_id": attempt_id
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(prepare) = prepare else {
+        panic!("Goal-scoped Wait Wake prepare failed")
+    };
+    assert_eq!(prepare["result"]["structuredContent"]["success"], true);
+    let automatic_message = prepare["result"]["structuredContent"]["output"]["app_protocol"]
+        ["automatic_message"]
+        .as_str()
+        .expect("Goal-scoped Wait exact continuation envelope");
+    for required in [
+        &format!("wait_id={wait_id}"),
+        &format!("goal_id={goal_id}"),
+        "mode=all",
+        "matched=1/1",
+        "bootstrap_agent_conversation",
+        "consume_agent_wake",
+        "read_agent_wait(wait_id)",
+        "get_goal(goal_id)",
+        "every authoritative source AgentTask",
+        "explicitly decide and update the Goal from current durable state",
+    ] {
+        assert!(
+            automatic_message.contains(required),
+            "missing Goal-scoped Wait continuation detail {required}"
+        );
+    }
+    assert!(
+        automatic_message.chars().count() <= 1_000,
+        "Goal-scoped Wait automatic message too long: {}",
+        automatic_message.chars().count()
+    );
+    for forbidden in [
+        "PRIVATE GOAL TITLE",
+        "PRIVATE GOAL OBJECTIVE",
+        "PRIVATE GOAL SCOPED TASK INSTRUCTION",
+        "PRIVATE_GOAL_SCOPED_PROJECT",
+        "PRIVATE GOAL SCOPED TERMINAL RESULT",
+        "PRIVATE GOAL SCOPED TERMINAL REASON",
+        "goal lifecycle",
+        "controller Endpoint",
+        "grants no Task, Project, Goal",
+    ] {
+        assert!(
+            !automatic_message.contains(forbidden),
+            "Goal-scoped Wait continuation leaked or re-expanded {forbidden}"
         );
     }
 }
