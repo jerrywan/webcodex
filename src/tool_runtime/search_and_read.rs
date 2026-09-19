@@ -36,15 +36,28 @@ fn match_read_items(
         .collect()
 }
 
-fn successful_search_outputs(batch: &Value) -> Vec<Value> {
-    batch
-        .get("items")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|item| item.get("success").and_then(Value::as_bool) == Some(true))
-        .filter_map(|item| item.get("output").cloned())
-        .collect()
+fn sanitize_batch_search_and_collect_successes(batch: &mut Value) -> Vec<Value> {
+    let mut successful = Vec::new();
+    let Some(items) = batch.get_mut("items").and_then(Value::as_array_mut) else {
+        return successful;
+    };
+    for item in items {
+        if item.get("success").and_then(Value::as_bool) != Some(true) {
+            continue;
+        }
+        let Some(output) = item.get_mut("output") else {
+            continue;
+        };
+        if let Some(matches) = output.get_mut("matches").and_then(Value::as_array_mut) {
+            for matched in matches {
+                if let Some(object) = matched.as_object_mut() {
+                    object.remove("read_hint");
+                }
+            }
+        }
+        successful.push(output.clone());
+    }
+    successful
 }
 
 fn fair_match_read_items(
@@ -133,34 +146,27 @@ impl ToolRuntime {
             query.limit = Some(query.limit.unwrap_or(max_reads).min(max_reads));
         }
 
+        let query_count = queries.len();
         let search = self.search_project_texts_resolved(resolved, queries).await;
         if !search.success {
             return search;
         }
-        let mut search_outputs = successful_search_outputs(&search.output);
+        let mut batch_search_output = search.output;
+        let search_outputs = sanitize_batch_search_and_collect_successes(&mut batch_search_output);
         if search_outputs.is_empty() {
             return ToolResult::err_with_output(
                 "search_and_read could not obtain a successful search result",
-                json!({"project": resolved.resolved_id, "search": search.output, "state_changed": false}),
+                json!({"project": resolved.resolved_id, "search": batch_search_output, "state_changed": false}),
             );
         }
-        for search_output in &mut search_outputs {
-            if let Some(matches) = search_output
-                .get_mut("matches")
-                .and_then(Value::as_array_mut)
-            {
-                for matched in matches {
-                    if let Some(object) = matched.as_object_mut() {
-                        object.remove("read_hint");
-                    }
-                }
-            }
-        }
         let items = fair_match_read_items(&search_outputs, read_before, read_after, max_reads);
-        let search_output = if search_outputs.len() == 1 {
-            search_outputs.remove(0)
+        let search_output = if query_count == 1 {
+            search_outputs[0].clone()
         } else {
-            json!({"items": search_outputs})
+            // Preserve the canonical batch envelope so callers retain input index,
+            // per-query success/failure, and failure provenance. Read planning still
+            // consumes only successful outputs.
+            batch_search_output
         };
         if items.is_empty() {
             return ToolResult::ok(json!({
@@ -278,6 +284,37 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].start_line, Some(6));
         assert_eq!(merged[0].limit, Some(131));
+    }
+
+    #[test]
+    fn batch_search_sanitization_preserves_indexes_and_failures() {
+        let mut batch = json!({
+            "project": "demo",
+            "requested_count": 3,
+            "returned_count": 3,
+            "succeeded_count": 2,
+            "failed_count": 1,
+            "items": [
+                {"index": 0, "success": true, "output": {"matches": [{"path":"a.rs","line":10,"read_hint":{"path":"a.rs","start_line":1,"limit":20}}]}, "error": null},
+                {"index": 1, "success": false, "output": {"reason_code":"empty","failure_stage":"request_validation"}, "error": "search_project_text failed: empty"},
+                {"index": 2, "success": true, "output": {"matches": [{"path":"b.rs","line":20,"read_hint":{"path":"b.rs","start_line":1,"limit":20}}]}, "error": null}
+            ],
+            "output_truncated": false
+        });
+        let successes = sanitize_batch_search_and_collect_successes(&mut batch);
+        assert_eq!(successes.len(), 2);
+        assert_eq!(batch["items"].as_array().unwrap().len(), 3);
+        assert_eq!(batch["items"][0]["index"], 0);
+        assert_eq!(batch["items"][1]["index"], 1);
+        assert_eq!(batch["items"][1]["success"], false);
+        assert_eq!(batch["items"][1]["output"]["reason_code"], "empty");
+        assert_eq!(batch["items"][2]["index"], 2);
+        assert!(batch["items"][0]["output"]["matches"][0]
+            .get("read_hint")
+            .is_none());
+        assert!(batch["items"][2]["output"]["matches"][0]
+            .get("read_hint")
+            .is_none());
     }
 
     #[test]

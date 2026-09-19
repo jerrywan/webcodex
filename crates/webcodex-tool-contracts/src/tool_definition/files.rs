@@ -112,7 +112,7 @@ pub(super) const SEARCH_DEFINITIONS: &[ToolDefinition] = &[
             def(
                 "search_and_read",
                 super::ToolAuditPolicy::TYPED_CANONICAL
-                    .session_input(super::ToolAuditSessionInputPolicy::OmitTopLevel(&["query"])),
+                    .session_input(super::ToolAuditSessionInputPolicy::SearchAndRead),
                 ModelVisible,
                 TOOL_CATEGORY_FILE,
                 Some(Shell),
