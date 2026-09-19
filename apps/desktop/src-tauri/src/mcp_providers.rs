@@ -319,7 +319,8 @@ impl McpProviderStore {
         #[cfg(not(unix))]
         {
             let bytes = serde_json::to_vec(values).map_err(|_| invalid())?;
-            crate::state::write_atomic_file(&self.secret_path(reference), &bytes)?;
+            crate::state::write_atomic_file(&self.secret_path(reference), &bytes)
+                .map_err(|_| invalid())?;
         }
         Ok(())
     }
