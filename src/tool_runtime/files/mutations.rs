@@ -703,6 +703,9 @@ fn validate_apply_text_edits_success_metadata(
         let Some(would_change) = file.get("would_change").and_then(Value::as_bool) else {
             return false;
         };
+        if change.kind != ApplyFileChangeKind::Edit && !would_change {
+            return false;
+        }
         if changed != (!expected_dry_run && would_change) {
             return false;
         }
@@ -4406,6 +4409,24 @@ mod tests {
             "files": [{"index":0,"kind":"create","path":"created.txt","to_path":null,"old_sha256":"a".repeat(64),"new_sha256":"b".repeat(64),"changed":true,"would_change":true,"edits":[]}],
             "changed_paths": ["created.txt"]
         });
+        let create_noop = json!({
+            "dry_run": false, "applied_count": 1, "changed": false, "would_change": false,
+            "files": [{"index":0,"kind":"create","path":"created.txt","to_path":null,"old_sha256":null,"new_sha256":"b".repeat(64),"changed":false,"would_change":false,"edits":[]}],
+            "changed_paths": []
+        });
+        let create_noop_result = apply_text_edits_agent_stdout_result(
+            &create_noop.to_string(),
+            1,
+            false,
+            "agent:test:demo",
+            std::slice::from_ref(&create),
+        );
+        assert!(!create_noop_result.success);
+        assert_eq!(
+            create_noop_result.output["execution_state"],
+            "outcome_unknown"
+        );
+
         let create_result = apply_text_edits_agent_stdout_result(
             &create_with_old_sha.to_string(),
             1,
