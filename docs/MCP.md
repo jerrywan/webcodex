@@ -356,11 +356,12 @@ payloads through model text:
   are short-lived process-local presentation state, and the normal size, MIME,
   path, and authorization bounds remain in force.
 
-The older `read_project_artifact_metadata`, `read_project_artifact`, and
-`export_project_artifact` tools remain compatibility/operator primitives, but
-new model-facing workflows should use `project_artifact`. Office artifacts such
-as DOCX/PPTX/XLSX and PDFs use the same underlying artifact transport and can
-therefore move between a project and a supporting ChatGPT host without a model
-manually carrying their Base64.
+The lower-level `read_project_artifact_metadata` and `read_project_artifact`
+tools remain operator/gateway primitives. The legacy `export_project_artifact`
+compatibility tool has been removed; complete host delivery is exposed only as
+`project_artifact(action=export)`. Office artifacts such as DOCX/PPTX/XLSX and
+PDFs use the same underlying artifact transport and can therefore move between
+a project and a supporting ChatGPT host without a model manually carrying their
+Base64.
 
 Use [Coding Workflow](CODING_WORKFLOW.md) for the canonical `work_on_project` bootstrap, behavioral-role mental model, and validation/closeout guidance. See [Architecture](ARCHITECTURE.md) and the `webcodex` CLI for operator tooling.

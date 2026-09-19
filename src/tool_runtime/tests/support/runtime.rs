@@ -103,7 +103,8 @@ pub(in crate::tool_runtime::tests) fn sample_tool_args_for_spec(spec: &ToolSpec)
 
 pub(in crate::tool_runtime::tests) fn sample_field_value(field: &str) -> Value {
     match field {
-        "project" => json!(SAMPLE_PROJECT),
+        "project" | "source_project" => json!(SAMPLE_PROJECT),
+        "destination_project" => json!("agent:fixture:destination"),
         "command" => json!("true"),
         "executable" => json!("git"),
         "language" => json!("sh"),
@@ -113,7 +114,8 @@ pub(in crate::tool_runtime::tests) fn sample_field_value(field: &str) -> Value {
         "paths" => json!(["old.txt"]),
         "items" => json!([{"path": "src/lib.rs"}]),
         "queries" => json!([{"pattern": "fn main"}]),
-        "path" => json!("src/lib.rs"),
+        "path" | "source_path" => json!("src/lib.rs"),
+        "destination_path" => json!("artifacts/copied.bin"),
         "old" | "old_text" => json!("a"),
         "new" | "new_text" => json!("b"),
         "pattern" => json!("fn main"),

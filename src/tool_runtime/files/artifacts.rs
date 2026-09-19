@@ -319,11 +319,15 @@ impl ToolRuntime {
             Ok(Ok(response)) => response,
             Ok(Err(_)) => {
                 self.runner_registry.cancel_request(&request_id).await;
-                return Err("agent project artifact export metadata request was dropped".to_string());
+                return Err(
+                    "agent project artifact export metadata request was dropped".to_string()
+                );
             }
             Err(_) => {
                 self.runner_registry.cancel_request(&request_id).await;
-                return Err("timed out waiting for agent project artifact export metadata".to_string());
+                return Err(
+                    "timed out waiting for agent project artifact export metadata".to_string(),
+                );
             }
         };
         if let Some(error) = response.error {

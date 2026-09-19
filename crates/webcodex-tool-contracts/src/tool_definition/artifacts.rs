@@ -85,7 +85,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                             idempotency: super::ToolIdempotency::NonIdempotent,
                         },
                         None,
-                        true,
+                        false,
                         Artifact,
                         true,
                         false,

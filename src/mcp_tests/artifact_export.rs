@@ -2104,11 +2104,7 @@ async fn mcp_artifact_export_action_audit_does_not_persist_handle_or_blob() {
             true,
         )
         .add_header(MCP_METHOD_HEADER, "tools/call", true)
-        .add_header(
-            MCP_NAME_HEADER,
-            crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
-            true,
-        )
+        .add_header(MCP_NAME_HEADER, "project_artifact", true)
         .json(&json!({
             "jsonrpc": "2.0",
             "id": 3112,
@@ -2124,7 +2120,10 @@ async fn mcp_artifact_export_action_audit_does_not_persist_handle_or_blob() {
         }))
         .send(&service)
         .await;
-    agent.await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), agent)
+        .await
+        .expect("artifact export audit fixture timed out")
+        .unwrap();
     assert_eq!(effective_status(&response), StatusCode::OK);
     let body: Value = response.take_json().await.unwrap();
     let uri = body["result"]["content"][0]["uri"]

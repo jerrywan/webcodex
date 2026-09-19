@@ -72,6 +72,10 @@ fn transfer_project_artifact_has_two_project_contract_and_no_payload_field() {
         ToolAuthorityPolicy::RequireAll(&[PROJECT_READ, PROJECT_WRITE])
     );
     assert!(definition.requires_permission());
+    assert!(
+        !definition.metadata.requires_project,
+        "two-project transfer has no singular generic project binding"
+    );
 
     let specs = registered_tool_specs();
     let spec = spec_named(&specs, "transfer_project_artifact");

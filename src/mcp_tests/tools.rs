@@ -165,8 +165,7 @@ fn memory_tools_remain_canonical_extensions_without_top_level_advertising() {
     full_auth.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
     for compact in [false, true] {
         for auth in [None, Some(&full_auth)] {
-            let payload =
-                mcp_tools_list_payload_with_features_for_auth(compact, false, true, auth);
+            let payload = mcp_tools_list_payload_with_features_for_auth(compact, false, true, auth);
             for spec in &specs {
                 assert!(!payload["tools"]
                     .as_array()
@@ -438,8 +437,7 @@ fn skill_runtime_tools_are_stateless_protocol_extensions_and_schema_static() {
     assert!(!generic_names.iter().any(|name| name == "skill_read_file"));
 
     let render_full = || {
-        let mut payload =
-            mcp_tools_list_payload_with_features_for_auth(false, false, true, None);
+        let mut payload = mcp_tools_list_payload_with_features_for_auth(false, false, true, None);
         add_stateless_workflow_recorder_metadata(&mut payload);
         payload
     };
@@ -2139,9 +2137,9 @@ async fn mcp_tools_list_stateless_serialized_size_budget() {
     // plus 16,641 with Apps. About 10% byte headroom; new advertised tools
     // require an explicit count-budget review, rather than silent growth.
     for (label, auth, max_tools, max_bytes) in [
-        ("anonymous", None, 32, 95_000),
-        ("scoped", Some(&scoped), 33, 98_000),
-        ("admin", Some(&admin), 39, 110_000),
+        ("anonymous", None, 33, 95_000),
+        ("scoped", Some(&scoped), 34, 98_000),
+        ("admin", Some(&admin), 40, 110_000),
     ] {
         for app_enabled in [false, true] {
             let mut sizes = Vec::new();

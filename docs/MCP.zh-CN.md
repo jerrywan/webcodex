@@ -282,10 +282,10 @@ stderr、provider stderr 或任意 provider prose。
   URI 本身不是独立 bearer authority；export handle 只是短期、process-local 的
   presentation state，现有大小、MIME、路径与 authorization 边界继续生效。
 
-旧的 `read_project_artifact_metadata`、`read_project_artifact` 和
-`export_project_artifact` 继续作为 compatibility/operator primitive 保留；新的模型面
-workflow 应优先使用 `project_artifact`。DOCX/PPTX/XLSX 等 Office artifact 与 PDF
-仍复用同一底层 artifact transport，因此在支持这些 host 能力的 ChatGPT 中，可以在
-project 与 host 之间直接传递，而不需要模型手工搬运 Base64。
+底层 `read_project_artifact_metadata` 与 `read_project_artifact` 继续作为
+operator/gateway primitive 保留。旧的 `export_project_artifact` compatibility tool 已
+删除；完整 host 交付统一通过 `project_artifact(action=export)` 暴露。DOCX/PPTX/XLSX
+等 Office artifact 与 PDF 仍复用同一底层 artifact transport，因此在支持这些 host
+能力的 ChatGPT 中，可以在 project 与 host 之间直接传递，而不需要模型手工搬运 Base64。
 
 请阅读 [Coding 工作流](CODING_WORKFLOW.zh-CN.md)，使用 canonical `work_on_project` bootstrap / behavioral role 心智模型，并遵循其中的 validation/closeout guidance。运维工具见 [架构](ARCHITECTURE.md) 与 `webcodex` CLI。
