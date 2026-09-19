@@ -412,12 +412,20 @@ mod tests {
         assert_eq!(short.effective_timeout_secs, 5);
         assert_eq!(short.sync_wait_secs, 5);
 
-        for wait in [1, 45, 60] {
+        for wait in [1, 45, STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS] {
             let budget =
                 StructuredExecutionBudget::resolve_with_sync_wait(Some(600), Some(wait)).unwrap();
             assert_eq!(budget.effective_timeout_secs, 600);
             assert_eq!(budget.sync_wait_secs, wait);
         }
+
+        let host_boundary =
+            StructuredExecutionBudget::resolve_with_sync_wait(Some(600), Some(60)).unwrap();
+        assert_eq!(host_boundary.effective_timeout_secs, 600);
+        assert_eq!(
+            host_boundary.sync_wait_secs,
+            STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS
+        );
 
         let oversized =
             StructuredExecutionBudget::resolve_with_sync_wait(Some(4_000), Some(600)).unwrap();

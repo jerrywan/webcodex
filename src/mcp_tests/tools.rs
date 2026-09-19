@@ -1907,7 +1907,7 @@ fn mcp_compact_common_copy_respects_tool_and_argument_boundaries() {
         (
             "cargo_check",
             "sync_wait_secs",
-            vec!["Same-execution", "10s", "60s", "timeout", "Never"],
+            vec!["Same-execution", "10s", "55s", "timeout", "Never"],
         ),
         (
             "run_shell",

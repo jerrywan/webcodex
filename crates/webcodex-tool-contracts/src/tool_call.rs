@@ -1725,7 +1725,7 @@ pub enum ToolCall {
         #[serde(default)]
         timeout_secs: Option<u64>,
         /// Optional synchronous grace before durable Job handoff. Omit to use 10 seconds bounded by the
-        /// total timeout. Explicit values must be positive; values above 60 or above the effective timeout
+        /// total timeout. Explicit values must be positive; values above 55 or above the effective timeout
         /// are accepted and clamped to the smaller bound. It only controls how long the Server waits for
         /// the already-started execution before exposing that same execution as a Job; it does not extend
         /// the total runtime timeout or rerun work.
@@ -1898,7 +1898,7 @@ pub enum ToolCall {
         #[serde(default)]
         timeout_secs: Option<u64>,
         /// Optional synchronous grace before durable Job handoff. Omit to use 10 seconds bounded by the
-        /// total timeout. Explicit values must be positive; values above 60 or above the effective timeout
+        /// total timeout. Explicit values must be positive; values above 55 or above the effective timeout
         /// are accepted and clamped to the smaller bound. It only controls how long the Server waits for
         /// the already-started execution before exposing that same execution as a Job; it does not extend
         /// the total runtime timeout or rerun work.
@@ -2269,7 +2269,7 @@ pub enum ToolCall {
         timeout_secs: Option<u64>,
         /// Optional synchronous grace in seconds. With check=true it controls only how long the caller
         /// waits before the same execution is handed off as a Job; omission uses the Runtime early-handoff
-        /// default bounded by the effective timeout_secs. Explicit positive values above 60 or above the
+        /// default bounded by the effective timeout_secs. Explicit positive values above 55 or above the
         /// effective timeout_secs are accepted and clamped to the smaller bound, and it never extends
         /// timeout_secs or retries the validation. With check=false it is accepted for caller-shape
         /// compatibility but ignored; ensure-format remains synchronous and timeout_secs remains the full
@@ -2315,7 +2315,7 @@ pub enum ToolCall {
         timeout_secs: Option<u64>,
         /// Optional synchronous grace in seconds. It controls only how long the caller waits before the
         /// same execution is handed off as a Job. Omission uses the Runtime early-handoff default bounded
-        /// by the effective timeout_secs. Explicit positive values above 60 or above the effective
+        /// by the effective timeout_secs. Explicit positive values above 55 or above the effective
         /// timeout_secs are accepted and clamped to the smaller bound. The submitted validation may still
         /// be queued; this never extends timeout_secs, retries, or starts a second validation.
         #[schemars(range(min = 1))]
@@ -2383,7 +2383,7 @@ pub enum ToolCall {
         timeout_secs: Option<u64>,
         /// Optional synchronous grace in seconds. It controls only how long the caller waits before the
         /// same execution is handed off as a Job. Omission uses the Runtime early-handoff default bounded
-        /// by the effective timeout_secs. Explicit positive values above 60 or above the effective
+        /// by the effective timeout_secs. Explicit positive values above 55 or above the effective
         /// timeout_secs are accepted and clamped to the smaller bound. The submitted validation may still
         /// be queued; this never extends timeout_secs, retries, or starts a second validation.
         #[schemars(range(min = 1))]
@@ -2418,7 +2418,7 @@ pub enum ToolCall {
         timeout_secs: Option<u64>,
         /// Optional synchronous grace in seconds. It controls only how long the caller waits before the
         /// same execution is handed off as a Job. Omission uses the Runtime early-handoff default bounded
-        /// by the effective timeout_secs. Explicit positive values above 60 or above the effective
+        /// by the effective timeout_secs. Explicit positive values above 55 or above the effective
         /// timeout_secs are accepted and clamped to the smaller bound. The submitted validation may still
         /// be queued; this never extends timeout_secs, retries, or starts a second validation.
         #[schemars(range(min = 1))]
@@ -2516,7 +2516,7 @@ pub enum ToolCall {
         #[serde(default)]
         timeout_secs: Option<u64>,
         /// Optional synchronous grace before durable Job handoff. Omit to use 10 seconds bounded by the
-        /// total timeout. Explicit values must be positive; values above 60 or above the effective timeout
+        /// total timeout. Explicit values must be positive; values above 55 or above the effective timeout
         /// are accepted and clamped to the smaller bound. It only controls how long the Server waits for
         /// the already-started execution before exposing that same execution as a Job; it does not extend
         /// the total runtime timeout or rerun work.

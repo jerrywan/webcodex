@@ -29,7 +29,10 @@ pub const MAX_JOB_OBSERVATION_WAIT_SECS: u64 = 100;
 /// Model-facing continuation wait kept below common MCP Host call deadlines.
 /// Runtime still accepts waits up to MAX_JOB_OBSERVATION_WAIT_SECS.
 pub const MODEL_JOB_CONTINUATION_WAIT_SECS: u64 = 55;
-pub const STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS: u64 = 60;
+/// Keep initial structured-execution handoff grace under the same Host-safe
+/// model-facing wait budget. This does not shorten the execution timeout; work
+/// past this grace continues as the same durable Job.
+pub const STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS: u64 = MODEL_JOB_CONTINUATION_WAIT_SECS;
 
 pub const MAX_SKILL_LIST_LIMIT: usize = 64;
 pub const MAX_SKILL_QUERY_CHARS: usize = 200;

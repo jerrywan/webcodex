@@ -162,9 +162,10 @@ struct ValidationBudget {
 /// `timeout_secs` is the total runtime budget of the command, not the tool
 /// call's synchronous wait. Positive values above the supported ceilings are
 /// caller preferences and are clamped before dispatch. Explicit
-/// `sync_wait_secs` is likewise clamped to both 60 seconds and the effective
-/// total budget. When omitted, use the same canonical early-handoff default as
-/// ordinary structured execution, bounded by the effective total timeout.
+/// `sync_wait_secs` is likewise clamped to the shared Host-safe model-facing
+/// ceiling and the effective total budget. When omitted, use the same canonical
+/// early-handoff default as ordinary structured execution, bounded by the
+/// effective total timeout.
 fn resolve_validation_budget(
     tool_name: &str,
     timeout_secs: Option<u64>,
@@ -225,6 +226,14 @@ mod validation_budget_tests {
         let explicit = resolve_validation_budget("cargo_check", Some(600), Some(45), 600).unwrap();
         assert_eq!(explicit.effective_timeout_secs, 600);
         assert_eq!(explicit.sync_wait_secs, 45);
+
+        let host_boundary =
+            resolve_validation_budget("cargo_check", Some(600), Some(60), 600).unwrap();
+        assert_eq!(host_boundary.effective_timeout_secs, 600);
+        assert_eq!(
+            host_boundary.sync_wait_secs,
+            STRUCTURED_EXECUTION_SYNC_WAIT_MAX_SECS
+        );
 
         let oversized =
             resolve_validation_budget("cargo_check", Some(4_000), Some(600), 600).unwrap();
