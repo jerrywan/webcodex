@@ -665,7 +665,9 @@ async fn e2b_timeout_after_mutation_dispatch_reconciles_known_true_result() {
         }]});
         while (true) {}
     "#;
-    let task = spawn_e2b_call(&runtime, &project, &session_id, source, Some(50));
+    // Keep the frontend deadline above host scheduling jitter so this test
+    // exercises timeout only after the mutation has entered canonical dispatch.
+    let task = spawn_e2b_call(&runtime, &project, &session_id, source, Some(1000));
     let request = wait_for_patch_agent_request(&runtime, "e2b-timeout-known").await;
     assert_eq!(request.kind, "file_apply_text_edits");
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -711,10 +713,12 @@ async fn e2b_mutation_stall_beyond_bounded_drain_returns_outcome_unknown() {
         }]});
         while (true) {}
     "#;
-    let task = spawn_e2b_call(&runtime, &project, &session_id, source, Some(50));
+    // Keep the frontend deadline above host scheduling jitter so the child
+    // reaches canonical dispatch before bounded drain is exercised.
+    let task = spawn_e2b_call(&runtime, &project, &session_id, source, Some(1000));
     let request = wait_for_patch_agent_request(&runtime, "e2b-timeout-unknown").await;
     assert_eq!(request.kind, "file_apply_text_edits");
-    let result = tokio::time::timeout(Duration::from_secs(7), task)
+    let result = tokio::time::timeout(Duration::from_secs(8), task)
         .await
         .expect("E2b must return after the bounded five-second reconciliation")
         .unwrap();
