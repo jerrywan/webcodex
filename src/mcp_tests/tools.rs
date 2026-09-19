@@ -1425,8 +1425,35 @@ fn strip_description_text(value: &mut Value) {
             if object.get("description").is_some_and(Value::is_string) {
                 object.remove("description");
             }
-            for child in object.values_mut() {
-                strip_description_text(child);
+            // Normalize schema copy only, never descriptions inside literal
+            // const/default/enum/examples or unrelated adapter metadata.
+            for (keyword, child) in object {
+                match keyword.as_str() {
+                    "properties" | "patternProperties" | "$defs" | "definitions"
+                    | "dependentSchemas" | "dependencies" => {
+                        if let Some(children) = child.as_object_mut() {
+                            for schema in children.values_mut() {
+                                strip_description_text(schema);
+                            }
+                        }
+                    }
+                    "items"
+                    | "prefixItems"
+                    | "allOf"
+                    | "anyOf"
+                    | "oneOf"
+                    | "additionalItems"
+                    | "additionalProperties"
+                    | "unevaluatedItems"
+                    | "unevaluatedProperties"
+                    | "propertyNames"
+                    | "contains"
+                    | "not"
+                    | "if"
+                    | "then"
+                    | "else" => strip_description_text(child),
+                    _ => {}
+                }
             }
         }
         Value::Array(items) => {
@@ -1483,6 +1510,9 @@ fn mcp_tools_list_inputs_equal_canonical_except_descriptions_and_host_file_overl
                 strip_description_text(&mut actual);
             } else {
                 assert_eq!(tool["description"], canonical.description, "{name}");
+                // Output schemas retain their existing MCP suggested-call
+                // routing overlays; compact discovery must not remove them here.
+                assert!(tool["outputSchema"].is_object(), "{name}");
             }
             assert_eq!(actual, expected, "{name} compact={compact}");
             assert_eq!(tool["annotations"], canonical.annotations, "{name}");
@@ -1490,8 +1520,13 @@ fn mcp_tools_list_inputs_equal_canonical_except_descriptions_and_host_file_overl
     }
 }
 
+// The exact manifest must stay canonical even when the request adapter reads
+// compact=true, so hold the existing environment guard through the calls.
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn mcp_compact_preserves_stateless_wrappers_app_metadata_and_exact_manifest() {
+    let mut env = crate::test_support::TestEnvGuard::new();
+    env.set("WEBCODEX_MCP_COMPACT_SCHEMAS", "true");
     let mut auth = crate::auth::shared_key_context("compact-overlays-test");
     auth.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
     for stateless in [false, true] {
@@ -1509,8 +1544,8 @@ async fn mcp_compact_preserves_stateless_wrappers_app_metadata_and_exact_manifes
                 else {
                     panic!("tools/list");
                 };
-                let mut result = value["result"].clone();
-                for tool in result["tools"].as_array_mut().unwrap() {
+                let result = value["result"].clone();
+                for tool in result["tools"].as_array().unwrap() {
                     if compact {
                         assert!(tool.get("outputSchema").is_none());
                         let properties = &tool["inputSchema"]["properties"];
@@ -1534,11 +1569,18 @@ async fn mcp_compact_preserves_stateless_wrappers_app_metadata_and_exact_manifes
                             }
                         }
                     }
-                    tool.as_object_mut().unwrap().remove("outputSchema");
-                    strip_description_text(tool);
                 }
                 payloads.push(result);
             }
+            let full_tools = payloads[0]["tools"].as_array().unwrap();
+            let compact_tools = payloads[1]["tools"].as_array().unwrap();
+            assert_eq!(full_tools.len(), compact_tools.len());
+            for (full, compact) in full_tools.iter().zip(compact_tools) {
+                assert_compact_tool_diff(full, compact);
+            }
+            // Include the Stateless result envelope in the equality check.
+            payloads[0].as_object_mut().unwrap().remove("tools");
+            payloads[1].as_object_mut().unwrap().remove("tools");
             assert_eq!(
                 payloads[0], payloads[1],
                 "stateless={stateless} app={app_enabled}"
@@ -1546,28 +1588,299 @@ async fn mcp_compact_preserves_stateless_wrappers_app_metadata_and_exact_manifes
         }
     }
     let runtime = test_runtime();
+    let specs = registered_tool_specs();
+    for name in [
+        "run_process",
+        "work_on_project",
+        "run_skill_resource",
+        "project_artifact",
+        "git_diff_hunks",
+        "import_conversation_files_to_project",
+    ] {
+        let McpOutcome::Ok(value) = handle_mcp_request(
+            &runtime,
+            rpc(
+                "tools/call",
+                Some(json!(2)),
+                mcp_2026_params(json!({
+                    "name": "tool_manifest", "arguments": {"tool_name": name},
+                })),
+            ),
+            Some(&auth),
+        )
+        .await
+        else {
+            panic!("exact manifest: {name}");
+        };
+        let output = &value["result"]["structuredContent"]["output"];
+        let canonical = specs.iter().find(|spec| spec.name == name).unwrap();
+        assert_eq!(output["description"], canonical.description, "{name}");
+        assert_eq!(output["input_schema"], canonical.input_schema, "{name}");
+        assert!(
+            output.get("output_schema").is_none(),
+            "exact manifest is input-only: {name}"
+        );
+    }
+}
+
+fn assert_compact_tool_diff(full: &Value, compact: &Value) {
+    let name = full["name"].as_str().unwrap();
+    let mut expected = full.clone();
+    let mut actual = compact.clone();
+    if name == "mcp_tool" {
+        assert!(
+            full.get("outputSchema").is_none(),
+            "gateway has no output schema"
+        );
+    } else {
+        assert!(full["outputSchema"].is_object(), "{name}");
+    }
+    assert!(compact.get("outputSchema").is_none(), "{name}");
+    expected.as_object_mut().unwrap().remove("outputSchema");
+    // Independent, closed allowlist of actual removed annotations. A changed
+    // regex, any other location, or any removed bound must fail equality.
+    for (pointer, pattern) in [
+        (
+            "/properties/recording_session_id",
+            "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
+        ),
+        (
+            "/properties/ack_session_message_ids/items",
+            "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
+        ),
+        (
+            "/properties/session_message_resolution/properties/message_id",
+            "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
+        ),
+    ] {
+        if let Some(property) = expected["inputSchema"].pointer_mut(pointer) {
+            assert_eq!(property["type"], "string", "{name} {pointer}");
+            assert_eq!(property["pattern"], pattern, "{name} {pointer}");
+            assert!(
+                compact["inputSchema"]
+                    .pointer(pointer)
+                    .unwrap()
+                    .get("pattern")
+                    .is_none(),
+                "opaque wrapper pattern survived: {name} {pointer}"
+            );
+            property.as_object_mut().unwrap().remove("pattern");
+        }
+    }
+    for tool in [&mut expected, &mut actual] {
+        tool.as_object_mut().unwrap().remove("description");
+        strip_description_text(&mut tool["inputSchema"]);
+    }
+    // Includes annotations, App _meta/ui, Host-file overlays, requiredness,
+    // additionalProperties, every non-wrapper pattern and every bound.
+    assert_eq!(actual, expected, "unexpected compact difference: {name}");
+}
+
+#[tokio::test]
+async fn mcp_compact_preserves_safety_patterns_and_wrapper_bounds() {
+    let mut auth = crate::auth::shared_key_context("compact-bounds-test");
+    auth.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
+    let McpOutcome::Ok(value) =
+        crate::mcp::tools::handle_list(Some(json!(1)), Some(&auth), true, true, true).await
+    else {
+        panic!("tools/list");
+    };
+    let tools = value["result"]["tools"].as_array().unwrap();
+    let schema =
+        |name: &str| &tools.iter().find(|tool| tool["name"] == name).unwrap()["inputSchema"];
+    for (name, field, pattern, min, max) in [
+        (
+            "project_artifact",
+            "expected_sha256",
+            "^[0-9a-f]{64}$",
+            64,
+            64,
+        ),
+        ("run_skill_resource", "path", "^scripts/.+$", 9, 512),
+        (
+            "git_review_summary",
+            "base_commit",
+            "^[0-9A-Fa-f]{40}$",
+            40,
+            40,
+        ),
+        (
+            "git_review_summary",
+            "head_commit",
+            "^[0-9A-Fa-f]{40}$",
+            40,
+            40,
+        ),
+        ("git_diff_hunks", "base_commit", "^[0-9A-Fa-f]{40}$", 40, 40),
+        ("git_diff_hunks", "head_commit", "^[0-9A-Fa-f]{40}$", 40, 40),
+    ] {
+        let property = &schema(name)["properties"][field];
+        assert_eq!(property["pattern"], pattern, "{name}.{field}");
+        assert_eq!(property["minLength"], min, "{name}.{field}");
+        assert_eq!(property["maxLength"], max, "{name}.{field}");
+    }
+    assert_eq!(
+        schema("run_skill_resource")["properties"]["expected_definition_revision"]["pattern"],
+        "^[0-9a-f]{64}$"
+    );
+    // The identical opaque Session pattern remains on business Session inputs.
+    assert_eq!(
+        schema("work_on_project")["properties"]["session_id"]["pattern"],
+        "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"
+    );
+    let properties = &schema("run_process")["properties"];
+    assert_eq!(
+        properties["ack_session_message_ids"]["maxItems"],
+        crate::tool_runtime::sessions::MAX_TOOL_CALL_ACK_MESSAGE_IDS
+    );
+    assert_eq!(
+        properties["session_message_resolution"]["properties"]["resolution"]["minLength"],
+        1
+    );
+    assert_eq!(
+        properties["session_message_resolution"]["properties"]["resolution"]["maxLength"],
+        crate::tool_runtime::sessions::MAX_MESSAGE_RESOLUTION_CHARS
+    );
+    assert_eq!(
+        properties["context_request"]["maxItems"],
+        crate::tool_runtime::context_projection::MAX_CONTEXT_REQUEST_ITEMS
+    );
+    assert_eq!(properties["context_request"]["items"]["minLength"], 1);
+    assert_eq!(
+        properties["context_request"]["items"]["maxLength"],
+        crate::tool_runtime::context_projection::MAX_CONTEXT_REQUEST_KEY_CHARS
+    );
+    for field in ["timeout_secs", "sync_wait_secs"] {
+        assert_eq!(properties[field]["minimum"], 1, "{field}");
+    }
+}
+
+#[test]
+fn mcp_compact_opaque_patterns_require_exact_wrapper_location_and_format() {
+    use crate::mcp::discovery::compact_tool;
+    let session_pattern = "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$";
+    // Even at a known path, a future/different format must not silently vanish.
+    for pattern in [
+        "^wc_sess_[A-Za-z0-9_-]{16}$",
+        "^[0-9a-f]{64}$",
+        "^scripts/.+$",
+    ] {
+        let literal =
+            json!({"type": "string", "pattern": session_pattern, "minLength": 24, "maxLength": 40});
+        let mut tool = json!({"name": "fixture", "inputSchema": {
+            "properties": {
+                "recording_session_id": {"type": "string", "pattern": pattern},
+                "session_id": literal,
+                "nested": {"properties": {"recording_session_id": literal}}
+            },
+            "const": literal, "default": literal, "enum": [literal], "examples": [literal]
+        }});
+        let original = tool.clone();
+        compact_tool(&mut tool);
+        assert_eq!(tool, original, "pattern={pattern}");
+    }
+    let mut tool = json!({"name": "fixture", "inputSchema": {"properties": {
+        "recording_session_id": {"type": "string", "pattern": session_pattern, "minLength": 24, "maxLength": 40}
+    }}});
+    compact_tool(&mut tool);
+    assert_eq!(
+        tool["inputSchema"]["properties"]["recording_session_id"],
+        json!({"type": "string", "minLength": 24, "maxLength": 40})
+    );
+    let once = tool.clone();
+    compact_tool(&mut tool);
+    assert_eq!(
+        tool, once,
+        "wrapper annotation projection must be idempotent"
+    );
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn mcp_compact_stateless_wrapper_ids_still_reject_malformed_invocations() {
+    let mut env = crate::test_support::TestEnvGuard::new();
+    let runtime = test_runtime();
+    let session = runtime
+        .sessions
+        .start_session(None, Some("compact wrapper validation".to_string()));
+    for compact in [false, true] {
+        env.set(
+            "WEBCODEX_MCP_COMPACT_SCHEMAS",
+            if compact { "true" } else { "false" },
+        );
+        for malformed in ["not-an-id", "wc_msg_short", "wc_msg_0123456789abcde!"] {
+            for field in [
+                "recording_session_id",
+                "ack_session_message_ids",
+                "session_message_resolution",
+            ] {
+                let mut arguments =
+                    json!({"tool_name": "run_process", "recording_session_id": session.session_id});
+                arguments[field] = match field {
+                    "recording_session_id" => json!(malformed.replace("wc_msg_", "wc_sess_")),
+                    "ack_session_message_ids" => json!([malformed]),
+                    _ => json!({"message_id": malformed, "resolution": "handled"}),
+                };
+                let outcome = handle_mcp_request(
+                    &runtime,
+                    rpc(
+                        "tools/call",
+                        Some(json!(1)),
+                        mcp_2026_params(json!({"name": "tool_manifest", "arguments": arguments})),
+                    ),
+                    None,
+                )
+                .await;
+                match (field, outcome) {
+                    // Recorder identity is rejected by the existing exact
+                    // Session lookup/authority gate, before business dispatch.
+                    ("recording_session_id", McpOutcome::Ok(value)) => {
+                        assert_eq!(value["result"]["isError"], true);
+                        assert_eq!(value["result"]["structuredContent"]["success"], false);
+                        assert_eq!(
+                            value["result"]["structuredContent"]["output"]["error_kind"],
+                            "unknown_session_id"
+                        );
+                    }
+                    (_, McpOutcome::BadRequest(value)) => {
+                        assert_eq!(value["error"]["code"], -32602);
+                        let message = value["error"]["message"].as_str().unwrap();
+                        assert!(
+                            message.contains(field) && message.contains("valid wc_msg_*"),
+                            "{message}"
+                        );
+                    }
+                    (_, other) => panic!("{field}={malformed}, compact={compact}: {other:?}"),
+                }
+            }
+        }
+    }
+    assert!(
+        runtime
+            .sessions
+            .summary(&session.session_id, Some(20))
+            .unwrap()
+            .events
+            .is_empty(),
+        "rejected invocations must not reach the recorder ledger"
+    );
+    // A real server-generated recorder remains usable with compact=true.
     let McpOutcome::Ok(value) = handle_mcp_request(
         &runtime,
         rpc(
             "tools/call",
             Some(json!(2)),
-            mcp_2026_params(json!({
-                "name": "tool_manifest", "arguments": {"tool_name": "run_process"},
-            })),
+            mcp_2026_params(json!({"name": "tool_manifest", "arguments": {
+                "tool_name": "run_process", "recording_session_id": session.session_id
+            }})),
         ),
-        Some(&auth),
+        None,
     )
     .await
     else {
-        panic!("exact manifest");
+        panic!("valid recorder");
     };
-    let output = &value["result"]["structuredContent"]["output"];
-    let canonical = registered_tool_specs()
-        .into_iter()
-        .find(|spec| spec.name == "run_process")
-        .unwrap();
-    assert_eq!(output["description"], canonical.description);
-    assert_eq!(output["input_schema"], canonical.input_schema);
+    assert_eq!(value["result"]["structuredContent"]["success"], true);
 }
 
 #[test]
@@ -1576,16 +1889,42 @@ fn mcp_compact_common_copy_respects_tool_and_argument_boundaries() {
     let full = mcp_tools_list_payload_with_compact(false);
     let compact = mcp_tools_list_payload_with_compact(true);
     for (name, field, hints) in [
-        ("run_process", "cwd", vec!["Project-relative", "root", "No named Session SSH"]),
-        ("run_skill_resource", "cwd", vec!["Project-relative", "Skill resolution"]),
-        ("run_detached_process", "timeout_secs", vec!["Total runtime", "604800"]),
-        ("cargo_check", "sync_wait_secs", vec!["Same-execution", "10s", "60s", "timeout", "Never"]),
-        ("run_shell", "assertion_name", vec!["reuse after a fix", "validation-like"]),
+        (
+            "run_process",
+            "cwd",
+            vec!["Project-relative", "root", "No named Session SSH"],
+        ),
+        (
+            "run_skill_resource",
+            "cwd",
+            vec!["Project-relative", "Skill resolution"],
+        ),
+        (
+            "run_detached_process",
+            "timeout_secs",
+            vec!["Total runtime", "604800"],
+        ),
+        (
+            "cargo_check",
+            "sync_wait_secs",
+            vec!["Same-execution", "10s", "60s", "timeout", "Never"],
+        ),
+        (
+            "run_shell",
+            "assertion_name",
+            vec!["reuse after a fix", "validation-like"],
+        ),
     ] {
         let property = |payload: &Value| {
-            payload["tools"].as_array().unwrap().iter()
-                .find(|tool| tool["name"] == name).unwrap()["inputSchema"]["properties"][field]
-                ["description"].as_str().unwrap().to_string()
+            payload["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == name)
+                .unwrap()["inputSchema"]["properties"][field]["description"]
+                .as_str()
+                .unwrap()
+                .to_string()
         };
         let before = bound_description(&property(&full), INPUT_DESCRIPTION_MAX_CHARS);
         let after = property(&compact);
@@ -1598,19 +1937,37 @@ fn mcp_compact_common_copy_respects_tool_and_argument_boundaries() {
     // semantics. They must stay on the existing generic bounding path.
     for tool in full["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();
-        let projected = compact["tools"].as_array().unwrap().iter()
-            .find(|candidate| candidate["name"] == name).unwrap();
-        for field in ["project", "client_id", "idempotency_key", "purpose", "result_expectation"] {
+        let projected = compact["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|candidate| candidate["name"] == name)
+            .unwrap();
+        for field in [
+            "project",
+            "client_id",
+            "idempotency_key",
+            "purpose",
+            "result_expectation",
+        ] {
             if let Some(copy) = tool["inputSchema"]["properties"][field]["description"].as_str() {
-                assert_eq!(projected["inputSchema"]["properties"][field]["description"],
-                    bound_description(copy, INPUT_DESCRIPTION_MAX_CHARS), "{name}.{field}");
+                assert_eq!(
+                    projected["inputSchema"]["properties"][field]["description"],
+                    bound_description(copy, INPUT_DESCRIPTION_MAX_CHARS),
+                    "{name}.{field}"
+                );
             }
         }
         if name == "run_shell" {
             for field in ["cwd", "timeout_secs", "sync_wait_secs"] {
-                let copy = tool["inputSchema"]["properties"][field]["description"].as_str().unwrap();
-                assert_eq!(projected["inputSchema"]["properties"][field]["description"],
-                    bound_description(copy, INPUT_DESCRIPTION_MAX_CHARS), "{name}.{field}");
+                let copy = tool["inputSchema"]["properties"][field]["description"]
+                    .as_str()
+                    .unwrap();
+                assert_eq!(
+                    projected["inputSchema"]["properties"][field]["description"],
+                    bound_description(copy, INPUT_DESCRIPTION_MAX_CHARS),
+                    "{name}.{field}"
+                );
             }
         }
     }
@@ -1620,7 +1977,10 @@ fn mcp_compact_common_copy_respects_tool_and_argument_boundaries() {
     }}});
     let original = fixture.clone();
     compact_tool(&mut fixture);
-    assert_eq!(fixture, original, "do not add copy or rewrite nested business fields");
+    assert_eq!(
+        fixture, original,
+        "do not add copy or rewrite nested business fields"
+    );
 }
 
 #[test]
@@ -1761,13 +2121,13 @@ async fn mcp_tools_list_stateless_serialized_size_budget() {
     let mut admin = scoped.clone();
     admin.scopes.push(crate::auth::SCOPE_ADMIN.to_string());
     // Final Stateless result bytes (including wrappers/gateways, excluding the
-    // JSON-RPC envelope). Measurements: 95,179 / 98,139 / 110,636 bytes,
+    // JSON-RPC envelope). Measurements: 85,676 / 88,360 / 99,384 bytes,
     // plus 16,641 with Apps. About 10% byte headroom; new advertised tools
     // require an explicit count-budget review, rather than silent growth.
     for (label, auth, max_tools, max_bytes) in [
-        ("anonymous", None, 32, 105_000),
-        ("scoped", Some(&scoped), 33, 108_000),
-        ("admin", Some(&admin), 39, 122_000),
+        ("anonymous", None, 32, 95_000),
+        ("scoped", Some(&scoped), 33, 98_000),
+        ("admin", Some(&admin), 39, 110_000),
     ] {
         for app_enabled in [false, true] {
             let mut sizes = Vec::new();
@@ -1804,10 +2164,18 @@ async fn mcp_tools_list_stateless_serialized_size_budget() {
                 let count_budget = max_tools + if app_enabled { 16 } else { 0 } + feature_tools;
                 let byte_budget =
                     max_bytes + if app_enabled { 18_000 } else { 0 } + feature_tools * 4096;
-                assert!(
-                    count <= count_budget,
-                    "{label} app={app_enabled}: {count} tools exceeds {count_budget}"
-                );
+                if feature_tools == 0 {
+                    assert_eq!(
+                        count, count_budget,
+                        "{label} app={app_enabled}: tool inventory changed"
+                    );
+                } else {
+                    // Preserve the existing experimental Code Mode allowance.
+                    assert!(
+                        count <= count_budget,
+                        "{label} app={app_enabled}: {count} tools exceeds {count_budget}"
+                    );
+                }
                 if compact {
                     assert!(
                         bytes <= byte_budget,

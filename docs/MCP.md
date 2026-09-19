@@ -311,10 +311,15 @@ are model-visible gateway tools; review/coding catalogs still recommend them.
 `WEBCODEX_MCP_COMPACT_SCHEMAS` defaults to `true`. Compact `tools/list` omits
 `outputSchema` and projects shorter MCP-specific tool/input descriptions for
 selection: purpose, nearby tool distinctions, and essential continuation guidance.
-Repeated Session/context wrapper copy is shortened too. Field names, required
-fields, enums, patterns, bounds, object/union shape, annotations, and MCP App/file
-metadata are preserved. This is discovery presentation only; runtime argument
-validation and execution authority do not change.
+Repeated Session/context wrapper and audited common-argument copy is shortened
+too. Compact discovery omits only the exact opaque-ID regexes on
+`recording_session_id`, `ack_session_message_ids.items`, and
+`session_message_resolution.message_id`; their existing parent descriptions keep
+the `wc_sess_*` / `wc_msg_*` type hints. Copy the exact returned IDs.
+Business-ID, hash/Git fence and resource-path patterns, all bounds, field names,
+required fields, enums, object/union shape, annotations, and MCP App/file metadata
+are preserved. This is discovery presentation only; runtime argument validation
+and execution authority do not change.
 
 Use `tool_manifest(tool_name=...)` for the full exact input contract and operational
 description, or set compact schemas to `false` for full discovery schemas.

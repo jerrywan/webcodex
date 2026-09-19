@@ -56,6 +56,36 @@ pub(super) fn compact_tool(tool: &mut Value) {
                 *copy = description.to_string();
             }
         }
+        compact_discovery_validation_annotations(schema);
+    }
+}
+
+fn compact_discovery_validation_annotations(schema: &mut Value) {
+    // Only copied opaque IDs in protocol wrappers, at these exact schema
+    // positions and with these exact patterns. Business IDs, fences, resource
+    // paths and all bounds stay intact. Full discovery and runtime validation
+    // use their original schemas/parsers, never this owned presentation copy.
+    for (pointer, pattern) in [
+        (
+            "/properties/recording_session_id",
+            "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
+        ),
+        (
+            "/properties/ack_session_message_ids/items",
+            "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
+        ),
+        (
+            "/properties/session_message_resolution/properties/message_id",
+            "^wc_msg_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$",
+        ),
+    ] {
+        if let Some(property) = schema.pointer_mut(pointer).and_then(Value::as_object_mut) {
+            if property.get("type").and_then(Value::as_str) == Some("string")
+                && property.get("pattern").and_then(Value::as_str) == Some(pattern)
+            {
+                property.remove("pattern");
+            }
+        }
     }
 }
 
