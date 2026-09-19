@@ -89,6 +89,16 @@ fn apply_text_edits_occurrence_and_recovery_schemas_are_model_visible() {
         serde_json::json!(["not_started", "completed", "outcome_unknown"])
     );
     assert_eq!(output_properties["ignored_noop_count"]["type"], "integer");
+    let file_properties = output_properties["files"]["items"]["properties"]
+        .as_object()
+        .expect("apply_text_edits file summary properties");
+    assert!(file_properties.contains_key("read_revision"));
+    assert!(!file_properties.contains_key("old_sha256"));
+    assert!(!file_properties.contains_key("new_sha256"));
+    assert_eq!(
+        file_properties["read_revision"]["anyOf"][0]["maximum"],
+        9_007_199_254_740_991_u64
+    );
 
     let stale_revision = serde_json::json!({
         "success": false,
@@ -630,7 +640,17 @@ async fn complete_apply_text_edits_success(
                     "applied_count": 1,
                     "changed": true,
                     "would_change": true,
-                    "files": [],
+                    "files": [{
+                        "index": 0,
+                        "kind": "edit",
+                        "path": path,
+                        "to_path": null,
+                        "old_sha256": "a".repeat(64),
+                        "new_sha256": "b".repeat(64),
+                        "changed": true,
+                        "would_change": true,
+                        "edits": []
+                    }],
                     "changed_paths": [path]
                 })
                 .to_string(),
@@ -878,7 +898,23 @@ async fn apply_text_edits_translates_strong_read_revisions_to_existing_wire_sha_
                     "applied_count": 3,
                     "changed": true,
                     "would_change": true,
-                    "files": [],
+                    "files": [
+                        {
+                            "index": 0, "kind": "edit", "path": "src/lib.rs", "to_path": null,
+                            "old_sha256": edit_sha, "new_sha256": "d".repeat(64),
+                            "changed": true, "would_change": true, "edits": []
+                        },
+                        {
+                            "index": 1, "kind": "delete", "path": "delete.txt", "to_path": null,
+                            "old_sha256": delete_sha, "new_sha256": null,
+                            "changed": true, "would_change": true, "edits": []
+                        },
+                        {
+                            "index": 2, "kind": "rename", "path": "rename.txt", "to_path": "moved.txt",
+                            "old_sha256": rename_sha, "new_sha256": "e".repeat(64),
+                            "changed": true, "would_change": true, "edits": []
+                        }
+                    ],
                     "changed_paths": ["src/lib.rs", "delete.txt", "rename.txt", "moved.txt"]
                 })
                 .to_string(),
@@ -893,6 +929,315 @@ async fn apply_text_edits_translates_strong_read_revisions_to_existing_wire_sha_
         .unwrap();
     let result = task.await.unwrap();
     assert!(result.success, "{:?}", result.error);
+}
+
+#[tokio::test]
+async fn apply_text_edits_success_mints_final_revisions_and_continues_without_reread() {
+    let client_id = "ate-final-revisions";
+    let runtime = runtime_with_agent_project(client_id);
+    register_agent(
+        &runtime,
+        client_id,
+        None,
+        RunnerCapabilities {
+            file_write: true,
+            apply_text_edit_local_guard_without_sha: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let project = agent_test_project_id(client_id);
+    let edit_old = "1".repeat(64);
+    let rename_old = "2".repeat(64);
+    let delete_old = "3".repeat(64);
+    let noop_sha = "4".repeat(64);
+    let edit_revision = seed_read_revision(&runtime, &project, "edit.txt", &edit_old).await;
+    let rename_revision = seed_read_revision(&runtime, &project, "rename.txt", &rename_old).await;
+    let delete_revision = seed_read_revision(&runtime, &project, "delete.txt", &delete_old).await;
+    let noop_revision = seed_read_revision(&runtime, &project, "noop.txt", &noop_sha).await;
+
+    let guarded_edit = |path: &str, revision: u64, old_text: &str, new_text: &str| {
+        let mut change = edit_change(
+            path,
+            "unused",
+            vec![text_edit(
+                ApplyTextEditKind::ReplaceExact,
+                Some(old_text),
+                Some(new_text),
+                None,
+            )],
+        );
+        change.expected_read_revision = Some(revision);
+        change
+    };
+    let changes = vec![
+        guarded_edit("edit.txt", edit_revision, "old", "new"),
+        ApplyFileChangeInput {
+            kind: ApplyFileChangeKind::Create,
+            path: "created.txt".to_string(),
+            to_path: None,
+            content: Some("created\n".to_string()),
+            edits: Vec::new(),
+            expected_read_revision: None,
+        },
+        ApplyFileChangeInput {
+            kind: ApplyFileChangeKind::Rename,
+            path: "rename.txt".to_string(),
+            to_path: Some("renamed.txt".to_string()),
+            content: None,
+            edits: Vec::new(),
+            expected_read_revision: Some(rename_revision),
+        },
+        ApplyFileChangeInput {
+            kind: ApplyFileChangeKind::Delete,
+            path: "delete.txt".to_string(),
+            to_path: None,
+            content: None,
+            edits: Vec::new(),
+            expected_read_revision: Some(delete_revision),
+        },
+        guarded_edit("noop.txt", noop_revision, "same", "same"),
+    ];
+    let task = tokio::spawn({
+        let runtime = runtime.clone();
+        let project = project.clone();
+        async move { runtime.apply_text_edits(project, changes, None).await }
+    });
+    let request = wait_for_patch_agent_request(&runtime, client_id).await;
+    let edit_new = "5".repeat(64);
+    let create_new = "6".repeat(64);
+    let rename_new = "7".repeat(64);
+    runtime
+        .runner_registry
+        .complete(RunnerResultRequest {
+            client_id: client_id.to_string(),
+            runner_instance_id: "inst".to_string(),
+            request_id: request.request_id,
+            exit_code: Some(0),
+            stdout: Some(
+                serde_json::json!({
+                    "dry_run": false,
+                    "applied_count": 5,
+                    "changed": true,
+                    "would_change": true,
+                    "files": [
+                        {"index":0,"kind":"edit","path":"edit.txt","to_path":null,"old_sha256":edit_old,"new_sha256":edit_new,"changed":true,"would_change":true,"edits":[]},
+                        {"index":1,"kind":"create","path":"created.txt","to_path":null,"old_sha256":null,"new_sha256":create_new,"changed":true,"would_change":true,"edits":[]},
+                        {"index":2,"kind":"rename","path":"rename.txt","to_path":"renamed.txt","old_sha256":rename_old,"new_sha256":rename_new,"changed":true,"would_change":true,"edits":[]},
+                        {"index":3,"kind":"delete","path":"delete.txt","to_path":null,"old_sha256":delete_old,"new_sha256":null,"changed":true,"would_change":true,"edits":[]},
+                        {"index":4,"kind":"edit","path":"noop.txt","to_path":null,"old_sha256":noop_sha,"new_sha256":noop_sha,"changed":false,"would_change":false,"edits":[]}
+                    ],
+                    "changed_paths": ["edit.txt", "created.txt", "rename.txt", "renamed.txt", "delete.txt"]
+                })
+                .to_string(),
+            ),
+            stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            duration_ms: Some(1),
+            error: None,
+        })
+        .await
+        .unwrap();
+    let result = task.await.unwrap();
+    assert!(result.success, "{:?}", result.error);
+    let files = result.output["files"].as_array().unwrap();
+    assert_eq!(files.len(), 5);
+    for file in files {
+        assert!(file.get("old_sha256").is_none());
+        assert!(file.get("new_sha256").is_none());
+        assert!(file.get("read_revision").is_some());
+    }
+    let edit_final_revision = files[0]["read_revision"].as_u64().unwrap();
+    assert!(files[1]["read_revision"].as_u64().is_some());
+    let rename_final_revision = files[2]["read_revision"].as_u64().unwrap();
+    assert!(files[3]["read_revision"].is_null());
+    assert_eq!(files[4]["read_revision"].as_u64(), Some(noop_revision));
+    crate::tool_runtime::startup_brief::validate_schema_instance_for_test(
+        &serde_json::to_value(&result).unwrap(),
+        &crate::tool_runtime::registry::output_schema_for_tool("apply_text_edits"),
+    )
+    .unwrap();
+
+    let edit_continuation = guarded_edit("edit.txt", edit_final_revision, "new", "newer");
+    let continuation_task = tokio::spawn({
+        let runtime = runtime.clone();
+        let project = project.clone();
+        async move {
+            runtime
+                .apply_text_edits(project, vec![edit_continuation], None)
+                .await
+        }
+    });
+    let continuation_request = wait_for_patch_agent_request(&runtime, client_id).await;
+    let continuation_payload: Value =
+        serde_json::from_str(continuation_request.content.as_deref().unwrap()).unwrap();
+    assert_eq!(continuation_payload["changes"][0]["expected_sha256"], edit_new);
+    let edit_newer = "8".repeat(64);
+    runtime
+        .runner_registry
+        .complete(RunnerResultRequest {
+            client_id: client_id.to_string(),
+            runner_instance_id: "inst".to_string(),
+            request_id: continuation_request.request_id,
+            exit_code: Some(0),
+            stdout: Some(
+                serde_json::json!({
+                    "dry_run": false, "applied_count": 1, "changed": true, "would_change": true,
+                    "files": [{"index":0,"kind":"edit","path":"edit.txt","to_path":null,"old_sha256":edit_new,"new_sha256":edit_newer,"changed":true,"would_change":true,"edits":[]}],
+                    "changed_paths": ["edit.txt"]
+                })
+                .to_string(),
+            ),
+            stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            duration_ms: Some(1),
+            error: None,
+        })
+        .await
+        .unwrap();
+    let continuation_result = continuation_task.await.unwrap();
+    assert!(continuation_result.success, "{:?}", continuation_result.error);
+    let edit_newer_revision = continuation_result.output["files"][0]["read_revision"]
+        .as_u64()
+        .unwrap();
+
+    let source_rejected = runtime
+        .apply_text_edits(
+            project.clone(),
+            vec![guarded_edit(
+                "rename.txt",
+                rename_final_revision,
+                "old",
+                "new",
+            )],
+            None,
+        )
+        .await;
+    assert!(!source_rejected.success);
+    assert_eq!(source_rejected.output["error_kind"], "read_revision_path_mismatch");
+    assert_no_apply_text_edits_runner_request(&runtime, client_id).await;
+
+    let destination_continuation = guarded_edit(
+        "renamed.txt",
+        rename_final_revision,
+        "renamed",
+        "renamed-again",
+    );
+    let destination_task = tokio::spawn({
+        let runtime = runtime.clone();
+        let project = project.clone();
+        async move {
+            runtime
+                .apply_text_edits(project, vec![destination_continuation], None)
+                .await
+        }
+    });
+    let destination_request = wait_for_patch_agent_request(&runtime, client_id).await;
+    let destination_payload: Value =
+        serde_json::from_str(destination_request.content.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        destination_payload["changes"][0]["expected_sha256"],
+        rename_new
+    );
+    runtime
+        .runner_registry
+        .complete(RunnerResultRequest {
+            client_id: client_id.to_string(),
+            runner_instance_id: "inst".to_string(),
+            request_id: destination_request.request_id,
+            exit_code: Some(0),
+            stdout: Some(
+                serde_json::json!({
+                    "dry_run": false, "applied_count": 1, "changed": true, "would_change": true,
+                    "files": [{"index":0,"kind":"edit","path":"renamed.txt","to_path":null,"old_sha256":rename_new,"new_sha256":"9".repeat(64),"changed":true,"would_change":true,"edits":[]}],
+                    "changed_paths": ["renamed.txt"]
+                })
+                .to_string(),
+            ),
+            stderr: Some(String::new()),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            duration_ms: Some(1),
+            error: None,
+        })
+        .await
+        .unwrap();
+    assert!(destination_task.await.unwrap().success);
+
+    let other_client = "ate-final-revisions-other";
+    register_agent(
+        &runtime,
+        other_client,
+        None,
+        RunnerCapabilities {
+            file_write: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let other_project = agent_test_project_id(other_client);
+    let project_rejected = runtime
+        .apply_text_edits(
+            other_project,
+            vec![guarded_edit(
+                "edit.txt",
+                edit_newer_revision,
+                "newer",
+                "other",
+            )],
+            None,
+        )
+        .await;
+    assert!(!project_rejected.success);
+    assert_eq!(
+        project_rejected.output["error_kind"],
+        "read_revision_project_mismatch"
+    );
+    assert_no_apply_text_edits_runner_request(&runtime, other_client).await;
+
+    runtime
+        .runner_registry
+        .set_last_seen_for_test(client_id, chrono::Utc::now().timestamp() - 120)
+        .await;
+    register_agent_with_instance(
+        &runtime,
+        client_id,
+        "inst-replacement",
+        None,
+        RunnerCapabilities {
+            file_write: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let owner_rejected = runtime
+        .apply_text_edits(
+            project,
+            vec![guarded_edit(
+                "edit.txt",
+                edit_newer_revision,
+                "newer",
+                "again",
+            )],
+            None,
+        )
+        .await;
+    assert!(!owner_rejected.success);
+    assert_eq!(owner_rejected.output["error_kind"], "read_revision_owner_mismatch");
+    let replacement_request = runtime
+        .runner_registry
+        .poll(RunnerPollRequest {
+            client_id: client_id.to_string(),
+            runner_instance_id: "inst-replacement".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        replacement_request.is_none(),
+        "owner mismatch must reject before dispatch to replacement Runner"
+    );
 }
 
 #[tokio::test]
@@ -1149,7 +1494,13 @@ async fn apply_text_edits_without_occurrence_unique_match_queues_and_succeeds() 
             stdout: Some(
                 serde_json::json!({
                     "dry_run": false, "applied_count": 1, "changed": true,
-                    "would_change": true, "files": [], "changed_paths": ["src/lib.rs"]
+                    "would_change": true,
+                    "files": [{
+                        "index": 0, "kind": "edit", "path": "src/lib.rs", "to_path": null,
+                        "old_sha256": "a".repeat(64), "new_sha256": "b".repeat(64),
+                        "changed": true, "would_change": true, "edits": []
+                    }],
+                    "changed_paths": ["src/lib.rs"]
                 })
                 .to_string(),
             ),
@@ -1450,25 +1801,25 @@ async fn apply_text_edits_dry_run_does_not_write() {
     )
     .await;
     let project = agent_test_project_id("ate-dry");
+    let before_revision =
+        seed_read_revision(&runtime, &project, "EDIT_PROBE.txt", &"a".repeat(64)).await;
+    let mut dry_run_change = edit_change(
+        "EDIT_PROBE.txt",
+        "unused",
+        vec![text_edit(
+            ApplyTextEditKind::ReplaceExact,
+            Some("old"),
+            Some("new"),
+            None,
+        )],
+    );
+    dry_run_change.expected_read_revision = Some(before_revision);
 
     let runtime_for_task = runtime.clone();
     let project_for_task = project.clone();
     let task = tokio::spawn(async move {
         runtime_for_task
-            .apply_text_edits(
-                project_for_task,
-                vec![edit_change(
-                    "EDIT_PROBE.txt",
-                    &"a".repeat(64),
-                    vec![text_edit(
-                        ApplyTextEditKind::ReplaceExact,
-                        Some("old"),
-                        Some("new"),
-                        None,
-                    )],
-                )],
-                Some(true),
-            )
+            .apply_text_edits(project_for_task, vec![dry_run_change], Some(true))
             .await
     });
 
@@ -1491,9 +1842,19 @@ async fn apply_text_edits_dry_run_does_not_write() {
             request_id: req.request_id,
             exit_code: Some(0),
             stdout: Some(
-                "{\"dry_run\":true,\"applied_count\":1,\"changed\":false,\
-                     \"would_change\":true,\"files\":[],\"changed_paths\":[\"EDIT_PROBE.txt\"]}"
-                    .to_string(),
+                serde_json::json!({
+                    "dry_run": true,
+                    "applied_count": 1,
+                    "changed": false,
+                    "would_change": true,
+                    "files": [{
+                        "index": 0, "kind": "edit", "path": "EDIT_PROBE.txt", "to_path": null,
+                        "old_sha256": "a".repeat(64), "new_sha256": "b".repeat(64),
+                        "changed": false, "would_change": true, "edits": []
+                    }],
+                    "changed_paths": ["EDIT_PROBE.txt"]
+                })
+                .to_string(),
             ),
             stderr: Some(String::new()),
             stdout_truncated: false,
@@ -1509,6 +1870,11 @@ async fn apply_text_edits_dry_run_does_not_write() {
     assert_eq!(result.output["dry_run"], true);
     assert_eq!(result.output["would_change"], true);
     assert_eq!(result.output["changed"], false);
+    assert!(result.output["files"][0]["read_revision"].is_null());
+    assert!(result.output["files"][0].get("old_sha256").is_none());
+    assert!(result.output["files"][0].get("new_sha256").is_none());
+    let next_revision = seed_read_revision(&runtime, &project, "after-dry-run.txt", &"c".repeat(64)).await;
+    assert_eq!(next_revision, before_revision + 1, "dry-run must not mutate the read revision registry");
 }
 
 #[tokio::test]
@@ -1669,10 +2035,19 @@ async fn apply_text_edits_session_event_summary() {
             request_id: req.request_id,
             exit_code: Some(0),
             stdout: Some(
-                "{\"dry_run\":false,\"applied_count\":1,\"changed\":true,\
-                     \"would_change\":true,\"files\":[{\"index\":0,\"kind\":\"edit\",\"path\":\"src/lib.rs\"}],\
-                     \"changed_paths\":[\"src/lib.rs\"]}"
-                    .to_string(),
+                serde_json::json!({
+                    "dry_run": false,
+                    "applied_count": 1,
+                    "changed": true,
+                    "would_change": true,
+                    "files": [{
+                        "index": 0, "kind": "edit", "path": "src/lib.rs", "to_path": null,
+                        "old_sha256": "a".repeat(64), "new_sha256": "b".repeat(64),
+                        "changed": true, "would_change": true, "edits": []
+                    }],
+                    "changed_paths": ["src/lib.rs"]
+                })
+                .to_string(),
             ),
             stderr: Some(String::new()),
             stdout_truncated: false,
@@ -1808,8 +2183,11 @@ async fn apply_text_edits_dropped_waiter_after_dispatch_is_outcome_unknown() {
 #[tokio::test]
 async fn apply_text_edits_malformed_success_payload_is_outcome_unknown() {
     let (runtime, project) = apply_text_edits_effect_runtime("ate-malformed").await;
+    let before_revision =
+        seed_read_revision(&runtime, &project, "before-malformed.txt", &"a".repeat(64)).await;
     let task = tokio::spawn({
         let runtime = runtime.clone();
+        let project = project.clone();
         async move {
             runtime
                 .apply_text_edits(project, one_effect_change(), None)
@@ -1821,6 +2199,13 @@ async fn apply_text_edits_malformed_success_payload_is_outcome_unknown() {
     complete_patch_agent_request(&runtime, "ate-malformed", &request.request_id, 0, "{}", "").await;
 
     assert_apply_text_edits_outcome_unknown(&task.await.unwrap());
+    let after_revision =
+        seed_read_revision(&runtime, &project, "after-malformed.txt", &"b".repeat(64)).await;
+    assert_eq!(
+        after_revision,
+        before_revision + 1,
+        "invalid Runner success metadata must not mint a read revision"
+    );
 }
 
 #[tokio::test]

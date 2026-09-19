@@ -193,6 +193,8 @@ async fn complete_mutation_fixture(
             let would_change = next != current;
             let dry_run = payload["dry_run"].as_bool().unwrap_or(false);
             let changed = would_change && !dry_run;
+            let old_sha256 = crate::tool_runtime::files::sha256_hex_bytes(current.as_bytes());
+            let new_sha256 = crate::tool_runtime::files::sha256_hex_bytes(next.as_bytes());
             if changed {
                 fs::write(&full, next).unwrap();
             }
@@ -201,18 +203,29 @@ async fn complete_mutation_fixture(
                 "applied_count": 1,
                 "changed": changed,
                 "would_change": would_change,
-                "files": [{"index": 0, "kind": "edit", "path": path}],
+                "files": [{
+                    "index": 0, "kind": "edit", "path": path, "to_path": null,
+                    "old_sha256": old_sha256, "new_sha256": new_sha256,
+                    "changed": changed, "would_change": would_change, "edits": []
+                }],
                 "changed_paths": if changed { vec![path] } else { Vec::<&str>::new() },
             })
         }
-        MutationFixtureReply::Noop => json!({
-            "dry_run": payload["dry_run"].as_bool().unwrap_or(false),
-            "applied_count": 1,
-            "changed": false,
-            "would_change": false,
-            "files": [{"index": 0, "kind": "edit", "path": path}],
-            "changed_paths": [],
-        }),
+        MutationFixtureReply::Noop => {
+            let sha256 = crate::tool_runtime::files::sha256_hex_bytes(&fs::read(&full).unwrap());
+            json!({
+                "dry_run": payload["dry_run"].as_bool().unwrap_or(false),
+                "applied_count": 1,
+                "changed": false,
+                "would_change": false,
+                "files": [{
+                    "index": 0, "kind": "edit", "path": path, "to_path": null,
+                    "old_sha256": sha256, "new_sha256": sha256,
+                    "changed": false, "would_change": false, "edits": []
+                }],
+                "changed_paths": [],
+            })
+        },
         MutationFixtureReply::ShaConflict { replacement } => {
             fs::write(&full, replacement).unwrap();
             let expected = change["expected_sha256"]

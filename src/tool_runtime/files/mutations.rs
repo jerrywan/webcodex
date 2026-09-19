@@ -642,6 +642,80 @@ fn transactional_edit_agent_stdout_result(
     ToolResult::ok(obj)
 }
 
+fn apply_text_edits_sha256(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(crate::apply_edits_shared::is_lowercase_hex_sha256)
+}
+
+fn validate_apply_text_edits_success_metadata(
+    output: &Value,
+    changes: &[ApplyFileChangeInput],
+    expected_dry_run: bool,
+) -> bool {
+    let Some(files) = output.get("files").and_then(Value::as_array) else {
+        return false;
+    };
+    if files.len() != changes.len() {
+        return false;
+    }
+
+    let mut any_changed = false;
+    let mut any_would_change = false;
+    for (expected_index, (file, change)) in files.iter().zip(changes).enumerate() {
+        if file.get("index").and_then(Value::as_u64) != Some(expected_index as u64)
+            || file.get("kind").and_then(Value::as_str) != Some(change.kind.as_str())
+            || file.get("path").and_then(Value::as_str) != Some(change.path.as_str())
+        {
+            return false;
+        }
+        let to_path_matches = match change.to_path.as_deref() {
+            Some(expected) => file.get("to_path").and_then(Value::as_str) == Some(expected),
+            None => matches!(file.get("to_path"), Some(Value::Null)),
+        };
+        if !to_path_matches {
+            return false;
+        }
+        if file.get("edits").and_then(Value::as_array).is_none() {
+            return false;
+        }
+
+        let old_sha256 = file.get("old_sha256");
+        let new_sha256 = file.get("new_sha256");
+        let sha_shape_valid = match change.kind {
+            ApplyFileChangeKind::Create => {
+                matches!(old_sha256, Some(Value::Null))
+                    && apply_text_edits_sha256(new_sha256)
+            }
+            ApplyFileChangeKind::Edit | ApplyFileChangeKind::Rename => {
+                apply_text_edits_sha256(old_sha256) && apply_text_edits_sha256(new_sha256)
+            }
+            ApplyFileChangeKind::Delete => {
+                apply_text_edits_sha256(old_sha256)
+                    && matches!(new_sha256, Some(Value::Null))
+            }
+        };
+        if !sha_shape_valid {
+            return false;
+        }
+
+        let Some(changed) = file.get("changed").and_then(Value::as_bool) else {
+            return false;
+        };
+        let Some(would_change) = file.get("would_change").and_then(Value::as_bool) else {
+            return false;
+        };
+        if changed != (!expected_dry_run && would_change) {
+            return false;
+        }
+        any_changed |= changed;
+        any_would_change |= would_change;
+    }
+
+    output.get("changed").and_then(Value::as_bool) == Some(any_changed)
+        && output.get("would_change").and_then(Value::as_bool) == Some(any_would_change)
+}
+
 fn apply_patch_sha256(value: &Value) -> bool {
     value.as_str().is_some_and(|value| {
         value.len() == 64
@@ -1821,7 +1895,7 @@ fn apply_text_edits_agent_stdout_result(
     project: &str,
     changes: &[ApplyFileChangeInput],
 ) -> ToolResult {
-    sanitize_apply_text_edits_model_recovery(
+    let result = sanitize_apply_text_edits_model_recovery(
         transactional_edit_agent_stdout_result(
             "apply_text_edits",
             stdout,
@@ -1830,6 +1904,17 @@ fn apply_text_edits_agent_stdout_result(
         ),
         project,
         changes,
+    );
+    if !result.success {
+        return result;
+    }
+    if validate_apply_text_edits_success_metadata(&result.output, changes, expected_dry_run) {
+        return result;
+    }
+    structured_edit_outcome_unknown_result(
+        "apply_text_edits",
+        "the Runner success payload contained invalid or contradictory file-result metadata",
+        json!({}),
     )
 }
 
@@ -3110,13 +3195,51 @@ impl ToolRuntime {
             Ok(response) => response,
             Err(result) => return result,
         };
-        apply_text_edits_agent_stdout_result(
+        let mut result = apply_text_edits_agent_stdout_result(
             &response.stdout.unwrap_or_default(),
             expected_change_count,
             expected_dry_run,
             &resolved.resolved_id,
             &changes,
-        )
+        );
+        if !result.success {
+            return result;
+        }
+
+        let files = result
+            .output
+            .get_mut("files")
+            .and_then(Value::as_array_mut)
+            .expect("validated apply_text_edits success files");
+        for (file, change) in files.iter_mut().zip(&changes) {
+            let new_sha256 = file
+                .get("new_sha256")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let read_revision = if expected_dry_run || change.kind == ApplyFileChangeKind::Delete {
+                None
+            } else {
+                let final_path = match change.kind {
+                    ApplyFileChangeKind::Rename => change
+                        .to_path
+                        .as_deref()
+                        .expect("validated rename destination"),
+                    _ => change.path.as_str(),
+                };
+                let target = read_revision_target(&resolved, final_path, &runner.runner_instance_id);
+                Some(self.read_revisions.observe(
+                    target,
+                    new_sha256.expect("validated final apply_text_edits sha256"),
+                ))
+            };
+            let file = file
+                .as_object_mut()
+                .expect("validated apply_text_edits file result object");
+            file.remove("old_sha256");
+            file.remove("new_sha256");
+            file.insert("read_revision".to_string(), json!(read_revision));
+        }
+        result
     }
 }
 
@@ -4187,6 +4310,134 @@ mod tests {
         assert!(!result.success);
         assert_eq!(result.output["execution_state"], "outcome_unknown");
         assert!(result.output.get("files").is_none());
+    }
+
+    #[test]
+    fn apply_text_edits_success_metadata_rejects_invalid_file_authority() {
+        let change = ApplyFileChangeInput {
+            kind: ApplyFileChangeKind::Edit,
+            path: "file.txt".to_string(),
+            to_path: None,
+            content: None,
+            edits: Vec::new(),
+            expected_read_revision: None,
+        };
+        let valid_payload = || {
+            json!({
+                "dry_run": false,
+                "applied_count": 1,
+                "changed": true,
+                "would_change": true,
+                "files": [{
+                    "index": 0,
+                    "kind": "edit",
+                    "path": "file.txt",
+                    "to_path": null,
+                    "old_sha256": "a".repeat(64),
+                    "new_sha256": "b".repeat(64),
+                    "changed": true,
+                    "would_change": true,
+                    "edits": []
+                }],
+                "changed_paths": ["file.txt"]
+            })
+        };
+
+        let mut invalid = Vec::new();
+        let mut wrong_index = valid_payload();
+        wrong_index["files"][0]["index"] = json!(1);
+        invalid.push(wrong_index);
+        let mut wrong_path = valid_payload();
+        wrong_path["files"][0]["path"] = json!("retargeted.txt");
+        invalid.push(wrong_path);
+        let mut wrong_to_path = valid_payload();
+        wrong_to_path["files"][0]["to_path"] = json!("retargeted.txt");
+        invalid.push(wrong_to_path);
+        let mut wrong_kind = valid_payload();
+        wrong_kind["files"][0]["kind"] = json!("rename");
+        invalid.push(wrong_kind);
+        let mut missing_files = valid_payload();
+        missing_files.as_object_mut().unwrap().remove("files");
+        invalid.push(missing_files);
+        let mut duplicate_file = valid_payload();
+        let duplicate = duplicate_file["files"][0].clone();
+        duplicate_file["files"].as_array_mut().unwrap().push(duplicate);
+        invalid.push(duplicate_file);
+        let mut malformed_new_sha = valid_payload();
+        malformed_new_sha["files"][0]["new_sha256"] = json!("ABC");
+        invalid.push(malformed_new_sha);
+        let mut contradictory_changed = valid_payload();
+        contradictory_changed["files"][0]["changed"] = json!(false);
+        invalid.push(contradictory_changed);
+        let mut contradictory_would_change = valid_payload();
+        contradictory_would_change["files"][0]["would_change"] = json!(false);
+        invalid.push(contradictory_would_change);
+
+        for payload in invalid {
+            let result = apply_text_edits_agent_stdout_result(
+                &payload.to_string(),
+                1,
+                false,
+                "agent:test:demo",
+                std::slice::from_ref(&change),
+            );
+            assert!(!result.success);
+            assert_eq!(result.output["execution_state"], "outcome_unknown");
+            assert!(result.output["state_changed"].is_null());
+            assert!(result.output.get("files").is_none());
+            assert!(result.output.get("read_revision").is_none());
+            assert!(result
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("invalid or contradictory file-result metadata"));
+        }
+
+        let create = ApplyFileChangeInput {
+            kind: ApplyFileChangeKind::Create,
+            path: "created.txt".to_string(),
+            to_path: None,
+            content: Some("created".to_string()),
+            edits: Vec::new(),
+            expected_read_revision: None,
+        };
+        let create_with_old_sha = json!({
+            "dry_run": false, "applied_count": 1, "changed": true, "would_change": true,
+            "files": [{"index":0,"kind":"create","path":"created.txt","to_path":null,"old_sha256":"a".repeat(64),"new_sha256":"b".repeat(64),"changed":true,"would_change":true,"edits":[]}],
+            "changed_paths": ["created.txt"]
+        });
+        let create_result = apply_text_edits_agent_stdout_result(
+            &create_with_old_sha.to_string(),
+            1,
+            false,
+            "agent:test:demo",
+            &[create],
+        );
+        assert!(!create_result.success);
+        assert_eq!(create_result.output["execution_state"], "outcome_unknown");
+
+        let delete = ApplyFileChangeInput {
+            kind: ApplyFileChangeKind::Delete,
+            path: "deleted.txt".to_string(),
+            to_path: None,
+            content: None,
+            edits: Vec::new(),
+            expected_read_revision: Some(1),
+        };
+        let delete_with_new_sha = json!({
+            "dry_run": false, "applied_count": 1, "changed": true, "would_change": true,
+            "files": [{"index":0,"kind":"delete","path":"deleted.txt","to_path":null,"old_sha256":"a".repeat(64),"new_sha256":"b".repeat(64),"changed":true,"would_change":true,"edits":[]}],
+            "changed_paths": ["deleted.txt"]
+        });
+        let delete_result = apply_text_edits_agent_stdout_result(
+            &delete_with_new_sha.to_string(),
+            1,
+            false,
+            "agent:test:demo",
+            &[delete],
+        );
+        assert!(!delete_result.success);
+        assert_eq!(delete_result.output["execution_state"], "outcome_unknown");
     }
 
     #[test]

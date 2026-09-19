@@ -808,6 +808,14 @@ fn edit_tool_surface_keeps_mutation_options_visible_and_schemas_stable() {
             "apply_text_edits must keep field {field}"
         );
     }
+    let text_edit_output =
+        &spec_named(&specs, "apply_text_edits").output_schema["properties"]["output"]["properties"];
+    let text_edit_file_properties = text_edit_output["files"]["items"]["properties"]
+        .as_object()
+        .expect("apply_text_edits file summary properties");
+    assert!(text_edit_file_properties.contains_key("read_revision"));
+    assert!(!text_edit_file_properties.contains_key("old_sha256"));
+    assert!(!text_edit_file_properties.contains_key("new_sha256"));
     let codex_patch = &spec_named(&specs, "apply_patch").input_schema["properties"];
     for field in ["project", "patch", "dry_run", "matching_mode"] {
         assert!(
