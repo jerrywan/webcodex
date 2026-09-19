@@ -89,6 +89,8 @@ WebCodex 只有一个 model-facing MCP runtime contract：**Adaptive Runtime**�
 
 MCP tool 的 machine-readable 结果位于 `structuredContent`；`content` 只保留简短的人类可读或 protocol-native fallback。需要结构化字段的 client 应读取 `structuredContent`，不要解析文本。
 
+普通 client 保持标准 MCP `isError` 语义。对于 `_meta["io.modelcontextprotocol/clientInfo"].name` 精确等于 `openai-mcp`（不限版本）的请求，MCP adapter 会对 WebCodex-owned canonical `ToolResult` failure 应用 **OpenAI structured-failure compatibility projection**：presentation 使用 `isError=false`，但 `structuredContent.success=false` 仍是业务结果的 authoritative truth，完整 output/error 也继续保留。当前 OpenAI Host 会把 `isError=true` 提升成异常而不暴露 `structuredContent`；该兼容层用于保留 machine-actionable failure/recovery data，Host 行为修复后即可移除。JSON-RPC/protocol error 仍然是真错误，第三方 MCP/Plugin passthrough result 也继续保留 provider 自己的语义。
+
 部分 MCP host 不会把 `structuredContent` 暴露给模型；Claude Custom Connector 已观察到这种情况，即使 WebCodex 已成功执行工具并返回完整结构化结果。为这类 host 提供服务的 operator 可以显式设置 `WEBCODEX_MCP_TEXT_JSON_COMPAT=true`。开启后，普通 runtime tool result 仍以 `structuredContent` 为 canonical，同时把同一 JSON 值序列化到 `content[0].text`。该选项默认关闭，因为重复表示会增加 response/model-context 大小；protocol-native image/resource framing 与现有 App-only compatibility path 不受影响。
 
 Result 中的 recovery 字段只描述下一次**显式**调用的安全建议，不授予 authority，也不会触发 hidden retry。尤其是 uncertain outcome，必须先 reconcile，再决定是否重复 effect。
