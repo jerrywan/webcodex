@@ -17,9 +17,6 @@ use super::{
     parse_required_clean_string, parse_usize_field, project_root, validate_artifact_runner_path,
 };
 use crate::apply_edits_shared::is_lowercase_hex_sha256 as is_hex_sha256;
-use crate::artifact_policy::{
-    has_safe_octet_stream_artifact_extension, octet_stream_safe_extension_error,
-};
 
 pub(super) const MAX_ARTIFACT_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
 pub(super) const MAX_ARTIFACT_UPLOAD_CHUNK_BYTES: usize = 1024 * 1024;
@@ -335,17 +332,6 @@ pub(super) fn upload_error(
     })
 }
 
-fn upload_policy_rejected_error(
-    path: Option<&str>,
-    upload_id: Option<&str>,
-    msg: impl Into<String>,
-) -> Value {
-    let mut out = upload_error(path, upload_id, msg);
-    out["failure_kind"] = json!("policy_rejected");
-    out["error_kind"] = json!("policy_rejected");
-    out
-}
-
 pub(super) fn handle_artifact_upload_begin(
     request: &RunnerFilePayload,
     resolved: &Path,
@@ -414,14 +400,6 @@ pub(super) fn handle_artifact_upload_begin(
         Ok(value) => value,
         Err(e) => return line_edit_stdout(upload_error(Some(path), None, e), start),
     };
-    if matches!(mime_type.as_deref(), Some("application/octet-stream"))
-        && !has_safe_octet_stream_artifact_extension(path)
-    {
-        return line_edit_stdout(
-            upload_policy_rejected_error(Some(path), None, octet_stream_safe_extension_error()),
-            start,
-        );
-    }
     let overwrite = match parse_bool_field(&payload, "overwrite") {
         Ok(value) => value,
         Err(e) => return line_edit_stdout(upload_error(Some(path), None, e), start),

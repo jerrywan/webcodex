@@ -1,4 +1,6 @@
-use crate::artifact_policy::{DOCX_MIME, PPTX_MIME, XLSX_MIME};
+use crate::artifact_policy::{
+    ooxml_extension_for_mime, preferred_mime_for_path, DOCX_MIME, PPTX_MIME, XLSX_MIME,
+};
 use flate2::read::DeflateDecoder;
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -578,38 +580,12 @@ fn ooxml_mime_from_file(path: &Path) -> Option<&'static str> {
     Some(mime)
 }
 
-pub(super) fn extension_mime(path: &str) -> Option<&'static str> {
-    let lower = path.to_lowercase();
-    if lower.ends_with(".png") {
-        Some("image/png")
-    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
-        Some("image/jpeg")
-    } else if lower.ends_with(".webp") {
-        Some("image/webp")
-    } else if lower.ends_with(".mp3") {
-        Some("audio/mpeg")
-    } else if lower.ends_with(".mp4") {
-        Some("video/mp4")
-    } else if lower.ends_with(".pdf") {
-        Some("application/pdf")
-    } else if lower.ends_with(".zip") {
-        Some("application/zip")
-    } else if lower.ends_with(".txt") {
-        Some("text/plain")
-    } else if lower.ends_with(".csv") {
-        Some("text/csv")
-    } else if lower.ends_with(".json") {
-        Some("application/json")
-    } else {
-        None
-    }
-}
-
 pub(super) fn artifact_mime(path: &str, data: &[u8], sniff_json: bool) -> Option<String> {
     if let Some(mime) = ooxml_mime(data) {
         return Some(mime.to_string());
     }
-    let mut mime = extension_mime(path);
+    let mut mime =
+        preferred_mime_for_path(path).filter(|mime| ooxml_extension_for_mime(mime).is_none());
     if let Some(magic) = magic_mime(data) {
         mime = Some(magic);
     } else if sniff_json {
@@ -632,7 +608,8 @@ pub(super) fn artifact_mime_from_file(
     let mut file = File::open(file_path).ok()?;
     let prefix_len = usize::try_from(file.metadata().ok()?.len()).ok()?.min(32);
     let prefix = read_file_range(&mut file, 0, prefix_len)?;
-    let mut mime = extension_mime(path);
+    let mut mime =
+        preferred_mime_for_path(path).filter(|mime| ooxml_extension_for_mime(mime).is_none());
     if let Some(magic) = magic_mime(&prefix) {
         mime = Some(magic);
     } else if sniff_json {

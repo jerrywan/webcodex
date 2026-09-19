@@ -1169,7 +1169,7 @@ async fn artifact_upload_begin_policy_rejection_is_classified() {
         .dispatch_with_auth(
             ToolCall::ArtifactUploadBegin {
                 project,
-                path: "artifacts/smoke/raw.bin".to_string(),
+                path: ".env".to_string(),
                 session_id: Some(session.session_id.clone()),
                 expected_bytes: Some(1),
                 expected_sha256: None,
@@ -1185,8 +1185,7 @@ async fn artifact_upload_begin_policy_rejection_is_classified() {
     assert_eq!(result.output["failure_kind"], "policy_rejected");
     assert_eq!(result.output["error_kind"], "policy_rejected");
     let error = result.error.as_deref().unwrap();
-    assert!(error.contains(".artifact"), "{error}");
-    assert!(error.contains("artifacts/smoke/<name>.artifact"), "{error}");
+    assert!(error.contains("sensitive artifact path"), "{error}");
     assert!(
         probe_patch_agent_request(&runtime, "artifact-policy-session")
             .await
@@ -4835,8 +4834,8 @@ async fn office_artifact_mime_policy_accepts_matching_save_and_upload_paths() {
                 .error
                 .as_deref()
                 .unwrap()
-                .contains("only allowed for safe artifact extensions"),
-            "Office extensions should be safe octet-stream artifact paths: {:?}",
+                .contains("policy"),
+            "generic binary MIME should pass policy before project resolution: {:?}",
             octet.error
         );
 
@@ -4861,24 +4860,24 @@ async fn office_artifact_mime_policy_accepts_matching_save_and_upload_paths() {
         );
     }
 
-    let unsupported = runtime
+    let unknown_mime = runtime
         .save_project_artifact(
             missing_project,
-            "docs/report.docx".to_string(),
+            "docs/report.customblob".to_string(),
             "YQ==".to_string(),
-            Some("application/msword".to_string()),
+            Some("application/x-unknown".to_string()),
             Some(false),
         )
         .await;
-    assert!(!unsupported.success);
+    assert!(!unknown_mime.success);
     assert!(
-        unsupported
+        !unknown_mime
             .error
             .as_deref()
             .unwrap()
-            .contains("unsupported mime_type"),
-        "{:?}",
-        unsupported.error
+            .contains("mime_type"),
+        "unknown presentation MIME should normalize to generic binary before project resolution: {:?}",
+        unknown_mime.error
     );
 }
 
@@ -4947,8 +4946,8 @@ async fn common_media_artifact_mime_policy_accepts_save_upload_and_octet_paths()
                 .error
                 .as_deref()
                 .unwrap()
-                .contains("only allowed for safe artifact extensions"),
-            "media extension should be safe for host octet-stream fallback: {:?}",
+                .contains("mime_type"),
+            "generic binary MIME should pass policy before project resolution: {:?}",
             octet.error
         );
     }
@@ -4979,13 +4978,6 @@ async fn artifact_upload_begin_rejects_invalid_inputs_before_resolving_project()
             None,
             Some("text/plain"),
             "expected_bytes too large",
-        ),
-        (
-            "artifacts/imports/raw.bin",
-            Some(1),
-            None,
-            Some("application/octet-stream"),
-            "artifacts/smoke/<name>.artifact",
         ),
     ];
 

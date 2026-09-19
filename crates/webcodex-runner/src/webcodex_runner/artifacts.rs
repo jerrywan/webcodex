@@ -24,7 +24,7 @@ use inspection::{
     verify_upload_file, zip_entry_count,
 };
 #[cfg(test)]
-use inspection::{extension_mime, ARTIFACT_STREAM_BUFFER_BYTES};
+use inspection::ARTIFACT_STREAM_BUFFER_BYTES;
 #[cfg(test)]
 use upload::{
     commit_artifact_upload_part, enforce_artifact_upload_begin_admission, read_upload_state,
@@ -1668,32 +1668,11 @@ mod tests {
     }
 
     #[test]
-    fn artifact_upload_begin_octet_stream_error_is_actionable() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = "artifacts/smoke/raw.bin";
-
-        let output = run_artifact_request(
-            tmp.path(),
-            "file_artifact_upload_begin",
-            path,
-            json!({
-                "path": path,
-                "mime_type": "application/octet-stream",
-                "max_bytes": DEFAULT_MAX_ARTIFACT_BYTES,
-            }),
-        );
-
-        let error = output["error"].as_str().unwrap();
-        assert_eq!(output["failure_kind"], "policy_rejected");
-        assert!(error.contains(".artifact"), "{error}");
-        assert!(error.contains(".txt"), "{error}");
-        assert!(error.contains("artifacts/smoke/<name>.artifact"), "{error}");
-    }
-
-    #[test]
-    fn artifact_upload_begin_octet_stream_safe_extension_succeeds() {
+    fn artifact_upload_begin_generic_binary_accepts_arbitrary_regular_extension() {
         for path in [
+            "artifacts/smoke/raw.bin",
             "artifacts/smoke/raw.artifact",
+            "artifacts/smoke/data.customblob",
             "artifacts/smoke/audio.mp3",
             "artifacts/smoke/video.mp4",
         ] {
@@ -1720,8 +1699,22 @@ mod tests {
     }
 
     #[test]
-    fn common_media_extensions_have_export_mime_types() {
-        assert_eq!(extension_mime("artifacts/audio.mp3"), Some("audio/mpeg"));
-        assert_eq!(extension_mime("artifacts/video.mp4"), Some("video/mp4"));
+    fn common_extensions_use_shared_export_mime_policy() {
+        assert_eq!(
+            crate::artifact_policy::preferred_mime_for_path("artifacts/audio.mp3"),
+            Some("audio/mpeg")
+        );
+        assert_eq!(
+            crate::artifact_policy::preferred_mime_for_path("artifacts/video.mp4"),
+            Some("video/mp4")
+        );
+        assert_eq!(
+            crate::artifact_policy::preferred_mime_for_path("README.md"),
+            Some("text/markdown")
+        );
+        assert_eq!(
+            crate::artifact_policy::preferred_mime_for_path("data.customblob"),
+            None
+        );
     }
 }

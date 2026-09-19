@@ -371,15 +371,15 @@ fn file_artifact_upload_begin_rejects_validation_and_targets() {
     ));
     assert_eq!(too_large["error"], "expected_bytes exceeds max_bytes");
 
-    let unsafe_octet_path = "artifacts/imports/raw.bin";
-    let unsafe_octet = line_edit_json(handle_file_request(
+    let generic_binary_path = "artifacts/imports/raw.bin";
+    let generic_binary = line_edit_json(handle_file_request(
         &policy,
         &json_file_op_request(
             tmp.path(),
             "file_artifact_upload_begin",
-            unsafe_octet_path,
+            generic_binary_path,
             serde_json::json!({
-                "path": unsafe_octet_path,
+                "path": generic_binary_path,
                 "expected_bytes": 1,
                 "expected_sha256": null,
                 "mime_type": "application/octet-stream",
@@ -388,11 +388,9 @@ fn file_artifact_upload_begin_rejects_validation_and_targets() {
             }),
         ),
     ));
-    let unsafe_octet_error = unsafe_octet["error"].as_str().unwrap();
-    assert!(unsafe_octet_error.contains(".artifact"));
-    assert!(unsafe_octet_error.contains(".txt"));
-    assert!(unsafe_octet_error.contains("artifacts/smoke/<name>.artifact"));
-    assert_eq!(unsafe_octet["failure_kind"], "policy_rejected");
+    assert!(generic_binary.get("error").is_none(), "{generic_binary}");
+    assert_eq!(generic_binary["mime_type"], "application/octet-stream");
+    assert_eq!(generic_binary["committed"], false);
 
     let existing_path = "artifacts/imports/existing.txt";
     std::fs::create_dir_all(tmp.path().join("artifacts/imports")).unwrap();

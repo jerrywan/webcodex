@@ -8,7 +8,10 @@ use super::files::MAX_PROJECT_ARTIFACT_UPLOAD_CHUNK_BYTES;
 use super::sessions::SessionTransport;
 use super::tool_call::{HostFileImportProvenance, OpenAiHostFileRef};
 use super::{ToolCall, ToolResult, ToolRuntime};
-use crate::artifact_policy::ooxml_extension_for_mime;
+use crate::artifact_policy::{
+    canonical_extension_for_mime, canonical_known_mime, mime_is_compatible_with_path,
+    GENERIC_BINARY_MIME,
+};
 use crate::auth::AuthContext;
 use base64::{engine::general_purpose, Engine as _};
 use serde::Deserialize;
@@ -18,10 +21,6 @@ use std::time::{Duration, Instant};
 
 pub(crate) const MAX_IMPORT_FILES: usize = 10;
 pub(crate) const MAX_IMPORT_FILE_BYTES: usize = 10 * 1024 * 1024;
-const IMPORT_OCTET_STREAM_EXTENSIONS: &[&str] = &[
-    ".png", ".jpg", ".jpeg", ".webp", ".mp3", ".mp4", ".pdf", ".zip", ".docx", ".pptx", ".xlsx",
-    ".txt", ".csv", ".json",
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConversationImportDownloadPolicy {
@@ -89,30 +88,12 @@ fn sanitize_import_name(name: &str, fallback: &str) -> String {
     }
 }
 
-fn default_extension_for_import_mime(mime: &str) -> Option<&'static str> {
-    if let Some(extension) = ooxml_extension_for_mime(mime) {
-        return Some(extension);
-    }
-    match mime {
-        "image/png" => Some(".png"),
-        "image/jpeg" => Some(".jpg"),
-        "image/webp" => Some(".webp"),
-        "audio/mpeg" => Some(".mp3"),
-        "video/mp4" => Some(".mp4"),
-        "application/pdf" => Some(".pdf"),
-        "application/zip" => Some(".zip"),
-        "text/plain" => Some(".txt"),
-        "text/csv" => Some(".csv"),
-        "application/json" => Some(".json"),
-        _ => None,
-    }
-}
 
 fn default_import_leaf(file_ref: &OpenAiFileIdRef, index: usize, mime: &str) -> String {
     let fallback = format!("artifact-{}", index + 1);
     match file_ref.name.as_deref().or(file_ref.id.as_deref()) {
         Some(source_name) => sanitize_import_name(source_name, &fallback),
-        None => match default_extension_for_import_mime(mime) {
+        None => match canonical_extension_for_mime(mime) {
             Some(extension) => format!("{fallback}{extension}"),
             None => fallback,
         },
@@ -134,26 +115,8 @@ fn join_import_path(output_dir: Option<&str>, leaf: &str) -> Result<String, Stri
 }
 
 fn mime_allowed_for_import(mime: &str, path: &str) -> bool {
-    let lower_path = path.to_ascii_lowercase();
-    if let Some(required_extension) = ooxml_extension_for_mime(mime) {
-        return lower_path.ends_with(required_extension);
-    }
-    matches!(
-        mime,
-        "image/png"
-            | "image/jpeg"
-            | "image/webp"
-            | "audio/mpeg"
-            | "video/mp4"
-            | "application/pdf"
-            | "application/zip"
-            | "text/plain"
-            | "text/csv"
-            | "application/json"
-    ) || (mime == "application/octet-stream"
-        && IMPORT_OCTET_STREAM_EXTENSIONS
-            .iter()
-            .any(|suffix| lower_path.ends_with(suffix)))
+    let mime = canonical_known_mime(mime).unwrap_or(GENERIC_BINARY_MIME);
+    mime_is_compatible_with_path(mime, path)
 }
 
 fn validate_openai_download_url(download_link: &str) -> Result<reqwest::Url, String> {
@@ -841,10 +804,12 @@ mod tests {
     }
 
     #[test]
-    fn default_import_leaf_preserves_common_media_extension_when_host_omits_filename() {
+    fn default_import_leaf_uses_shared_file_type_policy() {
         for (mime, expected) in [
             ("audio/mpeg", "artifact-1.mp3"),
             ("video/mp4", "artifact-1.mp4"),
+            ("text/markdown", "artifact-1.md"),
+            ("application/yaml", "artifact-1.yaml"),
         ] {
             let file_ref = OpenAiFileIdRef {
                 name: None,
@@ -857,7 +822,11 @@ mod tests {
         }
         assert!(mime_allowed_for_import(
             "application/octet-stream",
-            "artifact-1.mp4"
+            "artifact-1.customblob"
+        ));
+        assert!(mime_allowed_for_import(
+            "application/x-unknown",
+            "artifact-1.customblob"
         ));
     }
 

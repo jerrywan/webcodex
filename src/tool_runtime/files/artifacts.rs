@@ -141,46 +141,27 @@ pub(crate) fn is_sensitive_artifact_path(path: &str) -> bool {
     crate::sensitive_paths::is_bulk_skipped_path(path)
 }
 
-fn validate_artifact_mime(mime_type: Option<&str>) -> Result<Option<String>, String> {
-    let Some(mime) = mime_type.map(str::trim).filter(|s| !s.is_empty()) else {
-        return Ok(None);
-    };
-    if ooxml_extension_for_mime(mime).is_some() {
-        return Ok(Some(mime.to_string()));
-    }
-    match mime {
-        "image/png"
-        | "image/jpeg"
-        | "image/webp"
-        | "audio/mpeg"
-        | "video/mp4"
-        | "application/pdf"
-        | "application/zip"
-        | "text/plain"
-        | "text/csv"
-        | "application/json" => Ok(Some(mime.to_string())),
-        "application/octet-stream" => Ok(Some(mime.to_string())),
-        _ => Err(format!("unsupported mime_type '{}'; allowed artifact MIME types are image/png, image/jpeg, image/webp, audio/mpeg, video/mp4, application/pdf, application/zip, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.openxmlformats-officedocument.presentationml.presentation, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, text/plain, text/csv, application/json", mime)),
-    }
+fn validate_artifact_mime(mime_type: Option<&str>) -> Option<String> {
+    let mime = mime_type.map(str::trim).filter(|value| !value.is_empty())?;
+    Some(
+        canonical_known_mime(mime)
+            .unwrap_or(GENERIC_BINARY_MIME)
+            .to_string(),
+    )
 }
 
 pub(crate) fn validate_artifact_mime_for_path(
     path: &str,
     mime_type: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let mime_type = validate_artifact_mime(mime_type)?;
-    if matches!(mime_type.as_deref(), Some("application/octet-stream"))
-        && !has_safe_octet_stream_artifact_extension(path)
-    {
-        return Err(octet_stream_safe_extension_error());
-    }
+    let mime_type = validate_artifact_mime(mime_type);
     if let Some(mime) = mime_type.as_deref() {
-        if let Some(required_extension) = ooxml_extension_for_mime(mime) {
-            if !path.to_ascii_lowercase().ends_with(required_extension) {
-                return Err(format!(
-                    "OOXML MIME type '{mime}' requires a matching {required_extension} artifact path"
-                ));
-            }
+        if !mime_is_compatible_with_path(mime, path) {
+            let required_extension = ooxml_extension_for_mime(mime)
+                .expect("only OOXML MIME types have path compatibility requirements");
+            return Err(format!(
+                "OOXML MIME type '{mime}' requires a matching {required_extension} artifact path"
+            ));
         }
     }
     Ok(mime_type)
@@ -254,10 +235,8 @@ pub(crate) fn validate_project_artifact_export_snapshot(
         .get("mime_type")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "artifact export requires a detected or inferred MIME type".to_string())?;
-    let mime_type = validate_artifact_mime_for_path(path, Some(reported_mime))?
-        .ok_or_else(|| "artifact export requires a validated MIME type".to_string())?;
+        .filter(|value| !value.is_empty());
+    let mime_type = export_presentation_mime(path, reported_mime);
     let name = Path::new(path)
         .file_name()
         .and_then(|value| value.to_str())

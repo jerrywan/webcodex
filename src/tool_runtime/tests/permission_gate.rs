@@ -232,7 +232,7 @@ async fn hard_policy_deny_still_suppresses_permission_attach() {
         .dispatch_with_auth(
             ToolCall::ArtifactUploadBegin {
                 project,
-                path: "artifacts/smoke/raw.bin".to_string(),
+                path: ".env".to_string(),
                 session_id: Some(session.session_id.clone()),
                 expected_bytes: Some(1),
                 expected_sha256: None,
