@@ -53,7 +53,7 @@ async fn handle_with_apps(
 }
 
 #[test]
-fn job_terminal_wait_resume_setup_is_host_specific_and_parser_ready() {
+fn job_terminal_wait_suggested_call_is_host_specific_and_parser_ready() {
     let base = json!({
         "wait_id": "wc_job_wait_q6urq6urq6urq6ur",
         "job_id": "wc_job_exact",
@@ -69,27 +69,33 @@ fn job_terminal_wait_resume_setup_is_host_specific_and_parser_ready() {
     });
 
     let mut capable = ToolResult::ok(base.clone());
-    super::super::tools::project_job_terminal_resume_setup(true, &mut capable);
+    super::super::tools::project_job_terminal_resume_suggested_call(true, &mut capable);
     assert_eq!(
-        capable.output["resume_setup"],
+        capable.output["suggested_call"],
         json!({
             "tool": "present_job_terminal_continuation",
             "arguments": {"wait_id": "wc_job_wait_q6urq6urq6urq6ur"}
         })
     );
     assert_eq!(capable.output["automatic_resume_available"], false);
+    let suggested = &capable.output["suggested_call"];
+    crate::tool_runtime::ToolCall::from_tool_name(
+        suggested["tool"].as_str().expect("suggested tool name"),
+        suggested["arguments"].clone(),
+    )
+    .expect("Host continuation suggested_call must remain parser-ready");
 
     let mut no_carrier = ToolResult::ok(base.clone());
-    super::super::tools::project_job_terminal_resume_setup(false, &mut no_carrier);
-    assert!(no_carrier.output.get("resume_setup").is_none());
+    super::super::tools::project_job_terminal_resume_suggested_call(false, &mut no_carrier);
+    assert!(no_carrier.output.get("suggested_call").is_none());
 
     let mut already_bound = ToolResult::ok({
         let mut value = base.clone();
         value["automatic_resume_available"] = json!(true);
         value
     });
-    super::super::tools::project_job_terminal_resume_setup(true, &mut already_bound);
-    assert!(already_bound.output.get("resume_setup").is_none());
+    super::super::tools::project_job_terminal_resume_suggested_call(true, &mut already_bound);
+    assert!(already_bound.output.get("suggested_call").is_none());
 
     let mut triggered = ToolResult::ok({
         let mut value = base.clone();
@@ -99,9 +105,9 @@ fn job_terminal_wait_resume_setup_is_host_specific_and_parser_ready() {
         value["terminal_outcome"] = json!("succeeded");
         value
     });
-    super::super::tools::project_job_terminal_resume_setup(true, &mut triggered);
+    super::super::tools::project_job_terminal_resume_suggested_call(true, &mut triggered);
     assert!(
-        triggered.output.get("resume_setup").is_none(),
+        triggered.output.get("suggested_call").is_none(),
         "already-triggered terminal truth belongs to the current model turn"
     );
 
@@ -110,8 +116,8 @@ fn job_terminal_wait_resume_setup_is_host_specific_and_parser_ready() {
         value["delivery_state"] = json!("delivery_unknown");
         value
     });
-    super::super::tools::project_job_terminal_resume_setup(true, &mut unknown);
-    assert!(unknown.output.get("resume_setup").is_none());
+    super::super::tools::project_job_terminal_resume_suggested_call(true, &mut unknown);
+    assert!(unknown.output.get("suggested_call").is_none());
 }
 
 #[tokio::test]
@@ -149,6 +155,34 @@ async fn job_terminal_continuation_app_surface_is_explicit_sparse_and_app_only()
         wait.pointer("/_meta/ui/resourceUri").is_none(),
         "arming terminal attention must not implicitly create a Host carrier"
     );
+    let full_ui = super::super::tools::mcp_tools_list_payload_with_features_for_auth(
+        false,
+        true,
+        true,
+        true,
+        Some(&auth),
+    );
+    let full_wait = tool(&full_ui, "wait_for_job_terminal").expect("full-schema wait tool");
+    assert_eq!(
+        full_wait.pointer(
+            "/outputSchema/properties/output/properties/suggested_call/properties/tool/const"
+        ),
+        Some(&json!("present_job_terminal_continuation"))
+    );
+    assert!(full_wait
+        .pointer("/outputSchema/properties/output/properties/resume_setup")
+        .is_none());
+    let full_plain = super::super::tools::mcp_tools_list_payload_with_features_for_auth(
+        false,
+        false,
+        true,
+        true,
+        Some(&auth),
+    );
+    assert!(tool(&full_plain, "wait_for_job_terminal")
+        .unwrap()
+        .pointer("/outputSchema/properties/output/properties/suggested_call")
+        .is_none());
 
     for name in JOB_APP_TOOLS {
         let descriptor = tool(&ui["result"], name).unwrap_or_else(|| panic!("missing {name}"));

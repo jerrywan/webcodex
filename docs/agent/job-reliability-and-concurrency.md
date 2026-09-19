@@ -31,8 +31,8 @@ automatic model resumption. Do not poll the wait registration or repeatedly use
 short `observe_jobs` waits just to keep a Job visible. Explicit `observe_jobs`
 remains the fallback for details and recovery.
 
-For MCP Apps, a parser-ready `resume_setup` is projected only while the exact
-wait is still `waiting/not_ready`. Use it only when no independent work remains:
+For MCP Apps, the canonical parser-ready `suggested_call` is projected only while
+the exact wait is still `waiting/not_ready`. Use it only when no independent work remains:
 present the continuation card as the final meaningful action, then yield/end the
 current model turn promptly. If registration already returns terminal truth, handle
 that result in the current turn instead of arming a redundant follow-up.
@@ -41,7 +41,11 @@ The current MCP App Host contract does not expose an authoritative "this model
 turn is now idle/terminal" acknowledgement. The Job continuation App therefore
 waits a bounded 10-second yield grace after the initial presentation tool result
 before it may dispatch `ui/message`. This mitigates dispatch racing the invoking
-turn; it is not a fabricated turn-generation fence. A successful `ui/message`
+turn; it is not a fabricated turn-generation fence. Until the Host exposes an
+authoritative turn/supersession signal, the automatic message must reconcile the
+terminal event against the current conversation and must not resume work superseded
+by newer user instructions. This prevents stale work from being treated as current,
+but it cannot prevent the extra best-effort wake itself. A successful `ui/message`
 RPC proves only that the Host accepted the follow-up request, not that a fresh
 model turn consumed it. Exactly-once delivery therefore still forbids blind
 redispatch after an accepted or uncertain send.
