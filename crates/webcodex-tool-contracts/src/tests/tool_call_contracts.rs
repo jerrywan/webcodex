@@ -219,10 +219,58 @@ fn agent_wait_calls_parse_closed_selectors() {
         call,
         ToolCall::WaitForAgentEvents {
             expected_controller_generation: 4,
+            mode: AgentWaitModeCall::Any,
             ref events,
             ..
         } if events.len() == 1 && events[0].kind == "agent_task_terminal" && events[0].task_id == PRIVATE_TASK
     ));
+    let explicit_any = ToolCall::from_tool_name(
+        "wait_for_agent_events",
+        json!({
+            "agent_id": "wc_dagent_iavN7wEjRWeJq83v",
+            "endpoint_id": "wc_endpoint_iavN7wEjRWeJq83v",
+            "expected_controller_generation": 4,
+            "mode": "any",
+            "events": [{"kind":"agent_task_terminal","task_id":PRIVATE_TASK}],
+            "idempotency_key": PRIVATE_KEY,
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        explicit_any,
+        ToolCall::WaitForAgentEvents {
+            mode: AgentWaitModeCall::Any,
+            ..
+        }
+    ));
+    let all = ToolCall::from_tool_name(
+        "wait_for_agent_events",
+        json!({
+            "agent_id": "wc_dagent_iavN7wEjRWeJq83v",
+            "endpoint_id": "wc_endpoint_iavN7wEjRWeJq83v",
+            "expected_controller_generation": 4,
+            "mode": "all",
+            "events": [{"kind":"agent_task_terminal","task_id":PRIVATE_TASK}],
+            "idempotency_key": PRIVATE_KEY,
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        all,
+        ToolCall::WaitForAgentEvents {
+            mode: AgentWaitModeCall::All,
+            ..
+        }
+    ));
+    let specs = crate::registered_tool_specs();
+    let wait_spec = specs
+        .iter()
+        .find(|spec| spec.name == "wait_for_agent_events")
+        .unwrap();
+    let mode_schema = &wait_spec.input_schema["properties"]["mode"];
+    assert_eq!(mode_schema["enum"], json!(["any", "all"]));
+    assert_eq!(mode_schema["default"], "any");
+
     let read = ToolCall::from_tool_name(
         "read_agent_wait",
         json!({"wait_id": "wc_agent_wait_ZmZmZmZmZmZmZmZm".to_string()}),

@@ -14,6 +14,7 @@ A1 adds a concrete communication domain without changing the meaning of Workflow
 | Wake Intent | Durable logical continuation saying an Agent should receive another processing opportunity | a Message, Inbox Delivery, or Host delivery attempt |
 | Wake Delivery Attempt | One Endpoint/generation-bound attempt to deliver a Wake Intent through a continuation adapter | the durable communication fact or a grant of execution authority |
 | Agent Task | Planned durable asynchronous work accepted/created for an Agent | Conversation Message, Workflow Session todo, Job, or execution authority |
+| Agent Wait | Caller-owned durable one-shot rendezvous over 1..8 exact AgentTask-terminal sources with closed `any|all` mode | a Task dependency graph, Goal attention policy, Host binding, scheduler, or source-authority grant |
 | Workflow Session | Existing execution, provenance, validation, Job, workspace, todo, and guidance context | a chat room |
 
 An Agent Card contains a mutable non-unique handle, display name, description, bounded specialty labels, profile revision, and timestamps. These fields are self-description metadata. Canonical identity is only the Server-generated `agent_id`, and neither identity nor metadata grants Project, filesystem, Runner, Agent Task, or Workflow Session authority.
@@ -29,6 +30,7 @@ The Control-owned SQLite database remains the standalone authoritative transacti
 - recipient-specific Agent Deliveries;
 - operation-scoped idempotency records;
 - coalesced Agent Wake Intents and Endpoint/generation-bound Wake Delivery Attempts.
+- bounded Agent Waits, exact source registrations, and semantic match references used to derive one-shot Wait-origin Wake opportunities.
 
 This reuses the existing durable database lifecycle instead of adding another JSON truth or process-local registry. Generic `Database::open` is storage-only: it may run schema migration and owner-independent housekeeping, but it never declares a Wake worker dead or performs takeover recovery. The standalone Control Server holds an exclusive instance guard bound to its exact database state for its full lifetime; crash/takeover Wake reconciliation runs only after a successor acquires that ownership proof. This is deliberately standalone coordination, not a distributed lease or cluster protocol. The schema is concrete to the current communication/wake use case rather than a generic actor/event framework. It does not assume SQLite is process memory, and the domain can later be mapped to another transactional backend without changing its IDs or public semantics.
 

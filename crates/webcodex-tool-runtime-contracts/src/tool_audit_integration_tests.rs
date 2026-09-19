@@ -245,6 +245,7 @@ fn agent_wait_calls_parse_closed_selectors_and_keep_audit_payload_free() {
         } if events.len() == 1 && events[0].kind == "agent_task_terminal" && events[0].task_id == PRIVATE_TASK
     ));
     let audit = call.session_log_arguments();
+    assert_eq!(audit["mode"], "any");
     assert_eq!(audit["event_count"], 1);
     assert_eq!(audit["idempotency_key_present"], true);
     let audit_text = audit.to_string();

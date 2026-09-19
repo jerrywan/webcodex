@@ -1050,6 +1050,33 @@ pub struct AgentWaitEventSelectorCall {
     pub task_id: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWaitModeCall {
+    /// Trigger when any registered exact source Task becomes terminal.
+    #[default]
+    Any,
+    /// Trigger only after every registered exact source Task is terminal.
+    All,
+}
+
+impl AgentWaitModeCall {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::All => "all",
+        }
+    }
+}
+
+fn agent_wait_mode_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "string",
+        "enum": ["any", "all"],
+        "default": "any"
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectArtifactAction {
@@ -2765,8 +2792,13 @@ pub enum ToolCall {
         /// Exact current Endpoint controller generation. Stale generations fail closed.
         #[schemars(range(min = 1))]
         expected_controller_generation: i64,
-        /// Closed v1 ANY selector set. Any one matching source fact triggers the one-shot Wait; multiple
-        /// facts may coalesce only before the durable Host-dispatch fence.
+        /// Closed bounded rendezvous mode. Omission is exactly equivalent to `any`; `all` triggers only
+        /// after every registered exact source Task is terminal.
+        #[serde(default)]
+        #[schemars(schema_with = "agent_wait_mode_schema")]
+        mode: AgentWaitModeCall,
+        /// One to eight exact AgentTask terminal selectors. Matching facts are recorded durably; under
+        /// `any` the first match triggers, while under `all` only the final required match triggers.
         #[schemars(length(min = 1, max = 8))]
         events: Vec<AgentWaitEventSelectorCall>,
         /// Caller-generated Wait creation key. Exact replay returns the same Wait; changed reuse conflicts.

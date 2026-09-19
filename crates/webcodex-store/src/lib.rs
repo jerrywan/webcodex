@@ -44,10 +44,10 @@ pub use self::agent_task::{
     MAX_AGENT_TASK_LIST_LIMIT, MAX_AGENT_TASK_TERMINAL_TEXT_BYTES,
 };
 pub use self::agent_wait::{
-    AgentWaitDetail, AgentWaitEventSelector, AgentWaitMatchRecord, AgentWaitMutation,
-    AgentWaitSourceRecord, AgentWaitState, NewAgentWait, AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL,
-    AGENT_WAIT_ID_PREFIX, MAX_ACTIVE_AGENT_WAITS_PER_AGENT, MAX_AGENT_WAITS_PER_SOURCE,
-    MAX_AGENT_WAIT_SOURCES,
+    AgentWaitDetail, AgentWaitEventSelector, AgentWaitMatchRecord, AgentWaitMode,
+    AgentWaitMutation, AgentWaitSourceRecord, AgentWaitState, NewAgentWait,
+    AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL, AGENT_WAIT_ID_PREFIX,
+    MAX_ACTIVE_AGENT_WAITS_PER_AGENT, MAX_AGENT_WAITS_PER_SOURCE, MAX_AGENT_WAIT_SOURCES,
 };
 #[allow(unused_imports)]
 pub use self::agent_wake::{

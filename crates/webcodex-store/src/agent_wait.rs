@@ -57,6 +57,34 @@ impl AgentWaitState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWaitMode {
+    Any,
+    All,
+}
+
+impl AgentWaitMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::All => "all",
+        }
+    }
+
+    fn from_db(value: &str, index: usize) -> rusqlite::Result<Self> {
+        match value {
+            "any" => Ok(Self::Any),
+            "all" => Ok(Self::All),
+            other => Err(rusqlite::Error::FromSqlConversionFailure(
+                index,
+                Type::Text,
+                format!("unsupported AgentWait mode: {other}").into(),
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct AgentWaitEventSelector {
     pub kind: String,
@@ -68,6 +96,7 @@ pub struct NewAgentWait {
     pub target_agent_id: String,
     pub endpoint_id: String,
     pub expected_controller_generation: i64,
+    pub mode: AgentWaitMode,
     pub events: Vec<AgentWaitEventSelector>,
     pub idempotency_key: String,
 }
@@ -94,6 +123,7 @@ pub struct AgentWaitDetail {
     pub wait_id: String,
     pub target_agent_id: String,
     pub state: AgentWaitState,
+    pub mode: AgentWaitMode,
     pub revision: i64,
     pub created_at_unix_ms: i64,
     pub updated_at_unix_ms: i64,
@@ -127,6 +157,8 @@ pub(crate) struct AgentWaitWakeSnapshot {
     pub wait_id: String,
     pub target_agent_id: String,
     pub state: AgentWaitState,
+    pub mode: AgentWaitMode,
+    pub source_count: i64,
     pub match_count: i64,
     pub match_sequence: i64,
 }
@@ -140,6 +172,7 @@ impl Database {
                 owner_principal_kind TEXT NOT NULL,
                 owner_principal_digest TEXT NOT NULL,
                 target_agent_id TEXT NOT NULL,
+                mode TEXT NOT NULL DEFAULT 'any' CHECK(mode IN ('any', 'all')),
                 state TEXT NOT NULL CHECK(state IN ('waiting', 'triggered', 'resumed', 'cancelled')),
                 revision INTEGER NOT NULL CHECK(revision >= 1),
                 created_at_unix_ms INTEGER NOT NULL,
@@ -187,6 +220,21 @@ impl Database {
                 ON wc_agent_wait_matches(wait_id, sequence);
             ",
         )?;
+        let has_mode: i64 = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('wc_agent_waits')
+                WHERE name = 'mode'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_mode == 0 {
+            conn.execute(
+                "ALTER TABLE wc_agent_waits
+                 ADD COLUMN mode TEXT NOT NULL DEFAULT 'any' CHECK(mode IN ('any', 'all'))",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -239,21 +287,28 @@ impl Database {
             }
         }
         let idempotency_key = validate_idempotency_key(&input.idempotency_key)?;
-        let request_hash = digest_json(
-            "webcodex.agent-wait.request.v1",
-            &json!({
+        let request_hash_payload = match input.mode {
+            AgentWaitMode::Any => json!({
                 "agent_id": input.target_agent_id,
                 "endpoint_id": input.endpoint_id,
                 "expected_controller_generation": input.expected_controller_generation,
                 "events": input.events,
             }),
-        )
-        .map_err(|_| {
-            CommunicationStoreError::new(
-                "agent_wait_request_invalid",
-                "Agent Wait request could not be canonicalized",
-            )
-        })?;
+            AgentWaitMode::All => json!({
+                "agent_id": input.target_agent_id,
+                "endpoint_id": input.endpoint_id,
+                "expected_controller_generation": input.expected_controller_generation,
+                "events": input.events,
+                "mode": "all",
+            }),
+        };
+        let request_hash = digest_json("webcodex.agent-wait.request.v1", &request_hash_payload)
+            .map_err(|_| {
+                CommunicationStoreError::new(
+                    "agent_wait_request_invalid",
+                    "Agent Wait request could not be canonicalized",
+                )
+            })?;
 
         let mut conn = self.lock_connection(crate::StoreDomain::AgentWait);
         let transaction = conn
@@ -349,15 +404,16 @@ impl Database {
         transaction
             .execute(
                 "INSERT INTO wc_agent_waits (
-                    wait_id, owner_principal_kind, owner_principal_digest, target_agent_id,
+                    wait_id, owner_principal_kind, owner_principal_digest, target_agent_id, mode,
                     state, revision, created_at_unix_ms, updated_at_unix_ms,
                     triggered_at_unix_ms, resumed_at_unix_ms, cancelled_at_unix_ms
-                 ) VALUES (?1, ?2, ?3, ?4, 'waiting', 1, ?5, ?5, NULL, NULL, NULL)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'waiting', 1, ?6, ?6, NULL, NULL, NULL)",
                 params![
                     wait_id,
                     principal.kind,
                     principal.digest,
                     input.target_agent_id,
+                    input.mode.as_str(),
                     now
                 ],
             )
@@ -648,14 +704,45 @@ fn record_wait_match_in_transaction(
     terminal_task_state: AgentTaskState,
     occurred_at_unix_ms: i64,
 ) -> Result<bool, CommunicationStoreError> {
-    let next_sequence: i64 = transaction
+    let wait: Option<(String, String, i64, i64)> = transaction
         .query_row(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM wc_agent_wait_matches WHERE wait_id = ?1",
-            [wait_id],
+            "SELECT mode, state,
+                    (SELECT COUNT(*) FROM wc_agent_wait_sources s WHERE s.wait_id = w.wait_id),
+                    (SELECT COUNT(*) FROM wc_agent_wait_matches m WHERE m.wait_id = w.wait_id)
+             FROM wc_agent_waits w
+             WHERE wait_id = ?1 AND owner_principal_kind = ?2 AND owner_principal_digest = ?3
+               AND target_agent_id = ?4 AND state IN ('waiting', 'triggered')",
+            params![wait_id, principal.kind, principal.digest, target_agent_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(store_error)?;
+    let Some((mode_text, state_text, source_count, current_match_count)) = wait else {
+        return Err(CommunicationStoreError::new(
+            "agent_wait_storage_invariant",
+            "Agent Wait match could not load the exact active Wait",
+        ));
+    };
+    let mode = AgentWaitMode::from_db(&mode_text, 0).map_err(store_error)?;
+    let state = AgentWaitState::from_db(&state_text, 1).map_err(store_error)?;
+    validate_wait_join_invariants(mode, state, source_count, current_match_count)?;
+
+    let already_matched: i64 = transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM wc_agent_wait_matches
+                WHERE wait_id = ?1 AND kind = 'agent_task_terminal' AND task_id = ?2
+            )",
+            params![wait_id, task_id],
             |row| row.get(0),
         )
         .map_err(store_error)?;
-    if next_sequence > MAX_AGENT_WAIT_SOURCES as i64 {
+    if already_matched != 0 {
+        return Ok(false);
+    }
+
+    let next_sequence = current_match_count + 1;
+    if next_sequence > source_count || next_sequence > MAX_AGENT_WAIT_SOURCES as i64 {
         return Err(CommunicationStoreError::new(
             "agent_wait_match_capacity_invariant",
             "Agent Wait match count exceeds the registered source bound",
@@ -679,13 +766,22 @@ fn record_wait_match_in_transaction(
     if inserted == 0 {
         return Ok(false);
     }
+
+    let match_count = current_match_count + 1;
+    let should_trigger = match mode {
+        AgentWaitMode::Any => match_count >= 1,
+        AgentWaitMode::All => match_count == source_count,
+    };
     let updated = transaction
         .execute(
             "UPDATE wc_agent_waits
-             SET state = CASE WHEN state = 'waiting' THEN 'triggered' ELSE state END,
+             SET state = CASE WHEN ?6 = 1 AND state = 'waiting' THEN 'triggered' ELSE state END,
                  revision = revision + 1,
                  updated_at_unix_ms = MAX(updated_at_unix_ms, ?2),
-                 triggered_at_unix_ms = COALESCE(triggered_at_unix_ms, ?2)
+                 triggered_at_unix_ms = CASE
+                     WHEN ?6 = 1 THEN COALESCE(triggered_at_unix_ms, ?2)
+                     ELSE triggered_at_unix_ms
+                 END
              WHERE wait_id = ?1 AND owner_principal_kind = ?3 AND owner_principal_digest = ?4
                AND target_agent_id = ?5 AND state IN ('waiting', 'triggered')",
             params![
@@ -693,7 +789,8 @@ fn record_wait_match_in_transaction(
                 occurred_at_unix_ms,
                 principal.kind,
                 principal.digest,
-                target_agent_id
+                target_agent_id,
+                should_trigger as i64,
             ],
         )
         .map_err(store_error)?;
@@ -703,19 +800,15 @@ fn record_wait_match_in_transaction(
             "Agent Wait match could not update the exact active Wait",
         ));
     }
-    let (match_count, match_sequence): (i64, i64) = transaction
-        .query_row(
-            "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM wc_agent_wait_matches WHERE wait_id = ?1",
-            [wait_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(store_error)?;
+    if !should_trigger {
+        return Ok(false);
+    }
     coalesce_wait_wake_in_transaction(
         transaction,
         wait_id,
         target_agent_id,
         match_count,
-        match_sequence,
+        next_sequence,
         occurred_at_unix_ms,
     )
 }
@@ -799,19 +892,31 @@ pub(crate) fn require_agent_wait_for_wake(
             "Agent Wait Wake is missing source_wait_id",
         )
     })?;
-    let row: Option<(String, String, i64, i64)> = conn
+    let row: Option<(String, String, String, i64, i64, i64)> = conn
         .query_row(
-            "SELECT target_agent_id, state,
+            "SELECT target_agent_id, state, mode,
+                    (SELECT COUNT(*) FROM wc_agent_wait_sources s WHERE s.wait_id = w.wait_id),
                     (SELECT COUNT(*) FROM wc_agent_wait_matches m WHERE m.wait_id = w.wait_id),
                     (SELECT COALESCE(MAX(sequence), 0) FROM wc_agent_wait_matches m WHERE m.wait_id = w.wait_id)
              FROM wc_agent_waits w
              WHERE wait_id = ?1 AND owner_principal_kind = ?2 AND owner_principal_digest = ?3",
             params![wait_id, principal.kind, principal.digest],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
         )
         .optional()
         .map_err(store_error)?;
-    let Some((stored_target, state_text, match_count, match_sequence)) = row else {
+    let Some((stored_target, state_text, mode_text, source_count, match_count, match_sequence)) =
+        row
+    else {
         return Err(CommunicationStoreError::new(
             "agent_wait_not_found",
             "Agent Wait does not exist",
@@ -824,6 +929,8 @@ pub(crate) fn require_agent_wait_for_wake(
         ));
     }
     let state = AgentWaitState::from_db(&state_text, 1).map_err(store_error)?;
+    let mode = AgentWaitMode::from_db(&mode_text, 2).map_err(store_error)?;
+    validate_wait_join_invariants(mode, state, source_count, match_count)?;
     if state != AgentWaitState::Triggered {
         return Err(CommunicationStoreError::new(
             "agent_wait_wake_stale",
@@ -834,6 +941,8 @@ pub(crate) fn require_agent_wait_for_wake(
         wait_id: wait_id.to_string(),
         target_agent_id: stored_target,
         state,
+        mode,
+        source_count,
         match_count,
         match_sequence,
     })
@@ -852,6 +961,7 @@ pub(crate) fn resume_agent_wait_for_wake_in_transaction(
             "Agent Wait Wake is missing source_wait_id",
         )
     })?;
+    require_agent_wait_for_wake(transaction, principal, Some(wait_id), target_agent_id)?;
     let updated = transaction
         .execute(
             "UPDATE wc_agent_waits
@@ -889,21 +999,14 @@ pub(crate) fn verify_agent_wait_resumed_for_consumed_wake(
             "consumed Agent Wait Wake is missing source_wait_id",
         )
     })?;
-    let state = load_owned_agent_wait_state(conn, principal, wait_id)?;
-    if state != AgentWaitState::Resumed {
+    let detail = load_owned_agent_wait_detail(conn, principal, wait_id)?;
+    if detail.state != AgentWaitState::Resumed {
         return Err(CommunicationStoreError::new(
             "agent_wait_storage_invariant",
             "consumed Agent Wait Wake does not correspond to a resumed Wait",
         ));
     }
-    let stored_target: String = conn
-        .query_row(
-            "SELECT target_agent_id FROM wc_agent_waits WHERE wait_id = ?1",
-            [wait_id],
-            |row| row.get(0),
-        )
-        .map_err(store_error)?;
-    if stored_target != target_agent_id {
+    if detail.target_agent_id != target_agent_id {
         return Err(CommunicationStoreError::new(
             "agent_wait_wake_invariant",
             "consumed Agent Wait Wake target does not match the Wait",
@@ -943,6 +1046,7 @@ fn load_owned_agent_wait_detail(
     let row: Option<(
         String,
         String,
+        String,
         i64,
         i64,
         i64,
@@ -951,7 +1055,7 @@ fn load_owned_agent_wait_detail(
         Option<i64>,
     )> = conn
         .query_row(
-            "SELECT target_agent_id, state, revision, created_at_unix_ms, updated_at_unix_ms,
+            "SELECT target_agent_id, state, mode, revision, created_at_unix_ms, updated_at_unix_ms,
                     triggered_at_unix_ms, resumed_at_unix_ms, cancelled_at_unix_ms
              FROM wc_agent_waits
              WHERE wait_id = ?1 AND owner_principal_kind = ?2 AND owner_principal_digest = ?3",
@@ -966,6 +1070,7 @@ fn load_owned_agent_wait_detail(
                     row.get(5)?,
                     row.get(6)?,
                     row.get(7)?,
+                    row.get(8)?,
                 ))
             },
         )
@@ -974,6 +1079,7 @@ fn load_owned_agent_wait_detail(
     let Some((
         target_agent_id,
         state_text,
+        mode_text,
         revision,
         created_at,
         updated_at,
@@ -988,6 +1094,7 @@ fn load_owned_agent_wait_detail(
         ));
     };
     let state = AgentWaitState::from_db(&state_text, 1).map_err(store_error)?;
+    let mode = AgentWaitMode::from_db(&mode_text, 2).map_err(store_error)?;
 
     let mut source_stmt = conn
         .prepare(
@@ -1045,10 +1152,12 @@ fn load_owned_agent_wait_detail(
         ));
     }
     let match_sequence = matches.last().map(|entry| entry.sequence).unwrap_or(0);
+    validate_wait_join_invariants(mode, state, sources.len() as i64, matches.len() as i64)?;
     Ok(AgentWaitDetail {
         wait_id: wait_id.to_string(),
         target_agent_id,
         state,
+        mode,
         revision,
         created_at_unix_ms: created_at,
         updated_at_unix_ms: updated_at,
@@ -1061,4 +1170,42 @@ fn load_owned_agent_wait_detail(
         sources,
         matches,
     })
+}
+
+fn validate_wait_join_invariants(
+    mode: AgentWaitMode,
+    state: AgentWaitState,
+    source_count: i64,
+    match_count: i64,
+) -> Result<(), CommunicationStoreError> {
+    if !(1..=MAX_AGENT_WAIT_SOURCES as i64).contains(&source_count) {
+        return Err(CommunicationStoreError::new(
+            "agent_wait_source_capacity_invariant",
+            "Agent Wait source count is outside its durable bound",
+        ));
+    }
+    if match_count < 0 || match_count > source_count {
+        return Err(CommunicationStoreError::new(
+            "agent_wait_match_capacity_invariant",
+            "Agent Wait match count exceeds its durable source bound",
+        ));
+    }
+    let valid = match (mode, state) {
+        (AgentWaitMode::Any, AgentWaitState::Waiting) => match_count == 0,
+        (AgentWaitMode::Any, AgentWaitState::Triggered | AgentWaitState::Resumed) => {
+            match_count >= 1
+        }
+        (AgentWaitMode::All, AgentWaitState::Waiting) => match_count < source_count,
+        (AgentWaitMode::All, AgentWaitState::Triggered | AgentWaitState::Resumed) => {
+            match_count == source_count
+        }
+        (_, AgentWaitState::Cancelled) => true,
+    };
+    if !valid {
+        return Err(CommunicationStoreError::new(
+            "agent_wait_join_invariant",
+            "Agent Wait mode/state does not match its durable source and match counts",
+        ));
+    }
+    Ok(())
 }

@@ -1405,6 +1405,246 @@ async fn agent_continuation_app_protocol_uses_standard_result_without_model_proj
 }
 
 #[tokio::test]
+async fn all_agent_wait_mcp_automatic_message_is_compact_and_guides_authoritative_rereads() {
+    use crate::tool_runtime::{AgentWaitEventSelectorCall, AgentWaitModeCall};
+
+    let binding_id = "wc_host_binding_u7u7u7u7u7u7u7u7u7u7uw".to_string();
+    let (_temp, _db, runtime) = continuation_runtime();
+    let owner = continuation_auth("continuation-all-wait-owner");
+    let watcher = create_agent(
+        &runtime,
+        &owner,
+        "continuation-all-wait-watcher",
+        "ALL Wait Watcher",
+        "continuation-all-wait-watcher-create",
+    );
+    let worker = create_agent(
+        &runtime,
+        &owner,
+        "continuation-all-wait-worker",
+        "ALL Wait Worker",
+        "continuation-all-wait-worker-create",
+    );
+    let (watcher_endpoint, watcher_generation) =
+        attach(&runtime, &owner, &watcher, "continuation-all-wait-endpoint");
+
+    let present = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5301)),
+            mcp_2026_ui_params(json!({
+                "name": "present_agent_continuation",
+                "arguments": {
+                    "agent_id": watcher,
+                    "endpoint_id": watcher_endpoint,
+                    "expected_controller_generation": watcher_generation
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(present) = present else {
+        panic!("ALL Wait continuation presentation failed")
+    };
+    assert_eq!(present["result"]["structuredContent"]["success"], true);
+
+    let bind = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5302)),
+            mcp_2026_params(json!({
+                "name": "agent_continuation_bind",
+                "arguments": {
+                    "agent_id": watcher,
+                    "endpoint_id": watcher_endpoint,
+                    "expected_controller_generation": watcher_generation,
+                    "binding_id": binding_id,
+                    "app_call_id": "wc_app_call_0123456789abcdef_2"
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(bind) = bind else {
+        panic!("ALL Wait continuation bind failed")
+    };
+    assert_eq!(bind["result"]["structuredContent"]["success"], true);
+
+    let mut task_ids = Vec::new();
+    for index in 0..2 {
+        let task = runtime.create_agent_task(
+            Some(&owner),
+            format!("ALL Wait source {index}"),
+            format!("PRIVATE ALL Wait instruction {index}"),
+            Some(worker.clone()),
+            None,
+            None,
+            Some(format!("agent:special:private-all-wait-{index}")),
+            format!("continuation-all-wait-task-{index}"),
+        );
+        assert!(task.success, "{:?}", task.output);
+        let task_id = task.output["task"]["summary"]["task_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let started = runtime.start_agent_task_attempt(
+            Some(&owner),
+            task_id.clone(),
+            worker.clone(),
+            format!("continuation-all-wait-start-{index}"),
+        );
+        assert!(started.success, "{:?}", started.output);
+        let completed = runtime.complete_agent_task_attempt(
+            Some(&owner),
+            task_id.clone(),
+            started.output["attempt"]["attempt_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            worker.clone(),
+            started.output["attempt_fence"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            started.output["attempt"]["attempt_controller_generation"]
+                .as_i64()
+                .unwrap(),
+            "succeeded".to_string(),
+            Some(format!("PRIVATE ALL Wait terminal result {index}")),
+            Some(format!("PRIVATE ALL Wait terminal reason {index}")),
+            format!("continuation-all-wait-complete-{index}"),
+        );
+        assert!(completed.success, "{:?}", completed.output);
+        task_ids.push(task_id);
+    }
+
+    let waited = runtime.wait_for_agent_events(
+        Some(&owner),
+        watcher.clone(),
+        watcher_endpoint.clone(),
+        watcher_generation,
+        AgentWaitModeCall::All,
+        task_ids
+            .iter()
+            .map(|task_id| AgentWaitEventSelectorCall {
+                kind: "agent_task_terminal".to_string(),
+                task_id: task_id.clone(),
+            })
+            .collect(),
+        "continuation-all-wait-create".to_string(),
+    );
+    assert!(waited.success, "{:?}", waited.output);
+    assert_eq!(waited.output["agent_wait"]["state"], "triggered");
+    assert_eq!(waited.output["agent_wait"]["mode"], "all");
+    assert_eq!(waited.output["agent_wait"]["source_count"], 2);
+    assert_eq!(waited.output["agent_wait"]["match_count"], 2);
+    let wait_id = waited.output["agent_wait"]["wait_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let acquire = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5303)),
+            mcp_2026_params(json!({
+                "name": "agent_continuation_wake_acquire",
+                "arguments": {
+                    "agent_id": watcher,
+                    "endpoint_id": watcher_endpoint,
+                    "expected_controller_generation": watcher_generation,
+                    "binding_id": binding_id
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(acquire) = acquire else {
+        panic!("ALL Wait Wake acquire failed")
+    };
+    assert_eq!(acquire["result"]["structuredContent"]["success"], true);
+    let wake_id = acquire["result"]["structuredContent"]["output"]["wake"]["wake_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let attempt_id = acquire["result"]["structuredContent"]["output"]["wake"]["attempt_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let prepare = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5304)),
+            mcp_2026_params(json!({
+                "name": "agent_continuation_wake_prepare",
+                "arguments": {
+                    "agent_id": watcher,
+                    "endpoint_id": watcher_endpoint,
+                    "expected_controller_generation": watcher_generation,
+                    "binding_id": binding_id,
+                    "wake_id": wake_id,
+                    "attempt_id": attempt_id
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(prepare) = prepare else {
+        panic!("ALL Wait Wake prepare failed")
+    };
+    assert_eq!(prepare["result"]["structuredContent"]["success"], true);
+    let automatic_message = prepare["result"]["structuredContent"]["output"]["app_protocol"]
+        ["automatic_message"]
+        .as_str()
+        .expect("ALL Wait exact continuation envelope");
+    for required in [
+        &format!("wait_id={wait_id}"),
+        "mode=all",
+        "matched=2/2",
+        "bootstrap_agent_conversation",
+        "consume_agent_wake",
+        "read_agent_wait(wait_id)",
+        "authoritative source AgentTasks",
+    ] {
+        assert!(
+            automatic_message.contains(required),
+            "missing ALL Wait continuation detail {required}"
+        );
+    }
+    assert!(
+        automatic_message.chars().count() <= 1_000,
+        "ALL Wait automatic message too long: {}",
+        automatic_message.chars().count()
+    );
+    for forbidden in [
+        "PRIVATE ALL Wait instruction",
+        "PRIVATE ALL Wait terminal result",
+        "PRIVATE ALL Wait terminal reason",
+        "private-all-wait",
+        "grants no Task, Project, Goal",
+        "already dispatched by the Endpoint continuation carrier",
+    ] {
+        assert!(
+            !automatic_message.contains(forbidden),
+            "ALL Wait continuation leaked or re-expanded {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn agent_continuation_hidden_kernel_entry_is_fail_closed_without_protocol_capability() {
     use crate::tool_runtime::kernel::{
         HostFileImportTrust, ToolCallContext, ToolCallErrorStatus, ToolCallRequest,

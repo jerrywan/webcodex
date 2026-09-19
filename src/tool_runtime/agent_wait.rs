@@ -2,9 +2,9 @@ use super::communication::{
     agent_continuation_projection, communication_error, communication_principal,
     communication_store_unavailable, serialized_success,
 };
-use super::{AgentWaitEventSelectorCall, RecoveryKind, ToolResult, ToolRuntime};
+use super::{AgentWaitEventSelectorCall, AgentWaitModeCall, RecoveryKind, ToolResult, ToolRuntime};
 use crate::auth::AuthContext;
-use crate::db::{AgentWaitEventSelector, NewAgentWait};
+use crate::db::{AgentWaitEventSelector, AgentWaitMode, NewAgentWait};
 use serde_json::json;
 
 /// Project only after canonical recording. Store, audit and the App-only state
@@ -20,23 +20,34 @@ pub(super) fn agent_wait_model_projection(result: &mut ToolResult) {
     else {
         return;
     };
-    wait.retain(|key, _| matches!(key.as_str(), "wait_id" | "state" | "matches"));
+    wait.retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "wait_id" | "state" | "mode" | "source_count" | "match_count" | "sources" | "matches"
+        )
+    });
+    if let Some(sources) = wait
+        .get_mut("sources")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for source in sources {
+            if let Some(source) = source.as_object_mut() {
+                source.retain(|key, _| matches!(key.as_str(), "kind" | "task_id"));
+            }
+        }
+    }
     if let Some(matches) = wait
         .get_mut("matches")
         .and_then(serde_json::Value::as_array_mut)
     {
-        if matches.is_empty() {
-            wait.remove("matches");
-        } else {
-            for matched in matches {
-                if let Some(matched) = matched.as_object_mut() {
-                    matched.retain(|key, _| {
-                        matches!(
-                            key.as_str(),
-                            "task_id" | "task_attempt_id" | "terminal_task_state"
-                        )
-                    });
-                }
+        for matched in matches {
+            if let Some(matched) = matched.as_object_mut() {
+                matched.retain(|key, _| {
+                    matches!(
+                        key.as_str(),
+                        "task_id" | "task_attempt_id" | "terminal_task_state"
+                    )
+                });
             }
         }
     }
@@ -50,6 +61,7 @@ impl ToolRuntime {
         agent_id: String,
         endpoint_id: String,
         expected_controller_generation: i64,
+        mode: AgentWaitModeCall,
         events: Vec<AgentWaitEventSelectorCall>,
         idempotency_key: String,
     ) -> ToolResult {
@@ -59,6 +71,10 @@ impl ToolRuntime {
         };
         let Some(db) = self.communication_db.as_ref() else {
             return communication_store_unavailable();
+        };
+        let mode = match mode {
+            AgentWaitModeCall::Any => AgentWaitMode::Any,
+            AgentWaitModeCall::All => AgentWaitMode::All,
         };
         let events = events
             .into_iter()
@@ -73,6 +89,7 @@ impl ToolRuntime {
                 target_agent_id: agent_id.clone(),
                 endpoint_id: endpoint_id.clone(),
                 expected_controller_generation,
+                mode,
                 events,
                 idempotency_key,
             },

@@ -733,21 +733,34 @@ presentation/carrier selector and is not persisted as Wait execution ownership.
 
 Wait v1 is deliberately one-shot with lifecycle
 `waiting -> triggered -> resumed` or `waiting|triggered -> cancelled`. It supports only
-1..8 exact `agent_task_terminal` selectors with fixed ANY semantics. Registration and the
-current authoritative Task terminal snapshot occur in one SQLite IMMEDIATE transaction,
-and both explicit TaskAttempt completion and CodingAgentRun terminal reconciliation write
-matching Wait facts in their same source-terminal transaction. Admission bounds active
-Waits per Agent and active Waits per source before terminalization, so a normal accepted
-Wait cannot turn Task completion into unbounded fanout.
+1..8 exact `agent_task_terminal` selectors and one closed durable mode: `any` or `all`.
+`any` is the default and omission is exactly equivalent to `any`; it preserves the original
+v1 behavior in which the first source match triggers. `all` is only a bounded join/barrier:
+every registered exact source Task must be terminal before the Wait triggers. It is not a
+Task dependency, runnable-frontier rule, or successor-execution policy.
 
-The first match creates one `agent_wait_events` Wake through the existing Agent-level
-continuation queue. Further matching facts update that same Wake only while it is
-`pending` or `claimed`; `prepared`, `delivered`, and `delivery_unknown` are the durable
-batch seal because the Host may already have received the resume envelope. A sealed
-one-shot Wait never manufactures a successor turn for later matches. Exact Wake consume
-atomically changes `triggered -> resumed`; consume replay is inert. A resumed model reads
-the bounded Wait references and independently re-reads each authoritative source Task.
-If it still needs future attention it creates a new Wait.
+Registration and the current authoritative Task terminal snapshot occur in one SQLite
+IMMEDIATE transaction, and both explicit TaskAttempt completion and CodingAgentRun
+terminal reconciliation write matching Wait facts in their same source-terminal
+transaction. Every legitimate new match is durable and advances bounded Wait revision
+metadata. Under `all`, partial matches leave the Wait in `waiting` and create no queueable
+Wake; the final required match performs the one `waiting -> triggered` transition and
+creates one `agent_wait_events` Wake. If all sources are already terminal at registration,
+the same registration transaction records all matches and creates exactly one Wake.
+Admission bounds active Waits per Agent and active Waits per source before terminalization,
+so a normal accepted Wait cannot turn Task completion into unbounded fanout.
+
+Under `any`, further matching facts update the same Wake only while it is `pending` or
+`claimed`; `prepared`, `delivered`, and `delivery_unknown` are the durable batch seal
+because the Host may already have received the resume envelope. A sealed one-shot Wait
+never manufactures a successor turn for later matches. Under `all`, a Wake exists only
+after the final required match, so its initial snapshot contains the complete registered
+join. Exact Wake consume atomically changes `triggered -> resumed`; consume replay is
+inert. A resumed model reads the bounded Wait mode/counts, every registered source Task
+identity, and semantic match references, then independently re-reads each authoritative
+source Task. Task identity remains a reference and transfers no Task, Project, Goal,
+Session, Endpoint, or execution authority. If the model still needs future attention it
+creates a new Wait.
 
 Cancellation is similarly bounded: `waiting`, `pending`, or `claimed` work can be
 cancelled/revoked before Host dispatch preparation; cancellation fails closed after the
@@ -762,8 +775,10 @@ Natural future source kinds include `deadline_reached`, Job terminal state,
 Plugin/external completion, and human approval. They should be added only when each has an
 authoritative source transition and bounded registration/fanout contract. Wait v1 does
 not introduce a timer scheduler, generic event bus, public `publish_event`, recurring
-subscription, predicate language, ALL/AND/OR conditions, DAG, reducer, automatic Goal
-progression, or automatic successor Task creation.
+subscription, generic predicate/expression language, nested boolean conditions, DAG,
+reducer, automatic Goal progression, or automatic successor Task creation. The closed
+`mode=all` join does not change Goal terminal attention routing and never auto-discovers
+Goal-correlated Tasks.
 
 Goal should remain the deliberately small `active | completed | cancelled` lifecycle.
 States such as `implementing`, `waiting_ci`, `waiting_human`, `blocked`, or

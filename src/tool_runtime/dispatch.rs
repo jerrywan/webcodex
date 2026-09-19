@@ -2323,6 +2323,7 @@ impl ToolRuntime {
                 agent_id,
                 endpoint_id,
                 expected_controller_generation,
+                mode,
                 events,
                 idempotency_key,
             } => self.wait_for_agent_events(
@@ -2330,6 +2331,7 @@ impl ToolRuntime {
                 agent_id,
                 endpoint_id,
                 expected_controller_generation,
+                mode,
                 events,
                 idempotency_key,
             ),

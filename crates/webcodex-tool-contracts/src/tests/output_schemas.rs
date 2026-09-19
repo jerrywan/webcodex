@@ -2788,9 +2788,13 @@ fn assert_outcome_model_schema_fields(output_props: &serde_json::Map<String, Val
 }
 
 #[test]
-fn agent_wait_model_schema_separates_matches_from_durable_bookkeeping() {
+fn agent_wait_model_schema_preserves_bounded_join_sources_without_private_bookkeeping() {
     let specs = registered_tool_specs();
     let wait_id = "wc_agent_wait_ERERERERERERERER".to_string();
+    let source = serde_json::json!({
+        "kind": "agent_task_terminal",
+        "task_id": "wc_agent_task_IiIiIiIiIiIiIiIi".to_string(),
+    });
     let matched = serde_json::json!({
         "task_id": "wc_agent_task_IiIiIiIiIiIiIiIi".to_string(),
         "task_attempt_id": "wc_agent_task_attempt_MzMzMzMzMzMzMzMz".to_string(),
@@ -2803,23 +2807,27 @@ fn agent_wait_model_schema_separates_matches_from_durable_bookkeeping() {
     ] {
         let schema = &spec_named(&specs, tool).output_schema["properties"]["output"]["properties"]
             ["agent_wait"];
-        for state in ["waiting", "triggered", "resumed", "cancelled"] {
-            let mut wait = serde_json::json!({"wait_id": wait_id, "state": state});
-            if matches!(state, "triggered" | "resumed") {
-                wait["matches"] = serde_json::json!([matched]);
-            }
-            test_support::validate_schema_instance(&wait, schema).unwrap();
-            let mut duplicate = wait.clone();
-            duplicate["match_count"] = serde_json::json!(1);
-            assert!(test_support::validate_schema_instance(&duplicate, schema).is_err());
-            if matches!(state, "triggered" | "resumed") {
-                let mut missing = wait.clone();
-                missing.as_object_mut().unwrap().remove("matches");
-                assert!(test_support::validate_schema_instance(&missing, schema).is_err());
-                wait["matches"][0]["sequence"] = serde_json::json!(1);
-                assert!(test_support::validate_schema_instance(&wait, schema).is_err());
-            }
+        let wait = serde_json::json!({
+            "wait_id": wait_id,
+            "state": "waiting",
+            "mode": "all",
+            "source_count": 2,
+            "match_count": 1,
+            "sources": [source, {"kind":"agent_task_terminal","task_id":"wc_agent_task_7u7u7u7u7u7u7u7u"}],
+            "matches": [matched]
+        });
+        test_support::validate_schema_instance(&wait, schema).unwrap();
+        for required in ["mode", "source_count", "match_count", "sources", "matches"] {
+            let mut missing = wait.clone();
+            missing.as_object_mut().unwrap().remove(required);
+            assert!(test_support::validate_schema_instance(&missing, schema).is_err());
         }
+        let mut private_source = wait.clone();
+        private_source["sources"][0]["ordinal"] = serde_json::json!(0);
+        assert!(test_support::validate_schema_instance(&private_source, schema).is_err());
+        let mut private_match = wait.clone();
+        private_match["matches"][0]["sequence"] = serde_json::json!(1);
+        assert!(test_support::validate_schema_instance(&private_match, schema).is_err());
     }
 }
 

@@ -3268,14 +3268,16 @@ fn wake_envelope(
             )
         })?;
         let resume_hint = format!(
-            "WebCodex AgentWait continuation.\n\nagent_id={}\nendpoint_id={}\ncontroller_generation={}\nwake_id={}\nconsume_token={}\nwait_id={}\nmatch_count={}\nmatch_sequence={}\n\nBootstrap this exact Wake with bootstrap_agent_conversation, then consume it immediately with consume_agent_wake. Read this Wait with read_agent_wait(wait_id), re-read the authoritative source AgentTasks, and decide the next action from current state. This Wait is one-shot; create a new Wait if further waiting is needed.\n",
+            "WebCodex AgentWait continuation.\n\nagent_id={}\nendpoint_id={}\ncontroller_generation={}\nwake_id={}\nconsume_token={}\nwait_id={}\nmode={}\nmatched={}/{}\nmatch_sequence={}\n\nBootstrap this exact Wake with bootstrap_agent_conversation, then consume it immediately with consume_agent_wake. Read this Wait with read_agent_wait(wait_id), re-read the authoritative source AgentTasks, and decide the next action from current state. This Wait is one-shot; create a new Wait if further waiting is needed.\n",
             wake.target_agent_id,
             endpoint_id,
             controller_generation,
             wake.wake_id,
             consume_token,
             wait.wait_id,
+            wait.mode.as_str(),
             match_count,
+            wait.source_count,
             match_sequence,
         );
         (0, 0, resume_hint)

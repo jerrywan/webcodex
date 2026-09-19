@@ -1,6 +1,7 @@
 use super::agent_task::*;
 use super::agent_wait::{
-    AgentWaitEventSelector, AgentWaitState, NewAgentWait, AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL,
+    AgentWaitEventSelector, AgentWaitMode, AgentWaitState, NewAgentWait,
+    AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL,
 };
 use super::agent_wake::{AgentWakeState, AGENT_WAKE_CONSUME_TOKEN_PREFIX};
 use super::communication::{
@@ -724,6 +725,7 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
                 target_agent_id: waiter.clone(),
                 endpoint_id: wait_endpoint.endpoint_id.clone(),
                 expected_controller_generation: wait_endpoint.controller_generation,
+                mode: AgentWaitMode::Any,
                 events: vec![AgentWaitEventSelector {
                     kind: AGENT_WAIT_EVENT_KIND_AGENT_TASK_TERMINAL.to_string(),
                     task_id: task_id.clone(),
