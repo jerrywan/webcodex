@@ -343,6 +343,7 @@ pub struct AgentTaskCodingRunReconcileMutation {
     pub binding: AgentTaskCodingRunBindingRecord,
     pub state_changed: bool,
     pub attention_event_count: usize,
+    pub attention_target_agent_ids: Vec<String>,
     pub wait_target_agent_ids: Vec<String>,
 }
 
@@ -429,6 +430,8 @@ pub struct AgentTaskAttemptCompletionMutation {
     pub state_changed: bool,
     #[serde(skip_serializing)]
     pub attention_event_count: usize,
+    #[serde(skip_serializing)]
+    pub attention_target_agent_ids: Vec<String>,
     #[serde(skip_serializing)]
     pub wait_target_agent_ids: Vec<String>,
 }
@@ -1845,6 +1848,7 @@ impl Database {
                 replayed: true,
                 state_changed: false,
                 attention_event_count: 0,
+                attention_target_agent_ids: Vec::new(),
                 wait_target_agent_ids: Vec::new(),
             });
         }
@@ -1890,15 +1894,16 @@ impl Database {
             )
             .map_err(store_error)?;
         retire_pre_dispatch_endpoint_execution_for_attempt(&transaction, attempt_id, now)?;
-        let attention_event_count = create_agent_task_terminal_attention_in_transaction(
-            &transaction,
-            principal,
-            task_id,
-            attempt_id,
-            assignee_agent_id,
-            outcome,
-            now,
-        )?;
+        let (attention_event_count, attention_target_agent_ids) =
+            create_agent_task_terminal_attention_in_transaction(
+                &transaction,
+                principal,
+                task_id,
+                attempt_id,
+                assignee_agent_id,
+                outcome,
+                now,
+            )?;
         let wait_matches = record_agent_task_terminal_wait_matches_in_transaction(
             &transaction,
             principal,
@@ -1931,6 +1936,7 @@ impl Database {
             replayed: false,
             state_changed: true,
             attention_event_count,
+            attention_target_agent_ids,
             wait_target_agent_ids: wait_matches.schedule_agent_ids,
         })
     }
@@ -2555,6 +2561,7 @@ impl Database {
                 binding,
                 state_changed: false,
                 attention_event_count: 0,
+                attention_target_agent_ids: Vec::new(),
                 wait_target_agent_ids: Vec::new(),
             });
         }
@@ -2603,15 +2610,16 @@ impl Database {
                 "terminal CodingAgent binding revision CAS did not update the exact durable binding",
             ));
         }
-        let attention_event_count = create_agent_task_terminal_attention_in_transaction(
-            &transaction,
-            principal,
-            task_id,
-            attempt_id,
-            &attempt.assignee_agent_id,
-            desired_task_state,
-            now,
-        )?;
+        let (attention_event_count, attention_target_agent_ids) =
+            create_agent_task_terminal_attention_in_transaction(
+                &transaction,
+                principal,
+                task_id,
+                attempt_id,
+                &attempt.assignee_agent_id,
+                desired_task_state,
+                now,
+            )?;
         let wait_matches = record_agent_task_terminal_wait_matches_in_transaction(
             &transaction,
             principal,
@@ -2642,6 +2650,7 @@ impl Database {
             binding,
             state_changed: true,
             attention_event_count,
+            attention_target_agent_ids,
             wait_target_agent_ids: wait_matches.schedule_agent_ids,
         })
     }

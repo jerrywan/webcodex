@@ -1,4 +1,7 @@
-use super::communication::{CommunicationPrincipal, COMMUNICATION_PRINCIPAL_DIGEST_PREFIX};
+use super::communication::{
+    CommunicationPrincipal, NewAgentIdentity, COMMUNICATION_PRINCIPAL_DIGEST_PREFIX,
+    DURABLE_AGENT_ID_PREFIX,
+};
 use super::goal::*;
 use super::Database;
 
@@ -14,11 +17,28 @@ fn principal(hex: char) -> CommunicationPrincipal {
     }
 }
 
+fn create_agent(db: &Database, owner: &CommunicationPrincipal, key: &str) -> String {
+    db.create_agent_identity(
+        owner,
+        NewAgentIdentity {
+            handle: key.to_string(),
+            display_name: key.to_string(),
+            description: String::new(),
+            specialty_labels: Vec::new(),
+            idempotency_key: format!("agent-{key}"),
+        },
+    )
+    .unwrap()
+    .agent
+    .agent_id
+}
+
 fn input(key: &str) -> NewGoal {
     NewGoal {
         title: "Ship durable Goal foundation".to_string(),
         objective: "Preserve high-level durable intent without granting execution authority."
             .to_string(),
+        controller_agent_id: None,
         idempotency_key: key.to_string(),
     }
 }
@@ -61,6 +81,7 @@ fn create_read_list_update_and_terminal_replay_are_durable_and_revisioned() {
                 GoalPatch {
                     title: Some("Ship Goal foundation".to_string()),
                     objective: None,
+                    controller_agent_id: None,
                     lifecycle: None,
                     terminal_reason: None,
                 },
@@ -80,6 +101,7 @@ fn create_read_list_update_and_terminal_replay_are_durable_and_revisioned() {
                 GoalPatch {
                     title: Some("Different title under same key".to_string()),
                     objective: None,
+                    controller_agent_id: None,
                     lifecycle: None,
                     terminal_reason: None,
                 },
@@ -97,6 +119,7 @@ fn create_read_list_update_and_terminal_replay_are_durable_and_revisioned() {
                 GoalPatch {
                     title: None,
                     objective: None,
+                    controller_agent_id: None,
                     lifecycle: Some(GoalLifecycle::Completed),
                     terminal_reason: Some("Phase 1 accepted".to_string()),
                 },
@@ -120,6 +143,7 @@ fn create_read_list_update_and_terminal_replay_are_durable_and_revisioned() {
                 GoalPatch {
                     title: None,
                     objective: None,
+                    controller_agent_id: None,
                     lifecycle: Some(GoalLifecycle::Completed),
                     terminal_reason: Some("Phase 1 accepted".to_string()),
                 },
@@ -209,6 +233,185 @@ fn exact_read_hides_foreign_existence_and_updates_fail_closed() {
         )
         .unwrap_err();
     assert_eq!(immutable.code(), "goal_terminal");
+}
+
+#[test]
+fn explicit_controller_is_authorized_revisioned_replayed_and_persisted() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("goal-controller.db");
+    let owner = principal('8');
+    let foreign = principal('9');
+    let (goal_id, controller_b) = {
+        let db = Database::open(&path).unwrap();
+        let controller_a = create_agent(&db, &owner, "goal-controller-a");
+        let controller_b = create_agent(&db, &owner, "goal-controller-b");
+        let foreign_controller = create_agent(&db, &foreign, "foreign-goal-controller");
+        let missing_controller = format!("{DURABLE_AGENT_ID_PREFIX}{}", "z".repeat(16));
+
+        let mut create = input("controller-create");
+        create.controller_agent_id = Some(controller_a.clone());
+        let created = db.create_goal_at(&owner, create.clone(), T0).unwrap();
+        let goal_id = created.goal.summary.goal_id.clone();
+        assert_eq!(
+            created.goal.controller_agent_id.as_deref(),
+            Some(controller_a.as_str())
+        );
+        assert_eq!(created.goal.summary.revision, 1);
+
+        let replay = db.create_goal_at(&owner, create, T0 + 1).unwrap();
+        assert!(replay.replayed);
+        assert!(!replay.state_changed);
+        assert_eq!(replay.goal.controller_agent_id, Some(controller_a.clone()));
+
+        let mut changed_create = input("controller-create");
+        changed_create.controller_agent_id = Some(controller_b.clone());
+        assert_eq!(
+            db.create_goal_at(&owner, changed_create, T0 + 2)
+                .unwrap_err()
+                .code(),
+            "goal_idempotency_conflict"
+        );
+
+        let mut foreign_create = input("foreign-controller-create");
+        foreign_create.controller_agent_id = Some(foreign_controller.clone());
+        let foreign_error = db
+            .create_goal_at(&owner, foreign_create, T0 + 3)
+            .unwrap_err();
+        let mut missing_create = input("missing-controller-create");
+        missing_create.controller_agent_id = Some(missing_controller.clone());
+        let missing_error = db
+            .create_goal_at(&owner, missing_create, T0 + 4)
+            .unwrap_err();
+        assert_eq!(foreign_error.code(), "agent_not_found");
+        assert_eq!(missing_error.code(), foreign_error.code());
+        assert_eq!(missing_error.message(), foreign_error.message());
+
+        let updated = db
+            .update_goal_at(
+                &owner,
+                &goal_id,
+                1,
+                GoalPatch {
+                    controller_agent_id: Some(controller_b.clone()),
+                    ..GoalPatch::default()
+                },
+                "set-controller-b",
+                T0 + 5,
+            )
+            .unwrap();
+        assert_eq!(updated.goal.summary.revision, 2);
+        assert_eq!(
+            updated.goal.controller_agent_id.as_deref(),
+            Some(controller_b.as_str())
+        );
+
+        let replay = db
+            .update_goal_at(
+                &owner,
+                &goal_id,
+                1,
+                GoalPatch {
+                    controller_agent_id: Some(controller_b.clone()),
+                    ..GoalPatch::default()
+                },
+                "set-controller-b",
+                T0 + 6,
+            )
+            .unwrap();
+        assert!(replay.replayed);
+        assert!(!replay.state_changed);
+        assert_eq!(replay.goal.summary.revision, 2);
+
+        let foreign_update = db
+            .update_goal_at(
+                &owner,
+                &goal_id,
+                2,
+                GoalPatch {
+                    controller_agent_id: Some(foreign_controller.clone()),
+                    ..GoalPatch::default()
+                },
+                "foreign-controller-update",
+                T0 + 7,
+            )
+            .unwrap_err();
+        let missing_update = db
+            .update_goal_at(
+                &owner,
+                &goal_id,
+                2,
+                GoalPatch {
+                    controller_agent_id: Some(missing_controller),
+                    ..GoalPatch::default()
+                },
+                "missing-controller-update",
+                T0 + 8,
+            )
+            .unwrap_err();
+        assert_eq!(foreign_update.code(), "agent_not_found");
+        assert_eq!(missing_update.code(), foreign_update.code());
+        assert_eq!(missing_update.message(), foreign_update.message());
+
+        let foreign_goal_probe = db
+            .update_goal_at(
+                &foreign,
+                &goal_id,
+                2,
+                GoalPatch {
+                    controller_agent_id: Some(foreign_controller),
+                    ..GoalPatch::default()
+                },
+                "foreign-goal-controller-probe",
+                T0 + 9,
+            )
+            .unwrap_err();
+        assert_eq!(foreign_goal_probe.code(), "goal_not_found");
+
+        let terminal = db
+            .update_goal_at(
+                &owner,
+                &goal_id,
+                2,
+                GoalPatch {
+                    lifecycle: Some(GoalLifecycle::Completed),
+                    ..GoalPatch::default()
+                },
+                "controller-goal-terminal",
+                T0 + 10,
+            )
+            .unwrap();
+        assert_eq!(terminal.goal.summary.revision, 3);
+        assert_eq!(
+            terminal.goal.controller_agent_id.as_deref(),
+            Some(controller_b.as_str())
+        );
+        assert_eq!(
+            db.update_goal_at(
+                &owner,
+                &goal_id,
+                3,
+                GoalPatch {
+                    controller_agent_id: Some(controller_a),
+                    ..GoalPatch::default()
+                },
+                "terminal-controller-change",
+                T0 + 11,
+            )
+            .unwrap_err()
+            .code(),
+            "goal_terminal"
+        );
+        (goal_id, controller_b)
+    };
+
+    let reopened = Database::open(&path).unwrap();
+    let persisted = reopened.read_goal(&owner, &goal_id).unwrap();
+    assert_eq!(persisted.summary.lifecycle, GoalLifecycle::Completed);
+    assert_eq!(persisted.summary.revision, 3);
+    assert_eq!(
+        persisted.controller_agent_id.as_deref(),
+        Some(controller_b.as_str())
+    );
 }
 
 #[test]

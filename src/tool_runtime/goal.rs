@@ -76,6 +76,7 @@ pub(crate) struct GoalPlanProjection {
     pub goal_id: String,
     pub title: String,
     pub objective: String,
+    pub controller_agent_id: Option<String>,
     pub lifecycle: GoalLifecycle,
     pub revision: i64,
     pub updated_at_unix_ms: i64,
@@ -95,6 +96,7 @@ fn goal_plan_projection(goal: GoalDetail, activity: GoalActivityObservation) -> 
         goal_id: goal.summary.goal_id,
         title: goal.summary.title,
         objective: goal.objective,
+        controller_agent_id: goal.controller_agent_id,
         lifecycle: goal.summary.lifecycle,
         revision: goal.summary.revision,
         updated_at_unix_ms: goal.summary.updated_at_unix_ms,
@@ -125,7 +127,9 @@ fn goal_store_unavailable() -> ToolResult {
 fn goal_error(error: GoalStoreError, store_failure_recovery: RecoveryKind) -> ToolResult {
     let recovery = match error.code() {
         "goal_store_unavailable" => store_failure_recovery,
-        "goal_not_found" | "goal_revision_changed" | "goal_terminal" => RecoveryKind::Reobserve,
+        "goal_not_found" | "agent_not_found" | "goal_revision_changed" | "goal_terminal" => {
+            RecoveryKind::Reobserve
+        }
         "goal_idempotency_conflict" => RecoveryKind::Reobserve,
         _ => RecoveryKind::FixInput,
     };
@@ -215,11 +219,23 @@ fn request_visibility_budget_available(
 }
 
 impl ToolRuntime {
+    #[cfg(test)]
     pub(crate) fn create_goal(
         &self,
         auth: Option<&AuthContext>,
         title: String,
         objective: String,
+        idempotency_key: String,
+    ) -> ToolResult {
+        self.create_goal_with_controller(auth, title, objective, None, idempotency_key)
+    }
+
+    pub(crate) fn create_goal_with_controller(
+        &self,
+        auth: Option<&AuthContext>,
+        title: String,
+        objective: String,
+        controller_agent_id: Option<String>,
         idempotency_key: String,
     ) -> ToolResult {
         let principal = match goal_principal(auth) {
@@ -234,6 +250,7 @@ impl ToolRuntime {
             NewGoal {
                 title,
                 objective,
+                controller_agent_id,
                 idempotency_key,
             },
         ) {
@@ -552,6 +569,7 @@ impl ToolRuntime {
         }
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn update_goal(
         &self,
@@ -560,6 +578,32 @@ impl ToolRuntime {
         expected_revision: i64,
         title: Option<String>,
         objective: Option<String>,
+        lifecycle: Option<String>,
+        terminal_reason: Option<String>,
+        idempotency_key: String,
+    ) -> ToolResult {
+        self.update_goal_with_controller(
+            auth,
+            goal_id,
+            expected_revision,
+            title,
+            objective,
+            None,
+            lifecycle,
+            terminal_reason,
+            idempotency_key,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn update_goal_with_controller(
+        &self,
+        auth: Option<&AuthContext>,
+        goal_id: String,
+        expected_revision: i64,
+        title: Option<String>,
+        objective: Option<String>,
+        controller_agent_id: Option<String>,
         lifecycle: Option<String>,
         terminal_reason: Option<String>,
         idempotency_key: String,
@@ -586,6 +630,7 @@ impl ToolRuntime {
             GoalPatch {
                 title,
                 objective,
+                controller_agent_id,
                 lifecycle,
                 terminal_reason,
             },

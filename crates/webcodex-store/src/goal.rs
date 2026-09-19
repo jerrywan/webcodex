@@ -1,7 +1,7 @@
 use super::agent_task::AGENT_TASK_ID_PREFIX;
 use super::communication::{
     allocate_identity, digest_json, digest_text, now_unix_ms, validate_communication_principal,
-    validate_id, CommunicationPrincipal, CommunicationStoreError,
+    validate_id, CommunicationPrincipal, CommunicationStoreError, DURABLE_AGENT_ID_PREFIX,
 };
 use super::Database;
 use rusqlite::{
@@ -81,6 +81,7 @@ fn goal_store_error(error: rusqlite::Error) -> GoalStoreError {
 pub struct NewGoal {
     pub title: String,
     pub objective: String,
+    pub controller_agent_id: Option<String>,
     pub idempotency_key: String,
 }
 
@@ -88,6 +89,7 @@ pub struct NewGoal {
 pub struct GoalPatch {
     pub title: Option<String>,
     pub objective: Option<String>,
+    pub controller_agent_id: Option<String>,
     pub lifecycle: Option<GoalLifecycle>,
     pub terminal_reason: Option<String>,
 }
@@ -191,6 +193,7 @@ pub struct GoalSummary {
 pub struct GoalDetail {
     pub summary: GoalSummary,
     pub objective: String,
+    pub controller_agent_id: Option<String>,
     pub terminal_reason: Option<String>,
     pub correlations: Vec<GoalCorrelation>,
 }
@@ -222,6 +225,7 @@ impl Database {
                 owner_principal_digest TEXT NOT NULL,
                 title TEXT NOT NULL,
                 objective TEXT NOT NULL,
+                controller_agent_id TEXT REFERENCES wc_agent_identities(agent_id),
                 lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'completed', 'cancelled')),
                 revision INTEGER NOT NULL CHECK(revision >= 1),
                 created_at_unix_ms INTEGER NOT NULL,
@@ -262,6 +266,21 @@ impl Database {
                 ON wc_goal_idempotency(created_at_unix_ms DESC);
             ",
         )?;
+        let has_controller_agent_id: i64 = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('wc_goals')
+                WHERE name = 'controller_agent_id'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_controller_agent_id == 0 {
+            conn.execute(
+                "ALTER TABLE wc_goals
+                 ADD COLUMN controller_agent_id TEXT REFERENCES wc_agent_identities(agent_id)",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -282,16 +301,31 @@ impl Database {
         validate_goal_principal(principal)?;
         let title = validate_title(&input.title)?;
         let objective = validate_objective(&input.objective)?;
+        let controller_agent_id =
+            validate_optional_controller_agent_id(input.controller_agent_id.as_deref())?;
         let idempotency_key = validate_idempotency_key(&input.idempotency_key)?;
-        let request_hash = goal_request_hash(&json!({
-            "title": title,
-            "objective": objective,
-        }));
+        let request_hash = if let Some(controller_agent_id) = controller_agent_id.as_deref() {
+            goal_request_hash(&json!({
+                "title": title,
+                "objective": objective,
+                "controller_agent_id": controller_agent_id,
+            }))
+        } else {
+            // Preserve the Phase 1 request hash for controller-less Goals so accepted
+            // pre-upgrade idempotency records continue to replay exactly.
+            goal_request_hash(&json!({
+                "title": title,
+                "objective": objective,
+            }))
+        };
 
         let mut conn = self.lock_connection(crate::StoreDomain::Goal);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(goal_store_error)?;
+        if let Some(controller_agent_id) = controller_agent_id.as_deref() {
+            require_owned_controller_agent(&transaction, principal, controller_agent_id)?;
+        }
         if let Some(goal_id) = lookup_idempotent_goal(
             &transaction,
             principal,
@@ -319,15 +353,16 @@ impl Database {
             .execute(
                 "INSERT INTO wc_goals (
                     goal_id, owner_principal_kind, owner_principal_digest,
-                    title, objective, lifecycle, revision, created_at_unix_ms,
+                    title, objective, controller_agent_id, lifecycle, revision, created_at_unix_ms,
                     updated_at_unix_ms, terminal_at_unix_ms, terminal_reason
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', 1, ?6, ?6, NULL, NULL)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', 1, ?7, ?7, NULL, NULL)",
                 params![
                     goal_id,
                     principal.kind,
                     principal.digest,
                     title,
                     objective,
+                    controller_agent_id,
                     now,
                 ],
             )
@@ -506,6 +541,8 @@ impl Database {
             .as_deref()
             .map(validate_objective)
             .transpose()?;
+        let controller_agent_id =
+            validate_optional_controller_agent_id(patch.controller_agent_id.as_deref())?;
         let terminal_reason = patch
             .terminal_reason
             .as_deref()
@@ -513,6 +550,7 @@ impl Database {
             .transpose()?;
         if title.is_none()
             && objective.is_none()
+            && controller_agent_id.is_none()
             && patch.lifecycle.is_none()
             && terminal_reason.is_none()
         {
@@ -528,19 +566,39 @@ impl Database {
             ));
         }
         let idempotency_key = validate_idempotency_key(idempotency_key)?;
-        let request_hash = goal_request_hash(&json!({
-            "goal_id": goal_id,
-            "expected_revision": expected_revision,
-            "title": title,
-            "objective": objective,
-            "lifecycle": patch.lifecycle,
-            "terminal_reason": terminal_reason,
-        }));
+        let request_hash = if let Some(controller_agent_id) = controller_agent_id.as_deref() {
+            goal_request_hash(&json!({
+                "goal_id": goal_id,
+                "expected_revision": expected_revision,
+                "title": title,
+                "objective": objective,
+                "controller_agent_id": controller_agent_id,
+                "lifecycle": patch.lifecycle,
+                "terminal_reason": terminal_reason,
+            }))
+        } else {
+            // Preserve the Phase 1 hash shape when controller routing is not part of
+            // the update, including exact replay of pre-upgrade mutations.
+            goal_request_hash(&json!({
+                "goal_id": goal_id,
+                "expected_revision": expected_revision,
+                "title": title,
+                "objective": objective,
+                "lifecycle": patch.lifecycle,
+                "terminal_reason": terminal_reason,
+            }))
+        };
 
         let mut conn = self.lock_connection(crate::StoreDomain::Goal);
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(goal_store_error)?;
+        // Authorize the Goal before the optional controller target so a foreign Goal
+        // cannot be used as an existence oracle for durable Agent ids.
+        let current = load_owned_goal(&transaction, principal, goal_id)?;
+        if let Some(controller_agent_id) = controller_agent_id.as_deref() {
+            require_owned_controller_agent(&transaction, principal, controller_agent_id)?;
+        }
         if let Some(replayed_goal_id) = lookup_idempotent_goal(
             &transaction,
             principal,
@@ -564,7 +622,6 @@ impl Database {
             });
         }
 
-        let current = load_owned_goal(&transaction, principal, goal_id)?;
         if current.summary.revision != expected_revision {
             return Err(GoalStoreError::revision_changed(current.summary.revision));
         }
@@ -577,8 +634,11 @@ impl Database {
         let target_lifecycle = patch.lifecycle.unwrap_or(GoalLifecycle::Active);
         let target_title = title.unwrap_or_else(|| current.summary.title.clone());
         let target_objective = objective.unwrap_or_else(|| current.objective.clone());
+        let target_controller_agent_id =
+            controller_agent_id.or_else(|| current.controller_agent_id.clone());
         let state_changed = target_title != current.summary.title
             || target_objective != current.objective
+            || target_controller_agent_id != current.controller_agent_id
             || target_lifecycle != current.summary.lifecycle
             || terminal_reason != current.terminal_reason;
 
@@ -591,14 +651,15 @@ impl Database {
             transaction
                 .execute(
                     "UPDATE wc_goals
-                     SET title = ?2, objective = ?3, lifecycle = ?4,
-                         revision = revision + 1, updated_at_unix_ms = ?5,
-                         terminal_at_unix_ms = ?6, terminal_reason = ?7
+                     SET title = ?2, objective = ?3, controller_agent_id = ?4, lifecycle = ?5,
+                         revision = revision + 1, updated_at_unix_ms = ?6,
+                         terminal_at_unix_ms = ?7, terminal_reason = ?8
                      WHERE goal_id = ?1",
                     params![
                         goal_id,
                         target_title,
                         target_objective,
+                        target_controller_agent_id,
                         target_lifecycle.as_str(),
                         now,
                         terminal_at,
@@ -840,6 +901,43 @@ fn validate_goal_id(goal_id: &str) -> Result<(), GoalStoreError> {
         .map_err(map_communication_validation_error)
 }
 
+fn validate_optional_controller_agent_id(
+    value: Option<&str>,
+) -> Result<Option<String>, GoalStoreError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    validate_id(value, DURABLE_AGENT_ID_PREFIX, "invalid_agent_id")
+        .map_err(map_communication_validation_error)?;
+    Ok(Some(value.to_string()))
+}
+
+fn require_owned_controller_agent(
+    conn: &Connection,
+    principal: &CommunicationPrincipal,
+    agent_id: &str,
+) -> Result<(), GoalStoreError> {
+    validate_id(agent_id, DURABLE_AGENT_ID_PREFIX, "invalid_agent_id")
+        .map_err(map_communication_validation_error)?;
+    let owned = conn
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM wc_agent_identities
+                WHERE agent_id = ?1 AND owner_principal_kind = ?2 AND owner_principal_digest = ?3
+             )",
+            params![agent_id, principal.kind, principal.digest],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(goal_store_error)?;
+    if !owned {
+        return Err(GoalStoreError::new(
+            "agent_not_found",
+            "Agent identity does not exist",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_title(value: &str) -> Result<String, GoalStoreError> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > MAX_GOAL_TITLE_CHARS {
@@ -979,6 +1077,12 @@ fn validate_loaded_goal_detail(detail: &GoalDetail) -> Result<(), GoalStoreError
     let normalized_objective =
         validate_objective(&detail.objective).map_err(|_| persisted_goal_state_error())?;
     if normalized_objective != detail.objective
+        || detail
+            .controller_agent_id
+            .as_deref()
+            .is_some_and(|agent_id| {
+                validate_id(agent_id, DURABLE_AGENT_ID_PREFIX, "invalid_agent_id").is_err()
+            })
         || (detail.summary.lifecycle == GoalLifecycle::Active && detail.terminal_reason.is_some())
     {
         return Err(persisted_goal_state_error());
@@ -1057,7 +1161,7 @@ fn load_owned_goal(
     validate_goal_id(goal_id)?;
     let row = conn
         .query_row(
-            "SELECT goal_id, title, objective, lifecycle, revision,
+            "SELECT goal_id, title, objective, controller_agent_id, lifecycle, revision,
                     created_at_unix_ms, updated_at_unix_ms, terminal_at_unix_ms,
                     terminal_reason,
                     (SELECT COUNT(*) FROM wc_goal_correlations c
@@ -1072,21 +1176,22 @@ fn load_owned_goal(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    GoalLifecycle::from_db(&row.get::<_, String>(3)?, 3)?,
-                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<String>>(3)?,
+                    GoalLifecycle::from_db(&row.get::<_, String>(4)?, 4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
-                    row.get::<_, Option<i64>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                     row.get::<_, i64>(10)?,
+                    row.get::<_, i64>(11)?,
                 ))
             },
         )
         .optional()
         .map_err(goal_store_error)?
         .ok_or_else(|| GoalStoreError::new("goal_not_found", "Goal does not exist"))?;
-    if row.9.saturating_add(row.10) > MAX_GOAL_CORRELATIONS {
+    if row.10.saturating_add(row.11) > MAX_GOAL_CORRELATIONS {
         return Err(persisted_goal_state_error());
     }
     let mut statement = conn
@@ -1113,19 +1218,24 @@ fn load_owned_goal(
         summary: GoalSummary {
             goal_id: row.0,
             title: row.1,
-            lifecycle: row.3,
-            revision: row.4,
-            created_at_unix_ms: row.5,
-            updated_at_unix_ms: row.6,
-            terminal_at_unix_ms: row.7,
-            agent_task_count: row.9,
-            workflow_session_count: row.10,
+            lifecycle: row.4,
+            revision: row.5,
+            created_at_unix_ms: row.6,
+            updated_at_unix_ms: row.7,
+            terminal_at_unix_ms: row.8,
+            agent_task_count: row.10,
+            workflow_session_count: row.11,
         },
         objective: row.2,
-        terminal_reason: row.8,
+        controller_agent_id: row.3,
+        terminal_reason: row.9,
         correlations,
     };
     validate_loaded_goal_detail(&detail)?;
+    if let Some(controller_agent_id) = detail.controller_agent_id.as_deref() {
+        require_owned_controller_agent(conn, principal, controller_agent_id)
+            .map_err(|_| persisted_goal_state_error())?;
+    }
     Ok(detail)
 }
 

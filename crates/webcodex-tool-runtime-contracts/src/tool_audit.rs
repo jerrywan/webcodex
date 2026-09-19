@@ -385,6 +385,7 @@ fn typed_goal_request_audit(kind: GoalRequestAudit, arguments: &Value) -> Value 
                         .unwrap_or_default(),
                 ),
             );
+            copy_keys(obj, &mut out, &["controller_agent_id"]);
             out.insert(
                 "idempotency_key_present".to_string(),
                 Value::Bool(obj.get("idempotency_key").and_then(Value::as_str).is_some()),
@@ -396,7 +397,12 @@ fn typed_goal_request_audit(kind: GoalRequestAudit, arguments: &Value) -> Value 
             copy_keys(
                 obj,
                 &mut out,
-                &["goal_id", "expected_revision", "lifecycle"],
+                &[
+                    "goal_id",
+                    "expected_revision",
+                    "controller_agent_id",
+                    "lifecycle",
+                ],
             );
             out.insert(
                 "title_chars".to_string(),
@@ -4257,12 +4263,14 @@ impl ToolCallAuditProjection for ToolCall {
             Self::CreateGoal {
                 title,
                 objective,
+                controller_agent_id,
                 idempotency_key,
             } => typed_goal_request_audit(
                 GoalRequestAudit::Create,
                 &serde_json::json!({
                     "title": title,
                     "objective": objective,
+                    "controller_agent_id": controller_agent_id,
                     "idempotency_key": idempotency_key,
                 }),
             ),
@@ -4293,6 +4301,7 @@ impl ToolCallAuditProjection for ToolCall {
                 expected_revision,
                 title,
                 objective,
+                controller_agent_id,
                 lifecycle,
                 terminal_reason,
                 idempotency_key,
@@ -4303,6 +4312,7 @@ impl ToolCallAuditProjection for ToolCall {
                     "expected_revision": expected_revision,
                     "title": title,
                     "objective": objective,
+                    "controller_agent_id": controller_agent_id,
                     "lifecycle": lifecycle,
                     "terminal_reason": terminal_reason,
                     "idempotency_key": idempotency_key,

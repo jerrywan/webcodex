@@ -213,6 +213,7 @@ async fn goal_plan_app_descriptor_is_sparse_app_only_resource_backed_and_adaptiv
     }
     for required in [
         "goal_plan_state",
+        "controller_agent_id",
         "ui/notifications/tool-input",
         "visibilitychange",
         "ui/resource-teardown",
@@ -232,6 +233,9 @@ async fn goal_plan_app_descriptor_is_sparse_app_only_resource_backed_and_adaptiv
         "wake_token",
         "attempt_fence",
         "authority_fingerprint",
+        "endpoint_id",
+        "controller_generation",
+        "client_attachment_id",
     ] {
         assert!(
             !MCP_GOAL_PLAN_APP_HTML.contains(forbidden),

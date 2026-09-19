@@ -2637,6 +2637,11 @@ pub enum ToolCall {
         /// 8192-byte UTF-8 bound.
         #[schemars(length(min = 1, max = 8192))]
         objective: String,
+        /// Optional exact durable Agent that receives future Goal attention. This routing identity is
+        /// independently authorized and grants no Goal, Task, Project, Session, Runner, or execution authority.
+        #[schemars(regex(pattern = "^wc_dagent_[A-Za-z0-9_-]{16}$"))]
+        #[serde(default)]
+        controller_agent_id: Option<String>,
         /// Caller-generated Goal creation key. Exact retry returns the same Goal; changed reuse fails
         /// closed.
         #[schemars(length(min = 1, max = 128))]
@@ -2697,6 +2702,11 @@ pub enum ToolCall {
         #[schemars(length(min = 1, max = 8192))]
         #[serde(default)]
         objective: Option<String>,
+        /// Optional replacement durable Goal controller Agent. Omission preserves the current routing identity;
+        /// setting it re-authorizes the exact Agent and never inherits authority from prior routing.
+        #[schemars(regex(pattern = "^wc_dagent_[A-Za-z0-9_-]{16}$"))]
+        #[serde(default)]
+        controller_agent_id: Option<String>,
         /// Closed authoritative Goal lifecycle. Execution/presentation states such as implementing,
         /// blocked, or waiting_validation are not Goal lifecycle values.
         #[serde(default)]

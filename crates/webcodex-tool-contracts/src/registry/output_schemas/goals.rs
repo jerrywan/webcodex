@@ -8,6 +8,16 @@ fn nullable_integer(description: &str) -> Value {
     })
 }
 
+fn nullable_controller_agent_id(description: &str) -> Value {
+    json!({
+        "anyOf": [
+            {"type": "string", "pattern": "^wc_dagent_[A-Za-z0-9_-]{16}$"},
+            {"type": "null"}
+        ],
+        "description": description
+    })
+}
+
 fn lifecycle_schema() -> Value {
     json!({
         "type": "string",
@@ -59,6 +69,7 @@ fn goal_detail_schema() -> Value {
         "properties": {
             "summary": goal_summary_schema(),
             "objective": {"type": "string", "minLength": 1, "maxLength": 8192, "description": "Bounded authoritative high-level objective/instruction; the Store enforces the same 8192-byte UTF-8 ceiling."},
+            "controller_agent_id": nullable_controller_agent_id("Exact durable Goal attention-routing Agent, or null for the legacy worker fallback. Identity only; it grants no Goal, Task, Project, Session, Runner, Endpoint, or execution authority."),
             "terminal_reason": {
                 "anyOf": [
                     {"type": "string", "minLength": 1, "maxLength": 4096},
@@ -73,7 +84,7 @@ fn goal_detail_schema() -> Value {
                 "description": "Bounded explicit AgentTask and Workflow Session correlations only. No target-domain authority or private target state is projected."
             }
         },
-        "required": ["summary", "objective", "terminal_reason", "correlations"]
+        "required": ["summary", "objective", "controller_agent_id", "terminal_reason", "correlations"]
     })
 }
 
@@ -110,6 +121,7 @@ fn goal_plan_schema() -> Value {
             "goal_id": {"type": "string", "pattern": "^wc_goal_[A-Za-z0-9_-]{16}$", "description": "Exact durable Goal identity used for refresh/rehydration and app-only polling. Identity is never authority."},
             "title": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Bounded Goal title."},
             "objective": {"type": "string", "minLength": 1, "maxLength": 8192, "description": "Bounded authoritative Goal objective; the Store enforces the same 8192-byte UTF-8 ceiling."},
+            "controller_agent_id": nullable_controller_agent_id("Exact durable Goal attention-routing Agent, or null when terminal attention uses the backward-compatible Task worker fallback. Endpoint/window bindings are never projected."),
             "lifecycle": lifecycle_schema(),
             "revision": {"type": "integer", "minimum": 1, "description": "Monotonic authoritative Goal revision."},
             "updated_at_unix_ms": schema_type("integer", "Latest authoritative Goal mutation time."),
@@ -119,7 +131,7 @@ fn goal_plan_schema() -> Value {
             "activity": goal_activity_schema()
         },
         "required": [
-            "version", "goal_id", "title", "objective", "lifecycle", "revision",
+            "version", "goal_id", "title", "objective", "controller_agent_id", "lifecycle", "revision",
             "updated_at_unix_ms", "terminal_at_unix_ms", "agent_task_count",
             "workflow_session_count", "activity"
         ],

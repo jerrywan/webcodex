@@ -309,6 +309,15 @@ fn goal_schemas_are_bounded_private_and_existing_coding_tools_do_not_accept_goal
         create.input_schema["properties"]["idempotency_key"]["maxLength"],
         128
     );
+    assert_eq!(
+        create.input_schema["properties"]["controller_agent_id"]["pattern"],
+        "^wc_dagent_[A-Za-z0-9_-]{16}$"
+    );
+    assert!(!create.input_schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|field| field == "controller_agent_id"));
 
     let update = spec("update_goal");
     assert_eq!(
@@ -318,6 +327,10 @@ fn goal_schemas_are_bounded_private_and_existing_coding_tools_do_not_accept_goal
     assert_eq!(
         update.input_schema["properties"]["terminal_reason"]["maxLength"],
         4096
+    );
+    assert_eq!(
+        update.input_schema["properties"]["controller_agent_id"]["pattern"],
+        "^wc_dagent_[A-Za-z0-9_-]{16}$"
     );
 
     let present = spec("present_goal_plan");
@@ -334,6 +347,10 @@ fn goal_schemas_are_bounded_private_and_existing_coding_tools_do_not_accept_goal
     );
     assert_eq!(plan["properties"]["title"]["maxLength"], 200);
     assert_eq!(plan["properties"]["objective"]["maxLength"], 8192);
+    assert_eq!(
+        plan["properties"]["controller_agent_id"]["anyOf"][0]["pattern"],
+        "^wc_dagent_[A-Za-z0-9_-]{16}$"
+    );
     assert_eq!(
         plan["properties"]["lifecycle"]["enum"],
         json!(["active", "completed", "cancelled"])
@@ -381,7 +398,12 @@ fn goal_schemas_are_bounded_private_and_existing_coding_tools_do_not_accept_goal
     ] {
         assert!(list_summary["properties"].get(field).is_some(), "{field}");
     }
-    for private in ["objective", "terminal_reason", "correlations"] {
+    for private in [
+        "objective",
+        "controller_agent_id",
+        "terminal_reason",
+        "correlations",
+    ] {
         assert!(
             list_summary["properties"].get(private).is_none(),
             "{private}"
@@ -389,6 +411,10 @@ fn goal_schemas_are_bounded_private_and_existing_coding_tools_do_not_accept_goal
     }
 
     let detail = &spec("get_goal").output_schema["properties"]["output"]["properties"]["goal"];
+    assert_eq!(
+        detail["properties"]["controller_agent_id"]["anyOf"][0]["pattern"],
+        "^wc_dagent_[A-Za-z0-9_-]{16}$"
+    );
     let correlation = &detail["properties"]["correlations"]["items"];
     assert_eq!(
         correlation["properties"]
@@ -446,6 +472,7 @@ fn goal_tool_calls_and_audit_keep_goal_identity_distinct_and_private_text_out_of
             "goal_id": goal_id,
             "expected_revision": 4,
             "objective": "PRIVATE_GOAL_OBJECTIVE_DO_NOT_LOG",
+            "controller_agent_id": "wc_dagent_AAAAAAAAAAAAAAAA",
             "lifecycle": "completed",
             "terminal_reason": "PRIVATE_GOAL_REASON_DO_NOT_LOG",
             "idempotency_key": "PRIVATE_GOAL_KEY_DO_NOT_LOG"
@@ -460,6 +487,7 @@ fn goal_tool_calls_and_audit_keep_goal_identity_distinct_and_private_text_out_of
             "goal_id": goal_id,
             "expected_revision": 4,
             "objective": "PRIVATE_GOAL_OBJECTIVE_DO_NOT_LOG",
+            "controller_agent_id": "wc_dagent_AAAAAAAAAAAAAAAA",
             "lifecycle": "completed",
             "terminal_reason": "PRIVATE_GOAL_REASON_DO_NOT_LOG",
             "idempotency_key": "PRIVATE_GOAL_KEY_DO_NOT_LOG"
@@ -467,6 +495,7 @@ fn goal_tool_calls_and_audit_keep_goal_identity_distinct_and_private_text_out_of
     );
     assert_eq!(audit["goal_id"], goal_id);
     assert_eq!(audit["expected_revision"], 4);
+    assert_eq!(audit["controller_agent_id"], "wc_dagent_AAAAAAAAAAAAAAAA");
     assert_eq!(
         audit["objective_bytes"],
         "PRIVATE_GOAL_OBJECTIVE_DO_NOT_LOG".len()
@@ -601,12 +630,129 @@ fn goal_runtime_crud_replay_and_exact_read_hide_foreign_existence() {
     assert_eq!(update_replay.output["goal"]["summary"]["revision"], 2);
 }
 
+#[test]
+fn goal_runtime_controller_is_explicit_authorized_and_readable() {
+    let (_temp, _db, runtime) = runtime_with_goal_db();
+    let bob = auth_context(Some("bob-goal-controller"), false);
+    let alice = auth_context(Some("alice-goal-controller"), false);
+    let controller = runtime.create_agent_identity(
+        Some(&bob),
+        "bob-goal-controller".to_string(),
+        "Bob Goal Controller".to_string(),
+        None,
+        Vec::new(),
+        "bob-goal-controller-agent".to_string(),
+    );
+    assert!(controller.success, "{:?}", controller.output);
+    let controller_id = controller.output["agent"]["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let replacement = runtime.create_agent_identity(
+        Some(&bob),
+        "bob-goal-controller-2".to_string(),
+        "Bob Goal Controller 2".to_string(),
+        None,
+        Vec::new(),
+        "bob-goal-controller-agent-2".to_string(),
+    );
+    assert!(replacement.success, "{:?}", replacement.output);
+    let replacement_id = replacement.output["agent"]["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let foreign = runtime.create_agent_identity(
+        Some(&alice),
+        "alice-goal-controller".to_string(),
+        "Alice Goal Controller".to_string(),
+        None,
+        Vec::new(),
+        "alice-goal-controller-agent".to_string(),
+    );
+    assert!(foreign.success, "{:?}", foreign.output);
+    let foreign_id = foreign.output["agent"]["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let created = runtime.create_goal_with_controller(
+        Some(&bob),
+        "Controller Goal".to_string(),
+        "Use one explicit durable controller only for attention routing.".to_string(),
+        Some(controller_id.clone()),
+        "controller-goal-create".to_string(),
+    );
+    assert!(created.success, "{:?}", created.output);
+    let goal_id = created.output["goal"]["summary"]["goal_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(created.output["goal"]["controller_agent_id"], controller_id);
+    assert_eq!(
+        runtime.get_goal(Some(&bob), goal_id.clone()).output["goal"]["controller_agent_id"],
+        controller_id
+    );
+
+    let rejected = runtime.create_goal_with_controller(
+        Some(&bob),
+        "Foreign Controller Goal".to_string(),
+        "Foreign durable Agent ids must remain existence-hidden.".to_string(),
+        Some(foreign_id),
+        "foreign-controller-goal-create".to_string(),
+    );
+    assert!(!rejected.success);
+    assert_eq!(rejected.output["error_kind"], "agent_not_found");
+
+    let updated = runtime.update_goal_with_controller(
+        Some(&bob),
+        goal_id,
+        1,
+        None,
+        None,
+        Some(replacement_id.clone()),
+        None,
+        None,
+        "controller-goal-replace".to_string(),
+    );
+    assert!(updated.success, "{:?}", updated.output);
+    assert_eq!(updated.output["goal"]["summary"]["revision"], 2);
+    assert_eq!(
+        updated.output["goal"]["controller_agent_id"],
+        replacement_id
+    );
+}
+
 #[tokio::test]
 async fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hidden() {
     let (_temp, _db, runtime) = runtime_with_goal_db();
     let bob = auth_context(Some("bob-plan"), false);
     let alice = auth_context(Some("alice-plan"), false);
-    let goal_id = create_goal(&runtime, Some(&bob), "bob-plan-create");
+    let controller = runtime.create_agent_identity(
+        Some(&bob),
+        "bob-plan-controller".to_string(),
+        "Bob Plan Controller".to_string(),
+        None,
+        Vec::new(),
+        "bob-plan-controller-agent".to_string(),
+    );
+    assert!(controller.success, "{:?}", controller.output);
+    let controller_id = controller.output["agent"]["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let created = runtime.create_goal_with_controller(
+        Some(&bob),
+        "Durable Goal Phase 1".to_string(),
+        "Keep high-level durable intent authoritative and independent from execution domains."
+            .to_string(),
+        Some(controller_id.clone()),
+        "bob-plan-create".to_string(),
+    );
+    assert!(created.success, "{:?}", created.output);
+    let goal_id = created.output["goal"]["summary"]["goal_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let initial = runtime.present_goal_plan(Some(&bob), goal_id.clone()).await;
     assert!(initial.success, "{:?}", initial.output);
@@ -617,6 +763,7 @@ async fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hi
     assert_eq!(plan["revision"], 1);
     assert_eq!(plan["agent_task_count"], 0);
     assert_eq!(plan["workflow_session_count"], 0);
+    assert_eq!(plan["controller_agent_id"], controller_id);
     assert_eq!(plan["activity"]["available"], false);
     assert_eq!(plan["activity"]["state"], "unobserved");
     assert!(plan["activity"]["last_seen_at_ms"].is_null());
@@ -631,6 +778,7 @@ async fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hi
         [
             "activity",
             "agent_task_count",
+            "controller_agent_id",
             "goal_id",
             "lifecycle",
             "objective",
@@ -678,6 +826,10 @@ async fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hi
     assert!(after_update.success);
     assert_eq!(after_update.output["goal_plan"]["revision"], 2);
     assert_eq!(
+        after_update.output["goal_plan"]["controller_agent_id"],
+        controller_id
+    );
+    assert_eq!(
         after_update.output["goal_plan"]["objective"],
         "Updated durable plan objective"
     );
@@ -697,6 +849,10 @@ async fn goal_plan_projection_is_exact_pure_revisioned_terminal_and_existence_hi
     assert!(terminal.success);
     assert_eq!(terminal.output["goal_plan"]["lifecycle"], "completed");
     assert_eq!(terminal.output["goal_plan"]["revision"], 3);
+    assert_eq!(
+        terminal.output["goal_plan"]["controller_agent_id"],
+        controller_id
+    );
     assert_eq!(
         terminal.output["goal_plan"]["activity"]["state"],
         "not_applicable"

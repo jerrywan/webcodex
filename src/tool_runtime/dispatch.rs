@@ -2246,8 +2246,15 @@ impl ToolRuntime {
             ToolCall::CreateGoal {
                 title,
                 objective,
+                controller_agent_id,
                 idempotency_key,
-            } => self.create_goal(auth, title, objective, idempotency_key),
+            } => self.create_goal_with_controller(
+                auth,
+                title,
+                objective,
+                controller_agent_id,
+                idempotency_key,
+            ),
 
             ToolCall::GetGoal { goal_id } => self.get_goal(auth, goal_id),
 
@@ -2271,15 +2278,17 @@ impl ToolRuntime {
                 expected_revision,
                 title,
                 objective,
+                controller_agent_id,
                 lifecycle,
                 terminal_reason,
                 idempotency_key,
-            } => self.update_goal(
+            } => self.update_goal_with_controller(
                 auth,
                 goal_id,
                 expected_revision,
                 title,
                 objective,
+                controller_agent_id,
                 lifecycle.map(|value| value.as_str().to_string()),
                 terminal_reason,
                 idempotency_key,

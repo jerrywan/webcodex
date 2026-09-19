@@ -677,6 +677,7 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
     let db = Database::open(&temp.path().join("agent-task-coding-terminal.db")).unwrap();
     let owner = principal('4');
     let assignee = agent(&db, &owner, "coding-terminal-agent");
+    let goal_controller = agent(&db, &owner, "coding-terminal-controller");
     let waiter = agent(&db, &owner, "coding-terminal-waiter");
     let wait_endpoint = db
         .attach_agent_endpoint(
@@ -717,6 +718,7 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
                 title: "Coding terminal Goal".to_string(),
                 objective: "Re-evaluate high-level intent after backend terminal truth."
                     .to_string(),
+                controller_agent_id: Some(goal_controller.clone()),
                 idempotency_key: "coding-terminal-goal".to_string(),
             },
             now,
@@ -792,6 +794,10 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
         .unwrap();
     assert!(reconciled.state_changed);
     assert_eq!(reconciled.attention_event_count, 1);
+    assert_eq!(
+        reconciled.attention_target_agent_ids,
+        vec![goal_controller.clone()]
+    );
     assert_eq!(reconciled.wait_target_agent_ids, vec![waiter.clone()]);
     let resumed_wait = db.read_agent_wait(&owner, &agent_wait.wait_id).unwrap();
     assert_eq!(resumed_wait.state, AgentWaitState::Triggered);
@@ -825,7 +831,12 @@ fn backend_terminal_truth_reconciles_exact_attempt_after_ordinary_lease_expiry()
                AND e.task_id = ?2 AND e.task_attempt_id = ?3
                AND e.target_agent_id = ?4 AND e.terminal_task_state = 'succeeded'
                AND w.trigger_kind = 'attention_event' AND w.state = 'pending'",
-            params![goal_id, task_id, started.attempt.attempt_id, assignee],
+            params![
+                goal_id,
+                task_id,
+                started.attempt.attempt_id,
+                goal_controller
+            ],
             |row| row.get(0),
         )
         .unwrap();
@@ -3740,6 +3751,7 @@ fn inbox_and_attention_wake_consumes_never_become_active_turn_proof() {
                 objective:
                     "Generate an attention_event Wake that must never renew another TaskAttempt."
                         .to_string(),
+                controller_agent_id: None,
                 idempotency_key: "active-turn-attention-goal".to_string(),
             },
             takeover_at + 2,

@@ -723,9 +723,11 @@ impl ToolRuntime {
             Some(&terminal_reason),
         ) {
             Ok(mutation) => {
-                if mutation.state_changed && mutation.attention_event_count > 0 {
+                if mutation.state_changed {
                     if let Some(controller) = self.agent_continuations.as_ref() {
-                        controller.schedule_agent(&mutation.attempt.assignee_agent_id);
+                        for agent_id in &mutation.attention_target_agent_ids {
+                            controller.schedule_agent(agent_id);
+                        }
                     }
                 }
                 if mutation.state_changed {
@@ -845,9 +847,11 @@ impl ToolRuntime {
             &completion_key,
         ) {
             Ok(result) => {
-                if result.state_changed && result.attention_event_count > 0 {
+                if result.state_changed {
                     if let Some(controller) = self.agent_continuations.as_ref() {
-                        controller.schedule_agent(&assignee_agent_id);
+                        for agent_id in &result.attention_target_agent_ids {
+                            controller.schedule_agent(agent_id);
+                        }
                     }
                 }
                 if result.state_changed {

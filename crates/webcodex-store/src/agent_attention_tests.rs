@@ -83,12 +83,24 @@ fn create_goal_and_link(
     key: &str,
     now: i64,
 ) -> String {
+    create_goal_and_link_with_controller(db, owner, task_id, None, key, now)
+}
+
+fn create_goal_and_link_with_controller(
+    db: &Database,
+    owner: &CommunicationPrincipal,
+    task_id: &str,
+    controller_agent_id: Option<&str>,
+    key: &str,
+    now: i64,
+) -> String {
     let goal_id = db
         .create_goal_at(
             owner,
             NewGoal {
                 title: format!("Goal {key}"),
                 objective: "Keep high-level intent separate from task execution truth.".to_string(),
+                controller_agent_id: controller_agent_id.map(str::to_string),
                 idempotency_key: format!("goal-{key}"),
             },
             now,
@@ -301,6 +313,221 @@ fn correlated_success_is_atomic_replay_safe_and_never_mutates_goal() {
 }
 
 #[test]
+fn explicit_controller_equal_worker_routes_one_replay_safe_attention() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("controller-equal-worker.db")).unwrap();
+    let owner = principal('a');
+    let worker = create_agent(&db, &owner, "equal-controller-worker");
+    let (task_id, attempt_id, fence) =
+        create_task_and_attempt(&db, &owner, &worker, "equal-controller", T0);
+    create_goal_and_link_with_controller(
+        &db,
+        &owner,
+        &task_id,
+        Some(&worker),
+        "equal-controller",
+        T0 + 2,
+    );
+
+    let completed = db
+        .complete_agent_task_attempt_at(
+            &owner,
+            &task_id,
+            &attempt_id,
+            &worker,
+            &fence,
+            1,
+            AgentTaskState::Succeeded,
+            Some("equal controller result"),
+            None,
+            "complete-equal-controller",
+            T0 + 4,
+        )
+        .unwrap();
+    assert_eq!(completed.attention_event_count, 1);
+    assert_eq!(completed.attention_target_agent_ids, vec![worker.clone()]);
+    let first = events(&db, &attempt_id);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].target_agent_id, worker);
+    assert_eq!(attention_wake_count(&db, &attempt_id), 1);
+
+    let replay = db
+        .complete_agent_task_attempt_at(
+            &owner,
+            &task_id,
+            &attempt_id,
+            &worker,
+            &fence,
+            1,
+            AgentTaskState::Succeeded,
+            Some("equal controller result"),
+            None,
+            "complete-equal-controller",
+            T0 + 5,
+        )
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.attention_event_count, 0);
+    assert!(replay.attention_target_agent_ids.is_empty());
+    assert_eq!(events(&db, &attempt_id), first);
+    assert_eq!(attention_wake_count(&db, &attempt_id), 1);
+}
+
+#[test]
+fn explicit_controller_routes_worker_terminal_and_historical_wake_does_not_retarget() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("controller-route.db")).unwrap();
+    let owner = principal('b');
+    let worker = create_agent(&db, &owner, "route-worker");
+    let controller = create_agent(&db, &owner, "route-controller");
+    let replacement = create_agent(&db, &owner, "route-replacement");
+    let (task_id, attempt_id, fence) =
+        create_task_and_attempt(&db, &owner, &worker, "controller-route", T0);
+    let goal_id = create_goal_and_link_with_controller(
+        &db,
+        &owner,
+        &task_id,
+        Some(&controller),
+        "controller-route",
+        T0 + 2,
+    );
+
+    let completed = db
+        .complete_agent_task_attempt_at(
+            &owner,
+            &task_id,
+            &attempt_id,
+            &worker,
+            &fence,
+            1,
+            AgentTaskState::Succeeded,
+            Some("worker terminal result"),
+            None,
+            "complete-controller-route",
+            T0 + 4,
+        )
+        .unwrap();
+    assert_eq!(completed.attention_event_count, 1);
+    assert_eq!(
+        completed.attention_target_agent_ids,
+        vec![controller.clone()]
+    );
+    let emitted = events(&db, &attempt_id);
+    assert_eq!(emitted.len(), 1);
+    assert_eq!(emitted[0].target_agent_id, controller);
+    assert_ne!(emitted[0].target_agent_id, worker);
+    let wake_id = wake_id_for_event(&db, &emitted[0].event_id);
+    assert_eq!(
+        db.agent_wake(&wake_id).unwrap().unwrap().target_agent_id,
+        controller
+    );
+
+    let changed = db
+        .update_goal_at(
+            &owner,
+            &goal_id,
+            2,
+            GoalPatch {
+                controller_agent_id: Some(replacement.clone()),
+                ..GoalPatch::default()
+            },
+            "replace-controller-after-terminal-event",
+            T0 + 5,
+        )
+        .unwrap();
+    assert_eq!(changed.goal.summary.revision, 3);
+    assert_eq!(
+        changed.goal.controller_agent_id.as_deref(),
+        Some(replacement.as_str())
+    );
+    assert_eq!(events(&db, &attempt_id)[0].target_agent_id, controller);
+    assert_eq!(attention_wake_count(&db, &attempt_id), 1);
+
+    for (agent_id, suffix) in [(&worker, "worker"), (&replacement, "replacement")] {
+        let endpoint = db
+            .attach_agent_endpoint(
+                &owner,
+                NewAgentEndpoint {
+                    agent_id: agent_id.clone(),
+                    host: "ChatGPT".to_string(),
+                    client_attachment_id: Some(format!("route-{suffix}-window")),
+                    wake_capable: true,
+                    idempotency_key: format!("route-{suffix}-endpoint"),
+                },
+            )
+            .unwrap()
+            .endpoint;
+        assert!(db
+            .claim_next_agent_wake(
+                &owner,
+                agent_id,
+                &endpoint.endpoint_id,
+                endpoint.controller_generation,
+                "mcp_app",
+            )
+            .unwrap()
+            .is_none());
+    }
+
+    let endpoint = db
+        .attach_agent_endpoint(
+            &owner,
+            NewAgentEndpoint {
+                agent_id: controller.clone(),
+                host: "ChatGPT".to_string(),
+                client_attachment_id: Some("route-controller-window".to_string()),
+                wake_capable: true,
+                idempotency_key: "route-controller-endpoint".to_string(),
+            },
+        )
+        .unwrap()
+        .endpoint;
+    let claim = db
+        .claim_next_agent_wake(
+            &owner,
+            &controller,
+            &endpoint.endpoint_id,
+            endpoint.controller_generation,
+            "mcp_app",
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.wake.wake_id, wake_id);
+    let prepared = db
+        .prepare_agent_wake_dispatch(
+            &owner,
+            &controller,
+            &endpoint.endpoint_id,
+            endpoint.controller_generation,
+            &wake_id,
+            &claim.attempt.attempt_id,
+            &claim.claim_fence,
+            &claim.consume_token,
+        )
+        .unwrap();
+    assert!(prepared
+        .envelope
+        .resume_hint
+        .contains(&format!("agent_id={controller}")));
+    assert!(prepared.envelope.resume_hint.contains(&goal_id));
+    assert!(prepared
+        .envelope
+        .resume_hint
+        .contains("independently get_goal(goal_id) and read_agent_task(task_id)"));
+    assert!(prepared.envelope.resume_hint.contains(
+        "grants no Goal, Task, Project, Runner, filesystem, Conversation, or Workflow Session authority"
+    ));
+    assert_eq!(
+        db.read_goal(&owner, &goal_id)
+            .unwrap()
+            .controller_agent_id
+            .as_deref(),
+        Some(replacement.as_str())
+    );
+    assert_eq!(attention_wake_count(&db, &attempt_id), 1);
+}
+
+#[test]
 fn failed_task_fans_out_to_every_active_goal_and_survives_reopen() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("multi-goal.db");
@@ -321,6 +548,7 @@ fn failed_task_fans_out_to_every_active_goal_and_survives_reopen() {
                 GoalPatch {
                     title: None,
                     objective: None,
+                    controller_agent_id: None,
                     lifecycle: Some(GoalLifecycle::Completed),
                     terminal_reason: Some(
                         "Completed independently before Task terminalized".to_string(),
@@ -348,6 +576,7 @@ fn failed_task_fans_out_to_every_active_goal_and_survives_reopen() {
             )
             .unwrap();
         assert_eq!(completed.attention_event_count, 2);
+        assert_eq!(completed.attention_target_agent_ids, vec![assignee.clone()]);
         let emitted = events(&db, &attempt_id);
         assert_eq!(emitted.len(), 2);
         assert!(emitted
@@ -509,9 +738,17 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
     let db = Database::open(&temp.path().join("carrier.db")).unwrap();
     let owner = principal('7');
     let assignee = create_agent(&db, &owner, "carrier-worker");
+    let controller = create_agent(&db, &owner, "carrier-controller");
     let (task_id, attempt_id, fence) =
         create_task_and_attempt(&db, &owner, &assignee, "carrier", T0);
-    let goal_id = create_goal_and_link(&db, &owner, &task_id, "carrier", T0 + 2);
+    let goal_id = create_goal_and_link_with_controller(
+        &db,
+        &owner,
+        &task_id,
+        Some(&controller),
+        "carrier",
+        T0 + 2,
+    );
     db.complete_agent_task_attempt_at(
         &owner,
         &task_id,
@@ -527,6 +764,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
     )
     .unwrap();
     let event = events(&db, &attempt_id).pop().unwrap();
+    assert_eq!(event.target_agent_id, controller);
     let wake_id = wake_id_for_event(&db, &event.event_id);
 
     let terminal_goal = db
@@ -537,6 +775,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
             GoalPatch {
                 title: None,
                 objective: None,
+                controller_agent_id: None,
                 lifecycle: Some(GoalLifecycle::Completed),
                 terminal_reason: Some("Another turn completed the Goal first".to_string()),
             },
@@ -553,7 +792,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
         .attach_agent_endpoint(
             &owner,
             NewAgentEndpoint {
-                agent_id: assignee.clone(),
+                agent_id: controller.clone(),
                 host: "ChatGPT".to_string(),
                 client_attachment_id: Some("attention-carrier".to_string()),
                 wake_capable: true,
@@ -565,7 +804,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
     let claim = db
         .claim_next_agent_wake(
             &owner,
-            &assignee,
+            &controller,
             &endpoint.endpoint_id,
             endpoint.controller_generation,
             "mcp_app",
@@ -578,7 +817,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
     let prepared = db
         .prepare_agent_wake_dispatch(
             &owner,
-            &assignee,
+            &controller,
             &endpoint.endpoint_id,
             endpoint.controller_generation,
             &wake_id,
@@ -596,7 +835,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
     assert!(prepared
         .envelope
         .resume_hint
-        .contains(&format!("agent_id={assignee}")));
+        .contains(&format!("agent_id={controller}")));
     assert!(prepared
         .envelope
         .resume_hint
@@ -646,7 +885,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
     let bootstrap = db
         .bootstrap_agent_conversation(
             &owner,
-            &assignee,
+            &controller,
             &endpoint.endpoint_id,
             endpoint.controller_generation,
             None,
@@ -673,7 +912,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
     assert_eq!(
         db.bootstrap_agent_conversation(
             &owner,
-            &assignee,
+            &controller,
             &endpoint.endpoint_id,
             endpoint.controller_generation,
             None,
@@ -701,7 +940,7 @@ fn terminal_attention_uses_continuation_without_requiring_live_task_attempt() {
     let consumed = db
         .consume_agent_wake(
             &owner,
-            &assignee,
+            &controller,
             &endpoint.endpoint_id,
             endpoint.controller_generation,
             &wake_id,
@@ -755,6 +994,7 @@ fn active_goal_fanout_is_bounded_before_completion_and_maximum_fanout_is_determi
                 title: "Fanout overflow".to_string(),
                 objective: "Must fail before creating an unbounded terminal attention fanout."
                     .to_string(),
+                controller_agent_id: None,
                 idempotency_key: "goal-fanout-overflow".to_string(),
             },
             T0 + 1_000,

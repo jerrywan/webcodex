@@ -28,6 +28,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
   <div id="meta" class="meta" hidden>
     <span>Agent Tasks <b id="tasks">0</b></span>
     <span>Workflow Sessions <b id="sessions">0</b></span>
+    <span>Controller <b id="controller">Worker fallback</b></span>
     <span>Revision <b id="revision">—</b></span>
     <span>Updated <b id="updated">—</b></span>
   </div>
@@ -38,6 +39,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
 (() => {
   "use strict";
   const GOAL_ID = /^wc_goal_[A-Za-z0-9_-]{16}$/;
+  const AGENT_ID = /^wc_dagent_[A-Za-z0-9_-]{16}$/;
   const APP_PROTOCOL = "2026-01-26";
   const LIFECYCLES = new Set(["active", "completed", "cancelled"]);
   const ACTIVITY_STATES = new Set(["active", "attention_needed", "unobserved", "not_applicable"]);
@@ -111,6 +113,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     if (value.version !== 1 || !validGoalId(value.goal_id)) return null;
     if (typeof value.title !== "string" || Array.from(value.title).length < 1 || Array.from(value.title).length > 200) return null;
     if (typeof value.objective !== "string" || utf8Encoder.encode(value.objective).length < 1 || utf8Encoder.encode(value.objective).length > 8192) return null;
+    if (!(value.controller_agent_id === null || (typeof value.controller_agent_id === "string" && AGENT_ID.test(value.controller_agent_id)))) return null;
     if (!LIFECYCLES.has(value.lifecycle) || !Number.isSafeInteger(value.revision) || value.revision < 1) return null;
     if (!Number.isSafeInteger(value.updated_at_unix_ms)) return null;
     if (!(value.terminal_at_unix_ms === null || Number.isSafeInteger(value.terminal_at_unix_ms))) return null;
@@ -193,6 +196,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     el("objective").textContent = plan.objective;
     el("tasks").textContent = String(plan.agent_task_count);
     el("sessions").textContent = String(plan.workflow_session_count);
+    el("controller").textContent = plan.controller_agent_id || "Worker fallback";
     el("revision").textContent = String(plan.revision);
     const date = new Date(plan.updated_at_unix_ms);
     el("updated").textContent = Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
