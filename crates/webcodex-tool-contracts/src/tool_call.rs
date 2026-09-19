@@ -3831,7 +3831,11 @@ pub enum ToolCall {
         project: String,
         /// One bounded search query. Runtime forces match mode and zero search
         /// context because source context is returned by the read phase.
-        query: SearchProjectTextsQuery,
+        #[serde(default)]
+        query: Option<SearchProjectTextsQuery>,
+        #[schemars(length(max = 8))]
+        #[serde(default)]
+        queries: Option<Vec<SearchProjectTextsQuery>>,
         /// Optional explicit wc_sess_* Workflow Session id.
         #[serde(default)]
         session_id: Option<String>,

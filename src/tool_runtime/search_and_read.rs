@@ -36,19 +36,53 @@ fn match_read_items(
         .collect()
 }
 
-fn first_search_item_output(batch: &Value) -> Option<&Value> {
-    let item = batch.get("items")?.as_array()?.first()?;
-    item.get("success")
-        .and_then(Value::as_bool)
-        .filter(|success| *success)
-        .and_then(|_| item.get("output"))
+fn successful_search_outputs(batch: &Value) -> Vec<Value> {
+    batch
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("success").and_then(Value::as_bool) == Some(true))
+        .filter_map(|item| item.get("output").cloned())
+        .collect()
+}
+
+fn fair_match_read_items(
+    searches: &[Value],
+    read_before: usize,
+    read_after: usize,
+    max_reads: usize,
+) -> Vec<ReadFilesItem> {
+    let per_query: Vec<Vec<ReadFilesItem>> = searches
+        .iter()
+        .map(|search| match_read_items(search, read_before, read_after, max_reads))
+        .collect();
+    let mut result = Vec::with_capacity(max_reads);
+    let mut offset = 0;
+    while result.len() < max_reads {
+        let mut added = false;
+        for items in &per_query {
+            if let Some(item) = items.get(offset) {
+                result.push(item.clone());
+                added = true;
+                if result.len() == max_reads {
+                    break;
+                }
+            }
+        }
+        if !added {
+            break;
+        }
+        offset += 1;
+    }
+    result
 }
 
 impl ToolRuntime {
     pub(crate) async fn search_and_read(
         &self,
         project: String,
-        query: SearchProjectTextsQuery,
+        queries: Vec<SearchProjectTextsQuery>,
         session_id: Option<String>,
         read_before: Option<usize>,
         read_after: Option<usize>,
@@ -61,7 +95,7 @@ impl ToolRuntime {
         };
         self.search_and_read_resolved(
             &resolved,
-            query,
+            queries,
             session_id,
             read_before,
             read_after,
@@ -74,7 +108,7 @@ impl ToolRuntime {
     pub(crate) async fn search_and_read_resolved(
         &self,
         resolved: &ResolvedProject,
-        mut query: SearchProjectTextsQuery,
+        mut queries: Vec<SearchProjectTextsQuery>,
         session_id: Option<String>,
         read_before: Option<usize>,
         read_after: Option<usize>,
@@ -89,38 +123,45 @@ impl ToolRuntime {
             .min(MAX_READ_CONTEXT);
         let max_reads = max_reads.unwrap_or(DEFAULT_MAX_READS).clamp(1, MAX_READS);
 
-        query.result_mode = Some(SearchResultMode::Matches);
-        query.context_before = Some(0);
-        query.context_after = Some(0);
-        query.limit = Some(query.limit.unwrap_or(max_reads).min(max_reads));
+        if queries.is_empty() || queries.len() > 8 {
+            return ToolResult::err("search_and_read requires 1..8 queries");
+        }
+        for query in &mut queries {
+            query.result_mode = Some(SearchResultMode::Matches);
+            query.context_before = Some(0);
+            query.context_after = Some(0);
+            query.limit = Some(query.limit.unwrap_or(max_reads).min(max_reads));
+        }
 
-        let search = self
-            .search_project_texts_resolved(resolved, vec![query])
-            .await;
+        let search = self.search_project_texts_resolved(resolved, queries).await;
         if !search.success {
             return search;
         }
-        let Some(mut search_output) = first_search_item_output(&search.output).cloned() else {
+        let mut search_outputs = successful_search_outputs(&search.output);
+        if search_outputs.is_empty() {
             return ToolResult::err_with_output(
                 "search_and_read could not obtain a successful search result",
-                json!({
-                    "project": resolved.resolved_id,
-                    "search": search.output,
-                    "state_changed": false,
-                }),
+                json!({"project": resolved.resolved_id, "search": search.output, "state_changed": false}),
             );
-        };
-        if let Some(matches) = search_output
-            .get_mut("matches")
-            .and_then(Value::as_array_mut)
-        {
-            for matched in matches {
-                if let Some(object) = matched.as_object_mut() {
-                    object.remove("read_hint");
+        }
+        for search_output in &mut search_outputs {
+            if let Some(matches) = search_output
+                .get_mut("matches")
+                .and_then(Value::as_array_mut)
+            {
+                for matched in matches {
+                    if let Some(object) = matched.as_object_mut() {
+                        object.remove("read_hint");
+                    }
                 }
             }
         }
-        let items = match_read_items(&search_output, read_before, read_after, max_reads);
+        let items = fair_match_read_items(&search_outputs, read_before, read_after, max_reads);
+        let search_output = if search_outputs.len() == 1 {
+            search_outputs.remove(0)
+        } else {
+            json!({"items": search_outputs})
+        };
         if items.is_empty() {
             return ToolResult::ok(json!({
                 "project": resolved.resolved_id,
@@ -237,5 +278,29 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].start_line, Some(6));
         assert_eq!(merged[0].limit, Some(131));
+    }
+
+    #[test]
+    fn multi_query_schema_and_fair_global_budget() {
+        let parsed = crate::tool_runtime::ToolCall::from_tool_name(
+            "search_and_read",
+            json!({"project":"demo","queries":[{"pattern":"one"},{"pattern":"two"}]}),
+        )
+        .unwrap();
+        assert!(
+            matches!(parsed, crate::tool_runtime::ToolCall::SearchAndRead { query: None, queries: Some(queries), .. } if queries.len() == 2)
+        );
+        let searches = vec![
+            json!({"matches":[{"path":"a.rs","line":10},{"path":"a.rs","line":20},{"path":"a.rs","line":30}]}),
+            json!({"matches":[{"path":"b.rs","line":10},{"path":"b.rs","line":20},{"path":"b.rs","line":30}]}),
+        ];
+        let items = fair_match_read_items(&searches, 1, 1, 4);
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a.rs", "b.rs", "a.rs", "b.rs"]
+        );
     }
 }
