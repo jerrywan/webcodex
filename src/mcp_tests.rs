@@ -161,6 +161,8 @@ mod result_app;
 mod runtime_tools;
 #[path = "mcp_tests/ssh_resource.rs"]
 mod ssh_resource;
+#[path = "mcp_tests/structured_failure.rs"]
+mod structured_failure;
 #[path = "mcp_tests/tools.rs"]
 mod tools;
 #[path = "mcp_tests/work_result_app.rs"]

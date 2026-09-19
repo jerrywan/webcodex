@@ -2,6 +2,7 @@ use super::presentation;
 use super::resources;
 use super::response::{
     mcp_runtime_tool_result_fallback, mcp_stateless_result, rpc_error, rpc_result,
+    McpToolResultPresentation,
 };
 use super::{require_mcp_scope, scope_forbidden, McpOutcome};
 use crate::auth::AuthContext;
@@ -928,8 +929,9 @@ pub(super) fn mcp_runtime_tool_result(
     as_image_requested: bool,
     result: ToolResult,
 ) -> Value {
+    let result_presentation = McpToolResultPresentation::Standard;
     if tool_name == "export_project_artifact" {
-        return mcp_runtime_tool_result_fallback(result);
+        return mcp_runtime_tool_result_fallback(result, result_presentation);
     }
     let artifact_presentation = if as_image_requested {
         resources::ProjectArtifactPresentationMode::Image
@@ -941,10 +943,11 @@ pub(super) fn mcp_runtime_tool_result(
         artifact_presentation,
         result,
         resources::McpResourceToolCallContext::default(),
+        result_presentation,
     ) {
         resources::McpResourceToolResultAdaptation::Framed(value) => value,
         resources::McpResourceToolResultAdaptation::Unhandled(result) => {
-            mcp_runtime_tool_result_fallback(result)
+            mcp_runtime_tool_result_fallback(result, result_presentation)
         }
     }
 }
@@ -1476,6 +1479,7 @@ pub(super) async fn handle_call(
     mut model_ergonomics_out: Option<&mut Option<ModelErgonomicsRecord>>,
     mut correlation_out: Option<&mut crate::tool_runtime::ToolCallCorrelation>,
 ) -> McpOutcome {
+    let result_presentation = McpToolResultPresentation::from_request_params(&request_params);
     let mut params: McpToolCallParams = match serde_json::from_value(request_params) {
         Ok(params) => params,
         Err(e) => {
@@ -1521,6 +1525,7 @@ pub(super) async fn handle_call(
                 }
                 let rendered = mcp_runtime_tool_result_fallback(
                     adaptive_runtime_gateway_unknown_target(&target),
+                    result_presentation,
                 );
                 return McpOutcome::Ok(rpc_result(
                     id,
@@ -1677,7 +1682,7 @@ pub(super) async fn handle_call(
                     &ack_session_message_ids,
                 );
 
-                let result = mcp_runtime_tool_result_fallback(result);
+                let result = mcp_runtime_tool_result_fallback(result, result_presentation);
                 return McpOutcome::Ok(rpc_result(
                     id,
                     if stateless_2026 {
@@ -1851,7 +1856,7 @@ pub(super) async fn handle_call(
                     &ack_session_message_ids,
                 );
 
-                let result = mcp_runtime_tool_result_fallback(result);
+                let result = mcp_runtime_tool_result_fallback(result, result_presentation);
                 return McpOutcome::Ok(rpc_result(
                     id,
                     if stateless_2026 {
@@ -2161,7 +2166,7 @@ pub(super) async fn handle_call(
     });
     if let Some(lc) = lifecycle.as_deref() {
         // Protocol layer produced a JSON-RPC result (not -32xxx).
-        // Tool kernel success is independent (isError / structuredContent).
+        // Canonical tool success is independent of the MCP presentation signal.
         let category = if result.success {
             "success"
         } else {
@@ -2178,13 +2183,14 @@ pub(super) async fn handle_call(
         artifact_presentation,
         result,
         resource_tool_call,
+        result_presentation,
     ) {
         resources::McpResourceToolResultAdaptation::Framed(value) => value,
         resources::McpResourceToolResultAdaptation::Unhandled(result) => {
             // App-only tools use the standard CallToolResult channel too. Their
             // visibility/admission boundary, not custom result metadata, keeps
             // continuation protocol data out of ordinary model tool results.
-            mcp_runtime_tool_result_fallback(result)
+            mcp_runtime_tool_result_fallback(result, result_presentation)
         }
     };
     if app_only_agent_continuation || app_only_job_terminal_continuation {

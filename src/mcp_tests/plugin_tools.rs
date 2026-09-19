@@ -406,6 +406,112 @@ fn spawn_binding_call(
     })
 }
 
+#[tokio::test]
+async fn openai_presentation_preserves_plugin_provider_errors_and_projects_governance_denials() {
+    let runtime = Arc::new(test_runtime());
+    let auth = plugin_auth_with_scopes(&[
+        crate::auth::SCOPE_PLUGIN_INSPECT,
+        crate::auth::SCOPE_PLUGIN_INVOKE,
+    ]);
+    let tool = plugin_tool("search_symbol");
+    register_plugin_runner(
+        &runtime,
+        "runner-a",
+        "runner-instance-a",
+        "repo-tools",
+        "provider-instance-a",
+        vec![tool.clone()],
+    )
+    .await;
+    let (binding, _) = describe_dynamic_binding(
+        &runtime,
+        &auth,
+        "runner-a",
+        "runner-instance-a",
+        PluginProviderView {
+            provider_id: "repo-tools".into(),
+            provider_instance_id: "provider-instance-a".into(),
+            name: "Repo Tools".into(),
+            status: "ready".into(),
+            error_code: None,
+        },
+        tool,
+        780,
+    )
+    .await;
+    let provider_result = PluginToolResult {
+        content: vec![PluginContent::Text {
+            text: "upstream rejected the request".into(),
+        }],
+        // Even a provider payload resembling ToolResult remains provider-owned.
+        structured_content: Some(
+            json!({"success": false, "output": {"provider_code": "REJECTED"}, "error": "provider failure"}),
+        ),
+        is_error: true,
+    };
+    let session =
+        start_authorized_test_session(&runtime, &auth, crate::tool_runtime::SessionMode::ReadOnly);
+    for client in ["generic-test-client", "openai-mcp"] {
+        let mut params = json!({
+            "name": "plugin_tool", "arguments": {"action": "call", "binding": binding, "arguments": {"query": "probe"}},
+            "_meta": {"io.modelcontextprotocol/clientInfo": {"name": client, "version": "2"}},
+        });
+        let call = handle_mcp_request(
+            &runtime,
+            rpc("tools/call", Some(json!(781)), params.clone()),
+            Some(&auth),
+        );
+        let complete = async {
+            let request =
+                wait_for_plugin_request(&runtime.runner_registry, "runner-a", "runner-instance-a")
+                    .await;
+            complete_plugin_request(
+                &runtime,
+                request,
+                "runner-instance-a",
+                PluginGatewayResponse::success(PluginGatewayResponsePayload::ToolResult {
+                    result: provider_result.clone(),
+                }),
+            )
+            .await;
+        };
+        let (outcome, ()) = tokio::join!(call, complete);
+        let McpOutcome::Ok(body) = outcome else {
+            panic!("provider result must remain a result");
+        };
+        assert_eq!(
+            body["result"],
+            serde_json::to_value(&provider_result).unwrap()
+        );
+
+        params["arguments"]["recording_session_id"] = json!(session.session_id);
+        let denied = handle_mcp_request(
+            &runtime,
+            rpc("tools/call", Some(json!(782)), params),
+            Some(&auth),
+        )
+        .await;
+        let McpOutcome::Ok(body) = denied else {
+            panic!("canonical governance denial must remain a result");
+        };
+        assert_eq!(body["result"]["isError"], client != "openai-mcp");
+        assert_eq!(body["result"]["structuredContent"]["success"], false);
+        assert_eq!(
+            body["result"]["structuredContent"]["output"]["error_kind"],
+            "session_guard_denied"
+        );
+        assert!(runtime
+            .runner_registry
+            .poll(RunnerPollRequest {
+                client_id: "runner-a".into(),
+                runner_instance_id: "runner-instance-a".into()
+            })
+            .await
+            .unwrap()
+            .is_none());
+    }
+}
+
 fn spawn_plugin_metadata_call(
     runtime: &Arc<ToolRuntime>,
     auth: &crate::auth::AuthContext,

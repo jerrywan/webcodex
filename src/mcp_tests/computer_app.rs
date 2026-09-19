@@ -351,6 +351,7 @@ async fn mcp_computer_snapshot_resource_links_are_unique_caller_bound_and_scope_
                 "content_base64": encoded,
             })),
             Some(caller.clone()),
+            response::McpToolResultPresentation::Standard,
         );
         assert_eq!(framed["isError"], false);
         let content = framed["content"].as_array().unwrap();
@@ -450,6 +451,7 @@ async fn mcp_computer_snapshot_resource_links_are_unique_caller_bound_and_scope_
             "content_base64": encoded,
         })),
         Some(window_caller),
+        response::McpToolResultPresentation::Standard,
     );
     assert_eq!(window["content"][0]["type"], "resource_link");
     assert_eq!(window["content"][0]["name"], "mini-window-snapshot.jpg");

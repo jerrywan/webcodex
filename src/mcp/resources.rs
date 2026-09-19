@@ -1,7 +1,7 @@
 use super::protocol::request_client_capabilities;
 use super::response::{
     mcp_runtime_tool_result_fallback, mcp_stateless_result, rpc_error, rpc_error_with_data,
-    rpc_result, MCP_STATELESS_CACHE_SCOPE, MCP_STATELESS_CACHE_TTL_MS,
+    rpc_result, McpToolResultPresentation, MCP_STATELESS_CACHE_SCOPE, MCP_STATELESS_CACHE_TTL_MS,
 };
 use super::{require_mcp_scope, scope_forbidden, McpOutcome};
 use crate::auth::AuthContext;
@@ -716,16 +716,18 @@ pub(super) fn mcp_issue_artifact_export(
 pub(super) fn mcp_artifact_export_tool_result(
     result: ToolResult,
     caller: McpArtifactExportCallerBinding,
+    result_presentation: McpToolResultPresentation,
 ) -> Value {
     if !result.success {
-        return mcp_runtime_tool_result_fallback(result);
+        return mcp_runtime_tool_result_fallback(result, result_presentation);
     }
     let (uri, snapshot) = match mcp_issue_artifact_export(caller, &result) {
         Ok(value) => value,
         Err(error) => {
-            return mcp_runtime_tool_result_fallback(ToolResult::err(format!(
-                "cannot frame artifact export resource: {error}"
-            )))
+            return mcp_runtime_tool_result_fallback(
+                ToolResult::err(format!("cannot frame artifact export resource: {error}")),
+                result_presentation,
+            )
         }
     };
     json!({
@@ -762,6 +764,7 @@ pub(super) fn mcp_runtime_tool_result_with_snapshot_resource(
     as_image_requested: bool,
     mut result: ToolResult,
     snapshot_caller: Option<McpArtifactExportCallerBinding>,
+    result_presentation: McpToolResultPresentation,
 ) -> Value {
     let native_image_requested = as_image_requested
         || (matches!(tool_name, "computer_observe" | "browser_observe")
@@ -777,7 +780,7 @@ pub(super) fn mcp_runtime_tool_result_with_snapshot_resource(
         }
     }
 
-    mcp_runtime_tool_result_fallback(result)
+    mcp_runtime_tool_result_fallback(result, result_presentation)
 }
 
 pub(super) fn mcp_native_image_tool_result(
@@ -1780,6 +1783,7 @@ pub(super) fn adapt_tool_result(
     artifact_presentation: ProjectArtifactPresentationMode,
     result: ToolResult,
     context: McpResourceToolCallContext,
+    result_presentation: McpToolResultPresentation,
 ) -> McpResourceToolResultAdaptation {
     if artifact_presentation == ProjectArtifactPresentationMode::Export {
         return McpResourceToolResultAdaptation::Framed(mcp_artifact_export_tool_result(
@@ -1787,6 +1791,7 @@ pub(super) fn adapt_tool_result(
             context
                 .artifact_export_caller
                 .expect("validated artifact export caller binding"),
+            result_presentation,
         ));
     }
     if artifact_presentation == ProjectArtifactPresentationMode::Image
@@ -1798,6 +1803,7 @@ pub(super) fn adapt_tool_result(
                 artifact_presentation == ProjectArtifactPresentationMode::Image,
                 result,
                 context.snapshot_resource_caller,
+                result_presentation,
             ),
         );
     }

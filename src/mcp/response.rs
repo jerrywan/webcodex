@@ -4,6 +4,34 @@ use serde_json::{json, Value};
 pub(super) const MCP_STATELESS_CACHE_TTL_MS: u64 = 0;
 pub(super) const MCP_STATELESS_CACHE_SCOPE: &str = "private";
 
+/// MCP presentation only; canonical ToolResult success and protocol errors are unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum McpToolResultPresentation {
+    Standard,
+    OpenAiStructuredFailureCompat,
+}
+
+impl McpToolResultPresentation {
+    pub(super) fn from_request_params(params: &Value) -> Self {
+        match params
+            .get("_meta")
+            .and_then(|meta| meta.get("io.modelcontextprotocol/clientInfo"))
+            .and_then(|info| info.get("name"))
+            .and_then(Value::as_str)
+        {
+            Some("openai-mcp") => Self::OpenAiStructuredFailureCompat,
+            _ => Self::Standard,
+        }
+    }
+
+    fn is_error(self, success: bool) -> bool {
+        // The current OpenAI Host promotes isError into an exception that hides
+        // structuredContent. Preserve the complete WebCodex-owned result as a
+        // value, with business failure still authoritative in its success field.
+        matches!(self, Self::Standard) && !success
+    }
+}
+
 pub(super) fn mcp_complete_result(mut result: Value) -> Value {
     let Some(object) = result.as_object_mut() else {
         return result;
@@ -54,6 +82,7 @@ fn mcp_tool_text_content(structured: &Value, concise: String, text_json_compat: 
 fn mcp_runtime_tool_result_fallback_with_compat(
     result: ToolResult,
     text_json_compat: bool,
+    presentation: McpToolResultPresentation,
 ) -> Value {
     // `structuredContent` is the canonical machine-readable result. Repeating
     // that full JSON object in `content.text` doubles model context, so the
@@ -76,14 +105,18 @@ fn mcp_runtime_tool_result_fallback_with_compat(
     json!({
         "content": [{ "type": "text", "text": text }],
         "structuredContent": structured,
-        "isError": !success
+        "isError": presentation.is_error(success)
     })
 }
 
-pub(super) fn mcp_runtime_tool_result_fallback(result: ToolResult) -> Value {
+pub(super) fn mcp_runtime_tool_result_fallback(
+    result: ToolResult,
+    presentation: McpToolResultPresentation,
+) -> Value {
     mcp_runtime_tool_result_fallback_with_compat(
         result,
         crate::config::mcp_text_json_compat_enabled(),
+        presentation,
     )
 }
 
@@ -124,32 +157,5 @@ pub(super) fn rpc_error_with_data(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn runtime_result_keeps_compact_text_by_default() {
-        let rendered = mcp_runtime_tool_result_fallback_with_compat(
-            ToolResult::ok(json!({ "count": 2 })),
-            false,
-        );
-        assert_eq!(
-            rendered["content"][0]["text"],
-            "WebCodex tool completed successfully."
-        );
-        assert_eq!(rendered["structuredContent"]["output"]["count"], 2);
-    }
-
-    #[test]
-    fn text_json_compat_mirrors_runtime_structured_content() {
-        let runtime = mcp_runtime_tool_result_fallback_with_compat(
-            ToolResult::ok(json!({ "count": 2 })),
-            true,
-        );
-        assert_eq!(
-            runtime["content"][0]["text"],
-            serde_json::to_string(&runtime["structuredContent"]).unwrap()
-        );
-    }
-}
+#[path = "../mcp_tests/response.rs"]
+mod tests;
