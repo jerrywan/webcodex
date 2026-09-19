@@ -28,6 +28,7 @@ pub(crate) const MAX_IMPORT_FILE_BYTES: usize = MAX_PROJECT_ARTIFACT_UPLOAD_BYTE
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConversationImportDownloadPolicy {
     GptActionOpenAiHost,
+    AuthenticatedMcpOpenAiHostFile,
     TrustedMcpHostFile,
 }
 
@@ -366,6 +367,12 @@ async fn prepare_download_request(
             let url = validate_openai_download_url(download_link)?;
             let client = build_download_client(None)?;
             Ok((client, request_url_for_download(url)))
+        }
+        ConversationImportDownloadPolicy::AuthenticatedMcpOpenAiHostFile => {
+            validate_openai_download_url(download_link)?;
+            let target = validate_trusted_mcp_download_url(download_link).await?;
+            let client = build_download_client(Some(&target))?;
+            Ok((client, request_url_for_download(target.url)))
         }
         ConversationImportDownloadPolicy::TrustedMcpHostFile => {
             let target = validate_trusted_mcp_download_url(download_link).await?;
@@ -837,12 +844,16 @@ impl ToolRuntime {
             (SessionTransport::Mcp, HostFileImportProvenance::TrustedMcpHostFile) => {
                 ConversationImportDownloadPolicy::TrustedMcpHostFile
             }
+            (
+                SessionTransport::Mcp,
+                HostFileImportProvenance::AuthenticatedMcpOpenAiHostFile,
+            ) => ConversationImportDownloadPolicy::AuthenticatedMcpOpenAiHostFile,
             (SessionTransport::Api, HostFileImportProvenance::GptActionOpenAiHost) => {
                 ConversationImportDownloadPolicy::GptActionOpenAiHost
             }
             (SessionTransport::Mcp, _) => {
                 return ToolResult::err(
-                    "import_conversation_files_to_project requires an explicitly trusted MCP host-file rewrite",
+                    "import_conversation_files_to_project requires authenticated MCP OAuth host-file provenance",
                 );
             }
             (SessionTransport::Api, _) => {
@@ -996,6 +1007,51 @@ mod tests {
             .await
             .expect("public HTTPS literal should be accepted");
         assert_eq!(target.pinned_addrs, vec!["8.8.8.8:443".parse().unwrap()]);
+    }
+
+    #[tokio::test]
+    async fn authenticated_mcp_openai_host_policy_stays_host_limited_and_dns_pinned() {
+        let _lock = lock_import_test_network().await;
+
+        set_import_test_resolved_ips(Some(vec!["8.8.8.8".parse().unwrap()]));
+        reset_import_test_dns_resolution_count();
+        let (_client, url) = prepare_download_request(
+            "https://files.oaiusercontent.com/file",
+            ConversationImportDownloadPolicy::AuthenticatedMcpOpenAiHostFile,
+        )
+        .await
+        .expect("authenticated MCP OpenAI file host should be accepted");
+        assert_eq!(url.host_str(), Some("files.oaiusercontent.com"));
+        assert_eq!(import_test_dns_resolution_count(), 1);
+
+        set_import_test_resolved_ips(Some(vec!["127.0.0.1".parse().unwrap()]));
+        reset_import_test_dns_resolution_count();
+        let error = prepare_download_request(
+            "https://subdomain.oaiusercontent.com/file",
+            ConversationImportDownloadPolicy::AuthenticatedMcpOpenAiHostFile,
+        )
+        .await
+        .expect_err("OpenAI file host resolving private must fail closed");
+        assert!(error.contains("non-public address"), "{error}");
+        assert_eq!(import_test_dns_resolution_count(), 1);
+
+        set_import_test_resolved_ips(Some(vec!["8.8.8.8".parse().unwrap()]));
+        reset_import_test_dns_resolution_count();
+        let error = prepare_download_request(
+            "https://download.example/file",
+            ConversationImportDownloadPolicy::AuthenticatedMcpOpenAiHostFile,
+        )
+        .await
+        .expect_err("Tier 2 must not expand to arbitrary public HTTPS");
+        assert!(error.contains("OpenAI file host"), "{error}");
+        assert_eq!(
+            import_test_dns_resolution_count(),
+            0,
+            "non-OpenAI Tier 2 URL must be rejected before DNS"
+        );
+
+        set_import_test_resolved_ips(None);
+        reset_import_test_dns_resolution_count();
     }
 
     #[tokio::test]

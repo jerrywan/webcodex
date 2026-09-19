@@ -124,7 +124,9 @@ fn tool_specs_describe_default_coding_loop_preferences() {
     for phrase in [
         "preferred host-native attachment-to-project transfer path",
         "do not base64-transfer files",
-        "trusted mcp host/oauth client",
+        "active authenticated oauth client",
+        "openai file hosts",
+        "arbitrary public https",
         "up to 256 mib per file",
         "batch is not atomic",
         "partial_success=true",

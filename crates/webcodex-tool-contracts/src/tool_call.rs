@@ -538,6 +538,9 @@ pub enum HostFileImportProvenance {
     #[default]
     Untrusted,
     GptActionOpenAiHost,
+    /// Authenticated MCP OAuth client that may import only from OpenAI file hosts.
+    AuthenticatedMcpOpenAiHostFile,
+    /// Explicitly allowlisted MCP client that may import from arbitrary public HTTPS.
     TrustedMcpHostFile,
 }
 

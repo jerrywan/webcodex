@@ -956,7 +956,7 @@ fn mcp_file_params_keep_raw_object_shape_and_reject_model_mask_strings() {
 }
 
 #[test]
-fn mcp_file_import_trust_requires_exact_configured_active_client_id() {
+fn mcp_file_import_trust_distinguishes_exact_tier1_from_active_oauth_tier2() {
     const CALLBACK: &str = "https://chatgpt.example/connector/oauth/test";
     let mut config = (*test_config_oauth2(Some("secret"))).clone();
     let (_tmp, db) = test_db();
@@ -1002,8 +1002,8 @@ fn mcp_file_import_trust_requires_exact_configured_active_client_id() {
             &db,
             Some(&auth_for(&same_redirect.client_id))
         ),
-        HostFileImportTrust::Untrusted,
-        "sharing a redirect URI must not grant authority"
+        HostFileImportTrust::AuthenticatedMcpOpenAiHostFile,
+        "sharing a redirect URI must not grant Tier 1 authority"
     );
     assert_eq!(
         mcp_host_file_import_trust_from_state(&config, &db, Some(&trusted_auth)),
@@ -1015,8 +1015,8 @@ fn mcp_file_import_trust_requires_exact_configured_active_client_id() {
     db.insert_oauth_client(&same_name).unwrap();
     assert_eq!(
         mcp_host_file_import_trust_from_state(&config, &db, Some(&auth_for(&same_name.client_id))),
-        HostFileImportTrust::Untrusted,
-        "sharing the display name must not grant authority"
+        HostFileImportTrust::AuthenticatedMcpOpenAiHostFile,
+        "sharing the display name must not grant Tier 1 authority"
     );
 
     let unknown_client_id = crate::auth::generate_oauth_client_id();
@@ -1036,8 +1036,8 @@ fn mcp_file_import_trust_requires_exact_configured_active_client_id() {
     empty_config.oauth2.trusted_mcp_file_client_ids.clear();
     assert_eq!(
         mcp_host_file_import_trust_from_state(&empty_config, &db, Some(&trusted_auth)),
-        HostFileImportTrust::Untrusted,
-        "empty operator trust config must fail closed"
+        HostFileImportTrust::AuthenticatedMcpOpenAiHostFile,
+        "empty Tier 1 config still permits only authenticated OpenAI-host import"
     );
 
     db.revoke_oauth_client(&trusted.id, chrono::Utc::now().timestamp())
@@ -1057,8 +1057,8 @@ fn mcp_file_import_trust_requires_exact_configured_active_client_id() {
             &db,
             Some(&auth_for(&replacement.client_id))
         ),
-        HostFileImportTrust::Untrusted,
-        "recreating a client with the same callback cannot inherit the configured client-ID trust"
+        HostFileImportTrust::AuthenticatedMcpOpenAiHostFile,
+        "recreated active client cannot inherit Tier 1 but keeps OpenAI-host-only Tier 2"
     );
 
     let api_auth = crate::auth::AuthContext::new(crate::auth::AuthKind::ApiToken);

@@ -474,7 +474,7 @@ async fn complete_mcp_import_save(
 }
 
 #[tokio::test]
-async fn pat_created_replacement_client_with_same_redirect_remains_untrusted() {
+async fn pat_created_replacement_client_gets_openai_host_only_tier() {
     let (_db_tmp, db) = test_db();
     let user = seed_user(&db, "alice");
     let trusted =
@@ -516,14 +516,13 @@ async fn pat_created_replacement_client_with_same_redirect_remains_untrusted() {
         MCP_IMPORT_TRUSTED_REDIRECT
     );
 
-    // Model the strongest downstream case: even if the PAT holder completes
-    // OAuth for the replacement and obtains a valid access token, its
-    // allowed_client_id is the new server-generated ID and cannot match the
-    // operator-controlled trust configuration for the revoked client.
+    // A reprovisioned active OAuth client no longer loses ordinary ChatGPT
+    // attachment import solely because the exact allowlist still has the old id.
+    // It receives only the OpenAI-host-restricted Tier 2 provenance.
     let replacement_auth = mcp_import_oauth_auth(replacement_client_id);
     assert_eq!(
         mcp_host_file_import_trust_from_state(&config, &db, Some(&replacement_auth)),
-        HostFileImportTrust::Untrusted
+        HostFileImportTrust::AuthenticatedMcpOpenAiHostFile
     );
 }
 
@@ -594,15 +593,37 @@ fn mcp_file_import_trust_decision_reports_exact_failure_stage() {
         HostFileImportTrustReason::OAuthDisabled
     );
 
-    let other_client_id = crate::auth::generate_oauth_client_id();
+    let tier2_client = seed_mcp_import_client(
+        &db,
+        &user,
+        "Reprovisioned ChatGPT WebCodex",
+        MCP_IMPORT_TRUSTED_REDIRECT,
+    );
+    let tier2 = mcp_host_file_import_trust_decision_from_state(
+        &config,
+        &db,
+        Some(&mcp_import_oauth_auth(&tier2_client.client_id)),
+    );
+    assert_eq!(
+        tier2.reason,
+        HostFileImportTrustReason::AuthenticatedOAuthOpenAiHostOnly
+    );
+    assert_eq!(
+        tier2.trust,
+        HostFileImportTrust::AuthenticatedMcpOpenAiHostFile
+    );
+    assert_eq!(tier2.client_id_configured, Some(false));
+    assert_eq!(tier2.active_client_registration_found, Some(true));
+
+    let missing_client_id = crate::auth::generate_oauth_client_id();
     assert_eq!(
         mcp_host_file_import_trust_decision_from_state(
             &config,
             &db,
-            Some(&mcp_import_oauth_auth(&other_client_id))
+            Some(&mcp_import_oauth_auth(&missing_client_id))
         )
         .reason,
-        HostFileImportTrustReason::ClientIdNotConfigured
+        HostFileImportTrustReason::ClientRegistrationMissingOrRevoked
     );
 
     let unknown_configured_id = crate::auth::generate_oauth_client_id();
@@ -890,6 +911,101 @@ async fn loopback_api_token_mcp_file_import_saves_pptx_when_explicitly_enabled_i
 }
 
 #[test]
+fn oauth_mcp_file_import_unallowlisted_active_client_saves_openai_host_file() {
+    run_mcp_import_in_large_stack_test_thread(
+        oauth_mcp_file_import_unallowlisted_active_client_saves_openai_host_file_impl,
+    );
+}
+
+async fn oauth_mcp_file_import_unallowlisted_active_client_saves_openai_host_file_impl() {
+    use sha2::{Digest, Sha256};
+
+    let _lock = lock_mcp_import_test().await;
+    let bytes = b"tier2-chatgpt-pptx-attachment".to_vec();
+    let expected_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let server = start_mcp_import_mock_server(mcp_import_http_response(
+        "200 OK",
+        &[("Content-Length", bytes.len().to_string())],
+        &bytes,
+    ))
+    .await;
+    let _network = McpImportNetworkOverride::set(server.base_url.clone());
+
+    let (_db_tmp, db) = test_db();
+    let user = seed_user(&db, "alice");
+    let client = seed_mcp_import_client(
+        &db,
+        &user,
+        "Reprovisioned ChatGPT WebCodex",
+        MCP_IMPORT_TRUSTED_REDIRECT,
+    );
+    let token = seed_oauth_access_token(&db, &client, &user, "project:write");
+    let project_tmp = tempfile::tempdir().unwrap();
+    let (runtime, registry) = mcp_import_runtime(project_tmp.path(), Some("alice")).await;
+    let unrelated_trusted_id = crate::auth::generate_oauth_client_id();
+    let service = Service::new(build_test_router(
+        mcp_import_config(&[unrelated_trusted_id.as_str()]),
+        db,
+        runtime,
+    ));
+    let agent = tokio::spawn(complete_mcp_import_save(registry, bytes.clone()));
+    let temporary_url =
+        "https://files.oaiusercontent.com/temporary-secret-token/tier2-import.pptx";
+
+    let (status, body, _) = oauth_mcp_request(
+        &service,
+        &token,
+        "tools/call",
+        json!({
+            "name": "import_conversation_files_to_project",
+            "arguments": {
+                "project": "agent:importer:demo",
+                "openaiFileIdRefs": [{
+                    "download_url": temporary_url,
+                    "file_id": "file_tier2_reprovisioned",
+                    "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "file_name": "source.pptx"
+                }],
+                "output_dir": "paper/export",
+                "targets": ["tier2-import.pptx"],
+                "overwrite": false
+            }
+        }),
+    )
+    .await;
+
+    let decision = take_last_mcp_host_file_import_trust_decision()
+        .expect("MCP import must evaluate host-file trust");
+    assert_eq!(
+        decision.reason,
+        HostFileImportTrustReason::AuthenticatedOAuthOpenAiHostOnly
+    );
+    assert_eq!(
+        decision.trust,
+        HostFileImportTrust::AuthenticatedMcpOpenAiHostFile
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), agent)
+        .await
+        .expect("Tier 2 import fixture timed out")
+        .unwrap();
+
+    assert_eq!(status, StatusCode::OK, "body: {body:?}");
+    assert_eq!(body["result"]["isError"], false, "body: {body:?}");
+    let imported = &body["result"]["structuredContent"]["output"]["imported"][0];
+    assert_eq!(imported["path"], "paper/export/tier2-import.pptx");
+    assert_eq!(imported["bytes_written"], bytes.len());
+    assert_eq!(imported["sha256"], expected_sha256);
+    assert_eq!(
+        crate::tool_runtime::conversation_import::import_test_dns_resolution_count(),
+        1,
+        "Tier 2 OpenAI hostname must be resolved and pinned"
+    );
+    let serialized = serde_json::to_string(&body).unwrap();
+    assert!(!serialized.contains(temporary_url));
+    assert!(!serialized.contains("file_tier2_reprovisioned"));
+}
+
+#[test]
 fn oauth_mcp_file_import_trusted_client_saves_pptx() {
     run_mcp_import_in_large_stack_test_thread(oauth_mcp_file_import_trusted_client_saves_pptx_impl);
 }
@@ -1058,13 +1174,13 @@ async fn oauth_mcp_file_import_trusted_download_guards_remain_bounded_impl() {
 }
 
 #[test]
-fn mcp_file_import_untrusted_callers_fail_before_dns() {
+fn mcp_file_import_unallowlisted_oauth_rejects_non_openai_host_before_dns() {
     run_mcp_import_in_large_stack_test_thread(
-        mcp_file_import_untrusted_callers_fail_before_dns_impl,
+        mcp_file_import_unallowlisted_oauth_rejects_non_openai_host_before_dns_impl,
     );
 }
 
-async fn mcp_file_import_untrusted_callers_fail_before_dns_impl() {
+async fn mcp_file_import_unallowlisted_oauth_rejects_non_openai_host_before_dns_impl() {
     let _lock = lock_mcp_import_test().await;
     let _network = McpImportNetworkOverride::without_download();
     let (_db_tmp, db) = test_db();
@@ -1103,12 +1219,12 @@ async fn mcp_file_import_untrusted_callers_fail_before_dns_impl() {
     assert_eq!(status, StatusCode::OK, "body: {body:?}");
     assert_eq!(body["result"]["isError"], true);
     let serialized = serde_json::to_string(&body).unwrap();
-    assert!(serialized.contains("explicitly trusted MCP host-file rewrite"));
+    assert!(serialized.contains("OpenAI file host"));
     assert!(!serialized.contains(temporary_url));
     assert_eq!(
         crate::tool_runtime::conversation_import::import_test_dns_resolution_count(),
         0,
-        "ordinary OAuth client must be rejected before DNS/network"
+        "Tier 2 non-OpenAI URL must be rejected before DNS/network"
     );
 
     crate::tool_runtime::conversation_import::reset_import_test_dns_resolution_count();
@@ -1117,7 +1233,7 @@ async fn mcp_file_import_untrusted_callers_fail_before_dns_impl() {
     assert_eq!(body["result"]["isError"], true);
     assert!(serde_json::to_string(&body)
         .unwrap()
-        .contains("explicitly trusted MCP host-file rewrite"));
+        .contains("authenticated MCP OAuth host-file provenance"));
     assert_eq!(
         crate::tool_runtime::conversation_import::import_test_dns_resolution_count(),
         0,

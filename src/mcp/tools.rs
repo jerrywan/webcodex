@@ -1020,7 +1020,7 @@ pub(super) enum HostFileImportTrustReason {
     NotOAuthToken,
     MissingAllowedClientId,
     OAuthDisabled,
-    ClientIdNotConfigured,
+    AuthenticatedOAuthOpenAiHostOnly,
     ClientRegistrationMissingOrRevoked,
     ClientRegistrationLookupFailed,
 }
@@ -1039,7 +1039,7 @@ impl HostFileImportTrustReason {
             Self::NotOAuthToken => "not_oauth_token",
             Self::MissingAllowedClientId => "missing_allowed_client_id",
             Self::OAuthDisabled => "oauth_disabled",
-            Self::ClientIdNotConfigured => "client_id_not_configured",
+            Self::AuthenticatedOAuthOpenAiHostOnly => "authenticated_oauth_openai_host_only",
             Self::ClientRegistrationMissingOrRevoked => "client_registration_missing_or_revoked",
             Self::ClientRegistrationLookupFailed => "client_registration_lookup_failed",
         }
@@ -1163,30 +1163,35 @@ pub(super) fn mcp_host_file_import_trust_decision_from_state(
         .trusted_mcp_file_client_ids
         .iter()
         .any(|trusted_client_id| trusted_client_id == client_id);
-    if !client_id_configured {
-        return HostFileImportTrustDecision {
-            reason: HostFileImportTrustReason::ClientIdNotConfigured,
-            client_id_configured: Some(false),
-            ..base
-        };
-    }
     match db.get_oauth_client_by_client_id(client_id) {
-        Ok(Some(client)) if client.client_id == client_id => HostFileImportTrustDecision {
-            trust: HostFileImportTrust::TrustedMcpHostFile,
-            reason: HostFileImportTrustReason::Trusted,
-            client_id_configured: Some(true),
-            active_client_registration_found: Some(true),
-            ..base
-        },
+        Ok(Some(client)) if client.client_id == client_id => {
+            if client_id_configured {
+                HostFileImportTrustDecision {
+                    trust: HostFileImportTrust::TrustedMcpHostFile,
+                    reason: HostFileImportTrustReason::Trusted,
+                    client_id_configured: Some(true),
+                    active_client_registration_found: Some(true),
+                    ..base
+                }
+            } else {
+                HostFileImportTrustDecision {
+                    trust: HostFileImportTrust::AuthenticatedMcpOpenAiHostFile,
+                    reason: HostFileImportTrustReason::AuthenticatedOAuthOpenAiHostOnly,
+                    client_id_configured: Some(false),
+                    active_client_registration_found: Some(true),
+                    ..base
+                }
+            }
+        }
         Ok(_) => HostFileImportTrustDecision {
             reason: HostFileImportTrustReason::ClientRegistrationMissingOrRevoked,
-            client_id_configured: Some(true),
+            client_id_configured: Some(client_id_configured),
             active_client_registration_found: Some(false),
             ..base
         },
         Err(_) => HostFileImportTrustDecision {
             reason: HostFileImportTrustReason::ClientRegistrationLookupFailed,
-            client_id_configured: Some(true),
+            client_id_configured: Some(client_id_configured),
             active_client_registration_found: None,
             ..base
         },
