@@ -6,6 +6,7 @@ const plan = {
   version: 1, goal_id: `wc_goal_ERERERERERERERER`, title: "Ship Goal",
   objective: "Review and validate the Goal flow", lifecycle: "active", revision: 1,
   updated_at_unix_ms: 1000, terminal_at_unix_ms: null,
+  controller_agent_id: null,
   agent_task_count: 0, workflow_session_count: 0,
   activity: {
     available: true, state: "active", idle_threshold_ms: 300000,
