@@ -996,7 +996,7 @@ fn tool_call_project_accessor_covers_project_tool_specs() {
                 .and_then(Value::as_str)
                 .map(str::to_string),
         };
-        let mut call = ToolCall::from_tool_name(&spec.name, args)
+        let call = ToolCall::from_tool_name(&spec.name, args)
             .unwrap_or_else(|e| panic!("{} should deserialize: {}", spec.name, e));
         assert_eq!(
             call.project(),
@@ -1004,21 +1004,6 @@ fn tool_call_project_accessor_covers_project_tool_specs() {
             "{} ToolCall::project() mismatch",
             spec.name
         );
-        match expected_project.as_deref() {
-            Some(_) => {
-                let project = call
-                    .project_mut()
-                    .unwrap_or_else(|| panic!("{} ToolCall::project_mut() mismatch", spec.name));
-                project.clear();
-                project.push_str("agent:replacement:project");
-                assert_eq!(call.project(), Some("agent:replacement:project"));
-            }
-            None => assert!(
-                call.project_mut().is_none(),
-                "{} ToolCall::project_mut() unexpectedly exposed a Project",
-                spec.name
-            ),
-        }
     }
 
     // start_session's optional project is task association metadata, not an
