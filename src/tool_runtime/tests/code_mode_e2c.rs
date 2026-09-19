@@ -523,6 +523,28 @@ async fn e2c_job_handoff_has_exact_continuation_and_later_write_invalidates_term
         .validation_summary_for_session_with_jobs(&summary, 20, None)
         .await;
     assert_eq!(after["current_evidence"]["status"], "stale", "{after}");
+    let handoff = canonical_call(
+        &runtime,
+        "session_handoff_summary",
+        json!({
+            "session_id": session,
+            "project": project,
+            "include_workspace": false,
+            "include_validation": true,
+            "diagnostic": true,
+        }),
+    )
+    .await;
+    assert!(handoff.success, "{handoff:?}");
+    assert_eq!(
+        handoff.output["validation"]["current_evidence"]["status"], "stale",
+        "{handoff:#?}"
+    );
+    assert_eq!(
+        handoff.output["continuation_feedback"]["attempt"]["validation"]["status"], "stale",
+        "{handoff:#?}"
+    );
+
     assert!(probe_patch_agent_request(&runtime, client).await.is_none());
 }
 

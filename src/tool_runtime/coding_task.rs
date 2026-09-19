@@ -1692,9 +1692,12 @@ impl ToolRuntime {
                 None
             }
         };
-        let review_evidence = review_evidence_summary_for_session(&closeout_session_summary);
+        let projection_closeout_session_summary =
+            self.refresh_validation_source_summary(&closeout_session_summary);
+        let review_evidence =
+            review_evidence_summary_for_session(&projection_closeout_session_summary);
         let (work_performed, changed_paths) =
-            closeout_work_projection(&closeout_session_summary.events);
+            closeout_work_projection(&projection_closeout_session_summary.events);
 
         // Continuation feedback reuses the same attempt summary and validation
         // delta projections as start/handoff. It is a read-only projection over
@@ -1709,18 +1712,21 @@ impl ToolRuntime {
         };
         let continuation_current_validation =
             super::validation_events::current_validation_evidence_for_session(
-                &closeout_session_summary,
+                &projection_closeout_session_summary,
                 20,
             );
         let raw_tool_failures =
-            tool_failure_summary_from_events(&closeout_session_summary.events, 10);
-        let reconciliation =
-            reconcile_closeout_evidence(&raw_tool_failures, &closeout_session_summary, &validation);
+            tool_failure_summary_from_events(&projection_closeout_session_summary.events, 10);
+        let reconciliation = reconcile_closeout_evidence(
+            &raw_tool_failures,
+            &projection_closeout_session_summary,
+            &validation,
+        );
         let continuation_feedback = if closeout_session_summary.events.is_empty() {
             not_applicable_continuation_feedback_value("empty_session")
         } else {
             continuation_feedback_value(ContinuationFeedbackInput {
-                session_summary: &closeout_session_summary,
+                session_summary: &projection_closeout_session_summary,
                 validation: &continuation_validation,
                 jobs: &jobs,
                 discussion: &discussion,
@@ -1772,7 +1778,7 @@ impl ToolRuntime {
         }
         output["suggested_next_actions"] = json!(finish_suggested_next_actions(&output));
         output["handoff_brief"] = build_handoff_brief(HandoffBriefInput {
-            session_summary: &closeout_session_summary,
+            session_summary: &projection_closeout_session_summary,
             continuation_feedback: output.get("continuation_feedback").unwrap_or(&Value::Null),
             workspace_requested: include_workspace,
             workspace: output.get("workspace"),
@@ -1804,11 +1810,11 @@ impl ToolRuntime {
 
     /// Build the bounded continuation feedback projection for coding startup.
     ///
-    /// Pure read-only: validation is derived from the session ledger only
-    /// (`validation_summary_from_events`, no job-status enrichment), jobs come
-    /// from the bounded `active_jobs_summary` metadata, and guidance is read
-    /// from the message board without marking anything read or resolved. No
-    /// shell, no file reads, no Runner requests, no ledger mutation.
+    /// Pure read-only: validation is derived from the session ledger plus
+    /// process-local source-fence re-observation (no Job-status enrichment), jobs
+    /// come from the bounded `active_jobs_summary` metadata, and guidance is read
+    /// from the message board without marking anything read or resolved. No shell,
+    /// file reads, Runner requests, or ledger mutation.
     async fn startup_continuation_feedback(
         &self,
         summary: &sessions::SessionSummary,
@@ -1832,20 +1838,21 @@ impl ToolRuntime {
         if projection_summary.events.is_empty() {
             return not_applicable_continuation_feedback_value("empty_session");
         }
+        let projection_summary = self.refresh_validation_source_summary(projection_summary);
         let validation = super::validation_events::validation_summary_from_events(
             &projection_summary.events,
             20,
         );
         let current_validation = super::validation_events::current_validation_evidence_for_session(
-            projection_summary,
+            &projection_summary,
             20,
         );
         let raw_tool_failures = tool_failure_summary_from_events(&projection_summary.events, 10);
         let reconciliation =
-            reconcile_closeout_evidence(&raw_tool_failures, projection_summary, &validation);
+            reconcile_closeout_evidence(&raw_tool_failures, &projection_summary, &validation);
         let (discussion, _) = self.discussion_snapshot(&summary.session_id);
         continuation_feedback_value(ContinuationFeedbackInput {
-            session_summary: projection_summary,
+            session_summary: &projection_summary,
             validation: &validation,
             jobs,
             discussion: &discussion,

@@ -99,12 +99,21 @@ impl ToolRuntime {
         let workspace_result = self
             .show_changes_for_presentation(resolved.resolved_id.clone())
             .await;
-        let validation =
-            validation_summary_from_events(&summary.events, WORK_RESULT_VALIDATION_LIMIT);
-        let current_validation =
-            current_validation_evidence_for_session(&summary, WORK_RESULT_VALIDATION_LIMIT)
-                .evidence;
-        let review = review_evidence_summary_for_session(&summary);
+        // Work Result refresh is read-only, but source freshness is live
+        // process-local observation state. Re-observe persisted validation fences
+        // in memory so a later canonical mutation can strengthen unproven ->
+        // stale without materializing Jobs or writing the target Session.
+        let projection_summary = self.refresh_validation_source_summary(&summary);
+        let validation = validation_summary_from_events(
+            &projection_summary.events,
+            WORK_RESULT_VALIDATION_LIMIT,
+        );
+        let current_validation = current_validation_evidence_for_session(
+            &projection_summary,
+            WORK_RESULT_VALIDATION_LIMIT,
+        )
+        .evidence;
+        let review = review_evidence_summary_for_session(&projection_summary);
         let history_partial = summary.events_truncated;
         let mut projection = build_work_result_projection(
             &resolved.resolved_id,

@@ -327,9 +327,10 @@ impl ToolRuntime {
         if include_validation {
             output["validation"] = feedback_validation.clone();
         }
+        let projection_closeout_session = self.refresh_validation_source_summary(&closeout_session);
         let continuation_current_validation =
             super::validation_events::current_validation_evidence_for_session(
-                &closeout_session,
+                &projection_closeout_session,
                 20,
             );
         let (work_performed, changed_paths) = closeout_work_projection(&summary.events);
@@ -337,7 +338,7 @@ impl ToolRuntime {
         output["changed_paths"] = changed_paths;
         let reconciliation = reconcile_closeout_evidence(
             output.get("tool_failures").unwrap_or(&Value::Null),
-            &closeout_session,
+            &projection_closeout_session,
             &feedback_validation,
         );
 
@@ -347,7 +348,7 @@ impl ToolRuntime {
         // metadata already gathered here; never re-runs validation, mutates the
         // ledger, refreshes activity, or consumes guidance.
         output["continuation_feedback"] = continuation_feedback_value(ContinuationFeedbackInput {
-            session_summary: &closeout_session,
+            session_summary: &projection_closeout_session,
             validation: &feedback_validation,
             jobs: output.get("jobs").unwrap_or(&Value::Null),
             discussion: &discussion,
@@ -372,7 +373,7 @@ impl ToolRuntime {
         // --- bounded suggested next actions ---
         output["suggested_next_actions"] = json!(handoff_suggested_next_actions(&output));
         output["handoff_brief"] = build_handoff_brief(HandoffBriefInput {
-            session_summary: &closeout_session,
+            session_summary: &projection_closeout_session,
             continuation_feedback: output.get("continuation_feedback").unwrap_or(&Value::Null),
             workspace_requested: include_workspace,
             workspace: output.get("workspace"),

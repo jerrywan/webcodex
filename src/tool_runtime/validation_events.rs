@@ -110,9 +110,22 @@ impl ToolRuntime {
         let mut events = refreshed.events.clone();
         self.append_terminal_generic_job_validation_events(&refreshed, &mut events, auth)
             .await;
-        // Refresh a read-time projection, never rewrite durable execution facts.
+        self.refresh_validation_source_states(&mut events);
+        events.sort_by_key(|event| {
+            (
+                event.timestamp,
+                event.finished_at.unwrap_or(event.timestamp),
+            )
+        });
+        validation_summary_for_session_events(&refreshed, &events, limit)
+    }
+
+    /// Refresh only the in-memory validation-source projection. This never
+    /// materializes Jobs, appends Session events, or rewrites durable execution
+    /// facts, so read-only presentation surfaces may safely use it too.
+    pub(crate) fn refresh_validation_source_states(&self, events: &mut [SessionEvent]) {
         // This also sees canonical writes from other Sessions on this Project.
-        for event in &mut events {
+        for event in events {
             let project = event
                 .resolved_project
                 .as_deref()
@@ -133,13 +146,15 @@ impl ToolRuntime {
                 }
             }
         }
-        events.sort_by_key(|event| {
-            (
-                event.timestamp,
-                event.finished_at.unwrap_or(event.timestamp),
-            )
-        });
-        validation_summary_for_session_events(&refreshed, &events, limit)
+    }
+
+    pub(crate) fn refresh_validation_source_summary(
+        &self,
+        summary: &SessionSummary,
+    ) -> SessionSummary {
+        let mut refreshed = summary.clone();
+        self.refresh_validation_source_states(&mut refreshed.events);
+        refreshed
     }
 
     /// Preserve generic `run_job` and promoted `run_shell` validation evidence without mixing
