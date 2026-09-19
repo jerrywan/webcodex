@@ -20,7 +20,9 @@ The runtime uses the `dogfood` Cargo profile and includes experimental Code Mode
 The Desktop reuses the existing debug dogfood packaging/cache. Only Desktop was
 incrementally rebuilt for the UI fixes; no full candidate runtime rebuild was
 repeated. Server/Runner remain exactly the tested 5c53c10b binary inputs; the later
-commits change only Desktop frontend/tests and this documentation.
+commits change Desktop frontend/tests and documentation. A CI follow-up adds a
+missing error conversion only in the non-Unix MCP credential writer and aligns
+a Goal test fixture with updated main; neither changes the deployed macOS logic.
 
 The installed application remains at:
 
@@ -193,6 +195,25 @@ principal in this MVP. Concurrent writes to one Git working tree can conflict;
 stateful MCP Providers are Runner-scoped and may share state. Per-account
 principal attribution and per-window/session provider processes remain separate
 future work, not hidden guarantees of these profiles.
+
+## Post-push CI integration corrections
+
+The first PR #544 CI run tested merge commit
+`278a647b2763d9e7122c4fdc17ec9b704675711b`, combining this branch with newer main
+`3ec0c709adc0753448fc4ea49eef84c13c5998c1`. Its Goal Plan App fixture omitted
+`controller_agent_id`, which updated main now requires to be either null or a
+valid Agent ID. The same 27 failures were reproduced against both main alone
+and the CI merge, while this branch's original Goal tests passed 43/43.
+Adding explicit `controller_agent_id: null` to the fixture restored 43/43 on the
+CI merge's unchanged production HTML. The current branch's complete Node MCP App
+suite passed 253/253. No production validation was weakened or replaced.
+
+The Windows Desktop compile gate separately found a missing `std::io::Error`
+to `DesktopError` conversion in the `#[cfg(not(unix))]` private-credential writer.
+It now uses the same `map_err(|_| invalid())` redaction boundary as the surrounding
+storage operations. This is a Windows/non-Unix compile correction; the deployed
+macOS code path and candidate runtime bytes are unchanged. Updated CI results
+belong to the PR check suite; local macOS checks do not claim Windows execution.
 
 ## Rollback and local evidence
 
