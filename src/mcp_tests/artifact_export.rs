@@ -365,13 +365,11 @@ async fn issue_mcp_artifact_export_with_metadata_max(
                     "tools/call",
                     Some(json!(3101)),
                     mcp_2026_params(json!({
-                        "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                        "name": "project_artifact",
                         "arguments": {
-                            "tool": "export_project_artifact",
-                            "arguments": {
-                                "project": "agent:exporter:demo",
-                                "path": path,
-                            }
+                            "project": "agent:exporter:demo",
+                            "path": path,
+                            "action": "export"
                         }
                     })),
                 ),
@@ -465,35 +463,23 @@ async fn project_artifact_export_uses_existing_resource_link_authority_path() {
 }
 
 #[tokio::test]
-async fn mcp_artifact_export_is_stateless_protocol_only() {
+async fn project_artifact_export_is_stateless_protocol_only() {
     let legacy = mcp_tools_list_payload_with_compact(false);
-    assert!(!legacy["tools"]
+    assert!(legacy["tools"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|tool| tool["name"] == "export_project_artifact"));
+        .any(|tool| tool["name"] == "project_artifact"));
 
     let stateless = mcp_tools_list_payload_with_compact_and_app(false, true);
-    assert!(!stateless["tools"]
+    assert!(stateless["tools"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|tool| tool["name"] == "export_project_artifact"));
-    let spec = registered_tool_specs()
+        .any(|tool| tool["name"] == "project_artifact"));
+    assert!(registered_tool_specs()
         .into_iter()
-        .find(|spec| spec.name == "export_project_artifact")
-        .expect("canonical export_project_artifact ToolSpec");
-    assert_eq!(spec.input_schema["required"], json!(["project", "path"]));
-    assert!(spec.input_schema["properties"].get("session_id").is_some());
-    assert!(spec.input_schema["properties"]
-        .get("allow_cross_project_session")
-        .is_none());
-    assert!(
-        super::super::tools::adaptive_runtime_gateway_target_admitted_for_test(
-            "export_project_artifact",
-            true
-        )
-    );
+        .all(|spec| spec.name != "export_project_artifact"));
 
     let runtime = test_runtime();
     let mut auth = crate::auth::AuthContext::new(crate::auth::AuthKind::Bootstrap);
@@ -504,10 +490,11 @@ async fn mcp_artifact_export_is_stateless_protocol_only() {
             "tools/call",
             Some(json!(3100)),
             json!({
-                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "name": "project_artifact",
                 "arguments": {
-                    "tool": "export_project_artifact",
-                    "arguments": {"project": "agent:any:any", "path": "report.pdf"}
+                    "project": "agent:any:any",
+                    "path": "report.pdf",
+                    "action": "export"
                 }
             }),
         ),
@@ -522,74 +509,54 @@ async fn mcp_artifact_export_is_stateless_protocol_only() {
                 .unwrap()
                 .contains("stateless-2026"));
         }
-        other => panic!("legacy artifact export must fail closed, got {other:?}"),
+        other => panic!("project_artifact export must fail closed on legacy MCP, got {other:?}"),
     }
 }
 
 #[tokio::test]
-async fn adaptive_artifact_export_unified_direct_and_legacy_gateway_preserve_gates() {
+async fn project_artifact_export_preserves_protocol_and_auth_gates() {
     let runtime = test_runtime();
     let mut auth = crate::auth::AuthContext::new(crate::auth::AuthKind::Bootstrap);
     auth.is_bootstrap = true;
-    let routes = [
-        (
-            "unified-direct",
-            json!({
-                "name": "project_artifact",
-                "arguments": {
-                    "project": "agent:any:any",
-                    "path": "report.pdf",
-                    "action": "export"
-                }
-            }),
-        ),
-        (
-            "legacy-gateway",
-            json!({
-                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
-                "arguments": {
-                    "tool": "export_project_artifact",
-                    "arguments": {"project": "agent:any:any", "path": "report.pdf"}
-                }
-            }),
-        ),
-    ];
-    for (route, params) in routes {
-        for (stateless, expected_error) in [
-            (false, "stateless-2026"),
-            (true, "authenticated caller identity is unavailable"),
-        ] {
-            let outcome = handle_mcp_request(
-                &runtime,
-                rpc(
-                    "tools/call",
-                    Some(json!(3101)),
-                    if stateless {
-                        mcp_2026_params(params.clone())
-                    } else {
-                        params.clone()
-                    },
-                ),
-                if stateless { None } else { Some(&auth) },
-            )
-            .await;
-            let McpOutcome::BadRequest(value) = outcome else {
-                panic!("export must reject route={route}, stateless={stateless}: {outcome:?}");
-            };
-            assert_eq!(value["error"]["code"], -32602);
-            assert!(
-                value["error"]["message"]
-                    .as_str()
-                    .unwrap()
-                    .contains(expected_error),
-                "route={route}, stateless={stateless}: {value}"
-            );
+    let params = json!({
+        "name": "project_artifact",
+        "arguments": {
+            "project": "agent:any:any",
+            "path": "report.pdf",
+            "action": "export"
         }
+    });
+    for (stateless, expected_error) in [
+        (false, "stateless-2026"),
+        (true, "authenticated caller identity is unavailable"),
+    ] {
+        let outcome = handle_mcp_request(
+            &runtime,
+            rpc(
+                "tools/call",
+                Some(json!(3101)),
+                if stateless {
+                    mcp_2026_params(params.clone())
+                } else {
+                    params.clone()
+                },
+            ),
+            if stateless { None } else { Some(&auth) },
+        )
+        .await;
+        let McpOutcome::BadRequest(value) = outcome else {
+            panic!("export must reject stateless={stateless}: {outcome:?}");
+        };
+        assert_eq!(value["error"]["code"], -32602);
+        assert!(value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(expected_error));
     }
 }
 
 #[tokio::test]
-async fn adaptive_artifact_export_gateway_returns_resource_link_and_round_trips_binary() {
+async fn project_artifact_export_returns_resource_link_and_round_trips_binary() {
     use base64::Engine as _;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -609,13 +576,11 @@ async fn adaptive_artifact_export_gateway_returns_resource_link_and_round_trips_
                     "tools/call",
                     Some(json!(3102)),
                     mcp_2026_params(json!({
-                        "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                        "name": "project_artifact",
                         "arguments": {
-                            "tool": "export_project_artifact",
-                            "arguments": {
-                                "project": "agent:exporter:demo",
-                                "path": path
-                            }
+                            "project": "agent:exporter:demo",
+                            "path": path,
+                            "action": "export"
                         }
                     })),
                 ),
@@ -834,17 +799,22 @@ async fn mcp_artifact_export_oauth_resource_read_uses_project_read_and_stable_id
 }
 
 #[tokio::test]
-async fn export_project_artifact_non_mcp_path_fails_before_runner_read() {
+async fn project_artifact_export_non_mcp_path_fails_before_runner_read() {
     use crate::runner_protocol::RunnerPollRequest;
     let tmp = tempfile::tempdir().unwrap();
     let (runtime, registry) = mcp_export_runtime(tmp.path(), Some("alice")).await;
     let auth = mcp_export_api_auth("key-export", "alice");
     let result = runtime
         .dispatch_with_auth(
-            crate::tool_runtime::ToolCall::ExportProjectArtifact {
+            crate::tool_runtime::ToolCall::ProjectArtifact {
                 project: "agent:exporter:demo".to_string(),
                 path: "paper/report.pdf".to_string(),
+                action: crate::tool_runtime::ProjectArtifactAction::Export,
                 session_id: None,
+                allow_missing: None,
+                offset: None,
+                length: None,
+                expected_sha256: None,
             },
             Some(&auth),
         )
@@ -853,7 +823,7 @@ async fn export_project_artifact_non_mcp_path_fails_before_runner_read() {
     assert!(result
         .error
         .as_deref()
-        .is_some_and(|error| error.contains("MCP-only")));
+        .is_some_and(|error| error.contains("requires Stateless MCP 2026")));
     assert!(registry
         .poll(RunnerPollRequest {
             client_id: "exporter".to_string(),
@@ -1972,7 +1942,7 @@ fn mcp_artifact_export_preserves_streaming_bound_and_durable_projection_has_no_h
         "name": "report.pdf",
     }));
     let durable =
-        crate::tool_runtime::audit_safe_result_for_tool("export_project_artifact", &stable.output);
+        crate::tool_runtime::audit_safe_result_for_tool("project_artifact", &stable.output);
     let serialized = serde_json::to_string(&durable).unwrap();
     assert!(!serialized.contains(MCP_ARTIFACT_EXPORT_URI_PREFIX));
     assert!(!serialized.contains("content_base64"));
@@ -2144,13 +2114,11 @@ async fn mcp_artifact_export_action_audit_does_not_persist_handle_or_blob() {
             "id": 3112,
             "method": "tools/call",
             "params": mcp_2026_params(json!({
-                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "name": "project_artifact",
                 "arguments": {
-                    "tool": "export_project_artifact",
-                    "arguments": {
-                        "project": "agent:exporter:demo",
-                        "path": "paper/audit.pdf"
-                    }
+                    "project": "agent:exporter:demo",
+                    "path": "paper/audit.pdf",
+                    "action": "export"
                 }
             }))
         }))
@@ -2173,7 +2141,7 @@ async fn mcp_artifact_export_action_audit_does_not_persist_handle_or_blob() {
         )
         .unwrap()
     };
-    assert_eq!(operation, "export_project_artifact");
+    assert_eq!(operation, "project_artifact");
     for durable in [&summary, &error] {
         assert!(!durable.contains(MCP_ARTIFACT_EXPORT_URI_PREFIX));
         assert!(!durable.contains("wc_export_"));

@@ -1691,7 +1691,6 @@ pub(super) fn project_artifact_presentation_mode(
     arguments: &Value,
 ) -> ProjectArtifactPresentationMode {
     match tool_name {
-        "export_project_artifact" => ProjectArtifactPresentationMode::Export,
         "read_project_artifact"
             if arguments.get("as_image").and_then(Value::as_bool) == Some(true) =>
         {
@@ -1706,12 +1705,8 @@ pub(super) fn project_artifact_presentation_mode(
     }
 }
 
-fn artifact_export_operation_label(tool_name: &str) -> &'static str {
-    if tool_name == "project_artifact" {
-        "project_artifact(action=export)"
-    } else {
-        "export_project_artifact"
-    }
+fn artifact_export_operation_label(_tool_name: &str) -> &'static str {
+    "project_artifact(action=export)"
 }
 
 #[derive(Debug, Default)]

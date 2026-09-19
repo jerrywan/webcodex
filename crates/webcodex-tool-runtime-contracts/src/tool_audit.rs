@@ -5742,10 +5742,6 @@ impl ToolCallAuditProjection for ToolCall {
                 "limit": limit,
                 "offset": offset,
             }),
-            Self::ExportProjectArtifact { project, path, .. } => serde_json::json!({
-                "project": project,
-                "path": path,
-            }),
 
             Self::RegisterProject {
                 client_id,

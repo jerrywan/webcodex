@@ -2162,7 +2162,6 @@ async fn gpt_action_direct_and_gateway_admission_fail_closed() {
     for tool in [
         "present_goal_plan",
         "present_agent_continuation",
-        "export_project_artifact",
         "definitely_not_a_tool",
     ] {
         let (status, body, _) = oauth_action_call(&service, "secret", tool, json!({})).await;

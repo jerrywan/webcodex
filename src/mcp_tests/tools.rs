@@ -166,7 +166,7 @@ fn memory_tools_remain_canonical_extensions_without_top_level_advertising() {
     for compact in [false, true] {
         for auth in [None, Some(&full_auth)] {
             let payload =
-                mcp_tools_list_payload_with_features_for_auth(compact, false, true, true, auth);
+                mcp_tools_list_payload_with_features_for_auth(compact, false, true, auth);
             for spec in &specs {
                 assert!(!payload["tools"]
                     .as_array()
@@ -382,7 +382,7 @@ async fn hidden_extensions_keep_exact_manifest_and_gateway_execution() {
 #[test]
 fn trace_reader_is_stateless_protocol_extension_admin_scoped_and_schema_static() {
     let render = |stateless_2026: bool, auth: Option<&crate::auth::AuthContext>| {
-        mcp_tools_list_payload_with_features_for_auth(false, false, true, stateless_2026, auth)
+        mcp_tools_list_payload_with_features_for_auth(false, false, stateless_2026, auth)
     };
     let names = |payload: &Value| {
         payload["tools"]
@@ -439,7 +439,7 @@ fn skill_runtime_tools_are_stateless_protocol_extensions_and_schema_static() {
 
     let render_full = || {
         let mut payload =
-            mcp_tools_list_payload_with_features_for_auth(false, false, true, true, None);
+            mcp_tools_list_payload_with_features_for_auth(false, false, true, None);
         add_stateless_workflow_recorder_metadata(&mut payload);
         payload
     };
@@ -536,7 +536,7 @@ fn skill_runtime_tools_are_stateless_protocol_extensions_and_schema_static() {
 #[test]
 fn skill_management_tools_require_admin_and_remain_fixed_schema() {
     let render = |auth: Option<&crate::auth::AuthContext>| {
-        mcp_tools_list_payload_with_features_for_auth(false, false, true, true, auth)
+        mcp_tools_list_payload_with_features_for_auth(false, false, true, auth)
     };
     let shared = crate::auth::shared_key_context("skill-management-test");
     let shared_payload = render(Some(&shared));
@@ -1493,7 +1493,7 @@ fn mcp_tools_list_inputs_equal_canonical_except_descriptions_and_host_file_overl
         .collect::<std::collections::HashMap<_, _>>();
     for compact in [false, true] {
         let payload =
-            mcp_tools_list_payload_with_features_for_auth(compact, false, true, true, Some(&auth));
+            mcp_tools_list_payload_with_features_for_auth(compact, false, true, Some(&auth));
         for tool in payload["tools"].as_array().unwrap() {
             let name = tool["name"].as_str().unwrap();
             let canonical = &specs[name];

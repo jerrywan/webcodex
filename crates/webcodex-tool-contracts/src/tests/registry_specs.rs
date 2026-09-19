@@ -163,18 +163,6 @@ fn tool_specs_describe_default_coding_loop_preferences() {
             "project_artifact: {phrase}"
         );
     }
-    let export_artifact_desc = desc("export_project_artifact");
-    for phrase in [
-        "compatibility project artifact export specialist",
-        "resourcelink",
-        "without routing base64 through model output",
-        "prefer project_artifact(action=export)",
-    ] {
-        assert!(
-            export_artifact_desc.contains(phrase),
-            "export_project_artifact: {phrase}"
-        );
-    }
     let read_artifact_desc = desc("read_project_artifact");
     for phrase in [
         "bounded chunk inspection api",
@@ -183,7 +171,7 @@ fn tool_specs_describe_default_coding_loop_preferences() {
         "snapshot_changed",
         "do not manually translate",
         "do not loop over base64 chunks",
-        "export_project_artifact",
+        "project_artifact(action=export)",
     ] {
         assert!(
             read_artifact_desc.contains(phrase),

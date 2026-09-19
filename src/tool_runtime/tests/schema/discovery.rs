@@ -514,7 +514,6 @@ fn expected_cross_listed_discovery_groups(tool: &str) -> Option<&'static [&'stat
         | "artifact_upload_begin"
         | "artifact_upload_chunk"
         | "artifact_upload_finish"
-        | "export_project_artifact"
         | "import_conversation_files_to_project"
         | "read_project_artifact"
         | "read_project_artifact_metadata"
@@ -2338,11 +2337,6 @@ async fn tool_manifest_routing_metadata_uses_canonical_adaptive_routes() {
         ("run_shell", "direct", None),
         ("import_conversation_files_to_project", "direct", None),
         ("project_artifact", "direct", None),
-        (
-            "export_project_artifact",
-            "gateway",
-            Some("call_runtime_tool"),
-        ),
         ("session_discussion_summary", "direct", None),
         ("list_jobs", "direct", None),
         ("git_diff_hunks", "direct", None),

@@ -4043,21 +4043,6 @@ pub enum ToolCall {
         expected_sha256: Option<String>,
     },
 
-    /// Prepare one project artifact for standards-native MCP resource export.
-    /// The runtime returns only stable metadata; the MCP transport owns the
-    /// short-lived resource handle and complete binary framing.
-    ExportProjectArtifact {
-        /// Runner-registered project id.
-        project: String,
-        /// Project-relative artifact path.
-        path: String,
-        /// Optional explicit wc_sess_* Workflow Session id from a prior compatible bootstrap. When
-        /// provided, this tool call is recorded in that exact Session ledger; omission leaves the call
-        /// unlinked to Workflow Session state.
-        #[serde(default)]
-        session_id: Option<String>,
-    },
-
     /// Read bounded metadata for a binary project artifact. Zip files are
     /// counted but never extracted.
     ReadProjectArtifactMetadata {
@@ -5150,7 +5135,6 @@ impl ToolCall {
             Self::ImportConversationFilesToProject { .. } => "import_conversation_files_to_project",
             Self::TransferProjectArtifact { .. } => "transfer_project_artifact",
             Self::ProjectArtifact { .. } => "project_artifact",
-            Self::ExportProjectArtifact { .. } => "export_project_artifact",
             Self::ReadProjectArtifactMetadata { .. } => "read_project_artifact_metadata",
             Self::ReadProjectArtifact { .. } => "read_project_artifact",
             Self::ArtifactUploadBegin { .. } => "artifact_upload_begin",
@@ -5235,7 +5219,6 @@ impl ToolCall {
             | Self::SaveProjectArtifact { session_id, .. }
             | Self::ComputerSaveSnapshot { session_id, .. }
             | Self::ProjectArtifact { session_id, .. }
-            | Self::ExportProjectArtifact { session_id, .. }
             | Self::ReadProjectArtifactMetadata { session_id, .. }
             | Self::ReadProjectArtifact { session_id, .. }
             | Self::ArtifactUploadBegin { session_id, .. }
@@ -5381,7 +5364,6 @@ impl ToolCall {
             | Self::ComputerSaveSnapshot { project, .. }
             | Self::ImportConversationFilesToProject { project, .. }
             | Self::ProjectArtifact { project, .. }
-            | Self::ExportProjectArtifact { project, .. }
             | Self::ReadProjectArtifactMetadata { project, .. }
             | Self::ReadProjectArtifact { project, .. }
             | Self::ArtifactUploadBegin { project, .. }

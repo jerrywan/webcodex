@@ -3067,7 +3067,6 @@ impl ToolRuntime {
             | ToolCall::SaveProjectArtifact { .. }
             | ToolCall::TransferProjectArtifact { .. }
             | ToolCall::ProjectArtifact { .. }
-            | ToolCall::ExportProjectArtifact { .. }
             | ToolCall::ReadProjectArtifactMetadata { .. }
             | ToolCall::ReadProjectArtifact { .. }
             | ToolCall::ArtifactUploadBegin { .. }

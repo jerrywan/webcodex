@@ -128,30 +128,6 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
     ),
     model_spec(
         def(
-            "export_project_artifact",
-            super::ToolAuditPolicy::TYPED_CANONICAL,
-            ModelVisible,
-            TOOL_CATEGORY_ARTIFACT,
-            Some(FileRead),
-            TOOL_PROVIDER_CONTROL,
-            super::ToolSemanticContract {
-                effect: super::ToolEffect::Observe,
-                risk: Read,
-                approval: super::ToolApprovalPolicy::None,
-                idempotency: super::ToolIdempotency::PureRead,
-            },
-            Some(PROJECT_READ),
-            true,
-            Artifact,
-            false,
-            false,
-            super::ToolSessionEvidencePolicy::NONE,
-        ),
-        "Compatibility project artifact export specialist. Create one short-lived authenticated MCP ResourceLink for a bounded project artifact so the host/user can fetch the complete binary with resources/read without routing base64 through model output. Prefer project_artifact(action=export) on model surfaces that expose the unified facade.",
-    )
-    .with_gpt_action_unsupported(),
-    model_spec(
-        def(
             "read_project_artifact_metadata",
             super::ToolAuditPolicy::TYPED_CANONICAL,
             ModelVisible,
@@ -194,7 +170,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             super::ToolSessionEvidencePolicy::NONE,
         ),
-        "Bounded chunk inspection API for a project artifact. Returns base64 for one small segment plus full-file sha256/MIME metadata. A truncated ranged read emits one parser-ready suggested_call that carries the observed full-file sha256 as expected_sha256, so continuation either reads the same exact content incarnation or fails closed with snapshot_changed before returning changed bytes; do not manually translate next_offset or sha256 bookkeeping. If the goal is to deliver the complete file to ChatGPT/host/user, do not loop over base64 chunks; prefer export_project_artifact instead.",
+        "Bounded chunk inspection API for a project artifact. Returns base64 for one small segment plus full-file sha256/MIME metadata. A truncated ranged read emits one parser-ready suggested_call that carries the observed full-file sha256 as expected_sha256, so continuation either reads the same exact content incarnation or fails closed with snapshot_changed before returning changed bytes; do not manually translate next_offset or sha256 bookkeeping. If the goal is to deliver the complete file to ChatGPT/host/user, do not loop over base64 chunks; use project_artifact(action=export) instead.",
     ),
     model_spec(
         def(
@@ -217,7 +193,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
             false,
             super::ToolSessionEvidencePolicy::NONE,
         ),
-        "Begin a bounded low-level chunked binary artifact upload up to 256 MiB. Creates a project-local temporary upload session; finish commits atomically to the target path. This is not the preferred path for a current ChatGPT/host attachment; use import_conversation_files_to_project for host-native import. For smoke octet-stream uploads, use artifacts/smoke/<name>.artifact or omit mime_type when appropriate.",
+        "Begin a bounded low-level chunked binary artifact upload up to 256 MiB. Creates a project-local temporary upload session; finish commits atomically to the target path. This is not the preferred path for a current ChatGPT/host attachment; use import_conversation_files_to_project for host-native import. MIME is presentation metadata: unknown regular artifacts may use application/octet-stream; Project authorization, sensitive-path checks, root containment, symlink protection, fencing, and byte/SHA validation remain the safety boundary.",
     ),
     requires_artifact_upload_path_binding(model_spec(
         def(

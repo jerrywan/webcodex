@@ -273,7 +273,7 @@ pub(super) fn project_from_tool_call_params(params: &Value) -> Option<String> {
 /// the canonical auth/surface renderer below directly.
 #[cfg(test)]
 pub(super) fn mcp_tools_list_payload_with_compact(compact: bool) -> Value {
-    mcp_tools_list_payload_with_features(compact, false, false)
+    mcp_tools_list_payload_with_features(compact, false)
 }
 
 #[cfg(test)]
@@ -281,28 +281,17 @@ pub(super) fn mcp_tools_list_payload_with_compact_and_app(
     compact: bool,
     app_enabled: bool,
 ) -> Value {
-    mcp_tools_list_payload_with_features(compact, app_enabled, true)
+    mcp_tools_list_payload_with_features(compact, app_enabled)
 }
 
 #[cfg(test)]
-fn mcp_tools_list_payload_with_features(
-    compact: bool,
-    app_enabled: bool,
-    artifact_export_enabled: bool,
-) -> Value {
-    mcp_tools_list_payload_with_features_for_auth(
-        compact,
-        app_enabled,
-        artifact_export_enabled,
-        false,
-        None,
-    )
+fn mcp_tools_list_payload_with_features(compact: bool, app_enabled: bool) -> Value {
+    mcp_tools_list_payload_with_features_for_auth(compact, app_enabled, false, None)
 }
 
 pub(super) fn mcp_tools_list_payload_with_features_for_auth(
     compact: bool,
     app_enabled: bool,
-    artifact_export_enabled: bool,
     stateless_2026: bool,
     auth: Option<&AuthContext>,
 ) -> Value {
@@ -317,7 +306,6 @@ pub(super) fn mcp_tools_list_payload_with_features_for_auth(
 
     let mut tools = specs
         .into_iter()
-        .filter(|spec| artifact_export_enabled || spec.name != "export_project_artifact")
         .map(|spec| {
             mcp_tool_spec_json(
                 project_mcp_tool_spec_output_schema(spec, stateless_2026),
@@ -930,9 +918,6 @@ pub(super) fn mcp_runtime_tool_result(
     result: ToolResult,
 ) -> Value {
     let result_presentation = McpToolResultPresentation::Standard;
-    if tool_name == "export_project_artifact" {
-        return mcp_runtime_tool_result_fallback(result, result_presentation);
-    }
     let artifact_presentation = if as_image_requested {
         resources::ProjectArtifactPresentationMode::Image
     } else {
@@ -962,7 +947,6 @@ pub(super) async fn handle_list(
     let mut result = mcp_tools_list_payload_with_features_for_auth(
         compact_schemas,
         app_enabled,
-        stateless_2026,
         stateless_2026,
         auth,
     );

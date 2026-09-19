@@ -488,7 +488,6 @@ mod tests {
             "present_goal_plan",
             "present_agent_continuation",
             "rotate_agent_continuation_endpoint",
-            "export_project_artifact",
             "present_work_result",
         ] {
             assert!(!webcodex_tool_contracts::gpt_action_tool_supported(tool));

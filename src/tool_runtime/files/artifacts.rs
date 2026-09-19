@@ -319,11 +319,11 @@ impl ToolRuntime {
             Ok(Ok(response)) => response,
             Ok(Err(_)) => {
                 self.runner_registry.cancel_request(&request_id).await;
-                return Err("agent export_project_artifact request was dropped".to_string());
+                return Err("agent project artifact export metadata request was dropped".to_string());
             }
             Err(_) => {
                 self.runner_registry.cancel_request(&request_id).await;
-                return Err("timed out waiting for agent export_project_artifact".to_string());
+                return Err("timed out waiting for agent project artifact export metadata".to_string());
             }
         };
         if let Some(error) = response.error {
@@ -332,7 +332,7 @@ impl ToolRuntime {
         if response.exit_code != Some(0) {
             return Err(response.stderr.unwrap_or_else(|| {
                 format!(
-                    "agent export_project_artifact failed with code {:?}",
+                    "agent project artifact export metadata failed with code {:?}",
                     response.exit_code
                 )
             }));
@@ -341,7 +341,7 @@ impl ToolRuntime {
         let stdout = stdout.trim();
         let output = serde_json::from_str(stdout).map_err(|error| {
             format!(
-                "agent export_project_artifact returned invalid JSON: {error} (got: {})",
+                "agent project artifact export metadata returned invalid JSON: {error} (got: {})",
                 &stdout[..stdout.len().min(200)]
             )
         })?;

@@ -426,7 +426,6 @@ fn tool_categories_and_recommended_flows_are_well_formed() {
         "import_conversation_files_to_project",
         "transfer_project_artifact",
         "project_artifact",
-        "export_project_artifact",
         "save_project_artifact",
         "read_project_artifact",
         "artifact_upload_begin",
@@ -442,7 +441,6 @@ fn tool_categories_and_recommended_flows_are_well_formed() {
     assert!(edit
         .iter()
         .any(|value| value == "import_conversation_files_to_project"));
-    assert!(edit.iter().any(|value| value == "export_project_artifact"));
     let flows = recommended_flows();
     assert!(!flows.is_empty());
     for flow in &flows {

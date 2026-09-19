@@ -159,7 +159,6 @@ async fn job_terminal_continuation_app_surface_is_explicit_sparse_and_app_only()
         false,
         true,
         true,
-        true,
         Some(&auth),
     );
     let full_wait = tool(&full_ui, "wait_for_job_terminal").expect("full-schema wait tool");
@@ -175,7 +174,6 @@ async fn job_terminal_continuation_app_surface_is_explicit_sparse_and_app_only()
     let full_plain = super::super::tools::mcp_tools_list_payload_with_features_for_auth(
         false,
         false,
-        true,
         true,
         Some(&auth),
     );
