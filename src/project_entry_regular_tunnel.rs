@@ -324,6 +324,27 @@ mod tests {
     }
 
     #[test]
+    fn failed_tunnel_log_is_preserved_without_local_bearer_credential() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut session = RegularTunnelSession::create(temp.path()).unwrap();
+        let session_dir = session.directory.clone();
+        let authorization_file = session
+            .write_authorization_file("wc_boot_test_secret")
+            .unwrap();
+        let log_file = session.directory.join("openai-tunnel.log");
+        std::fs::write(&log_file, b"{\"level\":\"error\",\"message\":\"test\"}\n").unwrap();
+
+        session.preserve_failed_tunnel_log();
+        drop(session);
+
+        assert!(session_dir.is_dir());
+        assert!(log_file.is_file());
+        assert!(!authorization_file.exists());
+
+        std::fs::remove_dir_all(session_dir).unwrap();
+    }
+
+    #[test]
     fn authorization_file_rejects_empty_bootstrap_credentials() {
         let temp = tempfile::tempdir().unwrap();
         for value in ["", "   "] {
