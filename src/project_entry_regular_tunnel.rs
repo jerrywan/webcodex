@@ -45,7 +45,8 @@ impl RegularTunnelSession {
 
     fn preserve_failed_tunnel_log(&mut self) {
         let log_file = self.directory.join("openai-tunnel.log");
-        if !log_file.is_file() {
+        let startup_log_file = self.directory.join("openai-tunnel-startup.log");
+        if !log_file.is_file() && !startup_log_file.is_file() {
             return;
         }
 
