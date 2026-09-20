@@ -119,6 +119,9 @@ pub(crate) async fn run_regular_server_tunnel(
         result = report_regular_tunnel_health(&health_url, &local_mcp_url, &options.bootstrap_token) => result,
     };
     tunnel.stop().await;
+    if outcome.is_err() {
+        session.preserve_failed_tunnel_log();
+    }
     outcome
 }
 
