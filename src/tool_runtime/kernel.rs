@@ -333,7 +333,11 @@ impl ToolRuntime {
                 correlation: Default::default(),
             };
         }
-        if request.tool_name == "goal_plan_state" && !capabilities.goal_plan_app {
+        if matches!(
+            request.tool_name.as_str(),
+            "goal_plan_state" | "goal_plan_recheck_attention"
+        ) && !capabilities.goal_plan_app
+        {
             return ToolCallOutcome {
                 success: false,
                 result: None,
