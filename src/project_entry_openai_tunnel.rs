@@ -106,12 +106,7 @@ pub(super) async fn start_openai_tunnel(
         &startup_log_file,
     )
     .await?;
-    run_control_plane_probe(
-        prerequisites,
-        authorization_file,
-        &startup_log_file,
-    )
-    .await?;
+    run_control_plane_probe(prerequisites, authorization_file, &startup_log_file).await?;
 
     let health_url_file = session_dir.join("openai-tunnel-health-url");
     let log_file = session_dir.join("openai-tunnel.log");
@@ -229,7 +224,7 @@ async fn run_doctor(
             );
             return Err(tunnel_runtime_error(
                 "OpenAI tunnel-client doctor could not be supervised",
-            ))
+            ));
         }
         Err(_) => {
             append_startup_diagnostic(
@@ -242,7 +237,7 @@ async fn run_doctor(
             );
             return Err(tunnel_runtime_error(
                 "OpenAI tunnel-client doctor timed out before validating the connection",
-            ))
+            ));
         }
     };
     append_startup_diagnostic(
@@ -295,44 +290,46 @@ async fn run_control_plane_probe(
         &[],
         Some(authorization_file),
     );
-    let output =
-        match tokio::time::timeout(TUNNEL_CLIENT_CONTROL_PLANE_PROBE_TIMEOUT, command.output())
-            .await
-        {
-            Ok(Ok(output)) => output,
-            Ok(Err(error)) => {
-                append_startup_diagnostic(
-                    startup_log_file,
-                    "control_plane_probe",
-                    &format!(
-                        "spawn_error io_kind={:?} raw_os_error={:?} error={error}",
-                        error.kind(),
-                        error.raw_os_error()
-                    ),
-                    &[],
-                    &[],
-                    Some(authorization_file),
-                );
-                return Err(tunnel_runtime_error(
-                    "OpenAI tunnel-client control-plane probe could not be supervised",
-                ))
-            }
-            Err(_) => {
-                append_startup_diagnostic(
-                    startup_log_file,
-                    "control_plane_probe",
-                    "timeout",
-                    &[],
-                    &[],
-                    Some(authorization_file),
-                );
-                return Err(ProductError::new(
-                    "tunnel_unavailable",
-                    "OpenAI Secure MCP Tunnel could not reach the OpenAI control plane before the control-plane probe timeout",
-                    Some("Check the Tunnel proxy, api.openai.com network access, Tunnel ID, and Runtime Key permissions, then retry."),
-                ))
-            }
-        };
+    let output = match tokio::time::timeout(
+        TUNNEL_CLIENT_CONTROL_PLANE_PROBE_TIMEOUT,
+        command.output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            append_startup_diagnostic(
+                startup_log_file,
+                "control_plane_probe",
+                &format!(
+                    "spawn_error io_kind={:?} raw_os_error={:?} error={error}",
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+                &[],
+                &[],
+                Some(authorization_file),
+            );
+            return Err(tunnel_runtime_error(
+                "OpenAI tunnel-client control-plane probe could not be supervised",
+            ));
+        }
+        Err(_) => {
+            append_startup_diagnostic(
+                startup_log_file,
+                "control_plane_probe",
+                "timeout",
+                &[],
+                &[],
+                Some(authorization_file),
+            );
+            return Err(ProductError::new(
+                "tunnel_unavailable",
+                "OpenAI Secure MCP Tunnel could not reach the OpenAI control plane before the control-plane probe timeout",
+                Some("Check the Tunnel proxy, api.openai.com network access, Tunnel ID, and Runtime Key permissions, then retry."),
+            ));
+        }
+    };
     append_startup_diagnostic(
         startup_log_file,
         "control_plane_probe",
