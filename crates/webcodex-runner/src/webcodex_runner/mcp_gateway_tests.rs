@@ -441,7 +441,7 @@ fn image_only_result_succeeds_with_standard_wire_fields() {
     assert_eq!(
         result.content,
         vec![McpGatewayContent::Image {
-            data: "AA==".to_string(),
+            data: "iVBORw0KGgo=".to_string(),
             mime_type: "image/png".to_string(),
         }]
     );
@@ -489,7 +489,7 @@ fn mixed_text_image_text_result_preserves_order_and_structured_content() {
                 text: "before".to_string(),
             },
             McpGatewayContent::Image {
-                data: "AA==".to_string(),
+                data: "iVBORw0KGgo=".to_string(),
                 mime_type: "image/png".to_string(),
             },
             McpGatewayContent::Text {
@@ -518,7 +518,7 @@ fn image_result_preserves_provider_is_error_semantics() {
     assert_eq!(
         result.content,
         vec![McpGatewayContent::Image {
-            data: "AA==".to_string(),
+            data: "/9j/".to_string(),
             mime_type: "image/jpeg".to_string(),
         }]
     );
@@ -531,6 +531,7 @@ fn malformed_and_oversized_images_fail_as_invalid_results_without_hidden_retry()
         "missing_image_data",
         "missing_image_mime",
         "invalid_image_mime",
+        "mismatched_image_mime",
         "oversized_image",
     ] {
         let fixture = Fixture::new(scenario, 3);

@@ -526,6 +526,14 @@ pub fn validate_tool_result(result: &McpGatewayToolResult) -> Result<(), String>
                         MCP_GATEWAY_MAX_IMAGE_BYTES
                     ));
                 }
+                let detected_mime = sniff_supported_image_mime(&decoded).ok_or_else(|| {
+                    "tool result image data is not a supported PNG, JPEG, or WebP image".to_string()
+                })?;
+                if detected_mime != mime_type {
+                    return Err(format!(
+                        "tool result image mimeType '{mime_type}' does not match decoded content '{detected_mime}'"
+                    ));
+                }
                 image_bytes = image_bytes.saturating_add(decoded.len());
                 image_base64_bytes = image_base64_bytes.saturating_add(data.len());
                 if image_bytes > MCP_GATEWAY_MAX_IMAGE_BYTES
@@ -562,6 +570,18 @@ pub fn validate_tool_result(result: &McpGatewayToolResult) -> Result<(), String>
         ));
     }
     Ok(())
+}
+
+fn sniff_supported_image_mime(data: &[u8]) -> Option<&'static str> {
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if data.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
 }
 
 pub fn validate_json_value(value: &Value, max_bytes: usize, field: &str) -> Result<(), String> {
@@ -725,10 +745,14 @@ mod tests {
 
     #[test]
     fn image_content_round_trips_standard_wire_for_supported_mimes() {
-        for mime_type in ["image/png", "image/jpeg"] {
+        for (mime_type, data) in [
+            ("image/png", "iVBORw0KGgo="),
+            ("image/jpeg", "/9j/"),
+            ("image/webp", "UklGRgAAAABXRUJQ"),
+        ] {
             let result = McpGatewayToolResult {
                 content: vec![McpGatewayContent::Image {
-                    data: "AA==".to_string(),
+                    data: data.to_string(),
                     mime_type: mime_type.to_string(),
                 }],
                 structured_content: None,
@@ -737,7 +761,7 @@ mod tests {
             validate_tool_result(&result).unwrap();
             let wire = serde_json::to_value(&result).unwrap();
             assert_eq!(wire["content"][0]["type"], "image");
-            assert_eq!(wire["content"][0]["data"], "AA==");
+            assert_eq!(wire["content"][0]["data"], data);
             assert_eq!(wire["content"][0]["mimeType"], mime_type);
             assert!(wire["content"][0].get("mime_type").is_none());
             let decoded: McpGatewayToolResult = serde_json::from_value(wire).unwrap();
@@ -765,8 +789,15 @@ mod tests {
                 .unwrap_err()
                 .contains("mimeType")
         );
+        assert!(
+            validate_tool_result(&invalid("iVBORw0KGgo=".to_string(), "image/jpeg"))
+                .unwrap_err()
+                .contains("does not match")
+        );
 
-        let max_image = general_purpose::STANDARD.encode(vec![0u8; MCP_GATEWAY_MAX_IMAGE_BYTES]);
+        let mut max_image_bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        max_image_bytes.resize(MCP_GATEWAY_MAX_IMAGE_BYTES, 0);
+        let max_image = general_purpose::STANDARD.encode(max_image_bytes);
         assert_eq!(max_image.len(), MCP_GATEWAY_MAX_IMAGE_BASE64_BYTES);
         let max_result = invalid(max_image, "image/png");
         validate_tool_result(&max_result).unwrap();
@@ -785,7 +816,7 @@ mod tests {
                     text: "t".repeat(300 * 1024),
                 },
                 McpGatewayContent::Image {
-                    data: "AA==".to_string(),
+                    data: "iVBORw0KGgo=".to_string(),
                     mime_type: "image/png".to_string(),
                 },
             ],
@@ -796,15 +827,18 @@ mod tests {
             .unwrap_err()
             .contains("non-image"));
 
-        let chunk = general_purpose::STANDARD.encode(vec![0u8; 600 * 1024]);
+        let mut png_chunk = b"\x89PNG\r\n\x1a\n".to_vec();
+        png_chunk.resize(600 * 1024, 0);
+        let mut jpeg_chunk = vec![0xff, 0xd8, 0xff];
+        jpeg_chunk.resize(600 * 1024, 0);
         let aggregate = McpGatewayToolResult {
             content: vec![
                 McpGatewayContent::Image {
-                    data: chunk.clone(),
+                    data: general_purpose::STANDARD.encode(png_chunk),
                     mime_type: "image/png".to_string(),
                 },
                 McpGatewayContent::Image {
-                    data: chunk,
+                    data: general_purpose::STANDARD.encode(jpeg_chunk),
                     mime_type: "image/jpeg".to_string(),
                 },
             ],
@@ -822,7 +856,7 @@ mod tests {
                     text: "before".to_string(),
                 },
                 McpGatewayContent::Image {
-                    data: "AA==".to_string(),
+                    data: "iVBORw0KGgo=".to_string(),
                     mime_type: "image/png".to_string(),
                 },
                 McpGatewayContent::Text {

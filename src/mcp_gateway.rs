@@ -806,7 +806,7 @@ mod tests {
                         text: "before".to_string(),
                     },
                     McpGatewayContent::Image {
-                        data: "AA==".to_string(),
+                        data: "iVBORw0KGgo=".to_string(),
                         mime_type: "image/png".to_string(),
                     },
                     McpGatewayContent::Text {

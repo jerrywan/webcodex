@@ -255,23 +255,23 @@ fn main() -> io::Result<()> {
                     "image_result" => send(
                         &mut writer,
                         &format!(
-                            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"content":[{{"type":"image","data":"AA==","mimeType":"image/png"}}],"isError":false}}}}"#
+                            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"content":[{{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}}],"isError":false}}}}"#
                         ),
                     )?,
                     "mixed_content_result" => send(
                         &mut writer,
                         &format!(
-                            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"content":[{{"type":"text","text":"before"}},{{"type":"image","data":"AA==","mimeType":"image/png"}},{{"type":"text","text":"after"}}],"structuredContent":{{"kind":"mixed"}},"isError":false}}}}"#
+                            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"content":[{{"type":"text","text":"before"}},{{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}},{{"type":"text","text":"after"}}],"structuredContent":{{"kind":"mixed"}},"isError":false}}}}"#
                         ),
                     )?,
                     "image_error_result" => send(
                         &mut writer,
                         &format!(
-                            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"content":[{{"type":"image","data":"AA==","mimeType":"image/jpeg"}}],"structuredContent":{{"code":"IMAGE_ERROR"}},"isError":true}}}}"#
+                            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"content":[{{"type":"image","data":"/9j/","mimeType":"image/jpeg"}}],"structuredContent":{{"code":"IMAGE_ERROR"}},"isError":true}}}}"#
                         ),
                     )?,
                     "max_image_result" => {
-                        let data = format!("{}AA==", "AAAA".repeat(349_525));
+                        let data = format!("iVBORw0KGgoA{}AA==", "AAAA".repeat(349_522));
                         send(
                             &mut writer,
                             &format!(
@@ -310,6 +310,12 @@ fn main() -> io::Result<()> {
                         &mut writer,
                         &format!(
                             r#"{{"jsonrpc":"2.0","id":{id},"result":{{"content":[{{"type":"image","data":"AA==","mimeType":"text/plain"}}]}}}}"#
+                        ),
+                    )?,
+                    "mismatched_image_mime" => send(
+                        &mut writer,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"content":[{{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/jpeg"}}]}}}}"#
                         ),
                     )?,
                     "bad_result" => send(

@@ -529,7 +529,7 @@ async fn http_mcp_passthrough_preserves_mixed_image_content_order() {
                 text: "before".into(),
             },
             McpGatewayContent::Image {
-                data: "AA==".into(),
+                data: "iVBORw0KGgo=".into(),
                 mime_type: "image/png".into(),
             },
             McpGatewayContent::Text {
@@ -612,7 +612,7 @@ async fn http_mcp_passthrough_preserves_mixed_image_content_order() {
             );
             assert_eq!(body["result"]["content"][0]["text"], "before");
             assert_eq!(body["result"]["content"][1]["type"], "image");
-            assert_eq!(body["result"]["content"][1]["data"], "AA==");
+            assert_eq!(body["result"]["content"][1]["data"], "iVBORw0KGgo=");
             assert_eq!(body["result"]["content"][1]["mimeType"], "image/png");
             assert_eq!(body["result"]["content"][2]["text"], "after");
             assert_eq!(
