@@ -1,0 +1,31 @@
+name: Compute tunnel-client v0.0.14 hashes
+
+on:
+  push:
+    branches:
+      - fix/openai-tunnel-readiness-20260920
+
+permissions:
+  contents: read
+
+jobs:
+  hashes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and hash official assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 windows-arm64; do
+            file="tunnel-client-v0.0.14-$target.zip"
+            url="https://github.com/openai/tunnel-client/releases/download/v0.0.14/$file"
+            curl -fL --retry 3 --retry-delay 2 "$url" -o "work/$file"
+            archive="$(sha256sum "work/$file" | awk '{print $1}')"
+            member=tunnel-client
+            case "$target" in windows-*) member=tunnel-client.exe;; esac
+            rm -rf work/extract && mkdir -p work/extract
+            python3 -c 'import sys,zipfile,pathlib; z=pathlib.Path("work")/sys.argv[1]; m=sys.argv[2]; a=zipfile.ZipFile(z); pathlib.Path("work/extract",m).write_bytes(a.read(m))' "$file" "$member"
+            binary="$(sha256sum "work/extract/$member" | awk '{print $1}')"
+            echo "HASH target=$target archive=$archive binary=$binary member=$member"
+          done
