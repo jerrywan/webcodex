@@ -1,0 +1,32 @@
+name: Bootstrap upstream WebCodex
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  import-upstream:
+    if: github.event.head_commit.message != 'chore: import upstream webcodex'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/yyjeqhc/webcodex.git /tmp/webcodex-upstream
+
+      - name: Import upstream tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete --exclude='.git' /tmp/webcodex-upstream/ ./
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: import upstream webcodex"
+          git push origin HEAD:main
