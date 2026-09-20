@@ -18,14 +18,15 @@ use tokio::process::{Child, Command};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-const TUNNEL_CLIENT_VERSION: &str = "0.0.12";
+const TUNNEL_CLIENT_VERSION: &str = "0.0.14";
 const TUNNEL_CLIENT_RELEASE_BASE: &str =
-    "https://github.com/openai/tunnel-client/releases/download/v0.0.12";
+    "https://github.com/openai/tunnel-client/releases/download/v0.0.14";
 const TUNNEL_CLIENT_MAX_DOWNLOAD_BYTES: usize = 64 * 1024 * 1024;
 const TUNNEL_CLIENT_MAX_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 const TUNNEL_CLIENT_VERIFY_TIMEOUT: Duration = Duration::from_secs(10);
 const TUNNEL_CLIENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(30);
 const TUNNEL_CLIENT_CONTROL_PLANE_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+const TUNNEL_CLIENT_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const TUNNEL_CLIENT_READY_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const TUNNEL_CLIENT_HEALTH_URL_BYTES: usize = 512;
 const TUNNEL_CLIENT_OVERRIDE: &str = "WEBCODEX_TUNNEL_CLIENT_BIN";
@@ -89,10 +90,12 @@ pub(super) async fn start_openai_tunnel(
     mcp_url: &str,
     authorization_file: &Path,
     session_dir: &Path,
-    deadline: Instant,
 ) -> Result<OpenAiTunnel, ProductError> {
-    run_doctor(prerequisites, mcp_url, authorization_file, deadline).await?;
-    run_control_plane_probe(prerequisites, deadline).await?;
+    // Doctor, control-plane verification, and daemon readiness are independent
+    // phases. Do not let a slow-but-successful earlier phase consume the next
+    // phase's startup budget.
+    run_doctor(prerequisites, mcp_url, authorization_file).await?;
+    run_control_plane_probe(prerequisites).await?;
 
     let health_url_file = session_dir.join("openai-tunnel-health-url");
     let log_file = session_dir.join("openai-tunnel.log");
@@ -119,16 +122,19 @@ pub(super) async fn start_openai_tunnel(
         .spawn()
         .map_err(|_| tunnel_runtime_error("OpenAI tunnel-client could not start"))?;
 
-    if let Err(error) = wait_until_ready(&mut child, &health_url_file, deadline).await {
+    let ready_deadline = Instant::now() + TUNNEL_CLIENT_READY_TIMEOUT;
+    if let Err(mut error) = wait_until_ready(&mut child, &health_url_file, ready_deadline).await {
         let _ = child.start_kill();
         let _ = child.wait().await;
+        attach_tunnel_log_hint(&mut error, &log_file);
         return Err(error);
     }
     let health_url = match read_loopback_health_url(&health_url_file) {
         Ok(value) => value,
-        Err(error) => {
+        Err(mut error) => {
             let _ = child.start_kill();
             let _ = child.wait().await;
+            attach_tunnel_log_hint(&mut error, &log_file);
             return Err(error);
         }
     };
@@ -169,7 +175,6 @@ async fn run_doctor(
     prerequisites: &OpenAiTunnelPrerequisites,
     mcp_url: &str,
     authorization_file: &Path,
-    deadline: Instant,
 ) -> Result<(), ProductError> {
     let mut command = Command::new(&prerequisites.binary);
     suppress_windows_console(&mut command);
@@ -180,43 +185,29 @@ async fn run_doctor(
         .arg("127.0.0.1:0")
         .arg("--json")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .kill_on_drop(true);
-    let mut child = command
-        .spawn()
-        .map_err(|_| tunnel_runtime_error("OpenAI tunnel-client doctor could not start"))?;
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    if remaining.is_zero() {
-        let _ = child.start_kill();
-        let _ = child.wait().await;
-        return Err(tunnel_runtime_error(
-            "OpenAI tunnel-client doctor had no startup budget remaining",
-        ));
-    }
-    let budget = remaining.min(TUNNEL_CLIENT_DOCTOR_TIMEOUT);
-    let status = match tokio::time::timeout(budget, child.wait()).await {
-        Ok(Ok(status)) => status,
+
+    let output = match tokio::time::timeout(TUNNEL_CLIENT_DOCTOR_TIMEOUT, command.output()).await {
+        Ok(Ok(output)) => output,
         Ok(Err(_)) => {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
             return Err(tunnel_runtime_error(
                 "OpenAI tunnel-client doctor could not be supervised",
-            ));
+            ))
         }
         Err(_) => {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
             return Err(tunnel_runtime_error(
                 "OpenAI tunnel-client doctor timed out before validating the connection",
-            ));
+            ))
         }
     };
-    if !status.success() {
+    if !output.status.success() {
+        let detail = tunnel_output_hint(&output.stdout, &output.stderr);
         return Err(ProductError::new(
             "tunnel_unavailable",
-            "OpenAI tunnel-client doctor rejected the Secure MCP Tunnel configuration",
-            Some("Check CONTROL_PLANE_TUNNEL_ID, CONTROL_PLANE_API_KEY, Tunnel workspace scope, and network access, then retry."),
+            format!(
+                "OpenAI tunnel-client doctor rejected the Secure MCP Tunnel configuration ({detail})"
+            ),
+            Some("Check CONTROL_PLANE_TUNNEL_ID, CONTROL_PLANE_API_KEY, Tunnel workspace scope, local MCP reachability, and network/proxy access, then retry."),
         ));
     }
     Ok(())
@@ -224,7 +215,6 @@ async fn run_doctor(
 
 async fn run_control_plane_probe(
     prerequisites: &OpenAiTunnelPrerequisites,
-    deadline: Instant,
 ) -> Result<(), ProductError> {
     let mut command = Command::new(&prerequisites.binary);
     suppress_windows_console(&mut command);
@@ -240,48 +230,99 @@ async fn run_control_plane_probe(
         .env_remove("OPENAI_ADMIN_KEY")
         .env_remove("OPENAI_API_KEY")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|_| {
-        tunnel_runtime_error("OpenAI tunnel-client control-plane probe could not start")
-    })?;
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    if remaining.is_zero() {
-        let _ = child.start_kill();
-        let _ = child.wait().await;
-        return Err(tunnel_runtime_error(
-            "OpenAI tunnel-client control-plane probe had no startup budget remaining",
-        ));
-    }
-    let budget = remaining.min(TUNNEL_CLIENT_CONTROL_PLANE_PROBE_TIMEOUT);
-    let status = match tokio::time::timeout(budget, child.wait()).await {
-        Ok(Ok(status)) => status,
-        Ok(Err(_)) => {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-            return Err(tunnel_runtime_error(
-                "OpenAI tunnel-client control-plane probe could not be supervised",
-            ));
-        }
-        Err(_) => {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-            return Err(ProductError::new(
-                "tunnel_unavailable",
-                "OpenAI Secure MCP Tunnel could not reach the OpenAI control plane before the startup timeout",
-                Some("Check the Tunnel proxy, api.openai.com network access, Tunnel ID, and Runtime Key permissions, then retry."),
-            ));
-        }
-    };
-    if !status.success() {
+
+    let output =
+        match tokio::time::timeout(TUNNEL_CLIENT_CONTROL_PLANE_PROBE_TIMEOUT, command.output())
+            .await
+        {
+            Ok(Ok(output)) => output,
+            Ok(Err(_)) => {
+                return Err(tunnel_runtime_error(
+                    "OpenAI tunnel-client control-plane probe could not be supervised",
+                ))
+            }
+            Err(_) => {
+                return Err(ProductError::new(
+                    "tunnel_unavailable",
+                    "OpenAI Secure MCP Tunnel could not reach the OpenAI control plane before the control-plane probe timeout",
+                    Some("Check the Tunnel proxy, api.openai.com network access, Tunnel ID, and Runtime Key permissions, then retry."),
+                ))
+            }
+        };
+    if !output.status.success() {
+        let detail = tunnel_output_hint(&output.stdout, &output.stderr);
         return Err(ProductError::new(
             "tunnel_unavailable",
-            "OpenAI Secure MCP Tunnel could not verify the selected Tunnel with the Runtime Key",
+            format!(
+                "OpenAI Secure MCP Tunnel could not verify the selected Tunnel with the Runtime Key ({detail})"
+            ),
             Some("Check the Tunnel proxy, Tunnel workspace, and Tunnels Read + Use permissions, then retry."),
         ));
     }
     Ok(())
+}
+
+fn tunnel_output_hint(stdout: &[u8], stderr: &[u8]) -> &'static str {
+    let mut text = String::from_utf8_lossy(stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(stderr));
+    let text = text.to_ascii_lowercase();
+
+    if text.contains("401")
+        || text.contains("unauthorized")
+        || text.contains("invalid api key")
+        || text.contains("authentication failed")
+    {
+        "Runtime API key authentication was rejected"
+    } else if text.contains("403")
+        || text.contains("forbidden")
+        || text.contains("permission denied")
+        || text.contains("insufficient permission")
+    {
+        "Runtime API key does not have the required Tunnel permission"
+    } else if text.contains("404") || text.contains("not found") {
+        "Tunnel ID or Tunnel workspace could not be found"
+    } else if text.contains("proxy") {
+        "proxy configuration or proxy connectivity failed"
+    } else if text.contains("certificate") || text.contains("tls") || text.contains("x509") {
+        "TLS/certificate validation failed"
+    } else if text.contains("dns")
+        || text.contains("no such host")
+        || text.contains("name resolution")
+        || text.contains("lookup")
+    {
+        "DNS resolution failed"
+    } else if text.contains("timeout")
+        || text.contains("timed out")
+        || text.contains("deadline exceeded")
+    {
+        "network request timed out"
+    } else if text.contains("connection refused")
+        || text.contains("connection reset")
+        || text.contains("unreachable")
+        || text.contains("unexpected eof")
+        || text.contains(" eof")
+    {
+        "network/control-plane connection failed"
+    } else if text.contains("mcp") && (text.contains("connect") || text.contains("reachable")) {
+        "local MCP endpoint could not be reached"
+    } else {
+        "tunnel-client returned a non-success status"
+    }
+}
+
+fn attach_tunnel_log_hint(error: &mut ProductError, log_file: &Path) {
+    if !log_file.is_file() {
+        return;
+    }
+    let log_hint = format!(
+        "Startup diagnostics were preserved at {}.",
+        log_file.to_string_lossy()
+    );
+    error.next_action = Some(match error.next_action.take() {
+        Some(action) => format!("{action} {log_hint}"),
+        None => log_hint,
+    });
 }
 
 async fn wait_until_ready(
@@ -447,44 +488,44 @@ fn tunnel_client_asset_for(os: &str, arch: &str) -> Result<TunnelClientAsset, Pr
     let asset = match (os, arch) {
         ("linux", "x86_64") => TunnelClientAsset {
             target: "linux-amd64",
-            file_name: "tunnel-client-v0.0.12-linux-amd64.zip",
-            archive_sha256: "2bb693bd7b5cd28da7ce09cd9e309529dbb33b7cc9dc0058e62a064688f92c81",
-            binary_sha256: "ee9d4a75bc0b42f36f345aa96231e0db1ab00488122f34ebc99d6db055b6603e",
+            file_name: "tunnel-client-v0.0.14-linux-amd64.zip",
+            archive_sha256: "15bd17e805cad39d412199115bb9e10a978dd35258a114cdf25dd2ae6681c7d3",
+            binary_sha256: "472eb9dd9dd625b4e6023c3b4a5736b3a2e5a1b6dbe9338e001887a64ec992a6",
             member_name: "tunnel-client",
         },
         ("linux", "aarch64") => TunnelClientAsset {
             target: "linux-arm64",
-            file_name: "tunnel-client-v0.0.12-linux-arm64.zip",
-            archive_sha256: "6813878a3edb82ebebb32fe5a859bc6327a81cce5bc7b635a2313174d26365d6",
-            binary_sha256: "0a48e6696de0df5951c013e40be81ce775e6644e209758c48795a0ecbda06406",
+            file_name: "tunnel-client-v0.0.14-linux-arm64.zip",
+            archive_sha256: "2de3fb879a18edb847e0313592c912f1983685488290a7fdba7ac403e6a4fb0a",
+            binary_sha256: "ab6c05258f15dc43a8e23f39460beb69892a8ced03e4c345a6f1aef0dd009b0f",
             member_name: "tunnel-client",
         },
         ("macos", "x86_64") => TunnelClientAsset {
             target: "darwin-amd64",
-            file_name: "tunnel-client-v0.0.12-darwin-amd64.zip",
-            archive_sha256: "33de53aec680faafedc795f8f8268d6861577bddb871cb2d49529c91f88c2009",
-            binary_sha256: "4133dab2575223252732a998210c34b7ed96a51765cf5ea835a8e24cf2be1272",
+            file_name: "tunnel-client-v0.0.14-darwin-amd64.zip",
+            archive_sha256: "75e10be774184fb42189e347b16eb6bc9fb0780135d8af714d34e30ce068dc53",
+            binary_sha256: "89478d1d58350818275b852169745e1af0e18c02ff9b5b46d50df22018c95be9",
             member_name: "tunnel-client",
         },
         ("macos", "aarch64") => TunnelClientAsset {
             target: "darwin-arm64",
-            file_name: "tunnel-client-v0.0.12-darwin-arm64.zip",
-            archive_sha256: "42fb3138dc9c081d5777cb7e8bd1e041cc48b67c4978dbab3c5167ca1aabca02",
-            binary_sha256: "b1757220cf4722cec9085ee4a908cf0ee4c1a499a33bd99979b9a9c7669e29b1",
+            file_name: "tunnel-client-v0.0.14-darwin-arm64.zip",
+            archive_sha256: "b540493c5bdbcdbb755700c8e2e16597e28b1569e425007e0f73111047bd6a64",
+            binary_sha256: "309fd85da5a8c2ca8dae920deea8ac10a4d7934ed18ac46e7df0c200139cc9c5",
             member_name: "tunnel-client",
         },
         ("windows", "x86_64") => TunnelClientAsset {
             target: "windows-amd64",
-            file_name: "tunnel-client-v0.0.12-windows-amd64.zip",
-            archive_sha256: "2a2804933924e38a502d62b61f0266cb80d56d65744f4c29876b2bf9c1544356",
-            binary_sha256: "6649169733686805ca16cccd91774594d0c017fd729c37ad4ce1cd18323d9ae8",
+            file_name: "tunnel-client-v0.0.14-windows-amd64.zip",
+            archive_sha256: "784ab8da7b5a88f0109f1fd8aaf0a1c86067430b896dddf307ef7e3cc49fa1a5",
+            binary_sha256: "fcc85a69ec0ad82518e4f8964f60c45e31787957782a0fc9c1b0c44e82d61b9b",
             member_name: "tunnel-client.exe",
         },
         ("windows", "aarch64") => TunnelClientAsset {
             target: "windows-arm64",
-            file_name: "tunnel-client-v0.0.12-windows-arm64.zip",
-            archive_sha256: "65ab54221554481bb1c23b6015b99abe0b7f79b08593f4fb17a9e2e25532281d",
-            binary_sha256: "480684ec1031fc2985c7e87f9d669e7dfda4012a8ecdab21eabe1b5deafdd656",
+            file_name: "tunnel-client-v0.0.14-windows-arm64.zip",
+            archive_sha256: "fa775db8897df543dd4ba66404f69492a2acfbc6a291f10df27aced064a16568",
+            binary_sha256: "7260ec886a7efd34202c6506bd35b068e94723a5402ea6f76af5a3af3dbd0a0b",
             member_name: "tunnel-client.exe",
         },
         _ => {
