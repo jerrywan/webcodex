@@ -7,7 +7,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegularServerTunnelOptions {
     pub(crate) local_server_url: String,
