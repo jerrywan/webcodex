@@ -432,7 +432,7 @@ impl ProcessSupervisor {
                             .rev()
                             .collect::<Vec<_>>();
                         let diagnostic_path =
-                            persist_managed_process_diagnostic(kind, pid, generation, &summary, &recent);
+                            persist_managed_process_diagnostic(*kind, pid, generation, &summary, &recent);
                         let summary = match diagnostic_path {
                             Some(path) => format!(
                                 "{summary}; diagnostic_file={}",
