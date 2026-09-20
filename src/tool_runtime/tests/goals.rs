@@ -430,13 +430,15 @@ fn goal_schemas_are_bounded_private_and_existing_coding_tools_do_not_accept_goal
         "^wc_dagent_[A-Za-z0-9_-]{16}$"
     );
     let correlation = &detail["properties"]["correlations"]["items"];
+    let mut correlation_fields = correlation["properties"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    correlation_fields.sort();
     assert_eq!(
-        correlation["properties"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>(),
+        correlation_fields,
         vec![
             "created_at_unix_ms".to_string(),
             "kind".to_string(),

@@ -1,6 +1,6 @@
 //! Runtime observability metadata injected into `ToolRuntime`.
 
-use super::registry::registered_tool_specs;
+use super::tool_definition::model_visible_tool_definitions;
 use super::{permissions, ToolResult, ToolRuntime};
 use crate::auth::AuthContext;
 use crate::runner_protocol::{RunnerView, ShellJobInfo};
@@ -259,7 +259,18 @@ impl ToolRuntime {
     /// tokens, api keys, full env, complete project path lists, or
     /// stdout/stderr. Returns a structured JSON object with service metadata,
     /// Runner-registered Project status, Runner summaries, and Job counts.
-    pub(crate) async fn runtime_status(&self, auth: Option<&AuthContext>) -> ToolResult {
+    pub(crate) fn runtime_status<'a>(
+        &'a self,
+        auth: Option<&'a AuthContext>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolResult> + Send + 'a>> {
+        // Runtime status aggregates fleet, project, Job, connection, build, and
+        // configuration state. Keep that aggregate future off caller stacks so
+        // nested startup/admin/status flows remain bounded under workspace-wide
+        // dependency feature unification.
+        Box::pin(async move { self.runtime_status_inner(auth).await })
+    }
+
+    async fn runtime_status_inner(&self, auth: Option<&AuthContext>) -> ToolResult {
         let access = crate::runner_http::runner_access_from_auth(auth);
         let clients = self
             .runner_registry
@@ -396,9 +407,10 @@ impl ToolRuntime {
         });
 
         // -- tools summary ----------------------------------------------------
-        let specs = registered_tool_specs();
-        let tools_count = specs.len();
-        let tools_names: Vec<String> = specs.iter().map(|s| s.name.clone()).collect();
+        let tools_names: Vec<String> = model_visible_tool_definitions()
+            .map(|definition| definition.name.to_string())
+            .collect();
+        let tools_count = tools_names.len();
         let tools = json!({
             "count": tools_count,
             "names": tools_names,
@@ -628,10 +640,12 @@ impl ToolRuntime {
             "reconciled_count": reconciled_count,
             "lost_after_reconcile_count": lost_after_reconcile_count,
         });
-        let specs = registered_tool_specs();
+        let tool_names: Vec<String> = model_visible_tool_definitions()
+            .map(|definition| definition.name.to_string())
+            .collect();
         let tools = json!({
-            "count": specs.len(),
-            "names": specs.iter().map(|spec| spec.name.clone()).collect::<Vec<_>>(),
+            "count": tool_names.len(),
+            "names": tool_names,
         });
         let server_build = crate::build_info::runtime_build_info();
         let focus = json!({
