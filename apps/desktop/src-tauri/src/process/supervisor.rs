@@ -73,6 +73,8 @@ struct ManagedProcess {
     child: ManagedChild,
     phase: ProcessPhase,
     exit_code: Option<i32>,
+    logs: Arc<Mutex<VecDeque<String>>>,
+    observation_failures: u32,
     stdout_task: JoinHandle<()>,
     stderr_task: JoinHandle<()>,
 }
@@ -329,16 +331,12 @@ impl ProcessSupervisor {
                 stdout_logs,
                 machine_tx,
                 machine_stdout || matches!(kind, ProcessKey::RegularTunnel(_)),
+                "stdout",
             )
         });
         let stderr_logs = Arc::clone(&logs);
         let stderr_task = tokio::task::spawn_blocking(move || {
-            drain_stream(
-                stderr,
-                stderr_logs,
-                None,
-                matches!(kind, ProcessKey::RegularTunnel(_)),
-            )
+            drain_stream(stderr, stderr_logs, None, false, "stderr")
         });
         self.activity.push_for_profile(
             kind.tunnel_profile_id(),
@@ -354,6 +352,8 @@ impl ProcessSupervisor {
                 child,
                 phase: ProcessPhase::Starting,
                 exit_code: None,
+                logs,
+                observation_failures: 0,
                 stdout_task,
                 stderr_task,
             },
@@ -371,6 +371,7 @@ impl ProcessSupervisor {
             }
             match process.child.try_wait() {
                 Ok(Some(status)) => {
+                    process.observation_failures = 0;
                     process.exit_code = status.code();
                     process.phase = if status.success() {
                         ProcessPhase::Exited
@@ -389,16 +390,71 @@ impl ProcessSupervisor {
                         format!("Desktop-owned process exited with status {status}"),
                     );
                 }
-                Ok(None) => process.phase = ProcessPhase::Running,
-                Err(_) => {
-                    process.phase = ProcessPhase::Failed;
-                    self.activity.push_for_profile(
-                        kind.tunnel_profile_id(),
-                        ActivityEventKind::ProcessObservationFailed,
-                        kind.source(),
-                        ActivityLevel::Error,
-                        "Desktop could not observe the child process state",
-                    );
+                Ok(None) => {
+                    process.observation_failures = 0;
+                    process.phase = ProcessPhase::Running;
+                }
+                Err(error) => {
+                    process.observation_failures =
+                        process.observation_failures.saturating_add(1);
+                    let pid = process.child.id();
+                    let generation = process.generation;
+                    let tree_state = process.child.try_tree_exit();
+                    let tree_state_text = match &tree_state {
+                        Ok(true) => "empty".to_string(),
+                        Ok(false) => "active".to_string(),
+                        Err(tree_error) => format!(
+                            "unavailable(kind={:?}, raw_os_error={:?}, error={})",
+                            tree_error.kind(),
+                            tree_error.raw_os_error(),
+                            tree_error
+                        ),
+                    };
+
+                    if process.observation_failures == 1 {
+                        self.activity.push_for_profile(
+                            kind.tunnel_profile_id(),
+                            ActivityEventKind::ProcessObservationFailed,
+                            kind.source(),
+                            ActivityLevel::Error,
+                            format!(
+                                "Desktop could not observe the child process state: kind={kind:?}, pid={pid}, generation={generation}, io_kind={:?}, raw_os_error={:?}, error={}, job_tree={tree_state_text}",
+                                error.kind(),
+                                error.raw_os_error(),
+                                error
+                            ),
+                        );
+
+                        let recent = process
+                            .logs
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .iter()
+                            .rev()
+                            .take(8)
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        for line in recent.into_iter().rev() {
+                            self.activity.push_for_profile(
+                                kind.tunnel_profile_id(),
+                                ActivityEventKind::ProcessObservationFailed,
+                                kind.source(),
+                                ActivityLevel::Error,
+                                format!("Recent managed-process diagnostic: {line}"),
+                            );
+                        }
+                    }
+
+                    // A failed direct-child status query must not tear down a
+                    // still-live Job Object tree. The regular-tunnel observer
+                    // also watches the machine-event pipe, so a dead parent is
+                    // still detected when that pipe closes. If the Job Object is
+                    // empty (or cannot itself be queried), ownership is no
+                    // longer safely observable and the process is failed.
+                    process.phase = match tree_state {
+                        Ok(false) => ProcessPhase::Running,
+                        Ok(true) | Err(_) => ProcessPhase::Failed,
+                    };
                 }
             }
         }
@@ -565,13 +621,14 @@ fn drain_stream<R>(
     mut reader: R,
     logs: Arc<Mutex<VecDeque<String>>>,
     machine_tx: Option<MachineEventSender>,
-    machine_only: bool,
+    parse_machine_events: bool,
+    stream_name: &'static str,
 ) where
     R: Read,
 {
     let mut buffer = [0_u8; 4096];
     let mut line = Vec::with_capacity(4096);
-    let line_limit = if machine_only {
+    let line_limit = if parse_machine_events {
         MACHINE_LINE_BYTES
     } else {
         LOG_LINE_BYTES
@@ -583,7 +640,13 @@ fn drain_stream<R>(
         };
         for byte in &buffer[..read] {
             if *byte == b'\n' {
-                process_line(&line, &logs, machine_tx.as_ref(), machine_only);
+                process_line(
+                    &line,
+                    &logs,
+                    machine_tx.as_ref(),
+                    parse_machine_events,
+                    stream_name,
+                );
                 line.clear();
             } else if line.len() < line_limit {
                 line.push(*byte);
@@ -591,7 +654,13 @@ fn drain_stream<R>(
         }
     }
     if !line.is_empty() {
-        process_line(&line, &logs, machine_tx.as_ref(), machine_only);
+        process_line(
+                    &line,
+                    &logs,
+                    machine_tx.as_ref(),
+                    parse_machine_events,
+                    stream_name,
+                );
     }
     if let Some(tx) = machine_tx {
         tx.close();
@@ -602,20 +671,21 @@ fn process_line(
     line: &[u8],
     logs: &Arc<Mutex<VecDeque<String>>>,
     machine_tx: Option<&MachineEventSender>,
-    machine_only: bool,
+    parse_machine_events: bool,
+    stream_name: &'static str,
 ) {
     let text = String::from_utf8_lossy(line).trim().to_string();
     if text.is_empty() {
         return;
     }
-    if machine_only {
+    if parse_machine_events {
         if let (Some(tx), Ok(value)) = (machine_tx, serde_json::from_str::<Value>(&text)) {
             tx.send(value);
+            return;
         }
-        return;
     }
     let mut logs = logs.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    logs.push_back(sanitize_message(&text));
+    logs.push_back(format!("{stream_name}: {}", sanitize_message(&text)));
     while logs.len() > LOG_LINES {
         logs.pop_front();
     }
