@@ -5,9 +5,8 @@ use super::ProductError;
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-const REGULAR_TUNNEL_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegularServerTunnelOptions {
@@ -18,6 +17,7 @@ pub(crate) struct RegularServerTunnelOptions {
 
 struct RegularTunnelSession {
     directory: PathBuf,
+    cleanup_on_drop: bool,
 }
 
 impl RegularTunnelSession {
@@ -26,7 +26,10 @@ impl RegularTunnelSession {
         create_private_dir(&root)?;
         let directory = root.join(format!("openai-{}", uuid::Uuid::new_v4().simple()));
         create_private_dir(&directory)?;
-        Ok(Self { directory })
+        Ok(Self {
+            directory,
+            cleanup_on_drop: true,
+        })
     }
 
     fn write_authorization_file(&self, bootstrap_token: &str) -> Result<PathBuf, ProductError> {
@@ -40,11 +43,28 @@ impl RegularTunnelSession {
         write_new_private(&path, format!("Bearer {token}").as_bytes())?;
         Ok(path)
     }
+
+    fn preserve_failed_tunnel_log(&mut self) {
+        let log_file = self.directory.join("openai-tunnel.log");
+        if !log_file.is_file() {
+            return;
+        }
+
+        // Never preserve the generated local MCP Bearer credential with diagnostics.
+        // If it cannot be removed, fall back to deleting the entire session directory.
+        let authorization_file = self.directory.join("openai-mcp-authorization");
+        if authorization_file.exists() && std::fs::remove_file(&authorization_file).is_err() {
+            return;
+        }
+        self.cleanup_on_drop = false;
+    }
 }
 
 impl Drop for RegularTunnelSession {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.directory);
+        if self.cleanup_on_drop {
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
     }
 }
 
@@ -52,18 +72,23 @@ pub(crate) async fn run_regular_server_tunnel(
     options: &RegularServerTunnelOptions,
 ) -> Result<(), ProductError> {
     let local_server_url = validate_local_server_url(&options.local_server_url)?;
-    let session = RegularTunnelSession::create(&options.runtime_parent)?;
+    let mut session = RegularTunnelSession::create(&options.runtime_parent)?;
     let authorization_file = session.write_authorization_file(&options.bootstrap_token)?;
     let prerequisites = prepare_openai_tunnel().await?;
-    let deadline = Instant::now() + REGULAR_TUNNEL_STARTUP_TIMEOUT;
-    let mut tunnel = start_openai_tunnel(
+    let mut tunnel = match start_openai_tunnel(
         &prerequisites,
         &mcp_url(&local_server_url),
         &authorization_file,
         &session.directory,
-        deadline,
     )
-    .await?;
+    .await
+    {
+        Ok(tunnel) => tunnel,
+        Err(error) => {
+            session.preserve_failed_tunnel_log();
+            return Err(error);
+        }
+    };
 
     // Managed profiles use explicit Copy ID controls; concurrent starts must not
     // race over the user's clipboard. Keep CLI handoff for an unmanaged invocation.
