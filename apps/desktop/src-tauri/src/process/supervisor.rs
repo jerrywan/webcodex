@@ -5,7 +5,7 @@ use crate::platform;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
@@ -20,6 +20,7 @@ const MACHINE_CRITICAL_RESERVE: usize = 8;
 const GRACEFUL_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const LOCAL_EOF_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 const PROCESS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(20);
+const PROCESS_DIAGNOSTIC_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(tag = "kind", content = "tunnel_profile_id", rename_all = "snake_case")]
@@ -412,19 +413,12 @@ impl ProcessSupervisor {
                     };
 
                     if process.observation_failures == 1 {
-                        self.activity.push_for_profile(
-                            kind.tunnel_profile_id(),
-                            ActivityEventKind::ProcessObservationFailed,
-                            kind.source(),
-                            ActivityLevel::Error,
-                            format!(
-                                "Desktop could not observe the child process state: kind={kind:?}, pid={pid}, generation={generation}, io_kind={:?}, raw_os_error={:?}, error={}, job_tree={tree_state_text}",
-                                error.kind(),
-                                error.raw_os_error(),
-                                error
-                            ),
+                        let summary = format!(
+                            "Desktop could not observe the child process state: kind={kind:?}, pid={pid}, generation={generation}, io_kind={:?}, raw_os_error={:?}, error={}, job_tree={tree_state_text}",
+                            error.kind(),
+                            error.raw_os_error(),
+                            error
                         );
-
                         let recent = process
                             .logs
                             .lock()
@@ -433,8 +427,28 @@ impl ProcessSupervisor {
                             .rev()
                             .take(8)
                             .cloned()
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
                             .collect::<Vec<_>>();
-                        for line in recent.into_iter().rev() {
+                        let diagnostic_path =
+                            persist_managed_process_diagnostic(kind, pid, generation, &summary, &recent);
+                        let summary = match diagnostic_path {
+                            Some(path) => format!(
+                                "{summary}; diagnostic_file={}",
+                                path.to_string_lossy()
+                            ),
+                            None => summary,
+                        };
+                        self.activity.push_for_profile(
+                            kind.tunnel_profile_id(),
+                            ActivityEventKind::ProcessObservationFailed,
+                            kind.source(),
+                            ActivityLevel::Error,
+                            summary,
+                        );
+
+                        for line in recent {
                             self.activity.push_for_profile(
                                 kind.tunnel_profile_id(),
                                 ActivityEventKind::ProcessObservationFailed,
@@ -615,6 +629,75 @@ async fn finish_drain_task(mut task: JoinHandle<()>, deadline: tokio::time::Inst
         task.abort();
         let _ = task.await;
     }
+}
+
+fn managed_process_diagnostic_path() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("LOCALAPPDATA")?;
+        return Some(
+            std::path::PathBuf::from(root)
+                .join("WebCodex")
+                .join("diagnostics")
+                .join("managed-process.log"),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(root) = std::env::var_os("XDG_STATE_HOME") {
+            return Some(
+                std::path::PathBuf::from(root)
+                    .join("webcodex")
+                    .join("diagnostics")
+                    .join("managed-process.log"),
+            );
+        }
+        let home = std::env::var_os("HOME")?;
+        Some(
+            std::path::PathBuf::from(home)
+                .join(".local")
+                .join("state")
+                .join("webcodex")
+                .join("diagnostics")
+                .join("managed-process.log"),
+        )
+    }
+}
+
+fn persist_managed_process_diagnostic(
+    kind: ProcessKey,
+    pid: u32,
+    generation: u64,
+    summary: &str,
+    recent: &[String],
+) -> Option<std::path::PathBuf> {
+    let path = managed_process_diagnostic_path()?;
+    let parent = path.parent()?;
+    std::fs::create_dir_all(parent).ok()?;
+    if std::fs::metadata(&path)
+        .is_ok_and(|metadata| metadata.len() > PROCESS_DIAGNOSTIC_MAX_BYTES)
+    {
+        let _ = std::fs::remove_file(&path);
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()?;
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let safe_summary = sanitize_message(summary);
+    writeln!(
+        file,
+        "[{timestamp_ms}] kind={kind:?} pid={pid} generation={generation} {safe_summary}"
+    )
+    .ok()?;
+    for line in recent {
+        writeln!(file, "  {}", sanitize_message(line)).ok()?;
+    }
+    Some(path)
 }
 
 fn drain_stream<R>(
