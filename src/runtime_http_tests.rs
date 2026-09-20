@@ -540,7 +540,10 @@ fn http_runtime_status_after_runner_registration_fits_default_worker_stack() {
 
     runtime.block_on(async {
         tokio::spawn(async {
-            use crate::runner_protocol::RunnerRegisterRequest;
+            use crate::runner_protocol::{
+                RunnerBuildInfo, RunnerPolicySummary, RunnerProjectSummary, RunnerRegisterRequest,
+                ShellJobInventory,
+            };
 
             let config = test_config(Some("secret"));
             let (_tmp, db) = test_db();
@@ -552,14 +555,50 @@ fn http_runtime_status_after_runner_registration_fits_default_worker_stack() {
                 config,
                 db,
                 tool_runtime,
-                registry,
+                registry.clone(),
             ));
-            let registration =
+            let policy: RunnerPolicySummary = serde_json::from_value(json!({
+                "allow_raw_shell": true,
+                "allow_cwd_anywhere": true,
+                "allowed_roots": ["/root"],
+                "max_timeout_secs": 60,
+                "max_output_bytes": 262144,
+                "shell_profiles": {
+                    "default_profile": null,
+                    "configured_count": 0,
+                    "prepared_cache_count": 0,
+                    "profiles": [],
+                    "default_dialect": "sh",
+                    "available_dialects": ["sh", "bash"]
+                },
+                "tool_providers": {
+                    "strategy": "native",
+                    "claude_code": {
+                        "enabled": false,
+                        "version": null,
+                        "available": false,
+                        "process_state": "not_started",
+                        "discovered_tool_names": [],
+                        "capabilities": {"search_project_text": "unmapped"},
+                        "last_error_code": null
+                    }
+                },
+                "mcp_gateway_providers": []
+            }))
+            .expect("realistic current Runner policy fixture");
+            let mut registration =
                 crate::test_support::current_runner_registration(RunnerRegisterRequest {
                     process_started_at: Some(1),
-                    build: None,
+                    build: Some(RunnerBuildInfo {
+                        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                        git_commit: Some("0123456789abcdef".to_string()),
+                        git_dirty: Some(false),
+                    }),
                     job_concurrency_limit: Some(4),
-                    job_inventory: None,
+                    job_inventory: Some(ShellJobInventory {
+                        active_complete: true,
+                        jobs: Vec::new(),
+                    }),
                     coding_agent_providers: None,
                     coding_agent_inventory: None,
                     client_id: "status-stack-runner".to_string(),
@@ -571,15 +610,45 @@ fn http_runtime_status_after_runner_registration_fits_default_worker_stack() {
                     hostname: Some("status-stack-host".to_string()),
                     host_context: None,
                     capabilities: Default::default(),
-                    policy: None,
+                    policy: Some(policy),
                 });
+            registration.capabilities.job_state_reconciliation = true;
 
-            let register = TestClient::post("http://localhost/api/shell/agent/register")
+            let mut register = TestClient::post("http://localhost/api/shell/agent/register")
                 .bearer_auth("secret")
                 .json(&registration)
                 .send(&service)
                 .await;
-            assert_eq!(effective_status(&register), StatusCode::OK);
+            let register_status = effective_status(&register);
+            if register_status != StatusCode::OK {
+                let body: Value = register.take_json().await.unwrap_or(Value::Null);
+                panic!("realistic Runner registration failed with {register_status}: {body}");
+            }
+            crate::test_support::apply_project_inventory_snapshot(
+                registry.as_ref(),
+                "status-stack-runner",
+                "status-stack-instance",
+                vec![RunnerProjectSummary {
+                    id: "smoke-proj".to_string(),
+                    name: Some("Smoke Project".to_string()),
+                    path: "/tmp/status-stack-project".to_string(),
+                    allow_patch: true,
+                    kind: Some("repo".to_string()),
+                    registration_source: None,
+                    description: None,
+                    hooks: Vec::new(),
+                    disabled: false,
+                    revision: None,
+                    root_fingerprint: None,
+                    lineage: None,
+                    git_branch: Some("main".to_string()),
+                    git_head: None,
+                    git_dirty: Some(false),
+                    updated_at: 1,
+                    shell_profile: None,
+                }],
+            )
+            .await;
 
             let mut status = TestClient::post("http://localhost/api/runtime/status")
                 .bearer_auth("secret")

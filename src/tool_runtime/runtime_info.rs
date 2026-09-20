@@ -328,40 +328,15 @@ impl ToolRuntime {
         let stale_count = runner_count.saturating_sub(online_count);
         let clients_summary: Vec<Value> = clients
             .iter()
-            .map(|c| {
-                json!({
-                    "client_id": c.client_id,
-                    "agent_instance_id": c.runner_instance_id,
-                    "display_name": c.display_name,
-                    "owner": c.owner,
-                    "status": c.status,
-                    "host_context": host_context_projection(c.host_context.as_ref()),
-                    "connected": c.connected,
-                    "agent_protocol_generation": c.runner_protocol_generation.get(),
-                    "transport": c.transport,
-                    "last_seen": c.last_seen,
-                    "last_seen_age_secs": last_seen_age_secs(c, now),
-                    "pending_requests": c.pending_requests,
-                    "active_jobs": active_jobs_for_client(&runner_jobs, &c.client_id),
-                    "job_concurrency": job_concurrency_for_client(c, &runner_jobs),
-                    "capabilities": c.capabilities,
-                    "projects_count": enabled_projects_count(c),
-                    "project_inventory": c.project_inventory,
-                    "policy": sanitized_policy_summary(c.policy.as_ref()),
-                    "shell_profiles": sanitized_shell_profiles_summary(
-                        c.policy.as_ref().and_then(|p| p.shell_profiles.as_ref())
-                    ),
-                    "tool_providers": c.policy.as_ref().and_then(|p| p.tool_providers.as_ref()),
-                })
-            })
+            .map(|client| runtime_status_client_summary(client, &runner_jobs, now))
             .collect();
-        let runners = json!({
-            "count": runner_count,
-            "online_count": online_count,
-            "stale_count": stale_count,
-            "clients": clients_summary,
-            "summary": runner_health_summary(&clients, &runner_jobs, now),
-        });
+        let runners = runtime_status_runners_summary(
+            runner_count,
+            online_count,
+            stale_count,
+            clients_summary,
+            runner_health_summary(&clients, &runner_jobs, now),
+        );
         let connection_layers = connection_layers(
             &clients,
             runner_registered_count,
@@ -1375,6 +1350,99 @@ fn runner_health_summary(clients: &[RunnerView], runner_jobs: &[ShellJobInfo], n
         "stale": stale,
         "clients": runner_health_clients(clients, runner_jobs, now),
     })
+}
+
+fn runtime_status_client_summary(
+    client: &RunnerView,
+    runner_jobs: &[ShellJobInfo],
+    now: i64,
+) -> Value {
+    // Build this projection incrementally rather than through one large `json!`
+    // expression. A current Runner carries a wide capability set plus nested
+    // policy/provider metadata, and materializing the whole object in one macro
+    // can exceed the default Tokio worker stack in debug builds.
+    let mut value = serde_json::Map::with_capacity(22);
+    value.insert("client_id".to_string(), json!(client.client_id));
+    value.insert(
+        "agent_instance_id".to_string(),
+        json!(client.runner_instance_id),
+    );
+    value.insert("display_name".to_string(), json!(client.display_name));
+    value.insert("owner".to_string(), json!(client.owner));
+    value.insert("status".to_string(), json!(client.status));
+    value.insert(
+        "host_context".to_string(),
+        host_context_projection(client.host_context.as_ref()),
+    );
+    value.insert("connected".to_string(), json!(client.connected));
+    value.insert(
+        "agent_protocol_generation".to_string(),
+        json!(client.runner_protocol_generation.get()),
+    );
+    value.insert("transport".to_string(), json!(client.transport));
+    value.insert("last_seen".to_string(), json!(client.last_seen));
+    value.insert(
+        "last_seen_age_secs".to_string(),
+        json!(last_seen_age_secs(client, now)),
+    );
+    value.insert(
+        "pending_requests".to_string(),
+        json!(client.pending_requests),
+    );
+    value.insert(
+        "active_jobs".to_string(),
+        json!(active_jobs_for_client(runner_jobs, &client.client_id)),
+    );
+    value.insert(
+        "job_concurrency".to_string(),
+        job_concurrency_for_client(client, runner_jobs),
+    );
+    value.insert("capabilities".to_string(), json!(client.capabilities));
+    value.insert(
+        "projects_count".to_string(),
+        json!(enabled_projects_count(client)),
+    );
+    value.insert(
+        "project_inventory".to_string(),
+        json!(client.project_inventory),
+    );
+    value.insert(
+        "policy".to_string(),
+        sanitized_policy_summary(client.policy.as_ref()),
+    );
+    value.insert(
+        "shell_profiles".to_string(),
+        sanitized_shell_profiles_summary(
+            client
+                .policy
+                .as_ref()
+                .and_then(|policy| policy.shell_profiles.as_ref()),
+        ),
+    );
+    value.insert(
+        "tool_providers".to_string(),
+        json!(client
+            .policy
+            .as_ref()
+            .and_then(|policy| policy.tool_providers.as_ref())),
+    );
+    Value::Object(value)
+}
+
+fn runtime_status_runners_summary(
+    count: usize,
+    online_count: usize,
+    stale_count: usize,
+    clients: Vec<Value>,
+    health_summary: Value,
+) -> Value {
+    let mut value = serde_json::Map::with_capacity(5);
+    value.insert("count".to_string(), json!(count));
+    value.insert("online_count".to_string(), json!(online_count));
+    value.insert("stale_count".to_string(), json!(stale_count));
+    value.insert("clients".to_string(), Value::Array(clients));
+    value.insert("summary".to_string(), health_summary);
+    Value::Object(value)
 }
 
 /// Build the sanitized policy summary JSON exposed in `runtime_status` and
