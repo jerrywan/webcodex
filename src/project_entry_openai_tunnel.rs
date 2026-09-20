@@ -4,12 +4,8 @@ use super::{
 use reqwest::header::USER_AGENT;
 use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
-#[cfg(not(windows))]
-use std::fs::OpenOptions;
-use std::fs::{self, File};
-use std::io::Read;
-#[cfg(any(not(windows), test))]
-use std::io::Write;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -94,8 +90,28 @@ pub(super) async fn start_openai_tunnel(
     // Doctor, control-plane verification, and daemon readiness are independent
     // phases. Do not let a slow-but-successful earlier phase consume the next
     // phase's startup budget.
-    run_doctor(prerequisites, mcp_url, authorization_file).await?;
-    run_control_plane_probe(prerequisites).await?;
+    let startup_log_file = session_dir.join("openai-tunnel-startup.log");
+    append_startup_diagnostic(
+        &startup_log_file,
+        "startup",
+        "begin",
+        &[],
+        &[],
+        Some(authorization_file),
+    );
+    run_doctor(
+        prerequisites,
+        mcp_url,
+        authorization_file,
+        &startup_log_file,
+    )
+    .await?;
+    run_control_plane_probe(
+        prerequisites,
+        authorization_file,
+        &startup_log_file,
+    )
+    .await?;
 
     let health_url_file = session_dir.join("openai-tunnel-health-url");
     let log_file = session_dir.join("openai-tunnel.log");
@@ -175,6 +191,7 @@ async fn run_doctor(
     prerequisites: &OpenAiTunnelPrerequisites,
     mcp_url: &str,
     authorization_file: &Path,
+    startup_log_file: &Path,
 ) -> Result<(), ProductError> {
     let mut command = Command::new(&prerequisites.binary);
     suppress_windows_console(&mut command);
@@ -187,19 +204,55 @@ async fn run_doctor(
         .stdin(Stdio::null())
         .kill_on_drop(true);
 
+    append_startup_diagnostic(
+        startup_log_file,
+        "doctor",
+        "starting",
+        &[],
+        &[],
+        Some(authorization_file),
+    );
     let output = match tokio::time::timeout(TUNNEL_CLIENT_DOCTOR_TIMEOUT, command.output()).await {
         Ok(Ok(output)) => output,
-        Ok(Err(_)) => {
+        Ok(Err(error)) => {
+            append_startup_diagnostic(
+                startup_log_file,
+                "doctor",
+                &format!(
+                    "spawn_error io_kind={:?} raw_os_error={:?} error={error}",
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+                &[],
+                &[],
+                Some(authorization_file),
+            );
             return Err(tunnel_runtime_error(
                 "OpenAI tunnel-client doctor could not be supervised",
             ))
         }
         Err(_) => {
+            append_startup_diagnostic(
+                startup_log_file,
+                "doctor",
+                "timeout",
+                &[],
+                &[],
+                Some(authorization_file),
+            );
             return Err(tunnel_runtime_error(
                 "OpenAI tunnel-client doctor timed out before validating the connection",
             ))
         }
     };
+    append_startup_diagnostic(
+        startup_log_file,
+        "doctor",
+        &format!("exit_status={}", output.status),
+        &output.stdout,
+        &output.stderr,
+        Some(authorization_file),
+    );
     if !output.status.success() {
         let detail = tunnel_output_hint(&output.stdout, &output.stderr);
         return Err(ProductError::new(
@@ -215,6 +268,8 @@ async fn run_doctor(
 
 async fn run_control_plane_probe(
     prerequisites: &OpenAiTunnelPrerequisites,
+    authorization_file: &Path,
+    startup_log_file: &Path,
 ) -> Result<(), ProductError> {
     let mut command = Command::new(&prerequisites.binary);
     suppress_windows_console(&mut command);
@@ -232,17 +287,45 @@ async fn run_control_plane_probe(
         .stdin(Stdio::null())
         .kill_on_drop(true);
 
+    append_startup_diagnostic(
+        startup_log_file,
+        "control_plane_probe",
+        "starting",
+        &[],
+        &[],
+        Some(authorization_file),
+    );
     let output =
         match tokio::time::timeout(TUNNEL_CLIENT_CONTROL_PLANE_PROBE_TIMEOUT, command.output())
             .await
         {
             Ok(Ok(output)) => output,
-            Ok(Err(_)) => {
+            Ok(Err(error)) => {
+                append_startup_diagnostic(
+                    startup_log_file,
+                    "control_plane_probe",
+                    &format!(
+                        "spawn_error io_kind={:?} raw_os_error={:?} error={error}",
+                        error.kind(),
+                        error.raw_os_error()
+                    ),
+                    &[],
+                    &[],
+                    Some(authorization_file),
+                );
                 return Err(tunnel_runtime_error(
                     "OpenAI tunnel-client control-plane probe could not be supervised",
                 ))
             }
             Err(_) => {
+                append_startup_diagnostic(
+                    startup_log_file,
+                    "control_plane_probe",
+                    "timeout",
+                    &[],
+                    &[],
+                    Some(authorization_file),
+                );
                 return Err(ProductError::new(
                     "tunnel_unavailable",
                     "OpenAI Secure MCP Tunnel could not reach the OpenAI control plane before the control-plane probe timeout",
@@ -250,6 +333,14 @@ async fn run_control_plane_probe(
                 ))
             }
         };
+    append_startup_diagnostic(
+        startup_log_file,
+        "control_plane_probe",
+        &format!("exit_status={}", output.status),
+        &output.stdout,
+        &output.stderr,
+        Some(authorization_file),
+    );
     if !output.status.success() {
         let detail = tunnel_output_hint(&output.stdout, &output.stderr);
         return Err(ProductError::new(
@@ -261,6 +352,108 @@ async fn run_control_plane_probe(
         ));
     }
     Ok(())
+}
+
+fn append_startup_diagnostic(
+    path: &Path,
+    phase: &str,
+    status: &str,
+    stdout: &[u8],
+    stderr: &[u8],
+    authorization_file: Option<&Path>,
+) {
+    let mut body = format!("phase={phase} status={status}\n");
+    if !stdout.is_empty() {
+        body.push_str("stdout:\n");
+        body.push_str(&String::from_utf8_lossy(stdout));
+        body.push('\n');
+    }
+    if !stderr.is_empty() {
+        body.push_str("stderr:\n");
+        body.push_str(&String::from_utf8_lossy(stderr));
+        body.push('\n');
+    }
+    let safe = sanitize_startup_diagnostic(&body, authorization_file);
+
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Ok(mut file) = options.open(path) {
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let _ = writeln!(file, "[{timestamp_ms}] {safe}");
+    }
+}
+
+fn sanitize_startup_diagnostic(value: &str, authorization_file: Option<&Path>) -> String {
+    let mut safe = value.replace('\0', "");
+    if let Ok(runtime_key) = std::env::var("CONTROL_PLANE_API_KEY") {
+        let runtime_key = runtime_key.trim();
+        if !runtime_key.is_empty() {
+            safe = safe.replace(runtime_key, "[redacted]");
+        }
+    }
+    if let Some(path) = authorization_file {
+        if let Ok(secret) = fs::read_to_string(path) {
+            let secret = secret.trim();
+            if !secret.is_empty() {
+                safe = safe.replace(secret, "[redacted]");
+            }
+        }
+    }
+    safe = redact_bearer_values(&safe);
+    for prefix in ["wc_boot_", "wc_pair_", "wc_pat_", "wc_agent_", "sk-"] {
+        safe = redact_prefixed_diagnostic_token(&safe, prefix);
+    }
+    const MAX_DIAGNOSTIC_BYTES: usize = 16 * 1024;
+    if safe.len() > MAX_DIAGNOSTIC_BYTES {
+        let mut end = MAX_DIAGNOSTIC_BYTES;
+        while !safe.is_char_boundary(end) {
+            end -= 1;
+        }
+        safe.truncate(end);
+        safe.push('…');
+    }
+    safe
+}
+
+fn redact_bearer_values(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for line in value.lines() {
+        if let Some(index) = line.to_ascii_lowercase().find("bearer ") {
+            output.push_str(&line[..index]);
+            output.push_str("Bearer [redacted]");
+        } else {
+            output.push_str(line);
+        }
+        output.push('\n');
+    }
+    output
+}
+
+fn redact_prefixed_diagnostic_token(value: &str, prefix: &str) -> String {
+    let mut rest = value;
+    let mut out = String::with_capacity(value.len());
+    while let Some(index) = rest.find(prefix) {
+        out.push_str(&rest[..index]);
+        out.push_str("[redacted]");
+        let tail = &rest[index + prefix.len()..];
+        let consumed = tail
+            .char_indices()
+            .take_while(|(_, ch)| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+            .map(|(offset, ch)| offset + ch.len_utf8())
+            .last()
+            .unwrap_or(0);
+        rest = &tail[consumed..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn tunnel_output_hint(stdout: &[u8], stderr: &[u8]) -> &'static str {
