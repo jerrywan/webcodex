@@ -25,15 +25,7 @@ jobs:
             member=tunnel-client
             case "$target" in windows-*) member=tunnel-client.exe;; esac
             rm -rf work/extract && mkdir -p work/extract
-            python3 - "$file" "$member" <<'PY'
-import sys, zipfile
-from pathlib import Path
-z=Path("work")/sys.argv[1]
-member=sys.argv[2]
-with zipfile.ZipFile(z) as a:
-    data=a.read(member)
-Path("work/extract").joinpath(member).write_bytes(data)
-PY
+            python3 -c 'import sys,zipfile,pathlib; z=pathlib.Path("work")/sys.argv[1]; m=sys.argv[2]; a=zipfile.ZipFile(z); pathlib.Path("work/extract",m).write_bytes(a.read(m))' "$file" "$member"
             binary="$(sha256sum "work/extract/$member" | awk '{print $1}')"
             echo "HASH target=$target archive=$archive binary=$binary member=$member"
           done
