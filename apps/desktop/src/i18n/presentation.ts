@@ -84,6 +84,10 @@ export function activityMessage(entry: ActivityEntry, t: Translate) {
     const kind = entry.message.split(": ")[1];
     if (Object.hasOwn(operationKeys, kind)) return `${t("activity.operationStarted")} · ${operationLabel(kind as DesktopOperationKind, t)}`;
   }
+  if (entry.event_kind === "process_observation_failed") {
+    const summary = t("activity.processObservationFailed");
+    return entry.message ? `${summary} · ${entry.message}` : summary;
+  }
   return activityKeys[entry.event_kind] ? t(activityKeys[entry.event_kind]) : entry.message;
 }
 
