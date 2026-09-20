@@ -532,6 +532,73 @@ async fn goal_workflow_foreign_principal_scopes_project_and_window_fail_closed_w
 }
 
 #[tokio::test]
+async fn goal_workflow_revoked_correlated_project_is_partial_even_with_older_work() {
+    let fixture = Workflow::new(true).await;
+    let other_project = register_goal_activity_project(
+        &fixture.runtime,
+        "older-workflow-runner",
+        "goal-workflow-owner",
+        "older",
+        fixture.temp.path(),
+    )
+    .await;
+    let older = start_goal_activity_session(
+        &fixture.runtime,
+        &fixture.auth,
+        &other_project,
+        "Earlier explicitly correlated work",
+    );
+    link_goal_activity_session(
+        &fixture.runtime,
+        &fixture.auth,
+        &fixture.goal_id,
+        &older.session_id,
+        "older-session-link",
+    )
+    .await;
+    record_goal_window_event(
+        &fixture.db,
+        &fixture.auth,
+        "older-goal-workflow-window",
+        &other_project,
+        "read_files",
+        true,
+        Some(&older.session_id),
+        T0 - 1001,
+    );
+    let revoked_project = register_goal_activity_project(
+        &fixture.runtime,
+        "older-workflow-runner",
+        "new-project-owner",
+        "older",
+        fixture.temp.path(),
+    )
+    .await;
+    assert_eq!(revoked_project, other_project);
+    assert!(fixture
+        .runtime
+        .resolve_project_input_for_auth(&other_project, Some(&fixture.auth))
+        .await
+        .is_err());
+    let now = T0 + THRESHOLD;
+    fixture.poll(now);
+    // The inaccessible Window's work is older than the current work anchor, so
+    // a MAX(timestamp) recheck alone cannot reveal this coverage gap.
+    assert_no_attention(&fixture.recheck(now).await);
+    assert_eq!(fixture.counts(), (0, 0));
+    let state = fixture
+        .runtime
+        .goal_plan_state_at(Some(&fixture.auth), fixture.goal_id.clone(), now)
+        .await;
+    assert_eq!(
+        state.output["goal_plan"]["activity"]["coverage_partial"],
+        true
+    );
+    assert!(!state.output.to_string().contains(&other_project));
+    assert!(!state.output.to_string().contains(&older.session_id));
+}
+
+#[tokio::test]
 async fn goal_workflow_requires_current_unambiguous_active_session_not_historical_window_link() {
     for mode in [
         "closed",
@@ -924,7 +991,14 @@ async fn goal_workflow_checkpoint_card_and_closeout_are_sparse_canonical_and_own
 
 #[tokio::test]
 async fn goal_workflow_malformed_observation_and_goal_plan_do_not_create_attention() {
-    for malformed in ["plan", "work_time", "recorder_gap", "future_card"] {
+    for malformed in [
+        "plan",
+        "work_time",
+        "recorder_gap",
+        "future_card",
+        "card_time",
+        "missing_card_start",
+    ] {
         let fixture = Workflow::new(true).await;
         let now = T0 + THRESHOLD;
         fixture.poll(now);
@@ -944,6 +1018,12 @@ async fn goal_workflow_malformed_observation_and_goal_plan_do_not_create_attenti
             }
             "recorder_gap" => {
                 fixture.db.conn_for_tests().execute("UPDATE action_events SET recorder_gap_session_id = ?1 WHERE operation = 'goal_plan_state'", [&fixture.session_id]).unwrap();
+            }
+            "card_time" => {
+                fixture.db.conn_for_tests().execute("UPDATE action_events SET window_started_at_ms = window_ended_at_ms + 1 WHERE operation = 'goal_plan_state'", []).unwrap();
+            }
+            "missing_card_start" => {
+                fixture.db.conn_for_tests().execute("UPDATE action_events SET window_started_at_ms = NULL WHERE operation = 'goal_plan_state'", []).unwrap();
             }
             "future_card" => {
                 fixture.poll(now + 1);

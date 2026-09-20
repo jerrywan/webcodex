@@ -38,7 +38,9 @@ Runtime Goal tests use controlled timestamps rather than sleeping five minutes.
 They cover recent activity; continued live exact-Goal polling; one Event/Wake under
 repeated/concurrent rechecks; a new epoch only after new meaningful work; running
 requests; completion-record gaps; absent/stale/wrong-Goal cards; partial visibility;
-foreign principals and missing scopes; stale/closed/ambiguous Sessions; absent
+foreign principals and missing scopes; revoked historical correlated Projects even
+when their work is older than the current anchor; malformed/missing card timing;
+stale/closed/ambiguous Sessions; absent
 controllers; terminal Goals; transactional Wake insertion failure; malformed
 persistence; and Goal closeout privacy. They also exercise the same Agent as Worker
 and controller, the existing dispatch fence, accepted versus unknown delivery,

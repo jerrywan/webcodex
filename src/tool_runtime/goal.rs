@@ -373,6 +373,9 @@ impl ToolRuntime {
                 )
                 .await
             else {
+                // Missing or revoked correlated Sessions may hide Window work.
+                // Their older timestamps cannot make an incomplete scan complete.
+                coverage_partial = true;
                 continue;
             };
             if !visibility_cache.contains_key(&resolved_project.resolved_id)

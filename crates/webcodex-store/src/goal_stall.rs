@@ -242,6 +242,9 @@ impl Database {
         let (last_seen, latest_gap): (Option<i64>, Option<i64>) = transaction.query_row(
             "SELECT MAX(CASE WHEN action_name = 'toolsCall' AND operation = 'goal_plan_state'
                                   AND window_meaningful = 0 AND status = 'success'
+                                  AND window_started_at_ms IS NOT NULL
+                                  AND window_started_at_ms >= 0
+                                  AND window_ended_at_ms >= window_started_at_ms
                                   AND (CASE WHEN json_valid(ids_json) THEN json_extract(ids_json, '$.goal_id') ELSE NULL END) = ?4
                              THEN window_ended_at_ms END),
                     MAX(CASE WHEN recorder_gap_session_id IS NOT NULL THEN window_ended_at_ms END)
