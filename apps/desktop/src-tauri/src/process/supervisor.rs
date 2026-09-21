@@ -367,6 +367,7 @@ impl ProcessSupervisor {
             (None, None)
         };
         let stdout_logs = Arc::clone(&logs);
+        let stdout_debug_log_path = debug_log_path.clone();
         let stdout_task = tokio::task::spawn_blocking(move || {
             drain_stream(
                 stdout,
@@ -374,7 +375,7 @@ impl ProcessSupervisor {
                 machine_tx,
                 machine_stdout || matches!(kind, ProcessKey::RegularTunnel(_)),
                 "stdout",
-                debug_log_path.clone(),
+                stdout_debug_log_path,
             )
         });
         let stderr_logs = Arc::clone(&logs);
