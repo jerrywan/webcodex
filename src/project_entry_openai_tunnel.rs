@@ -26,6 +26,7 @@ const TUNNEL_CLIENT_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const TUNNEL_CLIENT_READY_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const TUNNEL_CLIENT_HEALTH_URL_BYTES: usize = 512;
 const TUNNEL_CLIENT_OVERRIDE: &str = "WEBCODEX_TUNNEL_CLIENT_BIN";
+const TUNNEL_DEBUG_LOG_ENV: &str = "WEBCODEX_TUNNEL_DEBUG_LOG";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -57,10 +58,23 @@ impl OpenAiTunnel {
     }
 
     pub(super) async fn wait_for_exit(&mut self) -> Result<(), ProductError> {
-        let status =
-            self.child.wait().await.map_err(|_| {
-                tunnel_runtime_error("OpenAI tunnel-client could not be supervised")
-            })?;
+        let status = match self.child.wait().await {
+            Ok(status) => status,
+            Err(error) => {
+                append_external_tunnel_debug(&format!(
+                    "tunnel_client phase=runtime_wait_error io_kind={:?} raw_os_error={:?} error={error}",
+                    error.kind(),
+                    error.raw_os_error()
+                ));
+                return Err(tunnel_runtime_error(
+                    "OpenAI tunnel-client could not be supervised",
+                ));
+            }
+        };
+        append_external_tunnel_debug(&format!(
+            "tunnel_client phase=runtime_exit status={status} exit_code={:?}",
+            status.code()
+        ));
         Err(ProductError::new(
             "tunnel_unavailable",
             format!("OpenAI Secure MCP Tunnel stopped unexpectedly ({status})"),
@@ -129,12 +143,66 @@ pub(super) async fn start_openai_tunnel(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    let mut child = command
-        .spawn()
-        .map_err(|_| tunnel_runtime_error("OpenAI tunnel-client could not start"))?;
+    append_startup_diagnostic(
+        &startup_log_file,
+        "daemon",
+        "spawn_starting",
+        &[],
+        &[],
+        Some(authorization_file),
+    );
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            append_startup_diagnostic(
+                &startup_log_file,
+                "daemon",
+                &format!(
+                    "spawn_error io_kind={:?} raw_os_error={:?} error={error}",
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+                &[],
+                &[],
+                Some(authorization_file),
+            );
+            return Err(tunnel_runtime_error(
+                "OpenAI tunnel-client could not start",
+            ));
+        }
+    };
+    append_startup_diagnostic(
+        &startup_log_file,
+        "daemon",
+        &format!("spawned pid={:?}", child.id()),
+        &[],
+        &[],
+        Some(authorization_file),
+    );
 
     let ready_deadline = Instant::now() + TUNNEL_CLIENT_READY_TIMEOUT;
+    append_startup_diagnostic(
+        &startup_log_file,
+        "daemon_ready",
+        "waiting",
+        &[],
+        &[],
+        Some(authorization_file),
+    );
     if let Err(mut error) = wait_until_ready(&mut child, &health_url_file, ready_deadline).await {
+        append_startup_diagnostic(
+            &startup_log_file,
+            "daemon_ready",
+            &format!(
+                "error code={} message={}",
+                error.code,
+                sanitize_startup_diagnostic(&error.message, Some(authorization_file))
+            ),
+            &[],
+            &[],
+            Some(authorization_file),
+        );
+        append_tunnel_log_tail_to_debug(&log_file, Some(authorization_file));
         let _ = child.start_kill();
         let _ = child.wait().await;
         attach_tunnel_log_hint(&mut error, &log_file);
@@ -143,12 +211,33 @@ pub(super) async fn start_openai_tunnel(
     let health_url = match read_loopback_health_url(&health_url_file) {
         Ok(value) => value,
         Err(mut error) => {
+            append_startup_diagnostic(
+                &startup_log_file,
+                "health_url",
+                &format!(
+                    "error code={} message={}",
+                    error.code,
+                    sanitize_startup_diagnostic(&error.message, Some(authorization_file))
+                ),
+                &[],
+                &[],
+                Some(authorization_file),
+            );
+            append_tunnel_log_tail_to_debug(&log_file, Some(authorization_file));
             let _ = child.start_kill();
             let _ = child.wait().await;
             attach_tunnel_log_hint(&mut error, &log_file);
             return Err(error);
         }
     };
+    append_startup_diagnostic(
+        &startup_log_file,
+        "daemon_ready",
+        &format!("ready health_url={health_url}"),
+        &[],
+        &[],
+        Some(authorization_file),
+    );
     Ok(OpenAiTunnel {
         child,
         health_url,
@@ -379,13 +468,43 @@ fn append_startup_diagnostic(
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
     if let Ok(mut file) = options.open(path) {
-        let timestamp_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
         let _ = writeln!(file, "[{timestamp_ms}] {safe}");
     }
+    append_external_tunnel_debug(&safe);
+}
+
+fn append_external_tunnel_debug(message: &str) {
+    let Some(path) = std::env::var_os(TUNNEL_DEBUG_LOG_ENV).map(PathBuf::from) else {
+        return;
+    };
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let safe = sanitize_startup_diagnostic(message, None);
+    let _ = writeln!(file, "[{timestamp_ms}] tunnel_client {safe}");
+}
+
+fn append_tunnel_log_tail_to_debug(log_file: &Path, authorization_file: Option<&Path>) {
+    let Ok(bytes) = fs::read(log_file) else {
+        append_external_tunnel_debug("tunnel_client phase=daemon_log_tail unavailable");
+        return;
+    };
+    const MAX_TAIL_BYTES: usize = 16 * 1024;
+    let start = bytes.len().saturating_sub(MAX_TAIL_BYTES);
+    let tail = String::from_utf8_lossy(&bytes[start..]);
+    let safe = sanitize_startup_diagnostic(&tail, authorization_file);
+    append_external_tunnel_debug(&format!(
+        "tunnel_client phase=daemon_log_tail begin\n{safe}\ntunnel_client phase=daemon_log_tail end"
+    ));
 }
 
 fn sanitize_startup_diagnostic(value: &str, authorization_file: Option<&Path>) -> String {
