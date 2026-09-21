@@ -4,6 +4,38 @@ use crate::connections::{ConnectionsSnapshot, TunnelConnectionSnapshot};
 use crate::tunnel_config::TunnelProfileRequest;
 use serde::Deserialize;
 
+const TUNNEL_DEBUG_LOG_ENV: &str = "WEBCODEX_TUNNEL_DEBUG_LOG";
+const TUNNEL_DEBUG_LOG_NAME: &str = "WebCodex-Tunnel-Debug.log";
+
+fn tunnel_debug_log_path() -> Option<std::path::PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    Some(executable.parent()?.join(TUNNEL_DEBUG_LOG_NAME))
+}
+
+fn initialize_tunnel_debug_log(path: &std::path::Path, id: TunnelProfileId) {
+    use std::io::Write as _;
+
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+    else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let _ = writeln!(
+        file,
+        "[{timestamp_ms}] desktop phase=start_connection profile={id:?} exe={}",
+        std::env::current_exe()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "<unknown>".to_string())
+    );
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionAction {
@@ -209,6 +241,10 @@ impl DesktopCore {
         let mut command = self
             .adapter
             .regular_tunnel_command(&env_file, proxy.url.as_deref())?;
+        if let Some(debug_log) = tunnel_debug_log_path() {
+            initialize_tunnel_debug_log(&debug_log, id);
+            command.env(TUNNEL_DEBUG_LOG_ENV, &debug_log);
+        }
         // Use the credential belonging to this exact Desktop-managed Server file,
         // not a bootstrap credential inherited from the shell that launched Desktop.
         command.env_remove("WEBCODEX_TOKEN");
