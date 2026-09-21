@@ -3281,12 +3281,16 @@ mod tests {
 
     #[test]
     fn explicit_tunnel_proxy_is_bounded_and_direct_mode_clears_routing() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .expect("bind temporary loopback proxy listener");
+        let port = listener.local_addr().expect("temporary proxy address").port();
+        let custom_url = format!("http://127.0.0.1:{port}");
         let custom = TunnelProxyConfig {
             mode: TunnelProxyMode::Custom,
-            custom_url: Some("http://127.0.0.1:7890".to_string()),
+            custom_url: Some(custom_url.clone()),
         };
-        let effective = effective_tunnel_proxy(&custom).expect("valid custom proxy");
-        assert_eq!(effective.url.as_deref(), Some("http://127.0.0.1:7890"));
+        let effective = effective_tunnel_proxy(&custom).expect("reachable custom proxy");
+        assert_eq!(effective.url.as_deref(), Some(custom_url.as_str()));
         assert_eq!(effective.source, "custom");
 
         let direct = effective_tunnel_proxy(&TunnelProxyConfig {
