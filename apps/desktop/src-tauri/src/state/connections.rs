@@ -273,6 +273,18 @@ impl DesktopCore {
         let local_mcp_url = format!("{}/mcp", runtime.server_url.trim_end_matches('/'));
         self.adapter.ensure_binaries(cancellation).await?;
         let proxy = effective_tunnel_proxy(&self.config.tunnel_proxy)?;
+        if let Some(debug_log) = tunnel_debug_log_path() {
+            append_desktop_tunnel_debug(
+                &debug_log,
+                &format!(
+                    "desktop phase=proxy_resolved mode={:?} source={} effective_url={} detected_url={}",
+                    self.config.tunnel_proxy.mode,
+                    proxy.source,
+                    proxy.url.as_deref().unwrap_or("<direct>"),
+                    proxy.detected_url.as_deref().unwrap_or("<none>")
+                ),
+            );
+        }
         let mut command = self
             .adapter
             .regular_tunnel_command(&env_file, proxy.url.as_deref())?;
