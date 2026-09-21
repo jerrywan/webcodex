@@ -17,8 +17,7 @@ fn initialize_tunnel_debug_log(path: &std::path::Path, id: TunnelProfileId) {
 
     let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
-        .write(true)
-        .truncate(true)
+        .append(true)
         .open(path)
     else {
         return;
