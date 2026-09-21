@@ -36,6 +36,23 @@ fn initialize_tunnel_debug_log(path: &std::path::Path, id: TunnelProfileId) {
     );
 }
 
+fn append_desktop_tunnel_debug(path: &std::path::Path, message: &str) {
+    use std::io::Write as _;
+
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let _ = writeln!(file, "[{timestamp_ms}] {message}");
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionAction {
@@ -181,7 +198,26 @@ impl DesktopCore {
         id: TunnelProfileId,
         cancellation: &CancellationContext,
     ) -> DesktopResult<()> {
+        let debug_log_path = tunnel_debug_log_path();
+        if let Some(path) = debug_log_path.as_deref() {
+            initialize_tunnel_debug_log(path, id);
+        }
         let result = self.spawn_connection(id, cancellation).await;
+        if let Some(path) = debug_log_path.as_deref() {
+            match &result {
+                Ok(()) => append_desktop_tunnel_debug(
+                    path,
+                    "desktop phase=start_connection_return status=ok",
+                ),
+                Err(error) => append_desktop_tunnel_debug(
+                    path,
+                    &format!(
+                        "desktop phase=start_connection_return status=error code={} message={}",
+                        error.code, error.message
+                    ),
+                ),
+            }
+        }
         if result.is_err() {
             self.connections.fail_start(id);
         }
@@ -242,7 +278,10 @@ impl DesktopCore {
             .adapter
             .regular_tunnel_command(&env_file, proxy.url.as_deref())?;
         if let Some(debug_log) = tunnel_debug_log_path() {
-            initialize_tunnel_debug_log(&debug_log, id);
+            append_desktop_tunnel_debug(
+                &debug_log,
+                "desktop phase=regular_tunnel_command_ready",
+            );
             command.env(TUNNEL_DEBUG_LOG_ENV, &debug_log);
         }
         // Use the credential belonging to this exact Desktop-managed Server file,
