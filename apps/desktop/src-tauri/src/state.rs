@@ -2721,13 +2721,23 @@ fn effective_tunnel_proxy(config: &TunnelProxyConfig) -> DesktopResult<Effective
             source: "direct",
             detected_url,
         }),
-        TunnelProxyMode::Custom => Ok(EffectiveTunnelProxy {
-            url: Some(validate_tunnel_proxy_url(
-                config.custom_url.as_deref().unwrap_or(""),
-            )?),
-            source: "custom",
-            detected_url,
-        }),
+        TunnelProxyMode::Custom => {
+            let url = validate_tunnel_proxy_url(config.custom_url.as_deref().unwrap_or(""))?;
+            if crate::platform::proxy_is_loopback(&url)
+                && !loopback_proxy_listener_is_reachable(&url)
+            {
+                return Err(DesktopError::new(
+                    "tunnel_proxy_unreachable",
+                    format!("The configured Tunnel proxy is not listening at {url}"),
+                    "Start the local proxy, correct its port, or choose Direct/Auto Tunnel proxy mode.",
+                ));
+            }
+            Ok(EffectiveTunnelProxy {
+                url: Some(url),
+                source: "custom",
+                detected_url,
+            })
+        }
         TunnelProxyMode::Auto => {
             if let Some(url) = environment_tunnel_proxy() {
                 return Ok(EffectiveTunnelProxy {
