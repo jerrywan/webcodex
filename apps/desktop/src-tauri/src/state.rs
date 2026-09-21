@@ -2700,7 +2700,7 @@ fn loopback_proxy_listener_is_reachable(url: &str) -> bool {
     let Some(port) = parsed.port_or_known_default() else {
         return false;
     };
-    let Ok(addresses) = (host, port).to_socket_addrs() else {
+    let Ok(addresses) = std::net::ToSocketAddrs::to_socket_addrs(&(host, port)) else {
         return false;
     };
     addresses
