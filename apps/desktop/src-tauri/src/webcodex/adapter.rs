@@ -302,7 +302,12 @@ impl WebCodexAdapter {
             .env_remove("OPENAI_ADMIN_KEY")
             .env_remove("OPENAI_API_KEY");
         if let Some(runtime_dir) = self.bundled_runtime_dir.as_deref() {
-            let bundled_tunnel_client = runtime_dir.join(executable_name("tunnel-client"));
+            let tunnel_client_name = if cfg!(windows) {
+                "tunnel-client.exe"
+            } else {
+                "tunnel-client"
+            };
+            let bundled_tunnel_client = runtime_dir.join(tunnel_client_name);
             if bundled_tunnel_client.is_file() {
                 command.env("WEBCODEX_TUNNEL_CLIENT_BIN", bundled_tunnel_client);
             }
