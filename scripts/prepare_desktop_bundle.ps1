@@ -10,7 +10,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$SourceSha,
     [Parameter(Mandatory = $true)][Int64]$BuiltAt,
-    [Parameter(Mandatory = $true)][string]$OutputDir
+    [Parameter(Mandatory = $true)][string]$OutputDir,
+    [Parameter(Mandatory = $false)][string]$TunnelClientBin
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,6 +40,36 @@ $resourceMap = [ordered]@{}
 $fileMetadata = [ordered]@{}
 
 try {
+    if ($TunnelClientBin) {
+        $TunnelClientBin = [System.IO.Path]::GetFullPath($TunnelClientBin)
+        if (-not (Test-Path -LiteralPath $TunnelClientBin -PathType Leaf)) {
+            throw "missing tunnel-client binary: $TunnelClientBin"
+        }
+        $tunnelSourceItem = Get-Item -LiteralPath $TunnelClientBin
+        if (($tunnelSourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "tunnel-client must be a regular non-reparse file: $TunnelClientBin"
+        }
+        $tunnelSourceHash = (Get-FileHash -LiteralPath $TunnelClientBin -Algorithm SHA256).Hash.ToLowerInvariant()
+        $expectedTunnelHash = "fcc85a69ec0ad82518e4f8964f60c45e31787957782a0fc9c1b0c44e82d61b9b"
+        if ($tunnelSourceHash -ne $expectedTunnelHash) {
+            throw "unexpected tunnel-client.exe SHA256: $tunnelSourceHash"
+        }
+        $tunnelDestination = Join-Path $runtimeDir "tunnel-client.exe"
+        Copy-Item -LiteralPath $TunnelClientBin -Destination $tunnelDestination
+        $tunnelDestinationItem = Get-Item -LiteralPath $tunnelDestination
+        $tunnelDestinationHash = (Get-FileHash -LiteralPath $tunnelDestination -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($tunnelDestinationItem.Length -ne $tunnelSourceItem.Length -or $tunnelDestinationHash -ne $expectedTunnelHash) {
+            throw "staged tunnel-client byte verification failed"
+        }
+        $resourceMap[[System.IO.Path]::GetFullPath($tunnelDestination)] = "webcodex-runtime/tunnel-client.exe"
+        $fileMetadata["tunnel-client"] = [ordered]@{
+            filename = "tunnel-client.exe"
+            version = "0.0.14"
+            size = [Int64]$tunnelDestinationItem.Length
+            sha256 = $tunnelDestinationHash
+        }
+    }
+
     foreach ($name in $binaryNames) {
         $source = Join-Path $BinDir "$name.exe"
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

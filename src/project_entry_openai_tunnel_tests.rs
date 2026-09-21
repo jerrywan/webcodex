@@ -48,31 +48,31 @@ fn official_release_assets_and_extracted_binaries_are_pinned_per_supported_platf
     let linux_amd64 = tunnel_client_asset_for("linux", "x86_64").unwrap();
     assert_eq!(
         linux_amd64.file_name,
-        "tunnel-client-v0.0.12-linux-amd64.zip"
+        "tunnel-client-v0.0.14-linux-amd64.zip"
     );
     assert_eq!(
         linux_amd64.archive_sha256,
-        "2bb693bd7b5cd28da7ce09cd9e309529dbb33b7cc9dc0058e62a064688f92c81"
+        "15bd17e805cad39d412199115bb9e10a978dd35258a114cdf25dd2ae6681c7d3"
     );
     assert_eq!(
         linux_amd64.binary_sha256,
-        "ee9d4a75bc0b42f36f345aa96231e0db1ab00488122f34ebc99d6db055b6603e"
+        "472eb9dd9dd625b4e6023c3b4a5736b3a2e5a1b6dbe9338e001887a64ec992a6"
     );
 
     let linux_arm64 = tunnel_client_asset_for("linux", "aarch64").unwrap();
     assert_eq!(
         linux_arm64.binary_sha256,
-        "0a48e6696de0df5951c013e40be81ce775e6644e209758c48795a0ecbda06406"
+        "ab6c05258f15dc43a8e23f39460beb69892a8ced03e4c345a6f1aef0dd009b0f"
     );
     let darwin_amd64 = tunnel_client_asset_for("macos", "x86_64").unwrap();
     assert_eq!(
         darwin_amd64.binary_sha256,
-        "4133dab2575223252732a998210c34b7ed96a51765cf5ea835a8e24cf2be1272"
+        "89478d1d58350818275b852169745e1af0e18c02ff9b5b46d50df22018c95be9"
     );
     let darwin_arm64 = tunnel_client_asset_for("macos", "aarch64").unwrap();
     assert_eq!(
         darwin_arm64.binary_sha256,
-        "b1757220cf4722cec9085ee4a908cf0ee4c1a499a33bd99979b9a9c7669e29b1"
+        "309fd85da5a8c2ca8dae920deea8ac10a4d7934ed18ac46e7df0c200139cc9c5"
     );
     assert_eq!(darwin_arm64.target, "darwin-arm64");
 
@@ -81,22 +81,42 @@ fn official_release_assets_and_extracted_binaries_are_pinned_per_supported_platf
     assert_eq!(windows_amd64.member_name, "tunnel-client.exe");
     assert_eq!(
         windows_amd64.archive_sha256,
-        "2a2804933924e38a502d62b61f0266cb80d56d65744f4c29876b2bf9c1544356"
+        "784ab8da7b5a88f0109f1fd8aaf0a1c86067430b896dddf307ef7e3cc49fa1a5"
     );
     assert_eq!(
         windows_amd64.binary_sha256,
-        "6649169733686805ca16cccd91774594d0c017fd729c37ad4ce1cd18323d9ae8"
+        "fcc85a69ec0ad82518e4f8964f60c45e31787957782a0fc9c1b0c44e82d61b9b"
     );
     let windows_arm64 = tunnel_client_asset_for("windows", "aarch64").unwrap();
     assert_eq!(windows_arm64.target, "windows-arm64");
     assert_eq!(windows_arm64.member_name, "tunnel-client.exe");
     assert_eq!(
         windows_arm64.archive_sha256,
-        "65ab54221554481bb1c23b6015b99abe0b7f79b08593f4fb17a9e2e25532281d"
+        "fa775db8897df543dd4ba66404f69492a2acfbc6a291f10df27aced064a16568"
     );
     assert_eq!(
         windows_arm64.binary_sha256,
-        "480684ec1031fc2985c7e87f9d669e7dfda4012a8ecdab21eabe1b5deafdd656"
+        "7260ec886a7efd34202c6506bd35b068e94723a5402ea6f76af5a3af3dbd0a0b"
+    );
+}
+
+#[test]
+fn tunnel_output_is_reduced_to_safe_diagnostic_categories() {
+    assert_eq!(
+        tunnel_output_hint(b"", b"HTTP 401 unauthorized"),
+        "Runtime API key authentication was rejected"
+    );
+    assert_eq!(
+        tunnel_output_hint(b"", b"403 forbidden"),
+        "Runtime API key does not have the required Tunnel permission"
+    );
+    assert_eq!(
+        tunnel_output_hint(b"", b"proxy connect failed"),
+        "proxy configuration or proxy connectivity failed"
+    );
+    assert_eq!(
+        tunnel_output_hint(b"", b"completely unknown failure"),
+        "tunnel-client returned a non-success status"
     );
 }
 
@@ -210,7 +230,7 @@ async fn version_verification_requires_the_pinned_client_line() {
 
     let temp = tempfile::tempdir().unwrap();
     let good = temp.path().join("good");
-    fs::write(&good, "#!/bin/sh\necho '0.0.12+test (git sha: abc)'\n").unwrap();
+    fs::write(&good, "#!/bin/sh\necho '0.0.14+test (git sha: abc)'\n").unwrap();
     fs::set_permissions(&good, fs::Permissions::from_mode(0o700)).unwrap();
     verify_tunnel_client_version(&good).await.unwrap();
 

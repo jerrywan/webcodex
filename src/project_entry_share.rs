@@ -637,7 +637,6 @@ pub(crate) async fn share(options: &ShareCommandOptions) -> Result<(), ProductEr
             &mcp_url(&runtime.local_url),
             &authorization_file,
             &session.directory,
-            startup_deadline,
         )
         .await
         {

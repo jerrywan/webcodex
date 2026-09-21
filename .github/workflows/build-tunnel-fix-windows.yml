@@ -1,0 +1,169 @@
+name: Build Tunnel Fix Windows
+
+on:
+  push:
+    branches:
+      - fix/openai-tunnel-readiness-20260920
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tunnel-fix-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tunnel-fix-win32-x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Check Rust formatting
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { throw "cargo fmt check failed" }
+
+      - name: Run tunnel unit tests
+        shell: pwsh
+        run: |
+          cargo test --locked -p webcodex --lib openai_tunnel
+          if ($LASTEXITCODE -ne 0) { throw "OpenAI tunnel tests failed" }
+          cargo test --locked -p webcodex --lib regular_tunnel
+          if ($LASTEXITCODE -ne 0) { throw "Regular tunnel tests failed" }
+
+      - name: Install Desktop dependencies
+        run: npm ci --prefix apps/desktop
+
+      - name: Build exact WebCodex runtime
+        id: runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $source = (git rev-parse HEAD).Trim()
+          $short = (git rev-parse --short=12 HEAD).Trim()
+          $version = (node -e "console.log(require('./npm/webcodex/package.json').version)").Trim()
+          $builtAt = [Int64]((git show -s --format=%ct HEAD).Trim())
+          $env:WEBCODEX_BUILT_AT = "$builtAt"
+
+          cargo build --locked --profile dogfood -p webcodex -p webcodex-cli -p webcodex-runner
+          if ($LASTEXITCODE -ne 0) { throw "WebCodex runtime build failed" }
+
+          foreach ($name in @("webcodex", "webcodex-server", "webcodex-runner")) {
+            $binary = Join-Path "target\dogfood" "$name.exe"
+            $output = @(& $binary --version)
+            if ($LASTEXITCODE -ne 0 -or $output.Count -eq 0 -or -not $output[0]) {
+              throw "$name --version failed"
+            }
+            $actual = $output[0].TrimEnd()
+            $expected = "$name $version (commit $short, dirty=false, built_at=$builtAt)"
+            if ($actual -ne $expected) { throw "Unexpected $name identity: $actual (expected $expected)" }
+          }
+
+          "source=$source" >> $env:GITHUB_OUTPUT
+          "short=$short" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "built_at=$builtAt" >> $env:GITHUB_OUTPUT
+
+      - name: Stage runtime for Desktop
+        id: bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:RUNNER_TEMP "webcodex-tunnel-fix-bundle"
+          $tunnelArchive = Join-Path $env:RUNNER_TEMP "tunnel-client-v0.0.14-windows-amd64.zip"
+          $tunnelExtract = Join-Path $env:RUNNER_TEMP "tunnel-client-v0.0.14-windows-amd64"
+          $tunnelUrl = "https://github.com/openai/tunnel-client/releases/download/v0.0.14/tunnel-client-v0.0.14-windows-amd64.zip"
+          Invoke-WebRequest -Uri $tunnelUrl -OutFile $tunnelArchive
+          $archiveHash = (Get-FileHash -LiteralPath $tunnelArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedArchiveHash = "784ab8da7b5a88f0109f1fd8aaf0a1c86067430b896dddf307ef7e3cc49fa1a5"
+          if ($archiveHash -ne $expectedArchiveHash) {
+            throw "Unexpected tunnel-client archive SHA256: $archiveHash"
+          }
+          if (Test-Path -LiteralPath $tunnelExtract) {
+            Remove-Item -LiteralPath $tunnelExtract -Recurse -Force
+          }
+          Expand-Archive -LiteralPath $tunnelArchive -DestinationPath $tunnelExtract
+          $tunnelBin = Join-Path $tunnelExtract "tunnel-client.exe"
+          if (-not (Test-Path -LiteralPath $tunnelBin -PathType Leaf)) {
+            throw "tunnel-client.exe missing from verified archive"
+          }
+          $binaryHash = (Get-FileHash -LiteralPath $tunnelBin -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedBinaryHash = "fcc85a69ec0ad82518e4f8964f60c45e31787957782a0fc9c1b0c44e82d61b9b"
+          if ($binaryHash -ne $expectedBinaryHash) {
+            throw "Unexpected tunnel-client.exe SHA256: $binaryHash"
+          }
+
+          & .\scripts\prepare_desktop_bundle.ps1 `
+            -BinDir "target\dogfood" `
+            -Version "${{ steps.runtime.outputs.version }}" `
+            -SourceSha "${{ steps.runtime.outputs.source }}" `
+            -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}") `
+            -OutputDir $stage `
+            -TunnelClientBin $tunnelBin
+          if ($LASTEXITCODE -ne 0) { throw "Desktop bundle staging failed" }
+          "config=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_OUTPUT
+
+      - name: Build unsigned Windows NSIS installer
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE "target\desktop-tunnel-fix-tauri"
+          node node_modules/@tauri-apps/cli/tauri.js build --bundles nsis --config "${{ steps.bundle.outputs.config }}" --ci --no-sign -- --locked
+          if ($LASTEXITCODE -ne 0) { throw "Tauri NSIS build failed" }
+
+          $bundleDir = Join-Path $env:CARGO_TARGET_DIR "release\bundle\nsis"
+          $built = @(Get-ChildItem -LiteralPath $bundleDir -Filter "*-setup.exe" -File)
+          if ($built.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($built.Count)" }
+
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          $name = "webcodex-desktop-tunnel-fix-${{ steps.runtime.outputs.short }}-v${{ steps.runtime.outputs.version }}-win32-x64-setup.exe"
+          $out = Join-Path $dist $name
+          Copy-Item -LiteralPath $built[0].FullName -Destination $out
+
+          $hash = (Get-FileHash -LiteralPath $out -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText(
+            "$out.sha256",
+            "$hash  $name`n",
+            [System.Text.Encoding]::ASCII
+          )
+
+      - name: Smoke newly built installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = @(Get-ChildItem -LiteralPath "dist" -Filter "*-setup.exe" -File)
+          if ($installer.Count -ne 1) { throw "Expected one installer for smoke test" }
+          & .\scripts\desktop_install_windows_smoke.ps1 `
+            -Installer $installer[0].FullName `
+            -Version "${{ steps.runtime.outputs.version }}" `
+            -SourceSha "${{ steps.runtime.outputs.source }}" `
+            -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}") `
+            -Platform win32-x64
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: webcodex-tunnel-fix-win32-x64
+          path: |
+            dist/*-setup.exe
+            dist/*-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

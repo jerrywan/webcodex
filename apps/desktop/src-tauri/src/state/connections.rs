@@ -4,6 +4,54 @@ use crate::connections::{ConnectionsSnapshot, TunnelConnectionSnapshot};
 use crate::tunnel_config::TunnelProfileRequest;
 use serde::Deserialize;
 
+const TUNNEL_DEBUG_LOG_ENV: &str = "WEBCODEX_TUNNEL_DEBUG_LOG";
+const TUNNEL_DEBUG_LOG_NAME: &str = "WebCodex-Tunnel-Debug.log";
+
+fn tunnel_debug_log_path() -> Option<std::path::PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    Some(executable.parent()?.join(TUNNEL_DEBUG_LOG_NAME))
+}
+
+fn initialize_tunnel_debug_log(path: &std::path::Path, id: TunnelProfileId) {
+    use std::io::Write as _;
+
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let _ = writeln!(
+        file,
+        "[{timestamp_ms}] desktop phase=start_connection profile={id:?} exe={}",
+        std::env::current_exe()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "<unknown>".to_string())
+    );
+}
+
+fn append_desktop_tunnel_debug(path: &std::path::Path, message: &str) {
+    use std::io::Write as _;
+
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let _ = writeln!(file, "[{timestamp_ms}] {message}");
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionAction {
@@ -149,7 +197,26 @@ impl DesktopCore {
         id: TunnelProfileId,
         cancellation: &CancellationContext,
     ) -> DesktopResult<()> {
+        let debug_log_path = tunnel_debug_log_path();
+        if let Some(path) = debug_log_path.as_deref() {
+            initialize_tunnel_debug_log(path, id);
+        }
         let result = self.spawn_connection(id, cancellation).await;
+        if let Some(path) = debug_log_path.as_deref() {
+            match &result {
+                Ok(()) => append_desktop_tunnel_debug(
+                    path,
+                    "desktop phase=start_connection_return status=ok",
+                ),
+                Err(error) => append_desktop_tunnel_debug(
+                    path,
+                    &format!(
+                        "desktop phase=start_connection_return status=error code={} message={}",
+                        error.code, error.message
+                    ),
+                ),
+            }
+        }
         if result.is_err() {
             self.connections.fail_start(id);
         }
@@ -206,9 +273,28 @@ impl DesktopCore {
         let local_mcp_url = format!("{}/mcp", runtime.server_url.trim_end_matches('/'));
         self.adapter.ensure_binaries(cancellation).await?;
         let proxy = effective_tunnel_proxy(&self.config.tunnel_proxy)?;
+        if let Some(debug_log) = tunnel_debug_log_path() {
+            append_desktop_tunnel_debug(
+                &debug_log,
+                &format!(
+                    "desktop phase=proxy_resolved mode={:?} source={} effective_url={} detected_url={}",
+                    self.config.tunnel_proxy.mode,
+                    proxy.source,
+                    proxy.url.as_deref().unwrap_or("<direct>"),
+                    proxy.detected_url.as_deref().unwrap_or("<none>")
+                ),
+            );
+        }
         let mut command = self
             .adapter
             .regular_tunnel_command(&env_file, proxy.url.as_deref())?;
+        if let Some(debug_log) = tunnel_debug_log_path() {
+            append_desktop_tunnel_debug(
+                &debug_log,
+                "desktop phase=regular_tunnel_command_ready",
+            );
+            command.env(TUNNEL_DEBUG_LOG_ENV, &debug_log);
+        }
         // Use the credential belonging to this exact Desktop-managed Server file,
         // not a bootstrap credential inherited from the shell that launched Desktop.
         command.env_remove("WEBCODEX_TOKEN");

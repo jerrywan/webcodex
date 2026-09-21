@@ -5,7 +5,7 @@ use crate::platform;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
@@ -20,6 +20,8 @@ const MACHINE_CRITICAL_RESERVE: usize = 8;
 const GRACEFUL_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const LOCAL_EOF_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 const PROCESS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(20);
+const PROCESS_DIAGNOSTIC_MAX_BYTES: u64 = 2 * 1024 * 1024;
+const TUNNEL_DEBUG_LOG_ENV: &str = "WEBCODEX_TUNNEL_DEBUG_LOG";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(tag = "kind", content = "tunnel_profile_id", rename_all = "snake_case")]
@@ -73,6 +75,9 @@ struct ManagedProcess {
     child: ManagedChild,
     phase: ProcessPhase,
     exit_code: Option<i32>,
+    logs: Arc<Mutex<VecDeque<String>>>,
+    observation_failures: u32,
+    debug_log_path: Option<std::path::PathBuf>,
     stdout_task: JoinHandle<()>,
     stderr_task: JoinHandle<()>,
 }
@@ -274,6 +279,25 @@ impl ProcessSupervisor {
             )
         })?;
 
+        let debug_log_path = if matches!(kind, ProcessKey::RegularTunnel(_)) {
+            command
+                .get_envs()
+                .find(|(key, _)| key.to_string_lossy() == TUNNEL_DEBUG_LOG_ENV)
+                .and_then(|(_, value)| value)
+                .map(std::path::PathBuf::from)
+        } else {
+            None
+        };
+        if let Some(path) = debug_log_path.as_deref() {
+            append_tunnel_debug_log(
+                path,
+                &format!(
+                    "desktop phase=spawn_attempt kind={kind:?} program={}",
+                    command.get_program().to_string_lossy()
+                ),
+            );
+        }
+
         // stdin is the Desktop parent-liveness lease for every long-lived
         // generation. Quick Share/Tunnel already consume EOF; Local Server and
         // Runner do so only when Desktop adds their explicit opt-in CLI flag.
@@ -286,19 +310,39 @@ impl ProcessSupervisor {
         // nested-Job incompatibilities (notably Git for Windows/MSYS) while
         // preserving exact ownership at both lifecycle layers.
         let silent_child_breakaway = kind == ProcessKey::LocalRunner;
-        let mut child = ManagedChild::spawn_with_options(
+        let mut child = match ManagedChild::spawn_with_options(
             &mut command,
             platform::managed_spawn_options(silent_child_breakaway),
-        )
-        .map_err(|error| {
-            DesktopError::new(
-                "process_start_failed",
-                format!("Could not start the {kind:?} process"),
-                "Check the configured WebCodex binaries and retry.",
-            )
-            .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
-        })?;
+        ) {
+            Ok(child) => child,
+            Err(error) => {
+                if let Some(path) = debug_log_path.as_deref() {
+                    append_tunnel_debug_log(
+                        path,
+                        &format!(
+                            "desktop phase=spawn_failed kind={kind:?} io_kind={:?} raw_os_error={:?} error={error}",
+                            error.kind(),
+                            error.raw_os_error()
+                        ),
+                    );
+                }
+                return Err(
+                    DesktopError::new(
+                        "process_start_failed",
+                        format!("Could not start the {kind:?} process"),
+                        "Check the configured WebCodex binaries and retry.",
+                    )
+                    .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) })),
+                );
+            }
+        };
         let pid = child.id();
+        if let Some(path) = debug_log_path.as_deref() {
+            append_tunnel_debug_log(
+                path,
+                &format!("desktop phase=spawned kind={kind:?} pid={pid} generation={generation}"),
+            );
+        }
         let stdout = child.child_mut().stdout.take().ok_or_else(|| {
             DesktopError::new(
                 "process_start_failed",
@@ -323,21 +367,27 @@ impl ProcessSupervisor {
             (None, None)
         };
         let stdout_logs = Arc::clone(&logs);
+        let stdout_debug_log_path = debug_log_path.clone();
         let stdout_task = tokio::task::spawn_blocking(move || {
             drain_stream(
                 stdout,
                 stdout_logs,
                 machine_tx,
                 machine_stdout || matches!(kind, ProcessKey::RegularTunnel(_)),
+                "stdout",
+                stdout_debug_log_path,
             )
         });
         let stderr_logs = Arc::clone(&logs);
+        let stderr_debug_log_path = debug_log_path.clone();
         let stderr_task = tokio::task::spawn_blocking(move || {
             drain_stream(
                 stderr,
                 stderr_logs,
                 None,
-                matches!(kind, ProcessKey::RegularTunnel(_)),
+                false,
+                "stderr",
+                stderr_debug_log_path,
             )
         });
         self.activity.push_for_profile(
@@ -354,6 +404,9 @@ impl ProcessSupervisor {
                 child,
                 phase: ProcessPhase::Starting,
                 exit_code: None,
+                logs,
+                observation_failures: 0,
+                debug_log_path,
                 stdout_task,
                 stderr_task,
             },
@@ -371,12 +424,23 @@ impl ProcessSupervisor {
             }
             match process.child.try_wait() {
                 Ok(Some(status)) => {
+                    process.observation_failures = 0;
                     process.exit_code = status.code();
                     process.phase = if status.success() {
                         ProcessPhase::Exited
                     } else {
                         ProcessPhase::Failed
                     };
+                    if let Some(path) = process.debug_log_path.as_deref() {
+                        append_tunnel_debug_log(
+                            path,
+                            &format!(
+                                "desktop phase=process_exit kind={kind:?} generation={} status={status} exit_code={:?}",
+                                process.generation,
+                                status.code()
+                            ),
+                        );
+                    }
                     self.activity.push_for_profile(
                         kind.tunnel_profile_id(),
                         ActivityEventKind::ProcessExited,
@@ -389,16 +453,94 @@ impl ProcessSupervisor {
                         format!("Desktop-owned process exited with status {status}"),
                     );
                 }
-                Ok(None) => process.phase = ProcessPhase::Running,
-                Err(_) => {
-                    process.phase = ProcessPhase::Failed;
-                    self.activity.push_for_profile(
-                        kind.tunnel_profile_id(),
-                        ActivityEventKind::ProcessObservationFailed,
-                        kind.source(),
-                        ActivityLevel::Error,
-                        "Desktop could not observe the child process state",
-                    );
+                Ok(None) => {
+                    process.observation_failures = 0;
+                    process.phase = ProcessPhase::Running;
+                }
+                Err(error) => {
+                    process.observation_failures =
+                        process.observation_failures.saturating_add(1);
+                    let pid = process.child.id();
+                    let generation = process.generation;
+                    if let Some(path) = process.debug_log_path.as_deref() {
+                        append_tunnel_debug_log(
+                            path,
+                            &format!(
+                                "desktop phase=process_observation_error kind={kind:?} generation={generation} pid={pid} io_kind={:?} raw_os_error={:?} error={error}",
+                                error.kind(),
+                                error.raw_os_error()
+                            ),
+                        );
+                    }
+                    let tree_state = process.child.try_tree_exit();
+                    let tree_state_text = match &tree_state {
+                        Ok(true) => "empty".to_string(),
+                        Ok(false) => "active".to_string(),
+                        Err(tree_error) => format!(
+                            "unavailable(kind={:?}, raw_os_error={:?}, error={})",
+                            tree_error.kind(),
+                            tree_error.raw_os_error(),
+                            tree_error
+                        ),
+                    };
+
+                    if process.observation_failures == 1 {
+                        let summary = format!(
+                            "Desktop could not observe the child process state: kind={kind:?}, pid={pid}, generation={generation}, io_kind={:?}, raw_os_error={:?}, error={}, job_tree={tree_state_text}",
+                            error.kind(),
+                            error.raw_os_error(),
+                            error
+                        );
+                        let recent = process
+                            .logs
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .iter()
+                            .rev()
+                            .take(8)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect::<Vec<_>>();
+                        let diagnostic_path =
+                            persist_managed_process_diagnostic(*kind, pid, generation, &summary, &recent);
+                        let summary = match diagnostic_path {
+                            Some(path) => format!(
+                                "{summary}; diagnostic_file={}",
+                                path.to_string_lossy()
+                            ),
+                            None => summary,
+                        };
+                        self.activity.push_for_profile(
+                            kind.tunnel_profile_id(),
+                            ActivityEventKind::ProcessObservationFailed,
+                            kind.source(),
+                            ActivityLevel::Error,
+                            summary,
+                        );
+
+                        for line in recent {
+                            self.activity.push_for_profile(
+                                kind.tunnel_profile_id(),
+                                ActivityEventKind::ProcessObservationFailed,
+                                kind.source(),
+                                ActivityLevel::Error,
+                                format!("Recent managed-process diagnostic: {line}"),
+                            );
+                        }
+                    }
+
+                    // A failed direct-child status query must not tear down a
+                    // still-live Job Object tree. The regular-tunnel observer
+                    // also watches the machine-event pipe, so a dead parent is
+                    // still detected when that pipe closes. If the Job Object is
+                    // empty (or cannot itself be queried), ownership is no
+                    // longer safely observable and the process is failed.
+                    process.phase = match tree_state {
+                        Ok(false) => ProcessPhase::Running,
+                        Ok(true) | Err(_) => ProcessPhase::Failed,
+                    };
                 }
             }
         }
@@ -561,17 +703,109 @@ async fn finish_drain_task(mut task: JoinHandle<()>, deadline: tokio::time::Inst
     }
 }
 
+fn managed_process_diagnostic_path() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("LOCALAPPDATA")?;
+        return Some(
+            std::path::PathBuf::from(root)
+                .join("WebCodex")
+                .join("diagnostics")
+                .join("managed-process.log"),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(root) = std::env::var_os("XDG_STATE_HOME") {
+            return Some(
+                std::path::PathBuf::from(root)
+                    .join("webcodex")
+                    .join("diagnostics")
+                    .join("managed-process.log"),
+            );
+        }
+        let home = std::env::var_os("HOME")?;
+        Some(
+            std::path::PathBuf::from(home)
+                .join(".local")
+                .join("state")
+                .join("webcodex")
+                .join("diagnostics")
+                .join("managed-process.log"),
+        )
+    }
+}
+
+fn persist_managed_process_diagnostic(
+    kind: ProcessKey,
+    pid: u32,
+    generation: u64,
+    summary: &str,
+    recent: &[String],
+) -> Option<std::path::PathBuf> {
+    let path = managed_process_diagnostic_path()?;
+    let parent = path.parent()?;
+    std::fs::create_dir_all(parent).ok()?;
+    if std::fs::metadata(&path)
+        .is_ok_and(|metadata| metadata.len() > PROCESS_DIAGNOSTIC_MAX_BYTES)
+    {
+        let _ = std::fs::remove_file(&path);
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()?;
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let safe_summary = sanitize_message(summary);
+    writeln!(
+        file,
+        "[{timestamp_ms}] kind={kind:?} pid={pid} generation={generation} {safe_summary}"
+    )
+    .ok()?;
+    for line in recent {
+        writeln!(file, "  {}", sanitize_message(line)).ok()?;
+    }
+    Some(path)
+}
+
+fn append_tunnel_debug_log(path: &std::path::Path, message: &str) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let _ = writeln!(file, "[{timestamp_ms}] {}", sanitize_message(message));
+}
+
 fn drain_stream<R>(
     mut reader: R,
     logs: Arc<Mutex<VecDeque<String>>>,
     machine_tx: Option<MachineEventSender>,
-    machine_only: bool,
+    parse_machine_events: bool,
+    stream_name: &'static str,
+    debug_log_path: Option<std::path::PathBuf>,
 ) where
     R: Read,
 {
     let mut buffer = [0_u8; 4096];
     let mut line = Vec::with_capacity(4096);
-    let line_limit = if machine_only {
+    let line_limit = if parse_machine_events {
         MACHINE_LINE_BYTES
     } else {
         LOG_LINE_BYTES
@@ -583,7 +817,14 @@ fn drain_stream<R>(
         };
         for byte in &buffer[..read] {
             if *byte == b'\n' {
-                process_line(&line, &logs, machine_tx.as_ref(), machine_only);
+                process_line(
+                    &line,
+                    &logs,
+                    machine_tx.as_ref(),
+                    parse_machine_events,
+                    stream_name,
+                    debug_log_path.as_deref(),
+                );
                 line.clear();
             } else if line.len() < line_limit {
                 line.push(*byte);
@@ -591,7 +832,14 @@ fn drain_stream<R>(
         }
     }
     if !line.is_empty() {
-        process_line(&line, &logs, machine_tx.as_ref(), machine_only);
+        process_line(
+            &line,
+            &logs,
+            machine_tx.as_ref(),
+            parse_machine_events,
+            stream_name,
+            debug_log_path.as_deref(),
+        );
     }
     if let Some(tx) = machine_tx {
         tx.close();
@@ -602,20 +850,26 @@ fn process_line(
     line: &[u8],
     logs: &Arc<Mutex<VecDeque<String>>>,
     machine_tx: Option<&MachineEventSender>,
-    machine_only: bool,
+    parse_machine_events: bool,
+    stream_name: &'static str,
+    debug_log_path: Option<&std::path::Path>,
 ) {
     let text = String::from_utf8_lossy(line).trim().to_string();
     if text.is_empty() {
         return;
     }
-    if machine_only {
+    let safe_text = sanitize_message(&text);
+    if let Some(path) = debug_log_path {
+        append_tunnel_debug_log(path, &format!("child {stream_name}: {safe_text}"));
+    }
+    if parse_machine_events {
         if let (Some(tx), Ok(value)) = (machine_tx, serde_json::from_str::<Value>(&text)) {
             tx.send(value);
+            return;
         }
-        return;
     }
     let mut logs = logs.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    logs.push_back(sanitize_message(&text));
+    logs.push_back(format!("{stream_name}: {safe_text}"));
     while logs.len() > LOG_LINES {
         logs.pop_front();
     }

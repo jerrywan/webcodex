@@ -2690,6 +2690,28 @@ fn environment_tunnel_proxy() -> Option<String> {
         })
 }
 
+fn loopback_proxy_listener_is_reachable(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let Some(port) = parsed.port_or_known_default() else {
+        return false;
+    };
+    let Ok(addresses) = std::net::ToSocketAddrs::to_socket_addrs(&(host, port)) else {
+        return false;
+    };
+    addresses
+        .take(4)
+        .any(|address| std::net::TcpStream::connect_timeout(
+            &address,
+            std::time::Duration::from_millis(250),
+        )
+        .is_ok())
+}
+
 fn effective_tunnel_proxy(config: &TunnelProxyConfig) -> DesktopResult<EffectiveTunnelProxy> {
     let system = crate::platform::system_http_proxy_candidate();
     let detected_url = system.as_ref().map(|candidate| candidate.url.clone());
@@ -2699,13 +2721,23 @@ fn effective_tunnel_proxy(config: &TunnelProxyConfig) -> DesktopResult<Effective
             source: "direct",
             detected_url,
         }),
-        TunnelProxyMode::Custom => Ok(EffectiveTunnelProxy {
-            url: Some(validate_tunnel_proxy_url(
-                config.custom_url.as_deref().unwrap_or(""),
-            )?),
-            source: "custom",
-            detected_url,
-        }),
+        TunnelProxyMode::Custom => {
+            let url = validate_tunnel_proxy_url(config.custom_url.as_deref().unwrap_or(""))?;
+            if crate::platform::proxy_is_loopback(&url)
+                && !loopback_proxy_listener_is_reachable(&url)
+            {
+                return Err(DesktopError::new(
+                    "tunnel_proxy_unreachable",
+                    format!("The configured Tunnel proxy is not listening at {url}"),
+                    "Start the local proxy, correct its port, or choose Direct/Auto Tunnel proxy mode.",
+                ));
+            }
+            Ok(EffectiveTunnelProxy {
+                url: Some(url),
+                source: "custom",
+                detected_url,
+            })
+        }
         TunnelProxyMode::Auto => {
             if let Some(url) = environment_tunnel_proxy() {
                 return Ok(EffectiveTunnelProxy {
@@ -2715,14 +2747,19 @@ fn effective_tunnel_proxy(config: &TunnelProxyConfig) -> DesktopResult<Effective
                 });
             }
             if let Some(candidate) = system {
-                if candidate.enabled || crate::platform::proxy_is_loopback(&candidate.url) {
+                if candidate.enabled {
                     return Ok(EffectiveTunnelProxy {
                         url: Some(candidate.url),
-                        source: if candidate.enabled {
-                            "windows_system"
-                        } else {
-                            "windows_loopback_candidate"
-                        },
+                        source: "windows_system",
+                        detected_url,
+                    });
+                }
+                if crate::platform::proxy_is_loopback(&candidate.url)
+                    && loopback_proxy_listener_is_reachable(&candidate.url)
+                {
+                    return Ok(EffectiveTunnelProxy {
+                        url: Some(candidate.url),
+                        source: "windows_loopback_candidate",
                         detected_url,
                     });
                 }

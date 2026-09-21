@@ -20,6 +20,61 @@ use state::AppState;
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 
+const TUNNEL_DEBUG_LOG_NAME: &str = "WebCodex-Tunnel-Debug.log";
+
+fn reset_desktop_debug_log() {
+    use std::io::Write as _;
+
+    let Ok(executable) = std::env::current_exe() else {
+        return;
+    };
+    let Some(parent) = executable.parent() else {
+        return;
+    };
+    let path = parent.join(TUNNEL_DEBUG_LOG_NAME);
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+    else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let _ = writeln!(
+        file,
+        "[{timestamp_ms}] desktop_app phase=setup_begin exe={}",
+        executable.to_string_lossy()
+    );
+}
+
+fn append_desktop_debug_log(message: &str) {
+    use std::io::Write as _;
+
+    let Ok(executable) = std::env::current_exe() else {
+        return;
+    };
+    let Some(parent) = executable.parent() else {
+        return;
+    };
+    let path = parent.join(TUNNEL_DEBUG_LOG_NAME);
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let _ = writeln!(file, "[{timestamp_ms}] {message}");
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         // Tauri recommends registering single-instance first so a secondary
@@ -34,9 +89,16 @@ pub fn run() {
             Some(vec!["--background"]),
         ))
         .setup(|app| {
+            reset_desktop_debug_log();
             let data_dir = app.path().app_local_data_dir()?;
             let resource_dir = app.path().resource_dir()?;
+            append_desktop_debug_log(&format!(
+                "desktop_app phase=paths_resolved data_dir={} resource_dir={}",
+                data_dir.to_string_lossy(),
+                resource_dir.to_string_lossy()
+            ));
             app.manage(AppState::new(data_dir, resource_dir)?);
+            append_desktop_debug_log("desktop_app phase=state_ready");
             app.manage(desktop_shell::DesktopShellState::default());
             app.manage(tray::TrayPresentationCache::default());
             tray::setup(app.handle())?;

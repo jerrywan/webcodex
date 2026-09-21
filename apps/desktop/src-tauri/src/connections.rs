@@ -378,7 +378,7 @@ impl ConnectionRuntimes {
             state.last_error = Some(failure);
             log(state, "connection_failed");
         }) {
-            activity.push_for_profile(Some(id), ActivityEventKind::ProcessObservationFailed, "regular_tunnel", ActivityLevel::Error, "Connection needs attention; other connections and the shared runtime are unchanged");
+            activity.push_for_profile(Some(id), ActivityEventKind::ProcessObservationFailed, "regular_tunnel", ActivityLevel::Error, format!("Connection failed: reason={failure:?}; other connections and the shared runtime are unchanged"));
             let mut processes = supervisor.lock().await;
             processes
                 .stop_generation(ProcessKey::RegularTunnel(id), generation)
