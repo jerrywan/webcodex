@@ -166,9 +166,7 @@ pub(super) async fn start_openai_tunnel(
                 &[],
                 Some(authorization_file),
             );
-            return Err(tunnel_runtime_error(
-                "OpenAI tunnel-client could not start",
-            ));
+            return Err(tunnel_runtime_error("OpenAI tunnel-client could not start"));
         }
     };
     append_startup_diagnostic(
