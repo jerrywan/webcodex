@@ -85,12 +85,36 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $stage = Join-Path $env:RUNNER_TEMP "webcodex-tunnel-fix-bundle"
+          $tunnelArchive = Join-Path $env:RUNNER_TEMP "tunnel-client-v0.0.14-windows-amd64.zip"
+          $tunnelExtract = Join-Path $env:RUNNER_TEMP "tunnel-client-v0.0.14-windows-amd64"
+          $tunnelUrl = "https://github.com/openai/tunnel-client/releases/download/v0.0.14/tunnel-client-v0.0.14-windows-amd64.zip"
+          Invoke-WebRequest -Uri $tunnelUrl -OutFile $tunnelArchive
+          $archiveHash = (Get-FileHash -LiteralPath $tunnelArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedArchiveHash = "784ab8da7b5a88f0109f1fd8aaf0a1c86067430b896dddf307ef7e3cc49fa1a5"
+          if ($archiveHash -ne $expectedArchiveHash) {
+            throw "Unexpected tunnel-client archive SHA256: $archiveHash"
+          }
+          if (Test-Path -LiteralPath $tunnelExtract) {
+            Remove-Item -LiteralPath $tunnelExtract -Recurse -Force
+          }
+          Expand-Archive -LiteralPath $tunnelArchive -DestinationPath $tunnelExtract
+          $tunnelBin = Join-Path $tunnelExtract "tunnel-client.exe"
+          if (-not (Test-Path -LiteralPath $tunnelBin -PathType Leaf)) {
+            throw "tunnel-client.exe missing from verified archive"
+          }
+          $binaryHash = (Get-FileHash -LiteralPath $tunnelBin -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedBinaryHash = "fcc85a69ec0ad82518e4f8964f60c45e31787957782a0fc9c1b0c44e82d61b9b"
+          if ($binaryHash -ne $expectedBinaryHash) {
+            throw "Unexpected tunnel-client.exe SHA256: $binaryHash"
+          }
+
           & .\scripts\prepare_desktop_bundle.ps1 `
             -BinDir "target\dogfood" `
             -Version "${{ steps.runtime.outputs.version }}" `
             -SourceSha "${{ steps.runtime.outputs.source }}" `
             -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}") `
-            -OutputDir $stage
+            -OutputDir $stage `
+            -TunnelClientBin $tunnelBin
           if ($LASTEXITCODE -ne 0) { throw "Desktop bundle staging failed" }
           "config=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_OUTPUT
 
