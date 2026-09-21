@@ -3,7 +3,7 @@ use super::openai_tunnel_service::{prepare_openai_tunnel, start_openai_tunnel};
 use super::setup_service::{create_private_dir, write_new_private};
 use super::ProductError;
 use serde_json::{json, Value};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -71,10 +71,35 @@ impl Drop for RegularTunnelSession {
 pub(crate) async fn run_regular_server_tunnel(
     options: &RegularServerTunnelOptions,
 ) -> Result<(), ProductError> {
+    append_fixed_tunnel_debug("regular_tunnel phase=begin");
     let local_server_url = validate_local_server_url(&options.local_server_url)?;
+    append_fixed_tunnel_debug("regular_tunnel phase=local_server_url_valid");
     let mut session = RegularTunnelSession::create(&options.runtime_parent)?;
+    append_fixed_tunnel_debug(&format!(
+        "regular_tunnel phase=session_created directory={}",
+        session.directory.to_string_lossy()
+    ));
     let authorization_file = session.write_authorization_file(&options.bootstrap_token)?;
-    let prerequisites = prepare_openai_tunnel().await?;
+    append_fixed_tunnel_debug("regular_tunnel phase=authorization_file_created");
+    append_fixed_tunnel_debug("regular_tunnel phase=prepare_openai_tunnel_begin");
+    let prerequisites = match prepare_openai_tunnel().await {
+        Ok(prerequisites) => {
+            append_fixed_tunnel_debug(&format!(
+                "regular_tunnel phase=prepare_openai_tunnel_ok binary={}",
+                prerequisites.binary.to_string_lossy()
+            ));
+            prerequisites
+        }
+        Err(error) => {
+            append_fixed_tunnel_debug(&format!(
+                "regular_tunnel phase=prepare_openai_tunnel_error code={}",
+                error.code
+            ));
+            session.preserve_failed_tunnel_log();
+            return Err(error);
+        }
+    };
+    append_fixed_tunnel_debug("regular_tunnel phase=start_openai_tunnel_begin");
     let mut tunnel = match start_openai_tunnel(
         &prerequisites,
         &mcp_url(&local_server_url),
@@ -83,8 +108,19 @@ pub(crate) async fn run_regular_server_tunnel(
     )
     .await
     {
-        Ok(tunnel) => tunnel,
+        Ok(tunnel) => {
+            append_fixed_tunnel_debug(&format!(
+                "regular_tunnel phase=start_openai_tunnel_ok pid={:?}",
+                tunnel.pid()
+            ));
+            tunnel
+        }
         Err(error) => {
+            append_fixed_tunnel_debug(&format!(
+                "regular_tunnel phase=start_openai_tunnel_error code={} message={}",
+                error.code,
+                sanitize_fixed_debug_message(&error.message)
+            ));
             session.preserve_failed_tunnel_log();
             return Err(error);
         }
@@ -110,6 +146,11 @@ pub(crate) async fn run_regular_server_tunnel(
         )
     })?;
     println!("{encoded}");
+    append_fixed_tunnel_debug(&format!(
+        "regular_tunnel phase=ready_event_emitted pid={:?} health_url={}",
+        tunnel.pid(),
+        tunnel.health_url
+    ));
 
     let health_url = tunnel.health_url.clone();
     let local_mcp_url = mcp_url(&local_server_url);
@@ -118,11 +159,55 @@ pub(crate) async fn run_regular_server_tunnel(
         result = tunnel.wait_for_exit() => result,
         result = report_regular_tunnel_health(&health_url, &local_mcp_url, &options.bootstrap_token) => result,
     };
+    match &outcome {
+        Ok(()) => append_fixed_tunnel_debug("regular_tunnel phase=outcome_ok"),
+        Err(error) => append_fixed_tunnel_debug(&format!(
+            "regular_tunnel phase=outcome_error code={} message={}",
+            error.code,
+            sanitize_fixed_debug_message(&error.message)
+        )),
+    }
     tunnel.stop().await;
+    append_fixed_tunnel_debug("regular_tunnel phase=tunnel_stopped");
     if outcome.is_err() {
         session.preserve_failed_tunnel_log();
+        append_fixed_tunnel_debug("regular_tunnel phase=failed_logs_preserved");
     }
     outcome
+}
+
+const TUNNEL_DEBUG_LOG_ENV: &str = "WEBCODEX_TUNNEL_DEBUG_LOG";
+
+fn append_fixed_tunnel_debug(message: &str) {
+    let Some(path) = std::env::var_os(TUNNEL_DEBUG_LOG_ENV).map(PathBuf::from) else {
+        return;
+    };
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let safe = sanitize_fixed_debug_message(message);
+    let _ = writeln!(file, "[{timestamp_ms}] {safe}");
+}
+
+fn sanitize_fixed_debug_message(message: &str) -> String {
+    let mut safe = message.to_string();
+    for variable in ["CONTROL_PLANE_API_KEY", "WEBCODEX_TOKEN"] {
+        if let Ok(secret) = std::env::var(variable) {
+            let secret = secret.trim();
+            if !secret.is_empty() {
+                safe = safe.replace(secret, "[redacted]");
+            }
+        }
+    }
+    safe
 }
 
 /// A running daemon is not sufficient proof of a usable local MCP endpoint.
