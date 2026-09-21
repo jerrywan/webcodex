@@ -3,7 +3,9 @@ name: Build Tunnel Fix Windows
 on:
   push:
     branches:
+      - main
       - fix/openai-tunnel-readiness-20260920
+  workflow_dispatch:
 
 permissions:
   contents: read
